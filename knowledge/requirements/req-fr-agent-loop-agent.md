@@ -1,0 +1,205 @@
+---
+kind: requirement
+id: REQ-FR-AGENT-LOOP
+title: "Agent 主循环插件"
+status: accepted
+liveness: auto
+tags: [agent-loop, core]
+---
+
+## Problem
+
+fly-rafter 是字面全插件系统：agent 主循环不是宿主内置，而是 dougong 插件。宿主对循环零感知，循环与基础设施只经服务缝与事件解耦。
+
+## Requirements
+
+- [REQ-FR-AGENT-LOOP-1] fr-agent-loop MUST 是 dougong 插件：inject llm/tools/system-prompt/session-persistence，provide `agent` 服务（send/steer/inject/followup 入 inbox）；每会话一个循环 fiber，置于该会话 realm。
+- [REQ-FR-AGENT-LOOP-2] 控制流 MUST 对齐 PRD 8.2 七步：输入入 inbox → turn()（append turn/start）→ preStep（inbox.claim → system-prompt.assemble → agent/pre-step waterfall → 拒绝或空输入直接收尾 turn）→ step（agent/request waterfall 提出 LlmCallConfig → llm.prepare_call → system prompt 提交 surface → append user/message → 按需 request/header、developer/message、request/context → deriveMessages 冻结请求 → 发起流）→ 流结算（error/aborted 时 append assistant/attempt + agent/request-error waterfall 决定重试或抛错；正常 append assistant/message；finish.kind == 'max-tokens' 粘滞结束 step）→ 工具执行（按 executionMode 分组）→ 收尾（step/end → agent/turn-stopping serial → turn/end；队列有 pending 开新 turn；llm.prepare_call 在无适配器时容忍中间件路由）。
+- [REQ-FR-AGENT-LOOP-3] 每次请求 MUST 从会话日志 deriveMessages 投影并冻结，不经内存数组直传。
+- [REQ-FR-AGENT-LOOP-4] step 抛错时 MUST 补齐缺失 tool/result（7.6 语义）；适配器级重试策略由 provider 插件经 provider_retry_policy 声明。
+- [REQ-FR-AGENT-LOOP-5] 会话内热路径（agent/assistant-stream chunk）MUST 使用批量事件分发；分发开销基准测试 MUST 纳入 M1 验收。
+
+- [REQ-FR-AGENT-LOOP-6] request/header 发布判定 MUST：首条 initial/resume；此后仅 canonical header 变化才 change（tool schema 用 JSON.stringify 顺序敏感比较）、仅序列边界才 series；工具增删 developer/message 仅 baseline 存在且名字集合有差，headerSeq 仅 additions 大于 0 时携带（dsh agent.ts:635-665、request-header.ts:21-52）。
+- [REQ-FR-AGENT-LOOP-7] 缓存友好路由 MUST：capable 模型同世代提示词增量 in-history 追加；runtime-context 以 user 消息快照追加、完整当前值跟随保留历史之后（清空文案逐字 'Current runtime context: none. Earlier runtime-context snapshots no longer apply.'）；runtime-context 快照每个变更恰好 admitted 一次，重试 MUST NOT 重复注入；组装确定性保证 prompt 前缀逐字节稳定（dsh runtime-context.ts:14-16,96-119、agent.ts:425-440）。
+- [REQ-FR-AGENT-LOOP-8] inbox 语义 MUST：claim 一次性取走全部 next-step、next-turn 至多 1 条；splice 规范化、message id 跨队列唯一、每次变更加 agent/inbox/spliced（dsh inbox.ts:109-114,198-243）。
+- [REQ-FR-AGENT-LOOP-9] 长任务维持 MUST：每 turn 换新 AbortController 使旧信号闩失效；max-tokens 粘滞不得被 completed 降级；turn-stopping 仅 turnEnds 已设且 nextStep 空时派发；NO_ADAPTER 容忍中间件路由；缺 provider/model 配置 MUST 直接报错（dsh agent.ts:154-161,319-397,573-610）。
+- [REQ-FR-AGENT-LOOP-10] attempt 结算 MUST 三分支：流 aborted 且中断内容非空白 → assistant/message 且 interrupted:true；error/aborted → assistant/attempt 并交 agent/request-error waterfall 裁决重试或抛错；正常 → assistant/message；user/message 仅 firstAttempt 落盘，重试 MUST NOT 重复注入（dsh agent.ts:425-441,464-545）。
+- [REQ-FR-AGENT-LOOP-11] turn/step 状态机 MUST：相位 idle/maintenance/running；pre-step reject 置 turnEnds={blocked}；step0 无可领取输入 → turn reason completed 且不发起模型调用；turnEnds 已设后的空步静默收尾（dsh agent.ts:154-161,298-397）。
+## Scenarios
+
+Rule: REQ-FR-AGENT-LOOP-1 — 循环插件形态与 agent 服务
+
+场景: agent 服务四入口入 inbox
+  假设 会话循环运行中
+  当 调用 agent 服务的 send、steer、inject 或 followup 时
+  那么 输入进入 inbox 并唤醒 driver
+
+场景: 每会话循环 fiber 置于会话 realm
+  假设 新会话启动
+  当 循环 fiber 创建时
+  那么 fiber 置于该会话 realm，宿主代码不含循环实现
+
+Rule: REQ-FR-AGENT-LOOP-2 — 七步控制流
+
+场景: 完整 turn 无工具调用
+  假设 headless 任务提交后模型返回纯文本
+  当 turn 结束时
+  那么 会话日志含 turn/start、step/start、user/message、assistant/message、step/end、turn/end 且 reason 为 completed
+
+场景: 含工具调用的 turn
+  假设 模型请求调用 bash 工具
+  当 工具结果回填后继续下一 step
+  那么 会话日志含模型序的 tool/call 与 tool/result，且无更多 tool-call 时 turn 为 completed
+
+场景: max-tokens 粘滞结束
+  假设 流结算 finish kind 为 max-tokens
+  当 结算完成时
+  那么 step 粘滞结束且 turn reason 为 max-tokens
+
+场景: steer 输入排队开新 turn
+  当 turn 进行中调用 steer 时
+  那么 输入入 inbox，当前 turn 正常收尾后开启下一 turn
+
+Rule: REQ-FR-AGENT-LOOP-3 — 请求从日志冻结投影
+
+场景: 冻结请求拒绝内存改动
+  假设 deriveMessages 已产出冻结请求
+  当 尝试在内存中修改请求内容时
+  那么 修改被拒绝，请求仍与日志投影一致
+
+Rule: REQ-FR-AGENT-LOOP-4 — 失败恢复
+
+场景: step 抛错补齐缺失 tool/result
+  假设 step 抛错时存在未结算的工具调用
+  当 失败恢复运行时
+  那么 缺失的 tool/result 被补齐且重放合法
+
+场景: provider 重试策略生效
+  假设 provider 插件声明了 provider_retry_policy
+  当 流错误发生时
+  那么 按策略重试，超限后向循环抛错
+
+Rule: REQ-FR-AGENT-LOOP-5 — 热路径批量分发
+
+场景: assistant-stream 批量分发基准
+  假设 会话内 assistant-stream chunk 高频到达
+  当 运行 M1 验收的分发开销基准时
+  那么 chunk 经批量分发送达监听者且基准达标
+
+Rule: REQ-FR-AGENT-LOOP-2 — preStep 与收尾分支
+
+场景: pre-step 拒绝或空输入收尾 turn
+  假设 agent/pre-step waterfall 拒绝输入或 inbox 无可领取输入
+  当 preStep 结算时
+  那么 不发起请求，turn 直接收尾并 append turn/end
+
+场景: turn 收尾前派发 turn-stopping
+  假设 turn 即将正常结束
+  当 收尾时
+  那么 先以 serial 语义派发 agent/turn-stopping，再 append turn/end
+
+Rule: REQ-FR-AGENT-LOOP-3 — 无适配器容忍
+
+场景: 无适配器时中间件路由容忍
+  假设 agent/request waterfall 提出的配置无绑定适配器
+  当 调用 prepare_call 时
+  那么 容忍中间件路由不报错，由后续件决定行为
+
+Rule: REQ-FR-AGENT-LOOP-2 — inbox claim 顺序
+
+场景: 多输入按入队顺序 claim
+  假设 inbox 中排队多个输入
+  当 preStep claim 时
+  那么 按入队顺序消费
+
+场景: incapable 模型走归一化路由
+  假设 当前模型不支持提示词缓存增量
+  当 提交 system prompt surface 时
+  那么 走归一化路由整段重写首节点
+
+Rule: REQ-FR-AGENT-LOOP-6 — header 发布判定
+
+场景: header reason 判定
+  假设 会话经历新建、工具集变更、仅序列推进三种情形
+  当 发布 request/header 时
+  那么 reason 分别为 initial、change、series；工具 schema 仅顺序不同的相等比较按顺序敏感判定
+
+Rule: REQ-FR-AGENT-LOOP-7 — 缓存友好路由
+
+场景: 策略变化不打破前缀
+  假设 会话中途审批策略变化
+  当 构造下一请求时
+  那么 历史前缀逐字节不变，新 runtime-context 快照追加在保留历史之后
+
+Rule: REQ-FR-AGENT-LOOP-8 — inbox 语义
+
+场景: claim 队列语义
+  假设 inbox 中有两条 next-step 与一条 next-turn 输入
+  当 preStep claim 时
+  那么 next-step 全部取走、next-turn 至多取一条，且变更产生 inbox/spliced 事件
+
+Rule: REQ-FR-AGENT-LOOP-9 — 跨 turn 信号隔离
+
+场景: 新 turn 旧信号失效
+  假设 上一 turn 的 AbortController 已触发
+  当 开启新 turn 时
+  那么 换新 controller，旧信号上的闩不再影响新 turn
+
+Rule: REQ-FR-AGENT-LOOP-10 — attempt 结算分支
+
+场景: 中断保留部分内容
+  假设 流 aborted 时已积累非空白文本与 reasoning 内容
+  当 结算该 attempt 时
+  那么 追加 assistant/message 且 interrupted:true，中断内容进入历史
+
+场景: 重试不重复 user/message
+  假设 首次 attempt 失败进入重试
+  当 第二次 attempt 发起请求时
+  那么 user/message 仅存在 firstAttempt 的一条，未重复注入
+
+场景: 错误 attempt 走 waterfall 裁决
+  假设 流以 error 结束
+  当 结算时
+  那么 追加 assistant/attempt 并交 agent/request-error waterfall 裁决，默认不重试则抛错
+
+Rule: REQ-FR-AGENT-LOOP-11 — 状态机精确行为
+
+场景: step0 空输入不花模型调用
+  假设 turn 开启后 preStep 无可领取输入
+  当 step0 结算时
+  那么 turn reason 为 completed 且未发起任何模型请求
+
+场景: pre-step reject 置 blocked
+  假设 agent/pre-step waterfall 以 reject 裁决
+  当 结算时
+  那么 turnEnds 置为 blocked 并收尾 turn
+
+场景: 维护相位不接受新步
+  假设 循环处于 maintenance 相位
+  当 请求发起新 step 时
+  那么 该请求不被执行，循环仅在恢复 running 后继续
+
+Rule: REQ-FR-AGENT-LOOP-7 — runtime-context 准入一次
+
+场景: runtime-context 恰好 admitted 一次
+  假设 某步因流错误重试
+  当 重试请求组装时
+  那么 本步已注入的 runtime-context 快照不重复出现
+
+## Dependencies
+
+- REQ-FR-SESSION
+- REQ-FR-LLM
+- REQ-FR-TOOLS
+
+## Source Trace
+
+- doc/prd.md#8.1: agent 主循环本身是插件；provide agent 服务（send/steer/inject/followup 入 inbox）
+- doc/prd.md#8.2: 控制流与 dsh agent-loop/src/agent.ts 逐步对齐（七步）
+- doc/prd.md#8.3: 失败恢复；provider_retry_policy
+- confidence: high（PRD 第 8 节流程级规格）
+- doc/dsh-source-notes.md: 源码级技术关键点（file:line 证据）
+
+## Open Questions
+
+None.

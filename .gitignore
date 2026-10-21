@@ -1,0 +1,6 @@
+.claude/
+target/
+# agent-spec 运行态（manifest 与合约体系入库，运行日志/追踪不入库）
+.agent-spec/runs/
+.agent-spec/trace/
+.agent-spec/pending-ai-requests.json

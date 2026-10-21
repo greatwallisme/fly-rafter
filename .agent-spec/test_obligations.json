@@ -1,0 +1,786 @@
+{
+  "version": 1,
+  "obligations": [
+    {
+      "requirement_id": "REQ-FR-ACP",
+      "scenario_name": "session/list 分页",
+      "suggested_selector": "pending_req_fr_acp_session_list",
+      "explicit_selector": "pending_req_fr_acp_session_list",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-acp-acp.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-ACP",
+      "scenario_name": "全流程 initialize 到 close",
+      "suggested_selector": "pending_req_fr_acp_initialize_close",
+      "explicit_selector": "pending_req_fr_acp_initialize_close",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-acp-acp.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-AGENT-LOOP",
+      "scenario_name": "steer 输入排队",
+      "suggested_selector": "pending_req_fr_agent_loop_steer",
+      "explicit_selector": "pending_req_fr_agent_loop_steer",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-agent-loop-agent.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-AGENT-LOOP",
+      "scenario_name": "含工具调用的 turn",
+      "suggested_selector": "pending_req_fr_agent_loop_turn",
+      "explicit_selector": "pending_req_fr_agent_loop_turn",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-agent-loop-agent.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-AGENT-LOOP",
+      "scenario_name": "完整 turn（无工具调用）",
+      "suggested_selector": "pending_req_fr_agent_loop_turn",
+      "explicit_selector": "pending_req_fr_agent_loop_turn",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-agent-loop-agent.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-AGENT-LOOP",
+      "scenario_name": "流错误触发重试",
+      "suggested_selector": "pending_req_fr_agent_loop_requirement",
+      "explicit_selector": "pending_req_fr_agent_loop_requirement",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-agent-loop-agent.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-APPROVAL",
+      "scenario_name": "allowed-once 授予",
+      "suggested_selector": "pending_req_fr_approval_allowed_once",
+      "explicit_selector": "pending_req_fr_approval_allowed_once",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-approval-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-APPROVAL",
+      "scenario_name": "never 策略自动拒绝",
+      "suggested_selector": "pending_req_fr_approval_never",
+      "explicit_selector": "pending_req_fr_approval_never",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-approval-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-APPROVAL",
+      "scenario_name": "无 answerer fail-closed",
+      "suggested_selector": "pending_req_fr_approval_answerer_fail_closed",
+      "explicit_selector": "pending_req_fr_approval_answerer_fail_closed",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-approval-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-BUILTIN-TOOLS",
+      "scenario_name": "headless 下 ask 类工具 fail-closed",
+      "suggested_selector": "pending_req_fr_builtin_tools_headless_ask_fail_closed",
+      "explicit_selector": "pending_req_fr_builtin_tools_headless_ask_fail_closed",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-builtin-tools-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-BUILTIN-TOOLS",
+      "scenario_name": "ripgrep 缺失明确报错",
+      "suggested_selector": "pending_req_fr_builtin_tools_ripgrep",
+      "explicit_selector": "pending_req_fr_builtin_tools_ripgrep",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-builtin-tools-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-BUILTIN-TOOLS",
+      "scenario_name": "工具 schema 与 catalog diff 为空",
+      "suggested_selector": "pending_req_fr_builtin_tools_schema_catalog_diff",
+      "explicit_selector": "pending_req_fr_builtin_tools_schema_catalog_diff",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-builtin-tools-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-COMMANDS",
+      "scenario_name": "/compact 触发压缩",
+      "suggested_selector": "pending_req_fr_commands_compact",
+      "explicit_selector": "pending_req_fr_commands_compact",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-commands-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-COMMANDS",
+      "scenario_name": "headless 不解析命令",
+      "suggested_selector": "pending_req_fr_commands_headless",
+      "explicit_selector": "pending_req_fr_commands_headless",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-commands-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-COMPACTION",
+      "scenario_name": "compact 后表面重写",
+      "suggested_selector": "pending_req_fr_compaction_compact",
+      "explicit_selector": "pending_req_fr_compaction_compact",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-compaction-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-COMPACTION",
+      "scenario_name": "超阈值剪枝形状",
+      "suggested_selector": "pending_req_fr_compaction_requirement",
+      "explicit_selector": "pending_req_fr_compaction_requirement",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-compaction-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-CONFIG",
+      "scenario_name": "单行 config 校验失败不阻塞其余槽位",
+      "suggested_selector": "pending_req_fr_config_config",
+      "explicit_selector": "pending_req_fr_config_config",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-config-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-CONFIG",
+      "scenario_name": "后行按 id 整行覆盖前行",
+      "suggested_selector": "pending_req_fr_config_id",
+      "explicit_selector": "pending_req_fr_config_id",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-config-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-CONFIG",
+      "scenario_name": "宿主按子命令装配对应入口 profile",
+      "suggested_selector": "pending_req_fr_config_profile",
+      "explicit_selector": "pending_req_fr_config_profile",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-config-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-CONFIG",
+      "scenario_name": "超出受限子集的条件表达式被拒绝",
+      "suggested_selector": "pending_req_fr_config_requirement",
+      "explicit_selector": "pending_req_fr_config_requirement",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-config-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-HEADLESS",
+      "scenario_name": "--json 事件流首末事件",
+      "suggested_selector": "pending_req_fr_headless_json",
+      "explicit_selector": "pending_req_fr_headless_json",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-headless-headless.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-HEADLESS",
+      "scenario_name": "--json 截断封顶",
+      "suggested_selector": "pending_req_fr_headless_json",
+      "explicit_selector": "pending_req_fr_headless_json",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-headless-headless.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-HEADLESS",
+      "scenario_name": "不存在的 session id 失败",
+      "suggested_selector": "pending_req_fr_headless_session_id",
+      "explicit_selector": "pending_req_fr_headless_session_id",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-headless-headless.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-HEADLESS",
+      "scenario_name": "完整任务走通 turn 周期并产出 v4 会话文件",
+      "suggested_selector": "pending_req_fr_headless_turn_v4",
+      "explicit_selector": "pending_req_fr_headless_turn_v4",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-headless-headless.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-HEADLESS",
+      "scenario_name": "无 TASK 且 stdin 为 TTY 返回 usage error",
+      "suggested_selector": "pending_req_fr_headless_task_stdin_tty_usage_error",
+      "explicit_selector": "pending_req_fr_headless_task_stdin_tty_usage_error",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-headless-headless.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-LLM",
+      "scenario_name": "chunk 序含 usage 先于 finish",
+      "suggested_selector": "pending_req_fr_llm_chunk_usage_finish",
+      "explicit_selector": "pending_req_fr_llm_chunk_usage_finish",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-llm-provider.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-LLM",
+      "scenario_name": "deepseek provider 无私有头",
+      "suggested_selector": "pending_req_fr_llm_deepseek_provider",
+      "explicit_selector": "pending_req_fr_llm_deepseek_provider",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-llm-provider.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-LLM",
+      "scenario_name": "openai base-url 覆盖",
+      "suggested_selector": "pending_req_fr_llm_openai_base_url",
+      "explicit_selector": "pending_req_fr_llm_openai_base_url",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-llm-provider.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-MCP",
+      "scenario_name": "stdio 服务器工具注册",
+      "suggested_selector": "pending_req_fr_mcp_stdio",
+      "explicit_selector": "pending_req_fr_mcp_stdio",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-mcp-mcp.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-MCP",
+      "scenario_name": "资源工具可用",
+      "suggested_selector": "pending_req_fr_mcp_requirement",
+      "explicit_selector": "pending_req_fr_mcp_requirement",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-mcp-mcp.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-PROMPT",
+      "scenario_name": "AGENTS.md 注入",
+      "suggested_selector": "pending_req_fr_prompt_agents_md",
+      "explicit_selector": "pending_req_fr_prompt_agents_md",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-prompt-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-PROMPT",
+      "scenario_name": "身份句渲染",
+      "suggested_selector": "pending_req_fr_prompt_requirement",
+      "explicit_selector": "pending_req_fr_prompt_requirement",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-prompt-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-PTC",
+      "scenario_name": "node 缺失 fail-closed",
+      "suggested_selector": "pending_req_fr_ptc_node_fail_closed",
+      "explicit_selector": "pending_req_fr_ptc_node_fail_closed",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-ptc-run-code-ptc.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-PTC",
+      "scenario_name": "run_code happy path",
+      "suggested_selector": "pending_req_fr_ptc_run_code_happy_path",
+      "explicit_selector": "pending_req_fr_ptc_run_code_happy_path",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-ptc-run-code-ptc.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-PTC",
+      "scenario_name": "子调度触发审批升级",
+      "suggested_selector": "pending_req_fr_ptc_requirement",
+      "explicit_selector": "pending_req_fr_ptc_requirement",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-ptc-run-code-ptc.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-PTC",
+      "scenario_name": "程序超时归类 timeout",
+      "suggested_selector": "pending_req_fr_ptc_timeout",
+      "explicit_selector": "pending_req_fr_ptc_timeout",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-ptc-run-code-ptc.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-QUALITY",
+      "scenario_name": "golden session 回放一致",
+      "suggested_selector": "pending_req_fr_quality_golden_session",
+      "explicit_selector": "pending_req_fr_quality_golden_session",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-quality-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-QUALITY",
+      "scenario_name": "质量门四关通过",
+      "suggested_selector": "pending_req_fr_quality_requirement",
+      "explicit_selector": "pending_req_fr_quality_requirement",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-quality-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-QUALITY",
+      "scenario_name": "配置键 kebab-case",
+      "suggested_selector": "pending_req_fr_quality_kebab_case",
+      "explicit_selector": "pending_req_fr_quality_kebab_case",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-quality-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-SANDBOX",
+      "scenario_name": "后端缺失 fail-closed",
+      "suggested_selector": "pending_req_fr_sandbox_fail_closed",
+      "explicit_selector": "pending_req_fr_sandbox_fail_closed",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-sandbox-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-SANDBOX",
+      "scenario_name": "默认模式解析",
+      "suggested_selector": "pending_req_fr_sandbox_requirement",
+      "explicit_selector": "pending_req_fr_sandbox_requirement",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-sandbox-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-SCOPE",
+      "scenario_name": "排除项不出现于装配",
+      "suggested_selector": "pending_req_fr_scope_requirement",
+      "explicit_selector": "pending_req_fr_scope_requirement",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-scope-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-SCOPE",
+      "scenario_name": "新偏差先记录后实施",
+      "suggested_selector": "pending_req_fr_scope_requirement",
+      "explicit_selector": "pending_req_fr_scope_requirement",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-scope-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-SDK",
+      "scenario_name": "initialize 返回 serverInfo",
+      "suggested_selector": "pending_req_fr_sdk_initialize_serverinfo",
+      "explicit_selector": "pending_req_fr_sdk_initialize_serverinfo",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-sdk-sdk-json-rpc.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-SDK",
+      "scenario_name": "session/wait 覆盖子孙",
+      "suggested_selector": "pending_req_fr_sdk_session_wait",
+      "explicit_selector": "pending_req_fr_sdk_session_wait",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-sdk-sdk-json-rpc.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-SDK",
+      "scenario_name": "未知方法错误码",
+      "suggested_selector": "pending_req_fr_sdk_requirement",
+      "explicit_selector": "pending_req_fr_sdk_requirement",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-sdk-sdk-json-rpc.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-SESSION",
+      "scenario_name": "deriveMessages 确定性",
+      "suggested_selector": "pending_req_fr_session_derivemessages",
+      "explicit_selector": "pending_req_fr_session_derivemessages",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-session-v4.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-SESSION",
+      "scenario_name": "fork 会话拒绝被续用",
+      "suggested_selector": "pending_req_fr_session_fork",
+      "explicit_selector": "pending_req_fr_session_fork",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-session-v4.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-SESSION",
+      "scenario_name": "v4 会话写入与读取回环",
+      "suggested_selector": "pending_req_fr_session_v4",
+      "explicit_selector": "pending_req_fr_session_v4",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-session-v4.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-SESSION",
+      "scenario_name": "空渲染清空 system 节点",
+      "suggested_selector": "pending_req_fr_session_system",
+      "explicit_selector": "pending_req_fr_session_system",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-session-v4.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-SESSION",
+      "scenario_name": "非 v4 文件被拒绝",
+      "suggested_selector": "pending_req_fr_session_v4",
+      "explicit_selector": "pending_req_fr_session_v4",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-session-v4.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-SUBAGENT",
+      "scenario_name": "ACP 桥端到端委派",
+      "suggested_selector": "pending_req_fr_subagent_acp",
+      "explicit_selector": "pending_req_fr_subagent_acp",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-subagent-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-SUBAGENT",
+      "scenario_name": "spawn 子会话隔离",
+      "suggested_selector": "pending_req_fr_subagent_spawn",
+      "explicit_selector": "pending_req_fr_subagent_spawn",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-subagent-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-TOOLS",
+      "scenario_name": "exclusive 串行屏障",
+      "suggested_selector": "pending_req_fr_tools_exclusive",
+      "explicit_selector": "pending_req_fr_tools_exclusive",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-tools-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-TOOLS",
+      "scenario_name": "parallel 有界滚动池",
+      "suggested_selector": "pending_req_fr_tools_parallel",
+      "explicit_selector": "pending_req_fr_tools_parallel",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-tools-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-TOOLS",
+      "scenario_name": "管线事件顺序",
+      "suggested_selector": "pending_req_fr_tools_requirement",
+      "explicit_selector": "pending_req_fr_tools_requirement",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-tools-requirement.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-TUI",
+      "scenario_name": "Ctrl+C 中断运行中会话",
+      "suggested_selector": "pending_req_fr_tui_ctrl_c",
+      "explicit_selector": "pending_req_fr_tui_ctrl_c",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-tui-tui.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-TUI",
+      "scenario_name": "审批卡 y/a/n 单键直判",
+      "suggested_selector": "pending_req_fr_tui_y_a_n",
+      "explicit_selector": "pending_req_fr_tui_y_a_n",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-tui-tui.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-TUI",
+      "scenario_name": "极矮终端按序降级",
+      "suggested_selector": "pending_req_fr_tui_requirement",
+      "explicit_selector": "pending_req_fr_tui_requirement",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-tui-tui.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    },
+    {
+      "requirement_id": "REQ-FR-TUI",
+      "scenario_name": "流式 markdown holdback",
+      "suggested_selector": "pending_req_fr_tui_markdown_holdback",
+      "explicit_selector": "pending_req_fr_tui_markdown_holdback",
+      "selector_authority": "explicit",
+      "verification_strength": "contract",
+      "spec_path": "specs/generated/task-req-fr-tui-tui.spec.md",
+      "required_evidence": [
+        "lifecycle",
+        "trace"
+      ]
+    }
+  ],
+  "diagnostics": []
+}

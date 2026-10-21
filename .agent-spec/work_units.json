@@ -1,0 +1,337 @@
+{
+  "version": 1,
+  "units": [
+    {
+      "id": "WU-REQ-FR-ACP",
+      "requirement_id": "REQ-FR-ACP",
+      "title": "ACP 服务器入口",
+      "source_path": "knowledge/requirements/req-fr-acp-acp.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [
+        "REQ-FR-AGENT-LOOP",
+        "REQ-FR-SESSION"
+      ],
+      "satisfies": [
+        "REQ-FR-ACP"
+      ],
+      "scenario_count": 2,
+      "blocked_by": []
+    },
+    {
+      "id": "WU-REQ-FR-AGENT-LOOP",
+      "requirement_id": "REQ-FR-AGENT-LOOP",
+      "title": "Agent 主循环插件",
+      "source_path": "knowledge/requirements/req-fr-agent-loop-agent.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [
+        "REQ-FR-LLM",
+        "REQ-FR-SESSION",
+        "REQ-FR-TOOLS"
+      ],
+      "satisfies": [
+        "REQ-FR-AGENT-LOOP"
+      ],
+      "scenario_count": 4,
+      "blocked_by": []
+    },
+    {
+      "id": "WU-REQ-FR-APPROVAL",
+      "requirement_id": "REQ-FR-APPROVAL",
+      "title": "权限审批服务",
+      "source_path": "knowledge/requirements/req-fr-approval-requirement.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [
+        "REQ-FR-SESSION"
+      ],
+      "satisfies": [
+        "REQ-FR-APPROVAL"
+      ],
+      "scenario_count": 3,
+      "blocked_by": []
+    },
+    {
+      "id": "WU-REQ-FR-BUILTIN-TOOLS",
+      "requirement_id": "REQ-FR-BUILTIN-TOOLS",
+      "title": "内置工具集",
+      "source_path": "knowledge/requirements/req-fr-builtin-tools-requirement.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [
+        "REQ-FR-SANDBOX",
+        "REQ-FR-TOOLS"
+      ],
+      "satisfies": [
+        "REQ-FR-BUILTIN-TOOLS"
+      ],
+      "scenario_count": 3,
+      "blocked_by": []
+    },
+    {
+      "id": "WU-REQ-FR-COMMANDS",
+      "requirement_id": "REQ-FR-COMMANDS",
+      "title": "斜杠命令框架",
+      "source_path": "knowledge/requirements/req-fr-commands-requirement.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [
+        "REQ-FR-COMPACTION"
+      ],
+      "satisfies": [
+        "REQ-FR-COMMANDS"
+      ],
+      "scenario_count": 2,
+      "blocked_by": []
+    },
+    {
+      "id": "WU-REQ-FR-COMPACTION",
+      "requirement_id": "REQ-FR-COMPACTION",
+      "title": "上下文管理与压缩",
+      "source_path": "knowledge/requirements/req-fr-compaction-requirement.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [
+        "REQ-FR-LLM",
+        "REQ-FR-SESSION"
+      ],
+      "satisfies": [
+        "REQ-FR-COMPACTION"
+      ],
+      "scenario_count": 2,
+      "blocked_by": []
+    },
+    {
+      "id": "WU-REQ-FR-CONFIG",
+      "requirement_id": "REQ-FR-CONFIG",
+      "title": "装配与配置系统",
+      "source_path": "knowledge/requirements/req-fr-config-requirement.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [],
+      "satisfies": [
+        "REQ-FR-CONFIG"
+      ],
+      "scenario_count": 3,
+      "blocked_by": []
+    },
+    {
+      "id": "WU-REQ-FR-HEADLESS",
+      "requirement_id": "REQ-FR-HEADLESS",
+      "title": "headless 入口",
+      "source_path": "knowledge/requirements/req-fr-headless-headless.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [
+        "REQ-FR-AGENT-LOOP",
+        "REQ-FR-APPROVAL",
+        "REQ-FR-CONFIG",
+        "REQ-FR-LLM",
+        "REQ-FR-SESSION"
+      ],
+      "satisfies": [
+        "REQ-FR-HEADLESS"
+      ],
+      "scenario_count": 5,
+      "blocked_by": []
+    },
+    {
+      "id": "WU-REQ-FR-LLM",
+      "requirement_id": "REQ-FR-LLM",
+      "title": "模型接入层与三 provider",
+      "source_path": "knowledge/requirements/req-fr-llm-provider.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [
+        "REQ-FR-CONFIG"
+      ],
+      "satisfies": [
+        "REQ-FR-LLM"
+      ],
+      "scenario_count": 3,
+      "blocked_by": []
+    },
+    {
+      "id": "WU-REQ-FR-MCP",
+      "requirement_id": "REQ-FR-MCP",
+      "title": "MCP 客户端",
+      "source_path": "knowledge/requirements/req-fr-mcp-mcp.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [
+        "REQ-FR-TOOLS"
+      ],
+      "satisfies": [
+        "REQ-FR-MCP"
+      ],
+      "scenario_count": 2,
+      "blocked_by": []
+    },
+    {
+      "id": "WU-REQ-FR-PROMPT",
+      "requirement_id": "REQ-FR-PROMPT",
+      "title": "系统提示词组装",
+      "source_path": "knowledge/requirements/req-fr-prompt-requirement.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [
+        "REQ-FR-TOOLS"
+      ],
+      "satisfies": [
+        "REQ-FR-PROMPT"
+      ],
+      "scenario_count": 2,
+      "blocked_by": []
+    },
+    {
+      "id": "WU-REQ-FR-PTC",
+      "requirement_id": "REQ-FR-PTC",
+      "title": "run_code / PTC",
+      "source_path": "knowledge/requirements/req-fr-ptc-run-code-ptc.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [
+        "REQ-FR-APPROVAL",
+        "REQ-FR-SANDBOX",
+        "REQ-FR-TOOLS"
+      ],
+      "satisfies": [
+        "REQ-FR-PTC"
+      ],
+      "scenario_count": 4,
+      "blocked_by": []
+    },
+    {
+      "id": "WU-REQ-FR-QUALITY",
+      "requirement_id": "REQ-FR-QUALITY",
+      "title": "质量门与命名硬约束",
+      "source_path": "knowledge/requirements/req-fr-quality-requirement.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [],
+      "satisfies": [
+        "REQ-FR-QUALITY"
+      ],
+      "scenario_count": 3,
+      "blocked_by": []
+    },
+    {
+      "id": "WU-REQ-FR-SANDBOX",
+      "requirement_id": "REQ-FR-SANDBOX",
+      "title": "沙箱策略",
+      "source_path": "knowledge/requirements/req-fr-sandbox-requirement.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [
+        "REQ-FR-CONFIG"
+      ],
+      "satisfies": [
+        "REQ-FR-SANDBOX"
+      ],
+      "scenario_count": 2,
+      "blocked_by": []
+    },
+    {
+      "id": "WU-REQ-FR-SCOPE",
+      "requirement_id": "REQ-FR-SCOPE",
+      "title": "范围排除与偏差治理",
+      "source_path": "knowledge/requirements/req-fr-scope-requirement.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [],
+      "satisfies": [
+        "REQ-FR-SCOPE"
+      ],
+      "scenario_count": 2,
+      "blocked_by": []
+    },
+    {
+      "id": "WU-REQ-FR-SDK",
+      "requirement_id": "REQ-FR-SDK",
+      "title": "SDK JSON-RPC 服务器入口",
+      "source_path": "knowledge/requirements/req-fr-sdk-sdk-json-rpc.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [
+        "REQ-FR-AGENT-LOOP",
+        "REQ-FR-SESSION",
+        "REQ-FR-SUBAGENT"
+      ],
+      "satisfies": [
+        "REQ-FR-SDK"
+      ],
+      "scenario_count": 3,
+      "blocked_by": []
+    },
+    {
+      "id": "WU-REQ-FR-SESSION",
+      "requirement_id": "REQ-FR-SESSION",
+      "title": "会话系统（v4）",
+      "source_path": "knowledge/requirements/req-fr-session-v4.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [],
+      "satisfies": [
+        "REQ-FR-SESSION"
+      ],
+      "scenario_count": 4,
+      "blocked_by": []
+    },
+    {
+      "id": "WU-REQ-FR-SUBAGENT",
+      "requirement_id": "REQ-FR-SUBAGENT",
+      "title": "子代理系统",
+      "source_path": "knowledge/requirements/req-fr-subagent-requirement.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [
+        "REQ-FR-ACP",
+        "REQ-FR-AGENT-LOOP",
+        "REQ-FR-SESSION"
+      ],
+      "satisfies": [
+        "REQ-FR-SUBAGENT"
+      ],
+      "scenario_count": 2,
+      "blocked_by": []
+    },
+    {
+      "id": "WU-REQ-FR-TOOLS",
+      "requirement_id": "REQ-FR-TOOLS",
+      "title": "工具系统与调度",
+      "source_path": "knowledge/requirements/req-fr-tools-requirement.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [
+        "REQ-FR-CONFIG",
+        "REQ-FR-SESSION"
+      ],
+      "satisfies": [
+        "REQ-FR-TOOLS"
+      ],
+      "scenario_count": 3,
+      "blocked_by": []
+    },
+    {
+      "id": "WU-REQ-FR-TUI",
+      "requirement_id": "REQ-FR-TUI",
+      "title": "TUI 入口",
+      "source_path": "knowledge/requirements/req-fr-tui-tui.md",
+      "mode": "leaf_full",
+      "status": "ready",
+      "depends_on": [
+        "REQ-FR-AGENT-LOOP",
+        "REQ-FR-APPROVAL",
+        "REQ-FR-COMMANDS",
+        "REQ-FR-SESSION"
+      ],
+      "satisfies": [
+        "REQ-FR-TUI"
+      ],
+      "scenario_count": 4,
+      "blocked_by": []
+    }
+  ],
+  "diagnostics": []
+}
