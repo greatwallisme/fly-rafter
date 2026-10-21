@@ -11,18 +11,18 @@ dsh 依赖 cordis 原生分层补丁能力装配插件；dougong loader 只接�
 ## Decisions
 
 - Generated draft from KLL requirement artifact; human review must confirm boundaries and test selectors before implementation.
-- fr-config MUST 解析 fr.patch.yml 有序分层装配（自底向上：入口默认 bundle → profile bundle 栈 → profile patch → 家目录 patch → `--patch` 命令行补丁），后行按 id 整行替换前行（含 config 与 disabled）。
-- fr-config MUST 将展开后的装配编译为 dougong loader JSON 文档（builtin/dylib/wasm source、config 对象、isolate），经 `Reconciler::replace + apply` 幂等收敛；编译产物 MUST 为 dougong `Config::parse` 可接受的合法文档。
+- fr-config MUST 解析 fr.patch.yml 有序分层装配（自底向上：入口默认 bundle → profile bundle 栈 → profile patch → 家目录 patch → `--patch` 命令行补丁），合并语义 MUST 对齐 dsh `applyEntryPatches`（2026-10-22 Q1/Q2 裁决，vendor/include/src/index.ts:57-127）：行内 id/name 为匹配器，其余键**逐键覆盖**（config 整键替换不深合并；只携 disabled 的覆盖行仅翻转 disabled）；覆盖行未命中 id 或 name 不匹配 → 警告跳过（不致命、不进 failures）；行序 = 首次插入序；`insert` 行 MUST 向装配根插入新行（fr 不做 group 嵌套），后续层 MUST 能覆盖先前层插入的行。
+- fr-config MUST 将展开后的装配编译为 dougong loader JSON 文档（source.kind 仅 dylib/wasm：行 name 经产物解析规则映射——字面路径，或 `FR_PLUGIN_PATH` 各目录与安装库目录 `<prefix>/lib/fr/` 下按 slug（`-`→`_`）先查 `lib<slug>.so`（dylib）再查 `<slug>.wasm`（wasm），先命中定形态，未命中进入 failures；config 对象、isolate），经 `Reconciler::replace + apply` 幂等收敛；编译产物 MUST 为 dougong `Config::parse` 可接受的合法文档，且 MUST NOT 出现 builtin source。
 - fr-config MUST 在装配期对每行 config 依据插件导出的 ConfigSchema 校验；单行校验失败进入 `Report::failures`，MUST NOT 阻塞其余槽位。
-- patch 行内条件表达式 MUST 限于受限声明式子集（`env.NAME` 存在性/相等比较、linux/macos/windows 平台三元、字面量）；MUST NOT 支持任意 JS 求值。
+- patch 行内条件表达式（`!!js` 标记或 `!!js ` 前缀字符串）MUST 限于受限声明式子集（2026-10-22 Q3A 勘误扩充）：`env.NAME ?? 默认值` 链、相等比较（`==`/`===`）、`platform === 'linux'|'macos'|'windows'` 与平台三元、裸 env 值读取、字面量、`profile-context` 布尔（dsh `ctx.get('profileContext')` 的 fr 等价物：入口/profile 上下文存在性，支持 `!` 取反）；MUST NOT 支持任意 JS 求值；子集外表达式（如 `getBuiltinModule` 类）MUST 求值失败 fail-closed（patch 文档整体拒绝，启动终止——对齐 dsh 用户层 patch 错误抛出语义）。
 - fr MUST 提供 `fr dump-config` 与 `fr dump-config-schema`，内容由真实装配生成（文档即生成物）。
 - fr MUST 提供关键默认值：默认模型 provider `deepseek-official`、model `deepseek-flash`；`FR_PERMISSION_MODE ?? workspace-write`（workspace root = 进程启动 cwd）；非 danger-full-access 时审批策略 `'ask'`；会话存储 `<FR_HOME>/sessions`、storages `<FR_HOME>/storages`；bash `timeout-ms` 60000；重复工具提醒阈值 [3, 5, 8]；`sample-over-cap-glob-results: false`；`allow-parallel-in-progress: true`；会话标题默认：无 LLM 时回退 5 词/40 字节（上限 80 字节），LLM 标题 targetWords 5（CJK 10）、maxInput 4096 字节、超时 60s。
 - fr 宿主二进制 MUST 仅含装配器、事件泵、入口分发三件事：事件泵驱动 tokio runtime，把入口信号（headless 任务 / TUI 按键 / ACP·SDK 协议帧）转发到对应入口插件监听器；按子命令装配对应入口 profile（headless/tui/acp/sdk/web）；宿主对 agent 循环零感知。FR_HOME 默认 `~/.fly-rafter`，家目录结构与 dsh `~/.dsh/` 同构（sessions/storages/profiles）。
-- 插件三形态 MUST 共用 dougong 五步契约：全部第一方插件为进程内 builtin（经 loader builtin 表按名装载）；C-ABI dylib 为第三方可信扩展（代码镜像进程内永不卸载，换版本即重启进程）；wasm 组件（wasm32-wasip2）为第三方沙箱扩展（零能力 WASI：wasip2 guest 必然声明 wasi:io 导入而宿主挂载零能力 WasiCtx 的惰性定义，能力面为零、导入声明不为零；fuel/epoch/内存帽；经 WIT world `dougong:kernel/host` 交互）。装配层 MUST 按 source kind 显式声明每行插件形态（fr.patch.yml 的 name → 编译产物 source.kind: builtin/dylib/wasm），fr-config MUST 按信任边界校验：第一方插件 MUST 为 builtin，dylib 仅第三方可信扩展、wasm 仅第三方沙箱扩展，违规行进入 failures。
+- 插件仅 dylib 与 wasm 两形态（2026-10-22 用户裁决，废除 builtin），MUST 共用 dougong 五步契约（声明 → 激活 → 服务 → 监听 → 释放，跨边界经 descriptor + C-ABI 导出表表达）：全部第一方插件 MUST 为 C-ABI dylib 工件（cdylib、内核家族仅依赖 dougong-abi、代码镜像进程内永不卸载，换版本即重启进程）；wasm 组件（wasm32-wasip2）仅为第三方沙箱扩展（零能力 WASI：wasip2 guest 必然声明 wasi:io 导入而宿主挂载零能力 WasiCtx 的惰性定义，能力面为零、导入声明不为零；fuel/epoch/内存帽；经 WIT world `dougong:kernel/host` 交互；零能力 WASI 无网络与文件系统，第一方组件 MUST NOT 以 wasm 承载）。fr-config MUST 按信任边界校验每行：第一方插件名 MUST 解析为 dylib source（解析命中 wasm 产物即为违规），wasm 仅当产物为第三方 `.wasm`；违规行进入 failures；loader builtin 表 MUST NOT 出现在 fr 装配产物中。
 - 第三方工具插件 MUST 经 Invoker 通道接入：跨边界契约 = 事件名 + JSON 载荷 schema + 方法号常量表（descriptor 声明 + 能力自检）；isolate 列 MUST 承载 realm（会话级装配在会话 realm 内放置同名插件，域内 provide 不外泄、注入先域内后回退全局默认）；`internal/update` waterfall 仅作热更新预留扩展点，本期 MUST NOT 暴露。
 - 默认装配树 MUST 与 dsh base cordis.patch.yml 插件 id 集合同型（品牌映射后），并冻结 PRD 6.4 未记载默认值：agent-instructions maxBytes 65536、projection-cache 200 事件 5000ms、web searchProvider deepseek-official 与 fetchProvider http、repeat argumentsPreviewChars 500、标题 maxOutputTokens 4096、tools 默认 native、storage-domain backend json（dsh cordis.patch.yml 各行）。
-- 启动失败策略 MUST（对齐 dsh required-id 审计 [app-boot index.ts:944-961,1092-1114]）：仅 bootstrap 入口 Include 与必需插件 id 集（fr 对应 agent-loop 与当前子命令入口插件）激活失败时以 StartupError 拒启动（错误列出失败与等待清单）；其余插件失败一律单条警告、兄弟继续；注入服务缺失 → 插件 fiber 置 pending 容忍（其 id 属必需集则致命）；导入失败记录错误后不留实例、不中止装配；patch 未知 id 警告跳过永不致命；行覆盖语义 MUST 为按 id 整行替换（非 dsh 键级合并），patch 行内仅其余键作用于该行自身。
-- patch 行内 env 缺省表达式 MUST 以受限子集表达 dsh !!js 形态的对应语义：`env.FR_PERMISSION_MODE 存在取其值否则取字面量 workspace-write` 的求值结果与 dsh `process.env.DSH_PERMISSION_MODE ?? 'workspace-write'` 逐值一致（dsh cordis.patch.yml:246,262）。
+- 启动失败策略 MUST（对齐 dsh required-id 审计 [app-boot index.ts:944-961,1092-1114]）：仅 bootstrap 入口 Include 与必需插件 id 集（fr 对应 agent-loop 与当前子命令入口插件）激活失败时以 StartupError 拒启动（错误列出失败与等待清单）；其余插件失败一律单条警告、兄弟继续；注入服务缺失 → 插件 fiber 置 pending 容忍（其 id 属必需集则致命）；导入失败记录错误后不留实例、不中止装配；patch 未知 id 警告跳过永不致命；覆盖行语义 MUST 为按键覆盖（2026-10-22 Q1 勘误，对齐 dsh applyEntryPatches），patch 行内仅其余键作用于该行自身。
+- patch 行内 env 缺省表达式 MUST 以受限子集（CONFIG-4）表达 dsh !!js 形态的对应语义：`env.FR_PERMISSION_MODE ?? workspace-write` 与 `danger-full-access` 的相等比较求值结果 MUST 与 dsh `process.env.DSH_PERMISSION_MODE ?? 'workspace-write'` 逐值一致（dsh cordis.patch.yml:246,262）。
 - .env 分层 MUST（2026-10-22 用户裁决纳入，PRD 6.4；对齐 dsh app-boot index.ts:126-260 品牌映射后）：fr-config 启动期解析环境 = 继承进程 env > 项目 `.env`（自 cwd）> 家目录 `.env`（`<FR_HOME>/.env`）；`.env` 中已设名 MUST NOT 覆盖更高层已存在的值；bootstrap 专名在任何 `.env` 层拒绝：PATH、NODE_ 前缀、代理名、DEEPSEEK_BASE_URL、全部 FR_ 与 XDG_ 前缀；家目录层例外可设 HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / NO_PROXY 四键。
 
 ## Boundaries
@@ -40,17 +40,41 @@ dsh 依赖 cordis 原生分层补丁能力装配插件；dougong loader 只接�
 
 ## Completion Criteria
 
-Scenario: 后行按 id 整行覆盖前行
+Scenario: 覆盖行仅翻转 disabled
+  Test: pending_req_fr_config_disabled
+  假设 覆盖行仅携带 id 与 disabled:true 且未携 config 或 name
+  当 合并到已存在的同名 id 行时
+  那么 仅该行 disabled 变为 true，name 与 config 保持不变
+
+Scenario: 覆盖行整键替换 config
+  Test: pending_req_fr_config_config
+  假设 覆盖行携带新 config 对象
+  当 合并到已存在 id 行时
+  那么 该行 config 整体替换为新对象（不深合并，旧键不保留）
+
+Scenario: 覆盖行未命中 id 警告跳过
   Test: pending_req_fr_config_id
-  假设 profile patch 中存在与入口默认 bundle 相同 id 的补丁行
-  当 编译装配时
-  那么 该行以 profile patch 版本生效，前行配置不再出现于编译产物
+  假设 覆盖行的 id 在装配中不存在
+  当 合并时
+  那么 发出单条警告并跳过该行，不进 failures、不致命
+
+Scenario: 覆盖行 name 不匹配警告跳过
+  Test: pending_req_fr_config_name
+  假设 覆盖行 id 命中但 name 与既有行不同
+  当 合并时
+  那么 发出单条警告并跳过该行，不致命
 
 Scenario: 装配层次自底向上展开
   Test: pending_req_fr_config_requirement
   假设 入口默认、profile、家目录 patch 与 --patch 各定义了同一 id
   当 展开装配时
   那么 按入口默认 → profile → 家目录 patch → --patch 顺序覆盖，最终值来自最后一层
+
+Scenario: insert 行向根插入并保持首插序
+  Test: pending_req_fr_config_insert
+  假设 某 bundle 层以 insert 行插入两个新 id
+  当 合并完成后
+  那么 新行按插入序追加于行列表尾，后续层可按 id 覆盖这些插入行
 
 Scenario: 编译产物为合法 loader 文档
   Test: pending_req_fr_config_loader
@@ -64,17 +88,35 @@ Scenario: 单行 config 校验失败不阻塞其余槽位
   当 执行装配收敛时
   那么 该行进入 failures，其余插件正常装载
 
-Scenario: 超出受限子集的条件表达式被拒绝
-  Test: pending_req_fr_config_requirement
-  假设 patch 行使用任意 JS 表达式
-  当 解析 fr.patch.yml
-  那么 返回明确解析错误并拒绝该行
+Scenario: 超出受限子集的条件表达式 fail-closed
+  Test: pending_req_fr_config_fail_closed
+  假设 patch 行使用任意 JS 表达式（如 getBuiltinModule 路径解析类）
+  当 解析 fr.patch.yml 求值该表达式时
+  那么 求值失败进 failures 并按启动失败策略处理
 
-Scenario: env 门控与平台三元按字面语义求值
+Scenario: env 默认链与相等比较逐值求值
   Test: pending_req_fr_config_env
-  假设 patch 行含 env.FR_X 存在性门控与 linux 平台三元
-  当 分别在 FR_X 设置与未设置、不同平台断言下求值时
-  那么 按存在性/相等与平台真值求值，无 JS 求值器介入
+  假设 patch 行含 env.FR_PERMISSION_MODE ?? workspace-write 与 danger-full-access 相等比较
+  当 分别在 FR_PERMISSION_MODE 设为 danger-full-access、其他值与未设置下求值时
+  那么 求值结果与 dsh process.env.DSH_PERMISSION_MODE ?? 'workspace-write' 逐值一致
+
+Scenario: 裸 env 值读取作为配置值
+  Test: pending_req_fr_config_env
+  假设 patch 行 config 值为裸 env.FR_TOOLS_MODE 表达式
+  当 求值时
+  那么 env 存在时取其字符串值，不存在时取 null
+
+Scenario: profile-context 布尔门控
+  Test: pending_req_fr_config_profile_context
+  假设 patch 行 disabled 为 profile-context 取反布尔（dsh !ctx.get('profileContext') 的 fr 等价物）
+  当 分别在有与无入口 profile 上下文时求值
+  那么 有上下文时 disabled=false，无上下文时 disabled=true
+
+Scenario: 平台三元按字面语义求值
+  Test: pending_req_fr_config_requirement
+  假设 patch 行含 linux 平台三元
+  当 在不同平台断言下求值时
+  那么 按平台真值选择分支，无 JS 求值器介入
 
 Scenario: dump 命令输出来自真实装配
   Test: pending_req_fr_config_dump
@@ -105,9 +147,9 @@ Scenario: 事件泵转发入口信号
   当 事件泵运转时
   那么 信号被转发到对应入口插件的监听器
 
-Scenario: 第一方名配 wasm source 被拒
-  Test: pending_req_fr_config_wasm_source
-  假设 patch 行 name 为 fr-session 且 source kind 为 wasm
+Scenario: 第一方名解析为 wasm 被拒
+  Test: pending_req_fr_config_wasm
+  假设 patch 行 name 为 fr-session 且解析命中 <slug>.wasm 产物
   当 fr-config 信任边界校验时
   那么 该行进入 failures 且不装载
 
@@ -117,15 +159,27 @@ Scenario: dylib 镜像永不卸载
   当 变更其补丁行并 reconcile 时
   那么 代码镜像保持驻留不卸载，换版本要求重启进程
 
+Scenario: 第一方 dylib 工件缺失启动失败
+  Test: pending_req_fr_config_dylib
+  假设 patch 行 name 为 fr-session 且解析路径不存在对应 .so
+  当 装配收敛时
+  那么 该行进入 failures 并按启动失败策略处理，其余槽不受影响
+
+Scenario: 装配产物不含 builtin source
+  Test: pending_req_fr_config_builtin_source
+  假设 默认 headless 装配展开完成
+  当 检查编译产物全部 source.kind 时
+  那么 全部为 dylib，无任何 builtin 条目
+
 Scenario: 会话 realm 域内解析不外泄
   Test: pending_req_fr_config_realm
   假设 会话 realm 内放置了同名插件
   当 会话内 require 该服务时
   那么 先命中域内实现，域内 provide 不外泄到全局默认
 
-Scenario: 第三方工具经 Invoker 通道接入
+Scenario: 插件经 Invoker 通道接入
   Test: pending_req_fr_config_invoker
-  当 第三方 wasm 工具插件接入时
+  当 插件（第一方 dylib 或第三方 wasm）跨边界提供服务时
   那么 经事件名加 JSON 载荷 schema 加方法号常量表的 Invoker 契约接入，且 descriptor 声明与能力自检通过
 
 Scenario: profile 选择与缩写
@@ -153,7 +207,7 @@ Scenario: disabled 行使插件不装载
 
 Scenario: dylib 与 wasm source 行装载
   Test: pending_req_fr_config_dylib_wasm_source
-  假设 装配分别包含 dylib 与 wasm source 的第三方行
+  假设 装配分别包含第一方 dylib 行与第三方 wasm 行
   当 收敛时
   那么 两种 source 按各自形态装载且能力边界生效
 

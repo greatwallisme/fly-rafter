@@ -47,7 +47,7 @@ Scenario: 每会话循环 fiber 置于会话 realm
   Test: pending_req_fr_agent_loop_fiber_realm
   假设 新会话启动
   当 循环 fiber 创建时
-  那么 fiber 置于该会话 realm，宿主代码不含循环实现
+  那么 fiber 置于该会话 realm，循环实现仅存在于 fr-agent-loop dylib 工件，宿主代码不含循环实现
 
 Scenario: 完整 turn 无工具调用
   Test: pending_req_fr_agent_loop_turn

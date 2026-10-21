@@ -54,3 +54,17 @@
 - 审计 13-20 完成：BUILTIN-TOOLS 充分（目录守恒层）；HEADLESS 补强（final 来源/usage 累计/append-only 投影）1178；TUI 补强（dsh TUI 已上游删除的基线事实负向钉住；一次锚点事故致 ## Dependencies 错位，已精确修复并配平验证）1179；ACP 补强（resume 拒绝形态/list 过滤/图片准入/permission 门控）1183；SDK 修正未同步勘误（未知方法 -32603）+3 场景 1186；CONFIG 新增启动失败策略条款 11/12 + .env 范围 Open Question 1190；QUALITY 充分；SCOPE 偏差清单同步 1190。
 - Phase 9 终态：20/20 合约逐份审计完毕（充分 2、补强后充分 5、重修 13 含 4 份重写），每份即时落地独立过三门禁，场景 1062→1190，源码笔记扩至 8 份报告。coverage-audit.md 第六节裁决表 + 3 项待用户裁决事项落盘。
 - 用户裁决（2026-10-22）：TUI 基线确认（fr 对齐 PRD 18.2 自有规格）；.env 分层纳入 fr-config。PRD 6.4 增 .env 分层段（品牌映射 FR_*/XDG_*、bootstrap 专名拒绝、家目录代理四键例外）；CONFIG 条款 13 + 3 场景落地，Open Question 撤销。
+## Session 5 — 2026-10-22（M1 放行 + 插件形态裁决返工）
+
+- 用户放行 M1（"完成m1"）。动工：读 PRD 全文 + dougong 内核模型/dylib 参考，workspace 骨架落盘（root Cargo.toml resolver 3/edition 2024/workspace.lints 对齐 dougong、rust-toolchain.toml 1.99.1 钉死）。
+- fr-config 首切片（补丁行模型/解析/loader JSON 编译 + dougong_loader::Config::parse 契约测试）四关全绿 8 tests。
+- 用户质询 fr-config 装载形态 → 我越权以"第一方全 builtin"作答并推进，用户两次严厉警告后确认规则：绝不擅自决定（已入长期记忆 no-unilateral-decisions）。
+- 一次性裁决 D1-D6 经用户"可以"通过：D1A fr-config 宿主直链库非插件；D2A 第一方全 dylib、wasm 仅第三方；D3A 宿主=内核+loader+fr-config+壳；D4A Invoker JSON 字节+fr-wire 形状共享；D5A M1 六条验收不变；D6A 合约全量扫描改写。用户令：先改 PRD 与合约，后写代码。
+- PRD 返工 11 处：1.4.2/4.2/4.3 全节（两形态表+负向钉 builtin）/4.4 跨边界载荷/4.5 布局（fr-wire 入列、插件全 cdylib 仅依赖 dougong-abi）/6.2 产物解析规则（字面路径或 FR_PLUGIN_PATH→<prefix>/lib/fr 查 lib<slug>.so→<slug>.wasm，未命中进 failures）/6.3 schema 真源宿主侧双侧校验/8.1/20/22/23 决策 16。
+- intake 返工：CONFIG-2、CONFIG-8 全节重写；场景 +3/-3 改（第一方 wasm 拒绝、工件缺失失败、产物无 builtin、Invoker 泛化、两形态装载、循环 fiber 工件归属）；AGENT-LOOP 1 场景。全管线复跑全绿，场景 1193→1195。
+- fr-config 代码按裁决返工：source.rs（SourceKind/SourceSpec/PathResolver/check_trust_boundary）、compile_to_loader_doc → CompileOutcome{doc, failures}（失败行 fail-closed 剔除不阻塞他槽、禁 builtin source）、信任校验第一方禁 wasm；tests 8→12；四关全绿（fmt/clippy -D warnings/test/doc）。
+- 裁决记录落盘 coverage-audit.md 第七节。
+- 用户裁决 Q1A/Q2A/Q3A（2026-10-22）：合并语义对齐 dsh applyEntryPatches（按键覆盖/warn-skip/首插序）；insert 根级插入、无 group；!!js 子集 = env ?? 链/相等比较/平台三元/裸 env 值/字面量/profile-context 布尔。真源依据：vendor/include/src/index.ts:57-127 + bundle patches 全量盘点（!!js 22 处；PRD"仅平台门控与 env 读取"表述勘误）。
+- PRD 勘误落地：6.1 合并语义、6.2 行模型示例（定义行经 insert）、5 节 !!js 行、19.2 条 6、23 决策 17。intake：CONFIG-1/4/11/12 改写，场景 +6 改 2（覆盖行翻转/config 整换/未命中跳过/name 不匹配/自底向上/insert+首插序；子集 fail-closed 文档级拒绝）。全管线复跑全绿 1202 场景。
+- fr-config 实现：cond.rs（受限表达式求值器：递归下降、?? 链语法消费、单双引号字面量、profile-context 布尔）；patch.rs 重写（PatchLine{id,name,config,disabled,insert}、compose 按 dsh 语义、row_from_value 走行保 tag、!!js→!js 行锚定归一化——libyaml 二级句柄展开致 serde_yaml_ng 丢 quoted tag 的规避）。tests 12→24，四关全绿。
+- 排障记录：eat("?") 误吞 "??"（lookahead 修复）；serde_json 不认单引号字面量（手写扫描）；PatchLineRaw derive 路径丢 tag（整文档解 Value 后手工走行）。

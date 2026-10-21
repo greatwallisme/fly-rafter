@@ -30,7 +30,7 @@ Fly Rafter（飞椽，`fr`）是一个以 dougong 组合内核为基座的 AI ag
 ### 1.4 设计原则
 
 1. **协议即会话日志**（承袭 dsh）：模型可见即已记录；每次 LLM 请求必须能从会话日志确定性重建（`deriveMessages()`）。请求消息从日志投影并冻结，不经内存数组直传。
-2. **一切皆插件**（dougong 语义承袭 cordis）：服务贡献、事件监听、可逆 effect、响应式依赖收敛。dougong 是 cordis 的 Rust 复现，dsh 本身构建在 vendored cordis 上——因此 fly-rafter 的结构映射是天然的：**dougong 替代 cordis，fly-rafter 插件集替代 dsh 的 packages**。
+2. **一切皆插件**（dougong 语义承袭 cordis）：服务贡献、事件监听、可逆 effect、响应式依赖收敛。dougong 是 cordis 的 Rust 复现，dsh 本身构建在 vendored cordis 上——因此 fly-rafter 的结构映射是天然的：**dougong 替代 cordis，fly-rafter 插件集替代 dsh 的 packages**。插件装载形态仅 dylib 与 wasm 两种（4.3，2026-10-22 用户裁决）：第一方插件全部为 C-ABI dylib，wasm 仅承载第三方沙箱扩展；fr 装配不含任何 builtin 形态。
 3. **1:1 口径 = 行为与协议对齐**：功能集合、工具名称与语义、提示词文本、配置格式、会话格式逐项对齐原版；内部结构按 dougong 插件模型重造，不镜像原版 TypeScript 模块划分。
 4. **fail-closed**：审批链无应答者、沙箱不可用、依赖未声明——一律拒绝，绝不静默放行。
 5. **质量门零容忍**：fmt / clippy（-D warnings）/ test / doc 四关全绿，不接收任何警告与错误。
@@ -103,23 +103,24 @@ Fly Rafter（飞椽，`fr`）是一个以 dougong 组合内核为基座的 AI ag
 
 `fr` 宿主二进制仅含：
 
-1. **装配器**：解析 `fr.patch.yml` 有序分层 → 按 id 整行覆盖展开为单份装配 → 编译为 dougong loader `Config`（builtin 表 + 可选 dylib/wasm 源；dougong 本体无 YAML/分层/行覆盖概念，见 4.1、6.2）→ `Reconciler::replace + apply` 幂等收敛；
+1. **装配器**：解析 `fr.patch.yml` 有序分层 → 按 id 整行覆盖展开为单份装配 → 编译为 dougong loader `Config`（source 仅 dylib/wasm 两类；loader 的 builtin 表在 fr 装配中从不使用；dougong 本体无 YAML/分层/行覆盖概念，见 4.1、6.2）→ `Reconciler::replace + apply` 幂等收敛；
 2. **事件泵**：驱动 tokio runtime、转发入口信号（headless 任务 / TUI 按键 / ACP·SDK 协议帧）到对应入口插件的监听器；
 3. **入口分发**：按子命令装配对应入口 profile（headless / tui / acp / sdk / web）。
 
 **agent 主循环本身是插件**（决策 3）：`agent-loop` 插件 inject `llm`、`tools`、`session-persistence`、`system-prompt` 等服务，监听输入事件驱动 turn/step；宿主对循环零感知。任一入口插件只做“把外部输入变成 inbox 消息、把会话事件投影成外部输出”。
 
-### 4.3 插件形态与信任边界
+### 4.3 插件形态与信任边界（2026-10-22 用户裁决：废除 builtin 形态）
 
-三种形态共用一份语义契约（dougong 五步契约：声明 → 激活 → 服务 → 监听 → 释放）：
+插件仅两种装载形态，共用一份语义契约（dougong 五步契约：声明 → 激活 → 服务 → 监听 → 释放，跨边界经 descriptor + C-ABI 导出表表达）：
 
 | 形态 | 用途 |
 |---|---|
-| 进程内 Rust（builtin） | fly-rafter 全部第一方插件，编译进宿主，经 loader `builtin` 表按名装载 |
-| C-ABI dylib | 第三方可信扩展；代码镜像进程内永不卸载（dougong R1），换版本即重启进程 |
-| wasm 组件（wasm32-wasip2） | 第三方沙箱扩展；零能力 WASI，fuel/epoch/内存帽；经 WIT world `dougong:kernel/host` 与宿主交互。“零能力”的精确含义（dougong `dougong-wasm/src/engine.rs:84-88`，已一手核实）：wasip2 guest 必然声明 `wasi:io` 导入，宿主 linker 为其挂载**零能力 WasiCtx 的惰性定义**——能力面为零，导入声明不为零；WIT world 本身不导入任何 WASI 能力 |
+| C-ABI dylib（cdylib，内核家族仅依赖 dougong-abi） | **fly-rafter 全部第一方插件 + 第三方可信扩展**。第一方组件（agent 主循环、工具、审批、沙箱、会话、三 provider、各入口等）无一例外为 dylib 工件，经 loader 文档 `{"kind":"dylib","path"}` 按名解析装载；代码镜像进程内永不卸载（dougong D5/R1，teardown-only），换版本即重启进程。形态铁律（dougong dylib 参考）：插件 crate 从内核家族只依赖 `dougong-abi`，框架语义全部宿主侧（inverted API）；inject/provide 来自插件 descriptor，不在装载文档声明 |
+| wasm 组件（wasm32-wasip2） | 第三方沙箱扩展（第一方不使用）；零能力 WASI，fuel/epoch/内存帽；经 WIT world `dougong:kernel/host` 与宿主交互。“零能力”的精确含义（dougong `dougong-wasm/src/engine.rs:84-88`，已一手核实）：wasip2 guest 必然声明 `wasi:io` 导入，宿主 linker 为其挂载**零能力 WasiCtx 的惰性定义**——能力面为零，导入声明不为零；WIT world 本身不导入任何 WASI 能力。零能力 WASI 无网络与文件系统，llm provider、mcp、web、session 落盘等组件在 wasm 内无法工作（除非宿主逐调用代理，成本不可接受）——这是第一方全 dylib 的硬约束 |
 
-第三方工具插件经 Invoker 通道接入：harness 定义跨边界契约 = 事件名 + JSON 载荷 schema + 方法号常量表（模式承袭 dougong `greeter` 示例：descriptor 声明 + 能力自检）。
+第一方全 dylib 的裁决依据（2026-10-22）：同一信任域内 wasm 只增加序列化与宿主代理成本；零能力 WASI 使需要网络/落盘的第一方组件在 wasm 内无法工作。loader 的 `builtin` 表在 fr 装配中**从不使用**（该内核能力保留只是 dougong 平台事实，不构成 fr 需求）。
+
+全部插件（第一方与第三方、dylib 与 wasm）经 Invoker 通道接入服务：harness 定义跨边界契约 = 事件名 + JSON 载荷 schema + 方法号常量表（模式承袭 dougong `greeter` 示例：descriptor 声明 + 能力自检）。
 
 ### 4.4 服务与事件契约总则
 
@@ -127,6 +128,7 @@ Fly Rafter（飞椽，`fr`）是一个以 dougong 组合内核为基座的 AI ag
 - 会话事件类型名与字段**与 dsh 逐字一致**（第 7 节）。
 - 仅品牌级标识按第 5 节适配表替换。
 - **Invoker 消费统一经 `ctx.require::<Invoker>`，禁止 `ctx.get`**（实现约束）：require 带声明检查，与内核“未声明依赖即拒绝”的能力基线一致；跨 dylib/wasm 边界的服务调用一律走此通道（dougong `invoke.rs`，已一手核实）。
+- **跨边界载荷形状（2026-10-22 裁决随附）**：跨 dylib/wasm 边界的一切服务与事件载荷为 JSON 字节（Invoker 通道，method u32 选择子）；共享 wire 形状由纯 serde 库 `fr-wire` 定义，各插件工件各链一份副本（仅共享形状定义，不跨边界传指针/状态）；会话内热路径（assistant-stream chunk）按第 22 节对策批量分发。
 
 ### 4.5 Workspace 布局（实现基线）
 
@@ -136,11 +138,12 @@ fly-rafter/
   rust-toolchain.toml   # 与 dougong 对齐钉死（1.99.1 补丁级）
   crates/
     fr                  # 宿主：装配器 + 事件泵 + 入口分发（bin）
-    fr-config           # fr.patch.yml 分层解析/校验/编译为 loader JSON；配置 schema 声明框架
+    fr-config           # [宿主库] fr.patch.yml 分层解析/校验/编译为 loader JSON；配置 schema 声明框架；.env 分层
+    fr-wire             # [宿主无关库] 共享 wire 形状（纯 serde 类型，各插件工件链接副本，指针不跨界）
     fr-session          # SessionEvent 全集、JSONL+zstd 持久化（v4）、surface/replace-op、deriveMessages、fork
     fr-agent-loop       # agent 主循环插件
     fr-tools            # 工具注册表、schema、执行管线、guards
-    fr-tools-builtin    # 内置工具集（第 17 节全部）
+    fr-tools-builtin    # 内置工具集（第 17 节全部；"builtin" 指工具集归属，非插件形态）
     fr-ptc              # run_code：node 子进程 wire 协议与桥接
     fr-system-prompt    # 有序 section 组装、{{var}}、AGENTS.md
     fr-approval         # ApprovalService + 权限预设
@@ -151,7 +154,7 @@ fly-rafter/
     fr-llm-openai       # OpenAI-compatible（可配 base-url）
     fr-llm-anthropic    # Anthropic 官方
     fr-mcp              # MCP 客户端（stdio + Streamable HTTP）
-    fr-subagent         # 进程内 spawn/fork
+    fr-subagent         # 同进程 spawn/fork（子 realm）
     fr-subagent-acp     # ACP 委派桥（与 fr-acp 共享 ACP 客户端代码）
     fr-commands         # 斜杠命令框架 + 内置命令
     fr-shell            # bash 执行 seam + 子进程/作业管理（dougong 缺口）
@@ -161,7 +164,7 @@ fly-rafter/
     fr-sdk              # JSON-RPC 服务器入口插件
 ```
 
-依赖方向：`fr` 只依赖 `fr-config` 与各入口插件；任何领域 crate 不得依赖入口 crate；全部插件 crate 依赖 `dougong`（及按需 `dougong-loader`），相互之间只经服务缝与事件解耦。
+依赖方向：`crates/` 下除 `fr`、`fr-config`、`fr-wire` 外**全部为 cdylib 插件工件**（内核家族仅依赖 `dougong-abi`，五步契约经 descriptor 表达）；`fr` 只依赖 `fr-config` 与入口插件（经 dylib 工件装载）；任何领域 crate 不得依赖入口 crate；fr-config/fr-wire 为普通 rlib；插件之间只经服务缝与事件解耦。
 
 ---
 
@@ -178,7 +181,7 @@ fly-rafter/
 | ACP `agentInfo = 'deepseek-harness-acp/0.0.1'` | `'fly-rafter-acp/0.0.1'` | 品牌 |
 | stderr 前缀 `dsh: reasoning:` / `dsh: <code>: <message>` | `fr: reasoning:` / `fr: <code>: <message>` | 品牌 |
 | `cordis.patch.yml` | `fr.patch.yml`（行格式逐字同构） | 品牌 + 一处语义适配（见下） |
-| patch 行内 `!!js` 表达式（平台门控、env 读取） | 受限声明式条件子集：`env.NAME` 存在性/相等比较、平台三元（linux/macos/windows）、字面量；**不支持任意 JS** | 有意适配（Rust 无 JS 求值器；dsh 中该语法仅用于上述场景） |
+| patch 行内 `!!js` 表达式 | 受限声明式条件子集（2026-10-22 勘误 Q3A）：`env.NAME ?? 默认值` 链、相等比较（`==`/`===`）、`platform === 'linux'|'macos'|'windows'` 与平台三元、裸 env 值读取、字面量、`profile-context` 布尔（dsh `ctx.get('profileContext')` 的 fr 等价物：入口/profile 上下文存在性，支持 `!` 取反）；**不支持任意 JS** | 有意适配（Rust 无 JS 求值器）；dsh 实际用法盘点 22 处（base 12、web-app 3、headless 1；子集外：sdk-app `getBuiltinModule` 路径解析类 6 处不做——其对象 office/node 捆绑路径属桌面打包面，19.1 已裁；出处 bundle patches 全量盘点 + `vendor/include/src/index.ts:57-127`） |
 | 插件配置键 camelCase（dsh schemastery 键，如 `includeHarnessIdentity`、`timeoutMs`） | 一律转 kebab-case（`include-harness-identity`、`timeout-ms`），Rust 侧经 serde rename 对接；不承诺与 dsh 配置文件互换 | 有意适配（用户裁决 2026-10-21，见 19.2） |
 
 除上表外，一切事件名、服务名、工具名、配置键、提示词文本逐字 1:1。
@@ -203,24 +206,32 @@ fly-rafter/
 4. 家目录 patch（`~/.fly-rafter/profiles/`）
 5. `--patch <file>` 命令行补丁
 
-**后行按 `id` 整行替换前行**（含 `config`、`disabled`），语义与 dsh 完全一致。
+**合并语义（2026-10-22 勘误对齐 dsh 源码 `vendor/include/src/index.ts:57-127`，Q1/Q2 裁决）**：行内 `id`/`name` 是**匹配器**；其余键**逐键覆盖**（`config` 作为单键整体替换、不深合并；只写 `disabled` 的覆盖行仅翻转 disabled、其余键不动）；覆盖行未命中 id → 警告并跳过（不报错、不致命）；`name` 不匹配 → 警告并跳过；行序 = 首次插入序（覆盖不改变行位置）；`insert` 行向装配根插入新行（Q2：fr 不做 `group` 嵌套，仅根级插入）；后续层可覆盖先前层插入的行。
 
 ### 6.2 补丁行格式
 
 ```yaml
-- id: llm-primary            # 行标识，分层覆盖键
-  name: fr-llm-deepseek      # 插件名（builtin 表键或产物名）
-  config:                    # 插件配置对象（交插件体校验）
-    model: deepseek-flash
-  disabled: false
+- insert:                    # 插入组：向装配根插入新行（fr 无 group 嵌套）；定义行一律经 insert 落地
+    - id: llm-primary
+      name: fr-llm-deepseek  # 插件名（经解析规则映射为 dylib/wasm 产物，见下）
+      config:
+        model: deepseek-flash
+    - id: headless-startup
+      name: fr-headless
+      config:
+        tools-mode: !!js "process.env.FR_TOOLS_MODE"
+- id: approval-policy        # 纯覆盖行示例：仅翻转 disabled，不动 name/config（dsh base patch 即整体一个大 insert，后续层按键覆盖）
+  disabled: true
 ```
 
 编译产物为 dougong loader 文档：
 
 ```json
-{ "plugins": [ { "name": "llm-primary", "source": {"kind": "builtin", "name": "fr-llm-deepseek"},
+{ "plugins": [ { "name": "llm-primary", "source": {"kind": "dylib", "path": "<libdir>/libfr_llm_deepseek.so"},
                  "config": {"model": "deepseek-flash"}, "isolate": null } ] }
 ```
+
+**产物解析规则**（编译期定形态）：行 `name` 含路径分隔符或以 `.so`/`.wasm` 结尾 → 按字面路径；否则按 slug（`-`→`_`）解析：在 `FR_PLUGIN_PATH` 各目录（冒号分隔、序即优先级）→ 安装库目录 `<prefix>/lib/fr/` 中依次查找 `lib<slug>.so`（dylib）与 `<slug>.wasm`（wasm），先命中者定形态；两处都未命中 → 该行进入 `Report::failures`（fail-closed，按 6.4 启动失败策略处理）。编译产物 MUST NOT 出现 `builtin` source。
 
 `inject/provide` 不在文档声明——来自插件 descriptor（dougong 铁律）。`isolate` 列承载 realm：会话级装配在会话 realm 内放置同名插件。
 
@@ -228,7 +239,7 @@ fly-rafter/
 
 ### 6.3 配置 schema 校验（dougong 缺口，fr-config 补齐）
 
-dougong 只验 JSON 形状（`require_object`）。fr-config 要求每个插件 crate 导出 `static ConfigSchema`（Rust 类型 + serde + 校验函数，等价 schemastery 角色），装配期对每行 `config` 校验，失败进入 `Report::failures` 不阻塞其他槽。`fr dump-config` 输出合成后插件树、`fr dump-config-schema` 输出全部插件 config schema（对齐 dsh 同名 CLI 能力；这两个目录文档在 fly-rafter 同样由真实装配生成并验证——承袭“文档即生成物”）。
+dougong 只验 JSON 形状（`require_object`）。fr-config 的 schema 真源在**宿主侧**：每个插件的配置 schema（Rust 类型 + serde + 校验函数，等价 schemastery 角色）集中声明于宿主链接的 schema 库，装配期对每行 `config` 校验，失败进入 `Report::failures` 不阻塞其他槽；插件工件在激活体顶部用同一 schema 库的链接副本对 config **再校验**（双侧校验），激活期校验失败按插件装载失败 fail-closed。`fr dump-config` 输出合成后插件树、`fr dump-config-schema` 输出全部插件 config schema（对齐 dsh 同名 CLI 能力；这两个目录文档在 fly-rafter 同样由真实装配生成并验证——承袭“文档即生成物”）。
 
 ### 6.4 关键默认值（继承自 dsh base patch，品牌名替换后）
 
@@ -310,7 +321,7 @@ abort 时为未派发的工具调用补合成错误 `tool/result`，保证重放
 
 ### 8.1 插件形态
 
-`fr-agent-loop`：inject `llm`、`tools`、`system-prompt`、`session-persistence`；provide `agent` 服务（`send / steer / inject / followup` 入 inbox）。每会话一个循环插件 fiber，置于该会话 realm。
+`fr-agent-loop`（dylib 工件）：inject `llm`、`tools`、`system-prompt`、`session-persistence`；provide `agent` 服务（`send / steer / inject / followup` 入 inbox）。每会话一个循环插件 fiber，置于该会话 realm；循环实现仅存在于 fr-agent-loop 工件，宿主代码不含循环逻辑。
 
 ### 8.2 控制流（与 dsh `agent-loop/src/agent.ts` 逐步对齐）
 
@@ -607,12 +618,13 @@ fr headless [TASK] [--session-id <id>] [--json] [--help]
 
 ### 19.2 有意偏差（与 1:1 口径的关系声明）
 
-1. `!!js` patch 表达式 → 受限声明式条件子集（第 5 节；dsh 中该语法仅用于平台门控与 env 读取，子集完整覆盖这些用途）
+1. `!!js` patch 表达式 → 受限声明式条件子集（第 5 节；dsh 中该语法的真实用法盘点 22 处见第 5 节适配表——env 三元与裸 env 读、profile 门控、sdk-app 路径解析类；fr 子集覆盖前三类并以 profile-context 布尔承载门控，2026-10-22 Q3A 勘误）
 2. 品牌/命名替换（第 5 节表）——文本级唯一改动为身份句
 3. 插件配置键由 dsh 的 camelCase 转为 kebab-case（用户裁决 2026-10-21，见第 5 节适配表与 5.1）：不承诺与 dsh 配置文件互换；协议 wire 层（会话事件、工具 schema、SDK/ACP 参数）不受影响，仍逐字 1:1
 4. 除上述各条与 19.1 排除项外，**不存在其他已知偏差**；实现中发现新的不可避免偏差必须先记录到本节并经用户确认
 5. PRD 勘误（2026-10-21 源码核对，按 dsh 源码修正正文 12 处）：会话头 seedLength、tool/call 时序、绑定名规则、PTC wire 帧、程序 fs 访问、CONTEXT_ORDERS 行号、AGENTS.md 注入形态、image_request_target、SDK 未知方法错误码、空渲染语义、审批切换文案、独占发布细节；依据见 doc/dsh-source-notes.md
 5. PRD 勘误与源码补遗（2026-10-21 源码核对）：正文 12 处与 dsh 源码不符已按源码修正（会话头 seedLength、tool/call 时序、绑定名规则、PTC wire 帧、程序 fs 访问、CONTEXT_ORDERS 行号、AGENTS.md 注入形态、image_request_target、SDK 未知方法错误码、空渲染语义、审批切换文案、独占发布细节）；另将 dsh 源码级技术关键点（默认装配树锚点、surface 硬约束、两级补偿、header 判定算法、缓存友好路由、管线与调度细则、PTC 实现细则、组装确定性、审批细则、流装配结算、三 provider 协议细则、入口输出细则、ACP 与 SDK 生命周期细则）并入正文各节。全部依据见 doc/dsh-source-notes.md（file:line 证据）
+6. 装配语义勘误（2026-10-22 Q1-Q3 裁决）：6.1 "按 id 整行替换"勘误为 dsh 实际的**按键覆盖**语义（id/name 匹配器、逐键覆盖、config 整键替换不深合并、未命中 id 或 name 不匹配均警告跳过、行序=首次插入序）；行模型增补 `insert`（根级插入，不做 group——base patch 未用、dougong 无组概念）；`!!js` 子集按 bundle patches 全量盘点（22 处）扩充：env `??` 默认链、相等比较、平台三元、裸 env 值、字面量、profile-context 布尔（dsh `ctx.get('profileContext')` 的 fr 等价物）；"dsh 中该语法仅用于平台门控与 env 读取"的原表述勘误；sdk-app `getBuiltinModule` 路径解析类 6 处不做（对象属桌面打包面，19.1 已裁）。依据 `vendor/include/src/index.ts:57-127`
 
 ### 19.3 wire 层声明
 
@@ -624,7 +636,7 @@ fr headless [TASK] [--session-id <id>] [--json] [--help]
 
 | 里程碑 | 范围 | 验收标准 |
 |---|---|---|
-| **M1 headless** | workspace 骨架与质量门；fr-config 分层编译；fr-session（v4 全量）；fr-agent-loop；fr-tools 管线 + 第 17 节全部工具（`subagent-acp` 桥除外）；fr-approval/fr-sandbox；fr-compaction；fr-system-prompt；三 provider；fr-mcp；fr-ptc；进程内子代理 spawn/fork；fr-headless | 1. `fr headless "任务"` 走通完整 turn 周期并产出 v4 会话文件；2. `--json` 事件流通过 schema 校验；3. 同一任务在 fly-rafter 与 dsh（同模型同参数）产出的会话日志结构逐事件同型（工具名/事件类型/字段名 diff 为空）；4. 审批 fail-closed、`--session-id` 续用、abort 补偿各有集成测试；5. `fr dump-config` / `dump-config-schema` 可用；6. 质量门四关全绿 |
+| **M1 headless** | workspace 骨架与质量门；fr-config 分层编译；fr-session（v4 全量）；fr-agent-loop；fr-tools 管线 + 第 17 节全部工具（`subagent-acp` 桥除外）；fr-approval/fr-sandbox；fr-compaction；fr-system-prompt；三 provider；fr-mcp；fr-ptc；进程内子代理 spawn/fork；fr-headless（以上全部插件以 dylib 工件经真实装载走通） | 1. `fr headless "任务"` 走通完整 turn 周期并产出 v4 会话文件；2. `--json` 事件流通过 schema 校验；3. 同一任务在 fly-rafter 与 dsh（同模型同参数）产出的会话日志结构逐事件同型（工具名/事件类型/字段名 diff 为空）；4. 审批 fail-closed、`--session-id` 续用、abort 补偿各有集成测试；5. `fr dump-config` / `dump-config-schema` 可用；6. 质量门四关全绿 |
 | **M2 TUI** | fr-tui 全量（18.2） | 1. 18.2 键位表逐项有 TestBackend 测试；2. 审批卡 y/a/n、问题对话框数字直选实测通过；3. 流式 markdown 与 holdback 渲染测试；4. `tmux capture-pane` 实机验证脚本入库；5. 四搬运模块保留出处头注释 |
 | **M3 ACP** | fr-acp + subagent-acp 桥 | 1. 以标准 ACP 客户端完成 initialize/new/prompt/update/permission/close 全流程；2. session/list 分页与 resume 语义测试；3. 委派桥端到端用例 |
 | **M4 SDK** | fr-sdk | 1. 协议帧/错误码/通知逐条符合 18.4 表；2. `session/wait` 覆盖子孙会话 |
@@ -653,7 +665,7 @@ fr headless [TASK] [--session-id <id>] [--json] [--help]
 | bubblewrap 缺失（Linux 沙箱） | 后端链降级 Landlock；两者皆缺 → `sandbox-unavailable` fail-closed，不静默放行 |
 | ripgrep 分发 | 运行时解析 PATH / `FR_RIPGREP`；打包期捆绑；缺失时 `grep` 工具明确报错 |
 | dsh 源码漂移（上游更新） | 本 PRD 锚定 v0.2.1-rc.2；参照物路径固定；升级为显式决策 |
-| 全插件化下循环性能（事件分发开销） | 会话内热路径（assistant-stream chunk）使用批量分发；基准测试进 M1 验收 |
+| 全插件化下循环性能（事件分发开销；插件边界跨越全部为 C-ABI Invoker 通道，JSON 字节序列化） | 会话内热路径（assistant-stream chunk）批量分发为硬性要求；基准测试进 M1 验收 |
 | 提示词文本抄录错误 | 提示词全部以脚本从 dsh 源文件抽取生成常量，禁止手抄 |
 
 ---
@@ -675,3 +687,5 @@ fr headless [TASK] [--session-id <id>] [--json] [--help]
 13. 会话格式只实现 v4
 14. Python SDK 裁剪：SDK 仅 JSON-RPC 服务器入口，客户端由调用方自行封装
 15. 命名硬约束（Rust 风格，禁 TS 风格）：代码标识符 snake_case，自有用户可见命名 kebab-case；dsh camelCase 插件配置键转 kebab-case（19.2 条 3），协议 wire 层保持逐字 1:1
+16. 插件仅 dylib 与 wasm 两形态（2026-10-22 用户裁决）：第一方组件全部为 C-ABI dylib 工件（内核家族仅依赖 dougong-abi），wasm 仅承载第三方沙箱扩展；loader builtin 表在 fr 装配中从不使用；fr-config 为宿主直链库（非插件，先于装载存在）；宿主进程内面 = dougong 内核 + dougong-loader + fr-config + 宿主壳（CLI 解析/事件泵/入口分发）；跨边界载荷一律 Invoker 通道 JSON 字节，共享形状经 fr-wire 纯 serde 库按副本共享
+17. 装配合并语义对齐 dsh 源码（2026-10-22 Q1-Q3 裁决）：按键覆盖（id/name 匹配器、逐键覆盖、config 整键替换、missed warn-skip、首次插入序）；`insert` 根级插入、不做 group；`!!js` 子集 = env `??` 默认链、相等比较（`==`/`===`）、平台三元、裸 env 值读取、字面量、profile-context 布尔（含 `!` 取反）

@@ -37,7 +37,7 @@ Rule: REQ-FR-AGENT-LOOP-1 — 循环插件形态与 agent 服务
 场景: 每会话循环 fiber 置于会话 realm
   假设 新会话启动
   当 循环 fiber 创建时
-  那么 fiber 置于该会话 realm，宿主代码不含循环实现
+  那么 fiber 置于该会话 realm，循环实现仅存在于 fr-agent-loop dylib 工件，宿主代码不含循环实现
 
 Rule: REQ-FR-AGENT-LOOP-2 — 七步控制流
 

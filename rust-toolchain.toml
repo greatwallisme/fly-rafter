@@ -1,0 +1,8 @@
+# Toolchain pin: clippy (pedantic + nursery + restriction) and rustdoc lints
+# drift between compiler releases; the zero-warning gates are only
+# reproducible on the exact compiler the workspace was verified with.
+# Aligned patch-level with the dougong workspace (PRD 21).
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-wasip2", "x86_64-unknown-linux-musl"]

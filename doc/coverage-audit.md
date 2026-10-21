@@ -183,3 +183,11 @@
 1. TUI 基线：用户确认——fr TUI 对齐 PRD 18.2 自有规格，dsh 已删包的键位不构成验收依据。
 2. .env 分层：用户裁决纳入 fr-config——PRD 6.4 已增段（三层优先序/已设名不覆盖/bootstrap 专名拒绝含 FR_* 与 XDG_* 前缀/家目录代理四键例外）；CONFIG 条款 13 + 3 场景落地，Open Question 撤销。场景终态 1193。
 3. PRD v1.1 勘误补遗及 3 处合约层同步：维持，无异议。
+
+## 七、插件形态裁决返工（2026-10-22）
+
+用户裁决（D1-D6 一次性裁决，回复"可以"通过）：废除 builtin 插件形态，插件仅 dylib/wasm 两形态；第一方全 dylib；fr-config 为宿主直链库非插件（D1A）；宿主保留内核+loader+fr-config+壳（D3A）；跨边界一律 Invoker JSON 字节、fr-wire 共享形状（D4A）；M1 六条验收文字不变（D5A）；合约全量扫描改写（D6A）。
+
+- PRD 改写 11 处：1.4.2 原则、4.2 装配器、4.3 全节重写（两形态表+裁决依据+负向钉 builtin）、4.4 跨边界载荷形状、4.5 布局（fr-wire 入列、插件 crate 全 cdylib 仅依赖 dougong-abi）、6.2 产物解析规则（FR_PLUGIN_PATH → 安装库目录，lib<slug>.so / <slug>.wasm，未命中进 failures）、6.3 schema 真源宿主侧+双侧校验、8.1 循环 dylib 工件、20 M1 范围注记、22 风险对策、23 决策 16
+- intake 改写：CONFIG-2（source 仅 dylib/wasm+解析规则+禁 builtin）、CONFIG-8（全节重写：两形态、第一方全 dylib、信任校验、禁 builtin）；场景 +3（第一方 wasm 拒绝改写、工件缺失失败、产物无 builtin）、改 3（Invoker 通道泛化、两形态装载、循环 fiber 工件归属）；AGENT-LOOP 场景 1 处
+- 全管线复跑全绿：accepted×20、三门禁通过、场景 1193→1195

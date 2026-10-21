@@ -1,0 +1,23 @@
+[package]
+name = "fr-config"
+description = "Fly Rafter layered assembly configuration: fr.patch.yml parsing, compilation to dougong loader documents, plugin config schemas, .env layering"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+serde_yaml_ng.workspace = true
+regex = "1.13.1"
+
+[dev-dependencies]
+dougong-loader.workspace = true
+
+[lints]
+workspace = true
