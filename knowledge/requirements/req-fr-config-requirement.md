@@ -202,7 +202,12 @@ Rule: REQ-FR-CONFIG-5 — dump 命令即生成物
 场景: 注册表命中投影 configN
   假设 装配行 name 命中 fr-schema 注册表
   当 运行 fr dump-config-schema 时
-  那么 该 entry status 为 schema 且 configRef 指向 $defs/configN，其 $defs 内容与同一声明的 to_json_schema 投影一致
+  那么 该 entry status 为 schema 且 configRef 指向 $defs/configN，其 $defs 内容与同一声明的 to_json_schema 投影一致，且投影为 dsh 全脸（非必需位 type 并 'null'、必需位附加 not:{type:'null'}、根与嵌套值位 anyOf loaderExpression 包裹）
+
+场景: 同名异 schema 投影分裂告警
+  假设 同一插件名的两行经 schema_of 命中不同声明
+  当 运行 fr dump-config-schema 时
+  那么 config0/config1 按发现序分裂，ambiguity 警告入 diagnostics，complete 为假
 
 场景: 查无 schema 标注 absent
   假设 装配行 name 未命中 fr-schema 注册表

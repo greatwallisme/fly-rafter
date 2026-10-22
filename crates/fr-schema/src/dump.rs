@@ -151,10 +151,11 @@ const PATCH_SCHEMA: &str = "#/$defs/patchList";
 /// Rows are validated shape-only with dsh's exact messages; a malformed row
 /// becomes a positioned error diagnostic and an `error` entry without
 /// losing its siblings. Every validated name goes through `schema_of`: a
-/// hit projects to a shared `configN` definition and `schema` status, a
-/// miss marks the row `absent` with the `unknownConfig` reference (Q9A). Initial
-/// diagnostics (composition warnings, skipped bundles) are copied in ahead
-/// of walk diagnostics and everything is sorted by entry position.
+/// hit projects to a `configN` definition cached per (name, declaration
+/// identity) and `schema` status, a miss marks the row `absent` with the
+/// `unknownConfig` reference (Q9A). Initial diagnostics (composition
+/// warnings, skipped bundles) are copied in ahead of walk diagnostics and
+/// everything is sorted by entry position.
 #[must_use]
 pub fn dump_config_schema<'s>(
     profile: &str,
@@ -270,19 +271,24 @@ fn base_definitions() -> serde_json::Map<String, Value> {
     definitions
 }
 
-/// Projects registry hits to `configN` definitions cached per plugin name
-/// and fills every entry's `configRef` (misses take [`UNKNOWN_CONFIG`]).
+/// Projects registry hits to `configN` definitions cached per (plugin name,
+/// declaration identity) and fills every entry's `configRef` (misses take
+/// [`UNKNOWN_CONFIG`]). dsh keys projections by descriptor node, so one name
+/// resolving to two declarations splits into two `configN` definitions and
+/// lights the ambiguity face consumed by [`entry_rules`]; the fr equivalent
+/// of node identity is the `&Schema` pointer handed back by `schema_of`.
 fn project_definitions(
     collected: &mut [Collected<'_>],
     definitions: &mut serde_json::Map<String, Value>,
 ) {
-    let mut projections: HashMap<String, String> = HashMap::new();
+    let mut projections: HashMap<(usize, String), String> = HashMap::new();
     for slot in collected.iter_mut() {
         if let Some(schema) = slot.schema {
             let name = slot.entry.name.clone().unwrap_or_default();
+            let key = (std::ptr::from_ref(schema).addr(), name);
             let next = projections.len();
             let reference = projections
-                .entry(name)
+                .entry(key)
                 .or_insert_with(|| {
                     let definition = format!("config{next}");
                     definitions.insert(definition.clone(), to_json_schema(schema));
@@ -1029,9 +1035,10 @@ mod tests {
         );
     }
 
-    /// Pins the registry-hit face: `schema` status, a shared `configN`
-    /// reference cached per plugin name, and the definition equal to the same
-    /// declaration's `to_json_schema` projection.
+    /// Pins the registry-hit face: `schema` status, a `configN` reference
+    /// cached per (name, declaration identity), and the definition equal to
+    /// the same declaration's `to_json_schema` projection (Q27A full
+    /// projection face: null acceptance plus value-position wrapping).
     #[test]
     fn registry_hit_projects_config_defs() {
         let schema = Schema::String {
@@ -1063,6 +1070,16 @@ mod tests {
             Some(&to_json_schema(&schema)),
             "config0 must equal the declaration's projection"
         );
+        assert_eq!(
+            definitions.get("config0"),
+            Some(&serde_json::json!({
+                "anyOf": [
+                    { "type": ["string", "null"], "enum": ["a", "b"] },
+                    { "$ref": "#/$defs/loaderExpression" },
+                ],
+            })),
+            "configN must carry the full dsh projection face (Q27A: null acceptance plus value-position wrapping)"
+        );
         let order: Vec<&str> = definitions.keys().map(String::as_str).collect();
         assert_eq!(
             order,
@@ -1079,6 +1096,82 @@ mod tests {
             "configN definitions append before entry/patch, as in dsh"
         );
         assert!(dumped.complete);
+    }
+
+    /// Pins the ambiguity face (Q29A): one plugin name resolved to two
+    /// distinct declarations splits into `config0`/`config1` in discovery
+    /// order, emits dsh's ambiguity warning, and breaks completeness.
+    #[test]
+    fn ambiguous_name_splits_projections_and_warns() {
+        let first = Schema::String {
+            candidates: Vec::new(),
+            default: None,
+            description: None,
+        };
+        let second = Schema::Integer {
+            min: None,
+            max: None,
+            default: None,
+            description: None,
+        };
+        let visit = std::cell::Cell::new(0usize);
+        let resolve = |name: &str| {
+            if name != "dup" {
+                return None;
+            }
+            let nth = visit.get();
+            visit.set(nth + 1);
+            if nth.is_multiple_of(2) {
+                Some(&first)
+            } else {
+                Some(&second)
+            }
+        };
+        let rows = parse_rows("- name: dup\n- name: dup\n");
+        let dumped = dump_config_schema("headless", &rows, &resolve, Vec::new());
+        let x = x_fr(&dumped.document);
+        let entries = x
+            .get("entries")
+            .and_then(Value::as_array)
+            .unwrap_or_else(|| panic!("entries missing"));
+        assert_eq!(
+            entries[0].get("configRef"),
+            Some(&string("#/$defs/config0"))
+        );
+        assert_eq!(
+            entries[1].get("configRef"),
+            Some(&string("#/$defs/config1"))
+        );
+        let definitions = defs(&dumped.document);
+        let order: Vec<&str> = definitions.keys().map(String::as_str).collect();
+        assert_eq!(
+            order,
+            [
+                "loaderExpression",
+                "entryMetadata",
+                "entryList",
+                "patchList",
+                "unknownConfig",
+                "config0",
+                "config1",
+                "entry",
+                "patch",
+            ],
+            "split projections append configN in discovery order"
+        );
+        assert!(
+            dumped.diagnostics.iter().any(|diagnostic| {
+                diagnostic.level == DiagnosticLevel::Warning
+                    && diagnostic
+                        .message
+                        .contains("Plugin \"dup\" has multiple collected schemas")
+            }),
+            "the ambiguity warning must fire once projections split"
+        );
+        assert!(
+            !dumped.complete,
+            "an ambiguous projection breaks completeness"
+        );
     }
 
     /// Pins the error path: a non-mapping row yields an `error` entry with a
@@ -1149,6 +1242,24 @@ mod tests {
         assert_eq!(dumped.diagnostics[1].path, Some("/2".to_owned()));
     }
 
+    /// Reads a patch rule's bound target id by position (order pins).
+    fn rule_id(dumped: &SchemaDump, offset: usize) -> String {
+        defs(&dumped.document)
+            .get("patch")
+            .and_then(Value::as_object)
+            .and_then(|patch| patch.get("allOf"))
+            .and_then(Value::as_array)
+            .unwrap_or_else(|| panic!("patch allOf missing"))[offset]
+            .get("if")
+            .and_then(|branch| branch.get("properties"))
+            .and_then(|properties| properties.get("id"))
+            .and_then(Value::as_object)
+            .and_then(|id| id.get("const"))
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| panic!("rule id missing"))
+            .to_owned()
+    }
+
     /// Pins the id-conditional patch rules: an override on a known target id is
     /// bound to that target's config reference (dsh patch rules).
     #[test]
@@ -1185,22 +1296,6 @@ mod tests {
         assert_eq!(all_of[1], patch_rule("t", "a", "#/$defs/config0"));
 
         // Patch rules print in dsh's first-set order, not id-sorted order.
-        fn rule_id(dumped: &SchemaDump, offset: usize) -> String {
-            defs(&dumped.document)
-                .get("patch")
-                .and_then(Value::as_object)
-                .and_then(|patch| patch.get("allOf"))
-                .and_then(Value::as_array)
-                .unwrap_or_else(|| panic!("patch allOf missing"))[offset]
-                .get("if")
-                .and_then(|branch| branch.get("properties"))
-                .and_then(|properties| properties.get("id"))
-                .and_then(Value::as_object)
-                .and_then(|id| id.get("const"))
-                .and_then(Value::as_str)
-                .unwrap_or_else(|| panic!("rule id missing"))
-                .to_owned()
-        }
         let ordered = parse_rows("- id: b\n  name: x\n- id: a\n  name: y\n- id: b\n  name: z\n");
         let dumped = dump(&ordered);
         assert_eq!(rule_id(&dumped, 1), "b", "first-set order, not id-sorted");

@@ -228,7 +228,7 @@ Scenario: x-fr 扩展键与 entry 五态
   那么 $schema 为 2020-12，含 x-fr 的 profile/complete/entries/diagnostics/patchSchema 五键，entry status 为五态之一
 
 Scenario: complete 为假退出码 1
-  Test: error_entry_sets_diagnostics_and_incomplete
+  Test: pending_req_fr_config_complete_1
   假设 装配存在 error 态 entry
   当 运行 fr dump-config-schema 时
   那么 diagnostics 含该条且进程退出码为 1
@@ -237,7 +237,13 @@ Scenario: 注册表命中投影 configN
   Test: registry_hit_projects_config_defs
   假设 装配行 name 命中 fr-schema 注册表
   当 运行 fr dump-config-schema 时
-  那么 该 entry status 为 schema 且 configRef 指向 $defs/configN，其 $defs 内容与同一声明的 to_json_schema 投影一致
+  那么 该 entry status 为 schema 且 configRef 指向 $defs/configN，其 $defs 内容与同一声明的 to_json_schema 投影一致，且投影为 dsh 全脸（非必需位 type 并 'null'、必需位附加 not:{type:'null'}、根与嵌套值位 anyOf loaderExpression 包裹）
+
+Scenario: 同名异 schema 投影分裂告警
+  Test: ambiguous_name_splits_projections_and_warns
+  假设 同一插件名的两行经 schema_of 命中不同声明
+  当 运行 fr dump-config-schema 时
+  那么 config0/config1 按发现序分裂，ambiguity 警告入 diagnostics，complete 为假
 
 Scenario: 查无 schema 标注 absent
   Test: absent_entries_reference_unknown_config

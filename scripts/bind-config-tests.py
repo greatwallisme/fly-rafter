@@ -59,8 +59,9 @@ PAIRS = [
     ("dump 内容行单叹号 js 逐字且整篇再 parse 等于挂载", "pending_req_fr_config", "dump_content_js_shaped_lines_survive_round_trip"),
     ("dump 命令输出来自真实装配", "pending_req_fr_config", "dump_config_and_schema_generated_from_real_assembly"),
     ("x-fr 扩展键与 entry 五态", "pending_req_fr_config", "x_fr_keys_and_entry_status_vocabulary"),
-    ("complete 为假退出码 1", "pending_req_fr_config", "error_entry_sets_diagnostics_and_incomplete"),
+    ("complete 为假退出码 1", "pending_req_fr_config", "pending_req_fr_config_complete_1"),
     ("注册表命中投影 configN", "pending_req_fr_config", "registry_hit_projects_config_defs"),
+    ("同名异 schema 投影分裂告警", "pending_req_fr_config", "ambiguous_name_splits_projections_and_warns"),
     ("查无 schema 标注 absent", "pending_req_fr_config", "absent_entries_reference_unknown_config"),
 ]
 

@@ -254,11 +254,28 @@ fn join(path: &str, key: &str) -> String {
     }
 }
 
-/// Projects the declaration to a JSON Schema 2020-12 document (keyword face
-/// aligned with dsh `ConfigJsonSchemaObject`, config-schema/types.ts:7-26).
+/// Projects the declaration to a JSON Schema 2020-12 document.
+///
+/// Keyword face aligned with dsh `ConfigJsonSchemaObject`
+/// (config-schema/types.ts:7-26), carried through the dsh projector faces:
+/// per-node null acceptance (projector.ts:90-97, 426) and loader-expression
+/// wrapping at every value position (projector.ts:100-122, 447).
+///
+/// The root declaration carries no requiredness (the dsh default for an
+/// undeclared `meta.required`), so the projected root accepts null; nested
+/// nodes take each [`Property::required`] flag. Annotating keywords hoist to
+/// the front of each wrapped position, matching the dsh dump's `configN`
+/// shape.
 #[must_use]
 pub fn to_json_schema(schema: &Schema) -> Value {
-    match schema {
+    wrap_value_positions(project_core(schema, false))
+}
+
+/// Projects one node structurally, then applies the node's null acceptance
+/// (dsh `nullable(core, acceptsMissing !== false)`); children project with
+/// their own requiredness.
+fn project_core(schema: &Schema, required: bool) -> Value {
+    let (mut object, type_name) = match schema {
         Schema::String {
             candidates,
             default,
@@ -273,7 +290,7 @@ pub fn to_json_schema(schema: &Schema) -> Value {
                 default.clone().map(Value::String),
                 description.as_deref(),
             );
-            Value::Object(object)
+            (object, "string")
         }
         Schema::Integer {
             min,
@@ -288,7 +305,7 @@ pub fn to_json_schema(schema: &Schema) -> Value {
                 (*default).map(Value::from),
                 description.as_deref(),
             );
-            Value::Object(object)
+            (object, "integer")
         }
         Schema::Number {
             min,
@@ -303,7 +320,7 @@ pub fn to_json_schema(schema: &Schema) -> Value {
                 (*default).map(Value::from),
                 description.as_deref(),
             );
-            Value::Object(object)
+            (object, "number")
         }
         Schema::Boolean {
             default,
@@ -315,7 +332,7 @@ pub fn to_json_schema(schema: &Schema) -> Value {
                 (*default).map(Value::from),
                 description.as_deref(),
             );
-            Value::Object(object)
+            (object, "boolean")
         }
         Schema::Object {
             properties,
@@ -333,24 +350,91 @@ pub fn to_json_schema(schema: &Schema) -> Value {
                 Value::from(*additional_properties),
             );
             insert_annotations(&mut object, None, description.as_deref());
-            Value::Object(object)
+            (object, "object")
         }
         Schema::Array { items, description } => {
             let mut object = type_object("array");
-            object.insert("items".into(), to_json_schema(items));
+            object.insert("items".into(), project_core(items, false));
             insert_annotations(&mut object, None, description.as_deref());
-            Value::Object(object)
+            (object, "array")
         }
         Schema::Dict {
             values,
             description,
         } => {
             let mut object = type_object("object");
-            object.insert("additionalProperties".into(), to_json_schema(values));
+            object.insert("additionalProperties".into(), project_core(values, false));
             insert_annotations(&mut object, None, description.as_deref());
-            Value::Object(object)
+            (object, "object")
+        }
+    };
+    nullable(&mut object, type_name, !required);
+    Value::Object(object)
+}
+
+/// Adds or removes null acceptance on one projected node (dsh
+/// `projector.ts:90-97`): an accepted node merges `null` into its `type`
+/// list, a required node appends `not: {"type": "null"}`. The node's type
+/// name passes in from the constructing arm, so the function is total; dsh's
+/// typeless-`anyOf` and boolean-core forms cannot occur here (fr's restricted
+/// face always projects a string `type`, PRD 6.3 subset, fail-closed).
+fn nullable(core: &mut Map<String, Value>, type_name: &str, accepts: bool) {
+    if accepts {
+        // dsh dedups through a Set; fr's projected type is always a single
+        // string, so the merge is a fixed two-entry list.
+        core.insert(
+            "type".into(),
+            Value::Array(vec![Value::from(type_name), Value::from("null")]),
+        );
+    } else {
+        let mut null_type = Map::new();
+        null_type.insert("type".into(), Value::from("null"));
+        core.insert("not".into(), Value::Object(null_type));
+    }
+}
+
+/// Wraps every config value position with the loader-expression alternative
+/// (dsh `expressions`, projector.ts:100-122): `properties` values, `items`,
+/// and `additionalProperties` subtrees wrap recursively, the position's
+/// annotating keywords hoist to the front in dsh's list order, and the
+/// position becomes `{...annotations, anyOf: [core, loaderExpression]}`.
+/// The dsh branches for `propertyNames`, `prefixItems`, `anyOf`, and `not`
+/// are unreachable here: fr's restricted projection face never emits those
+/// keywords, so such subtrees cannot occur (PRD 6.3 subset).
+fn wrap_value_positions(value: Value) -> Value {
+    let Value::Object(mut object) = value else {
+        return value; // non-object positions (`additionalProperties: false`) stay verbatim
+    };
+    for key in ["properties", "items", "additionalProperties"] {
+        let Some(child) = object.shift_remove(key) else {
+            continue;
+        };
+        let walked = match child {
+            // Property positions wrap individually; the `properties` map
+            // itself is not a value position (dsh valuePosition=false there).
+            Value::Object(children) if key == "properties" => Value::Object(
+                children
+                    .into_iter()
+                    .map(|(name, child)| (name, wrap_value_positions(child)))
+                    .collect(),
+            ),
+            child => wrap_value_positions(child),
+        };
+        object.insert(key.into(), walked);
+    }
+    let mut wrapped = Map::new();
+    for key in ["title", "description", "default", "$comment", "x-fr"] {
+        if let Some(annotation) = object.shift_remove(key) {
+            wrapped.insert(key.into(), annotation);
         }
     }
+    let mut reference = Map::new();
+    reference.insert("$ref".into(), Value::from("#/$defs/loaderExpression"));
+    wrapped.insert(
+        "anyOf".into(),
+        Value::Array(vec![Value::Object(object), Value::Object(reference)]),
+    );
+    Value::Object(wrapped)
 }
 
 /// Creates the `{"type": <name>}` skeleton every projection shares.
@@ -365,7 +449,10 @@ fn project_properties(properties: &[Property]) -> (Map<String, Value>, Vec<Value
     let mut property_map = Map::new();
     let mut required = Vec::new();
     for property in properties {
-        property_map.insert(property.name.clone(), to_json_schema(&property.schema));
+        property_map.insert(
+            property.name.clone(),
+            project_core(&property.schema, property.required),
+        );
         if property.required {
             required.push(Value::from(property.name.clone()));
         }
@@ -592,13 +679,18 @@ mod tests {
             default: Some("ask".to_string()),
             description: Some("approval policy".into()),
         };
+        // The root position is not required (dsh's undeclared `meta.required`
+        // default), so `null` merges into the type list; annotations hoist to
+        // the front and the loader-expression alternative closes the `anyOf`.
         assert_eq!(
             to_json_schema(&schema),
             json!({
-                "type": "string",
-                "enum": ["ask", "never"],
-                "default": "ask",
                 "description": "approval policy",
+                "default": "ask",
+                "anyOf": [
+                    { "type": ["string", "null"], "enum": ["ask", "never"] },
+                    { "$ref": "#/$defs/loaderExpression" },
+                ],
             })
         );
     }
@@ -613,7 +705,13 @@ mod tests {
         };
         assert_eq!(
             to_json_schema(&integer),
-            json!({ "type": "integer", "minimum": 0, "maximum": 600_000, "default": 60_000 })
+            json!({
+                "default": 60_000,
+                "anyOf": [
+                    { "type": ["integer", "null"], "minimum": 0, "maximum": 600_000 },
+                    { "$ref": "#/$defs/loaderExpression" },
+                ],
+            })
         );
         let number = Schema::Number {
             min: Some(0.0),
@@ -623,7 +721,12 @@ mod tests {
         };
         assert_eq!(
             to_json_schema(&number),
-            json!({ "type": "number", "minimum": 0.0 })
+            json!({
+                "anyOf": [
+                    { "type": ["number", "null"], "minimum": 0.0 },
+                    { "$ref": "#/$defs/loaderExpression" },
+                ],
+            })
         );
     }
 
@@ -641,10 +744,22 @@ mod tests {
         assert_eq!(
             to_json_schema(&object),
             json!({
-                "type": "object",
-                "properties": { "model": { "type": "string" } },
-                "required": ["model"],
-                "additionalProperties": false,
+                "anyOf": [
+                    {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "model": {
+                                "anyOf": [
+                                    { "type": "string", "not": { "type": "null" } },
+                                    { "$ref": "#/$defs/loaderExpression" },
+                                ],
+                            },
+                        },
+                        "required": ["model"],
+                        "additionalProperties": false,
+                    },
+                    { "$ref": "#/$defs/loaderExpression" },
+                ],
             })
         );
         let array = Schema::Array {
@@ -658,7 +773,20 @@ mod tests {
         };
         assert_eq!(
             to_json_schema(&array),
-            json!({ "type": "array", "items": { "type": "integer" } })
+            json!({
+                "anyOf": [
+                    {
+                        "type": ["array", "null"],
+                        "items": {
+                            "anyOf": [
+                                { "type": ["integer", "null"] },
+                                { "$ref": "#/$defs/loaderExpression" },
+                            ],
+                        },
+                    },
+                    { "$ref": "#/$defs/loaderExpression" },
+                ],
+            })
         );
         let dict = Schema::Dict {
             values: Box::new(string_schema()),
@@ -666,7 +794,20 @@ mod tests {
         };
         assert_eq!(
             to_json_schema(&dict),
-            json!({ "type": "object", "additionalProperties": { "type": "string" } })
+            json!({
+                "anyOf": [
+                    {
+                        "type": ["object", "null"],
+                        "additionalProperties": {
+                            "anyOf": [
+                                { "type": ["string", "null"] },
+                                { "$ref": "#/$defs/loaderExpression" },
+                            ],
+                        },
+                    },
+                    { "$ref": "#/$defs/loaderExpression" },
+                ],
+            })
         );
     }
 
@@ -709,13 +850,37 @@ mod tests {
         assert_eq!(
             to_json_schema(&schema),
             json!({
-                "type": "object",
-                "properties": {
-                    "model": { "type": "string", "enum": ["deepseek-flash"], "default": "deepseek-flash" },
-                    "thresholds": { "type": "array", "items": { "type": "integer" } },
-                },
-                "required": ["model"],
-                "additionalProperties": false,
+                "anyOf": [
+                    {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "model": {
+                                "default": "deepseek-flash",
+                                "anyOf": [
+                                    { "type": "string", "enum": ["deepseek-flash"], "not": { "type": "null" } },
+                                    { "$ref": "#/$defs/loaderExpression" },
+                                ],
+                            },
+                            "thresholds": {
+                                "anyOf": [
+                                    {
+                                        "type": ["array", "null"],
+                                        "items": {
+                                            "anyOf": [
+                                                { "type": ["integer", "null"] },
+                                                { "$ref": "#/$defs/loaderExpression" },
+                                            ],
+                                        },
+                                    },
+                                    { "$ref": "#/$defs/loaderExpression" },
+                                ],
+                            },
+                        },
+                        "required": ["model"],
+                        "additionalProperties": false,
+                    },
+                    { "$ref": "#/$defs/loaderExpression" },
+                ],
             })
         );
     }
