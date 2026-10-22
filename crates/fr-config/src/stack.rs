@@ -163,8 +163,67 @@ pub fn read_profile_manifest(dir: &Path) -> Result<Vec<String>> {
     Ok(bundles)
 }
 
+/// Anchors insert-row names that are explicit relative paths (`./` or `../`
+/// prefixes) to `base`, mirroring dsh `anchorInsertedPluginNames`
+/// (app-boot index.ts:550-561; 2026-10-22 Q6 ruling). Override rows are
+/// matchers and are never touched; names without the explicit prefix stay
+/// literal (PRD 6.2).
+fn anchor_insert_names(lines: &mut [PatchLine], base: &Path) {
+    for line in lines {
+        let Some(inserted) = &mut line.insert else {
+            continue;
+        };
+        for row in inserted {
+            if let Some(name) = &mut row.name {
+                if let Some(rest) = name.strip_prefix("./") {
+                    *name = join_lexical(base, Path::new(rest)).display().to_string();
+                } else if name.starts_with("../") {
+                    *name = join_lexical(base, Path::new(name)).display().to_string();
+                }
+            }
+        }
+    }
+}
+
+/// Lexically joins `base` and `rel`, collapsing `.` and `..` without touching
+/// the filesystem (same shape as dsh's `path.resolve`).
+fn join_lexical(base: &Path, rel: &Path) -> PathBuf {
+    let mut parts: Vec<std::ffi::OsString> = base
+        .components()
+        .filter(|component| !matches!(component, std::path::Component::CurDir))
+        .map(|component| component.as_os_str().to_owned())
+        .collect();
+    for component in rel.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                parts.pop();
+            }
+            other => parts.push(other.as_os_str().to_owned()),
+        }
+    }
+    parts.into_iter().collect()
+}
+
+/// The directory a patch file's relative insert names anchor to: the file's
+/// parent, made absolute against the cwd when relative (dsh
+/// `dirname(resolve(file))`).
+fn anchor_base(path: &Path) -> PathBuf {
+    let dir = path
+        .parent()
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    if dir.is_absolute() {
+        return dir;
+    }
+    match std::env::current_dir() {
+        Ok(cwd) => cwd.join(dir),
+        Err(_) => dir,
+    }
+}
+
 /// Loads an optional patch file: absent = `None` (empty layer), any other
 /// read failure or a parse error is fatal (dsh `loadOptionalPatches`).
+/// Insert-row relative names anchor to the file's directory (Q6).
 ///
 /// # Errors
 ///
@@ -176,11 +235,15 @@ pub fn load_optional_patches(path: &Path, ctx: &EvalContext) -> Result<Option<Ve
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(Error::Io(format!("failed to read {}: {e}", path.display()))),
     };
-    parse_patch_lines(&content, ctx).map(Some)
+    let mut lines = parse_patch_lines(&content, ctx)?;
+    anchor_insert_names(&mut lines, &anchor_base(path));
+    Ok(Some(lines))
 }
 
-/// Loads a required `--patch` overlay: the caller named this file, so its
-/// absence is a misconfiguration and fails startup (dsh `loadOverlayPatches`).
+/// Loads a required `--patch` overlay (dsh `loadOverlayPatches`).
+///
+/// The caller named this file, so its absence is a misconfiguration and fails
+/// startup. Insert-row relative names anchor to the file's directory (Q6).
 ///
 /// # Errors
 ///
@@ -189,7 +252,9 @@ pub fn load_optional_patches(path: &Path, ctx: &EvalContext) -> Result<Option<Ve
 pub fn load_required_overlay(path: &Path, ctx: &EvalContext) -> Result<Vec<PatchLine>> {
     let content = fs::read_to_string(path)
         .map_err(|e| Error::Io(format!("failed to read overlay {}: {e}", path.display())))?;
-    parse_patch_lines(&content, ctx)
+    let mut lines = parse_patch_lines(&content, ctx)?;
+    anchor_insert_names(&mut lines, &anchor_base(path));
+    Ok(lines)
 }
 
 /// Profile patch template written when a profile directory is initialized.
@@ -428,6 +493,27 @@ mod tests {
             read_profile_manifest(&dir).is_err(),
             "non-mapping manifest rejected"
         );
+        fs::write(&manifest, "bundles: [a]\nbundles: [b]\n")
+            .unwrap_or_else(|e| panic!("write failed: {e}"));
+        assert!(
+            read_profile_manifest(&dir).is_err(),
+            "duplicate keys must be rejected, not silently last-wins"
+        );
+    }
+
+    #[test]
+    fn invalid_name_leaves_no_filesystem_side_effects() {
+        let home = TempHome::new("no-side-effect");
+        for bad in ["", "a/b", ".", "node_modules"] {
+            assert!(
+                validate_profile_name(bad).is_err(),
+                "{bad:?} must be rejected"
+            );
+        }
+        assert!(
+            !home.path().join(PROFILES_DIR).exists(),
+            "rejected names must not touch the filesystem"
+        );
     }
 
     #[test]
@@ -581,8 +667,73 @@ mod tests {
             serde_json::from_str(&compiled.doc).unwrap_or_else(|e| panic!("bad json: {e}"));
         let plugins = doc["plugins"].as_array().expect("plugins array");
         assert!(!plugins.is_empty(), "M1 bundle must mount plugins");
+        // The bundle's !!js values must arrive evaluated (tag-loss regression
+        // guard): approval policy and sandbox mode under the neutral context.
+        let by_name = |id: &str| {
+            plugins
+                .iter()
+                .find(|p| p["name"] == id)
+                .unwrap_or_else(|| panic!("row {id} missing"))
+        };
+        assert_eq!(by_name("approval-policy")["config"]["policy"], "ask");
+        assert_eq!(
+            by_name("sandbox")["config"]["mode"],
+            "workspace-write",
+            "neutral env falls back to workspace-write"
+        );
         dougong_loader::Config::parse(&compiled.doc)
             .unwrap_or_else(|e| panic!("loader rejected compiled doc: {e}"));
         let _ = fs::remove_dir_all(&artifacts);
+    }
+
+    #[test]
+    fn relative_insert_names_anchor_to_patch_dir() {
+        let home = TempHome::new("anchor");
+        let dir = home.path().join("patches");
+        fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("mkdir failed: {e}"));
+        let overlay = dir.join("rel.yml");
+        fs::write(
+            &overlay,
+            "- insert:\n    - id: a\n      name: ./ext/libfoo.so\n    - id: b\n      name: ../sib/bar.wasm\n    - id: c\n      name: plugins/foo.so\n",
+        )
+        .unwrap_or_else(|e| panic!("write failed: {e}"));
+        let lines = load_required_overlay(&overlay, &EvalContext::neutral())
+            .unwrap_or_else(|e| panic!("load failed: {e}"));
+        let inserted = lines[0].insert.as_ref().expect("insert group");
+        assert_eq!(
+            inserted[0].name.as_deref(),
+            Some(dir.join("ext/libfoo.so").to_str().expect("utf-8 path")),
+            "./ anchored to the patch file dir"
+        );
+        assert_eq!(
+            inserted[1].name.as_deref(),
+            Some(
+                home.path()
+                    .join("sib/bar.wasm")
+                    .to_str()
+                    .expect("utf-8 path")
+            ),
+            "../ folds up lexically"
+        );
+        assert_eq!(
+            inserted[2].name.as_deref(),
+            Some("plugins/foo.so"),
+            "no ./ ../ prefix stays literal"
+        );
+    }
+
+    #[test]
+    fn override_row_names_are_never_anchored() {
+        let home = TempHome::new("matcher");
+        let overlay = home.path().join("patch.yml");
+        fs::write(&overlay, "- id: x\n  name: ./matcher\n  disabled: true\n")
+            .unwrap_or_else(|e| panic!("write failed: {e}"));
+        let lines = load_required_overlay(&overlay, &EvalContext::neutral())
+            .unwrap_or_else(|e| panic!("load failed: {e}"));
+        assert_eq!(
+            lines[0].name.as_deref(),
+            Some("./matcher"),
+            "override-row name is a matcher and stays untouched"
+        );
     }
 }

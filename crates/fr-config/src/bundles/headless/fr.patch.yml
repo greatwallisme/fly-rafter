@@ -1,7 +1,9 @@
 # Headless entry default bundle (M1 minimal set; PRD 6.1/6.4, 2026-10-22 Q5B).
 # One flat insert group (same shape as the dsh base patch). Tool-level config
-# defaults from PRD 6.4 (repeat/glob/todo/bash-timeout) land with the
+# defaults from PRD 6.4 (repeat/glob/task-list/bash-timeout) land with the
 # fr-tools-builtin config schema (Phase 16) and are intentionally absent here.
+# llm-primary carries no provider key: the fr-llm-deepseek adapter IS the
+# provider (PRD 6.4 provider deepseek-official realized by the plugin choice).
 - insert:
     - id: llm-primary
       name: fr-llm-deepseek

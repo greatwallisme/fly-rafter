@@ -233,7 +233,7 @@ fly-rafter/
                  "config": {"model": "deepseek-flash"}, "isolate": null } ] }
 ```
 
-**产物解析规则**（编译期定形态）：行 `name` 含路径分隔符或以 `.so`/`.wasm` 结尾 → 按字面路径；否则按 slug（`-`→`_`）解析：在 `FR_PLUGIN_PATH` 各目录（冒号分隔、序即优先级）→ 安装库目录 `<prefix>/lib/fr/` 中依次查找 `lib<slug>.so`（dylib）与 `<slug>.wasm`（wasm），先命中者定形态；两处都未命中 → 该行进入 `Report::failures`（fail-closed，按 6.4 启动失败策略处理）。编译产物 MUST NOT 出现 `builtin` source。
+**产物解析规则**（编译期定形态）：行 `name` 含路径分隔符或以 `.so`/`.wasm` 结尾 → 按字面路径（2026-10-22 Q6 勘误：insert 行 name 以 `./`/`../` 开头者，装载期 MUST 锚定到所在补丁文件目录转绝对——对齐 dsh `anchorInsertedPluginNames` index.ts:550-561；覆盖行 name 为匹配器，不解析不锚定；无 `./`/`../` 前缀的含分隔符 name 保持字面路径）；否则按 slug（`-`→`_`）解析：在 `FR_PLUGIN_PATH` 各目录（冒号分隔、序即优先级）→ 安装库目录 `<prefix>/lib/fr/` 中依次查找 `lib<slug>.so`（dylib）与 `<slug>.wasm`（wasm），先命中者定形态；两处都未命中 → 该行进入 `Report::failures`（fail-closed，按 6.4 启动失败策略处理）。编译产物 MUST NOT 出现 `builtin` source。
 
 `inject/provide` 不在文档声明——来自插件 descriptor（dougong 铁律）。`isolate` 列承载 realm：会话级装配在会话 realm 内放置同名插件。
 
@@ -627,6 +627,7 @@ fr headless [TASK] [--session-id <id>] [--json] [--help]
 5. PRD 勘误与源码补遗（2026-10-21 源码核对）：正文 12 处与 dsh 源码不符已按源码修正（会话头 seedLength、tool/call 时序、绑定名规则、PTC wire 帧、程序 fs 访问、CONTEXT_ORDERS 行号、AGENTS.md 注入形态、image_request_target、SDK 未知方法错误码、空渲染语义、审批切换文案、独占发布细节）；另将 dsh 源码级技术关键点（默认装配树锚点、surface 硬约束、两级补偿、header 判定算法、缓存友好路由、管线与调度细则、PTC 实现细则、组装确定性、审批细则、流装配结算、三 provider 协议细则、入口输出细则、ACP 与 SDK 生命周期细则）并入正文各节。全部依据见 doc/dsh-source-notes.md（file:line 证据）
 6. 装配语义勘误（2026-10-22 Q1-Q3 裁决）：6.1 "按 id 整行替换"勘误为 dsh 实际的**按键覆盖**语义（id/name 匹配器、逐键覆盖、config 整键替换不深合并、未命中 id 或 name 不匹配均警告跳过、行序=首次插入序）；行模型增补 `insert`（根级插入，不做 group——base patch 未用、dougong 无组概念）；`!!js` 子集按 bundle patches 全量盘点（22 处）扩充：env `??` 默认链、相等比较、平台三元、裸 env 值、字面量、profile-context 布尔（dsh `ctx.get('profileContext')` 的 fr 等价物）；"dsh 中该语法仅用于平台门控与 env 读取"的原表述勘误；sdk-app `getBuiltinModule` 路径解析类 6 处不做（对象属桌面打包面，19.1 已裁）。依据 `vendor/include/src/index.ts:57-127`
 7. 装载文件布局勘误与裁决（2026-10-22 Q1-Q5）：6.1 家目录 patch 括号路径 `~/.fly-rafter/profiles/` 勘误为 `<FR_HOME>/fr.patch.yml`（dsh 真源为 home 根 cordis.patch.yml，profile-context.ts:78）；profile 清单定为 `<profile>/profile.yml`（`bundles:` 仅引用宿主内置命名 bundle，未知名 skipped 警告非致命——dsh 的 npm 包栈与 pnpm 机制在 fr 无对应物，插件市场已裁）；profile 模板自动初始化纳入 M1（1:1 dsh 首用 init：绝不覆盖既有文件，未知名报错）；入口默认 bundle 为嵌入 YAML 常量、与用户 patch 同一解析路径（dsh bundle 与用户 patch 同 schema，app-boot index.ts:268）；M1 默认 bundle 为最小 headless 集，完整品牌映射抽取后置。依据 `packages/boot/app-boot/src/{profile.ts,profile-context.ts,index.ts}`
+8. insert 行相对路径锚定勘误（2026-10-22 Q6，代码评审发现）：6.2「按字面路径」缺 dsh 的锚定语义——dsh 在补丁解析期把 insert 行 name 为 `./`/`../` 相对路径者锚定到补丁文件所在目录（anchorInsertedPluginNames，app-boot index.ts:550-561；覆盖行 name 为匹配器不解析）；fr 对齐实现于装载期，无此锚定则相对路径落成 CWD 相对而偏离 dsh
 
 ### 19.3 wire 层声明
 
@@ -692,3 +693,4 @@ fr headless [TASK] [--session-id <id>] [--json] [--help]
 16. 插件仅 dylib 与 wasm 两形态（2026-10-22 用户裁决）：第一方组件全部为 C-ABI dylib 工件（内核家族仅依赖 dougong-abi），wasm 仅承载第三方沙箱扩展；loader builtin 表在 fr 装配中从不使用；fr-config 为宿主直链库（非插件，先于装载存在）；宿主进程内面 = dougong 内核 + dougong-loader + fr-config + 宿主壳（CLI 解析/事件泵/入口分发）；跨边界载荷一律 Invoker 通道 JSON 字节，共享形状经 fr-wire 纯 serde 库按副本共享
 17. 装配合并语义对齐 dsh 源码（2026-10-22 Q1-Q3 裁决）：按键覆盖（id/name 匹配器、逐键覆盖、config 整键替换、missed warn-skip、首次插入序）；`insert` 根级插入、不做 group；`!!js` 子集 = env `??` 默认链、相等比较（`==`/`===`）、平台三元、裸 env 值读取、字面量、profile-context 布尔（含 `!` 取反）
 18. 装载文件布局（2026-10-22 Q1-Q5 裁决）：家目录 patch = `<FR_HOME>/fr.patch.yml`（对齐 dsh home 根）；profile 清单 = `<profile>/profile.yml`，bundles 仅引用宿主内置命名 bundle、未知名 skipped 非致命；profile 模板自动初始化纳入 M1（首用建清单+空白 patch，不覆盖既有；fr 模板 bundles 为空——入口默认 bundle 恒在层 1）；入口默认 bundle 为嵌入 YAML 常量走同一解析路径；M1 默认 bundle 为最小 headless 集（完整品牌映射抽取后置）
+19. insert 行相对路径锚定对齐 dsh（2026-10-22 Q6 裁决）：装载期把各文件层 insert 行 name 以 `./`/`../` 开头者锚定到补丁文件目录转绝对（词法归一，不做符号链接解析）；入口内置 bundle 全为 slug 名不受影响；覆盖行 name 不锚定；无 `./`/`../` 前缀的含分隔符 name 保持字面路径
