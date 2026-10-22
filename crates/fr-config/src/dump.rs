@@ -57,12 +57,20 @@ pub fn collect_dump_layers(
     let mut layers: Vec<DumpLayer> = Vec::new();
     // Layer 1: the entry default bundle (fr mounts it ahead of the manifest
     // bundle stack, so the dump must too — otherwise the dump could not equal
-    // the boot mount).
+    // the boot mount). Built-in bundles are embedded constants, not files:
+    // the boot parse keeps their names literal, so the raw re-parse must not
+    // anchor relative names to the cwd either.
     let entry_yaml = builtin_bundle_yaml(entry.bundle_name());
     if let Some(yaml) = entry_yaml {
         layers.push(DumpLayer {
             label: entry.bundle_name().to_owned(),
-            patches: parse_raw_patch_list(yaml, Path::new(entry.bundle_name()), "patches", bin)?,
+            patches: parse_raw_patch_list(
+                yaml,
+                Path::new(entry.bundle_name()),
+                "patches",
+                bin,
+                false,
+            )?,
         });
     }
     for name in &loaded.bundle_names {
@@ -73,7 +81,7 @@ pub fn collect_dump_layers(
         };
         layers.push(DumpLayer {
             label: name.clone(),
-            patches: parse_raw_patch_list(yaml, Path::new(name), "patches", bin)?,
+            patches: parse_raw_patch_list(yaml, Path::new(name), "patches", bin, false)?,
         });
     }
     if !default_only {
@@ -256,15 +264,20 @@ fn flush_group(
     Ok(())
 }
 
+/// Matches the single-bang `!js` tags `serde_yaml_ng` emits at YAML value
+/// positions; compiled once, shared by every group flush.
+static DENORMALIZE_JS_TAG: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+
 /// Rewrites the single-bang `!js` tags `serde_yaml_ng` emits back to the
 /// `!!js` secondary-handle form at YAML value positions, matching the input
 /// dialect verbatim; quoted content never matches (mirror of
 /// [`crate::patch::normalize_js_tags`]).
 #[must_use]
 fn denormalize_js_tags(yaml: &str) -> String {
-    let value_position =
+    let value_position = DENORMALIZE_JS_TAG.get_or_init(|| {
         Regex::new(r"(?m)^([ \t]*(?:-[ \t]+)?[A-Za-z_][A-Za-z0-9_-]*:[ \t]+|^[ \t]*-[ \t]+)!js")
-            .expect("valid regex");
+            .expect("valid regex")
+    });
     value_position.replace_all(yaml, "${1}!!js").into_owned()
 }
 
@@ -291,7 +304,7 @@ fn load_raw_optional(path: &Path, bin: &str) -> Result<Option<Vec<Value>>> {
             )));
         }
     };
-    parse_raw_patch_list(&content, path, "patches", bin).map(Some)
+    parse_raw_patch_list(&content, path, "patches", bin, true).map(Some)
 }
 
 /// Loads a required `--patch` overlay raw: absence is fatal because the
@@ -303,21 +316,30 @@ fn load_raw_overlay(path: &Path, bin: &str) -> Result<Vec<Value>> {
             path.display()
         ))
     })?;
-    parse_raw_patch_list(&content, path, "overlay", bin)
+    parse_raw_patch_list(&content, path, "overlay", bin, true)
 }
 
 /// Parses one raw patch list with shape-only validation (dsh
 /// `parsePatchList`): a top-level YAML sequence whose every entry is a
 /// mapping, any keys kept, `!!js` preserved unevaluated (structural trust —
 /// the dump prints whatever the file holds, Q24A). Insert-row relative names
-/// anchor to the file's directory (Q6).
+/// anchor to the file's directory (Q6) when `anchor_relative` holds; built-in
+/// bundle layers pass `false` because they are embedded constants with no
+/// file, and the boot-grade parse keeps their names literal (PRD 6.2 anchors
+/// file layers only).
 ///
 /// # Errors
 ///
 /// [`Error::PatchParse`] with the dsh dump diagnostics for YAML, shape, or
 /// row-mapping violations; flow-style `!!js` tags are fail-closed (fr parse
 /// dialect).
-fn parse_raw_patch_list(content: &str, path: &Path, label: &str, bin: &str) -> Result<Vec<Value>> {
+fn parse_raw_patch_list(
+    content: &str,
+    path: &Path,
+    label: &str,
+    bin: &str,
+    anchor_relative: bool,
+) -> Result<Vec<Value>> {
     let normalized = normalize_js_tags(content);
     ensure_no_flow_style_js(&normalized).map_err(|e| {
         Error::PatchParse(format!(
@@ -347,7 +369,9 @@ fn parse_raw_patch_list(content: &str, path: &Path, label: &str, bin: &str) -> R
         }
     }
     let mut owned: Vec<Value> = rows.clone();
-    anchor_insert_names_raw(&mut owned, &anchor_base(path));
+    if anchor_relative {
+        anchor_insert_names_raw(&mut owned, &anchor_base(path));
+    }
     Ok(owned)
 }
 
@@ -387,9 +411,25 @@ fn anchor_insert_names_raw(rows: &mut [Value], base: &Path) {
 
 /// Path to one composed row: indices from the root list down through group
 /// `config` arrays (`[root]` for a root row, `[root, child]` for a group
-/// child). Rows are never removed during composition, so recorded paths stay
-/// valid.
+/// child). Root rows are never removed or reordered, so their paths stay
+/// valid; a group `config` replacement cuts the old children out of the tree,
+/// which [`detach_descendants`] handles by freezing their index records.
 type RowPath = Vec<usize>;
+
+/// One id-index record ([`build_map`]): either a live row addressable by
+/// path, or a frozen snapshot of a row detached from the tree by an ancestor
+/// `config` replacement. dsh's index holds direct object references, so
+/// patches keep applying to detached rows with invisible effect — the
+/// snapshot reproduces exactly that: their warnings still fire (the name
+/// and group checks read the frozen row), their changes never show.
+#[derive(Clone, Debug)]
+enum RowTarget {
+    /// Path from the root list down to the live row.
+    Live(RowPath),
+    /// The row's last state before an ancestor `config` replacement cut it
+    /// out of the tree.
+    Detached(Value),
+}
 
 /// JS truthiness for raw YAML values (the patch algorithm branches on truthy
 /// checks, not presence).
@@ -407,7 +447,12 @@ fn js_truthy(value: &Value) -> bool {
 /// the recursion descends into a truthy-`group` row's array `config`, so a
 /// group child is addressable exactly like a root row. Last same-id row wins
 /// (JS `Map.set` overwrite).
-fn build_map(rows: &[Value], parent: &[usize], offset: usize, map: &mut HashMap<String, RowPath>) {
+fn build_map(
+    rows: &[Value],
+    parent: &[usize],
+    offset: usize,
+    map: &mut HashMap<String, RowTarget>,
+) {
     let id_key = Value::String("id".into());
     let group_key = Value::String("group".into());
     let config_key = Value::String("config".into());
@@ -420,7 +465,7 @@ fn build_map(rows: &[Value], parent: &[usize], offset: usize, map: &mut HashMap<
         if let Some(Value::String(id)) = mapping.get(&id_key)
             && !id.is_empty()
         {
-            map.insert(id.clone(), path.clone());
+            map.insert(id.clone(), RowTarget::Live(path.clone()));
         }
         if mapping.get(&group_key).is_some_and(js_truthy)
             && let Some(Value::Sequence(children)) = mapping.get(&config_key)
@@ -449,7 +494,7 @@ fn row_at_mut<'a>(rows: &'a mut [Value], path: &[usize]) -> Option<&'a mut Value
 /// target them. Skips with the dsh warning when the target is not a group.
 fn insert_into_group(
     data: &mut [Value],
-    index: &mut HashMap<String, RowPath>,
+    index: &mut HashMap<String, RowTarget>,
     path: &RowPath,
     inserted: &[Value],
     id_text: &str,
@@ -483,6 +528,33 @@ fn insert_into_group(
     build_map(inserted, path, offset, index);
 }
 
+/// The reserved row keys the patch algorithm branches on, built once per
+/// composition call and shared by the per-patch handlers.
+struct PatchKeys {
+    /// The row id patch rows target.
+    id: Value,
+    /// The insert-list key on a patch row.
+    insert: Value,
+    /// The matcher-only name key.
+    name: Value,
+    /// The group flag key on a target row.
+    group: Value,
+    /// The child-list key on a target row.
+    config: Value,
+}
+
+impl PatchKeys {
+    fn new() -> Self {
+        Self {
+            id: Value::String("id".into()),
+            insert: Value::String("insert".into()),
+            name: Value::String("name".into()),
+            group: Value::String("group".into()),
+            config: Value::String("config".into()),
+        }
+    }
+}
+
 /// Applies patch lists to an entry list — THE patch semantics of the dump,
 /// a verbatim port of dsh `applyEntryPatches`
 /// (vendor/include/src/index.ts:57-127; Q24A). The input is never mutated:
@@ -491,6 +563,13 @@ fn insert_into_group(
 /// so a later patch in the same flattened list can target a row an earlier
 /// patch inserted. A patch that matches nothing records a warning and is
 /// skipped, with the exact dsh wording (`%C` renders as `JSON.stringify`).
+///
+/// dsh's id index holds direct object references, so a plain `config`
+/// override on a group swaps the subtree while later patches still reach the
+/// old children through their references — mutating them invisibly. The path
+/// index mirrors that with [`RowTarget::Detached`] snapshots: a replaced
+/// group's old children freeze, their warnings keep reading the frozen row,
+/// and their patches change nothing.
 fn apply_entry_patches(
     base: &[Value],
     patches: &[Value],
@@ -500,94 +579,190 @@ fn apply_entry_patches(
         return base.to_vec();
     }
     let mut data: Vec<Value> = base.to_vec();
-    let mut index: HashMap<String, RowPath> = HashMap::new();
+    let mut index: HashMap<String, RowTarget> = HashMap::new();
     build_map(&data, &[], 0, &mut index);
-    let id_key = Value::String("id".into());
-    let insert_key = Value::String("insert".into());
-    let name_key = Value::String("name".into());
+    let keys = PatchKeys::new();
     for patch in patches {
         // parse_raw_patch_list guarantees mapping rows.
         let Some(mapping) = patch.as_mapping() else {
             continue;
         };
-        let insert = mapping.get(&insert_key).filter(|value| js_truthy(value));
-        let id = mapping.get(&id_key);
-        let name = mapping.get(&name_key);
+        let insert = mapping.get(&keys.insert).filter(|value| js_truthy(value));
+        let id = mapping.get(&keys.id);
+        let name = mapping.get(&keys.name);
         if let Some(Value::Sequence(inserted)) = insert {
-            if id.is_some_and(js_truthy) {
-                let target_path = match id {
-                    // Only string ids can match the string-keyed index
-                    // (dsh `entryMap.get(id)` on a string-keyed Map).
-                    Some(Value::String(target_id)) => index.get(target_id).cloned(),
-                    _ => None,
-                };
-                let Some(path) = target_path else {
-                    let id_text = id.map_or_else(String::new, canonical_form);
-                    warnings.push(format!("patch insert: entry {id_text} not found"));
-                    continue;
-                };
-                let id_text = id.map_or_else(String::new, canonical_form);
-                insert_into_group(&mut data, &mut index, &path, inserted, &id_text, warnings);
-                continue;
-            }
-            // Root-level insert; rows are cloned so the patch list itself is
-            // never mutated (dsh structuredClone's the whole list instead).
-            let offset = data.len();
-            data.extend(inserted.iter().cloned());
-            build_map(inserted, &[], offset, &mut index);
-            continue;
-        }
-        if id.is_none_or(|value| !js_truthy(value)) {
-            warnings.push("patch: id is required for non-insert patches".to_owned());
-            continue;
-        }
-        let target_path = match id {
-            Some(Value::String(target_id)) => index.get(target_id).cloned(),
-            _ => None,
-        };
-        let Some(path) = target_path else {
-            let id_text = id.map_or_else(String::new, canonical_form);
-            warnings.push(format!("patch: entry {id_text} not found"));
-            continue;
-        };
-        // `name` is a matcher only and is never written (dsh destructures it
-        // out of the overrides); a truthy mismatch against the target's name
-        // warns and skips. A target without a name renders as `undefined`,
-        // matching `JSON.stringify(undefined)`.
-        if let Some(name_value) = name.filter(|value| js_truthy(value)) {
-            let expected = row_at_mut(&mut data, &path)
-                .and_then(|target| target.as_mapping().map(|m| m.get(&name_key)))
-                .flatten()
-                .map_or_else(|| "undefined".to_owned(), canonical_form);
-            if canonical_form(name_value) != expected {
-                let id_text = id.map_or_else(String::new, canonical_form);
-                warnings.push(format!(
-                    "patch: name mismatch for {id_text} (expected {expected}, got {}), skipping",
-                    canonical_form(name_value)
-                ));
-                continue;
-            }
-        }
-        let Some(target) = row_at_mut(&mut data, &path) else {
-            continue;
-        };
-        let Some(target_map) = target.as_mapping_mut() else {
-            continue;
-        };
-        // Every remaining key overrides per key (dsh `Object.entries` order;
-        // serde_yaml_ng's ordered mapping keeps the same insertion order and
-        // replaces existing values in place). Non-string keys cannot occur in
-        // the JS semantics the port mirrors and are skipped.
-        for (key, value) in mapping {
-            match key.as_str() {
-                Some("id" | "insert" | "name") | None => {}
-                Some(_) => {
-                    target_map.insert(key.clone(), value.clone());
-                }
-            }
+            apply_insert_patch(&mut data, &mut index, id, inserted, &keys, warnings);
+        } else {
+            apply_override_patch(&mut data, &mut index, id, name, mapping, &keys, warnings);
         }
     }
     data
+}
+
+/// Handles one truthy-`insert` patch row: an id-targeted group insert, or a
+/// root-level append when the id is absent or falsy (dsh insert branch).
+fn apply_insert_patch(
+    data: &mut Vec<Value>,
+    index: &mut HashMap<String, RowTarget>,
+    id: Option<&Value>,
+    inserted: &[Value],
+    keys: &PatchKeys,
+    warnings: &mut Vec<String>,
+) {
+    if id.is_none_or(|value| !js_truthy(value)) {
+        // Root-level insert; rows are cloned so the patch list itself is
+        // never mutated (dsh structuredClone's the whole list instead).
+        let offset = data.len();
+        data.extend(inserted.iter().cloned());
+        build_map(inserted, &[], offset, index);
+        return;
+    }
+    let id_text = id.map_or_else(String::new, canonical_form);
+    let located = match id {
+        // Only string ids can match the string-keyed index
+        // (dsh `entryMap.get(id)` on a string-keyed Map).
+        Some(Value::String(target_id)) => index.get(target_id).cloned(),
+        _ => None,
+    };
+    match located {
+        Some(RowTarget::Live(path)) => {
+            insert_into_group(data, index, &path, inserted, &id_text, warnings);
+        }
+        // dsh pushes into the detached group's config array; the change is
+        // invisible, but the not-a-group check still reads the detached row.
+        // (Rows inserted there are likewise invisible and are not indexed.)
+        Some(RowTarget::Detached(target)) => {
+            if !target
+                .as_mapping()
+                .and_then(|map| map.get(&keys.group))
+                .is_some_and(js_truthy)
+            {
+                warnings.push(format!("patch insert: entry {id_text} is not a group"));
+            }
+        }
+        None => warnings.push(format!("patch insert: entry {id_text} not found")),
+    }
+}
+
+/// Handles one non-insert patch row: the per-key overrides against the id's
+/// live row, or the invisible name-checked no-op against a detached snapshot
+/// (dsh keeps mutating the detached object its reference reaches).
+fn apply_override_patch(
+    data: &mut [Value],
+    index: &mut HashMap<String, RowTarget>,
+    id: Option<&Value>,
+    name: Option<&Value>,
+    mapping: &serde_yaml_ng::Mapping,
+    keys: &PatchKeys,
+    warnings: &mut Vec<String>,
+) {
+    if id.is_none_or(|value| !js_truthy(value)) {
+        warnings.push("patch: id is required for non-insert patches".to_owned());
+        return;
+    }
+    let id_text = id.map_or_else(String::new, canonical_form);
+    let located = match id {
+        Some(Value::String(target_id)) => index.get(target_id).cloned(),
+        _ => None,
+    };
+    match located {
+        Some(RowTarget::Live(path)) => {
+            // `name` is a matcher only and is never written (dsh destructures
+            // it out of the overrides); a truthy mismatch against the target's
+            // name warns and skips. A target without a name renders as
+            // `undefined`, matching `JSON.stringify(undefined)`.
+            if let Some(name_value) = name.filter(|value| js_truthy(value)) {
+                let expected = row_at_mut(data, &path)
+                    .and_then(|target| target.as_mapping().map(|m| m.get(&keys.name)))
+                    .flatten()
+                    .map_or_else(|| "undefined".to_owned(), canonical_form);
+                if canonical_form(name_value) != expected {
+                    warnings.push(format!(
+                        "patch: name mismatch for {id_text} (expected {expected}, got {}), skipping",
+                        canonical_form(name_value)
+                    ));
+                    return;
+                }
+            }
+            let Some(target) = row_at_mut(data, &path) else {
+                return;
+            };
+            let Some(target_map) = target.as_mapping_mut() else {
+                return;
+            };
+            // A plain `config` override swaps the whole subtree: snapshot the
+            // old children before the write so their ids can detach (dsh
+            // keeps reaching them through references).
+            let old_config = if mapping.keys().any(|key| key.as_str() == Some("config")) {
+                target_map.get(&keys.config).cloned()
+            } else {
+                None
+            };
+            // Every remaining key overrides per key (dsh `Object.entries`
+            // order; serde_yaml_ng's ordered mapping keeps the same insertion
+            // order and replaces existing values in place). Non-string keys
+            // cannot occur in the JS semantics the port mirrors and are
+            // skipped.
+            for (key, value) in mapping {
+                match key.as_str() {
+                    Some("id" | "insert" | "name") | None => {}
+                    Some(_) => {
+                        target_map.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+            if let Some(old) = old_config {
+                detach_descendants(index, &path, &old);
+            }
+        }
+        // The name check still reads the detached row (dsh compares against
+        // the object its reference reaches); a matching patch mutates the
+        // detached object — invisible here.
+        Some(RowTarget::Detached(snapshot)) => {
+            if let Some(name_value) = name.filter(|value| js_truthy(value)) {
+                let expected = snapshot
+                    .as_mapping()
+                    .and_then(|map| map.get(&keys.name))
+                    .map_or_else(|| "undefined".to_owned(), canonical_form);
+                if canonical_form(name_value) != expected {
+                    warnings.push(format!(
+                        "patch: name mismatch for {id_text} (expected {expected}, got {}), skipping",
+                        canonical_form(name_value)
+                    ));
+                }
+            }
+        }
+        None => warnings.push(format!("patch: entry {id_text} not found")),
+    }
+}
+
+/// Freezes every indexed row living under a group whose `config` a patch just
+/// replaced: dsh's reference index still reaches the old children, so later
+/// patches mutate the detached objects instead of whatever now occupies their
+/// old positions. Each record becomes a [`RowTarget::Detached`] snapshot of
+/// the row's state at detachment time.
+fn detach_descendants(index: &mut HashMap<String, RowTarget>, group: &[usize], old_config: &Value) {
+    let null = Value::Null;
+    for entry in index.values_mut() {
+        let RowTarget::Live(path) = entry else {
+            continue;
+        };
+        if path.len() <= group.len() || !path.starts_with(group) {
+            continue;
+        }
+        // Walk the old subtree along the recorded path to snapshot the row as
+        // it was when the replacement cut it out; the indices were valid in
+        // that subtree, so only the `null` fallback is unreachable in practice.
+        let mut node = old_config;
+        for &position in &path[group.len()..] {
+            let Some(child) = node.as_sequence().and_then(|seq| seq.get(position)) else {
+                node = &null;
+                break;
+            };
+            node = child;
+        }
+        *entry = RowTarget::Detached(node.clone());
+    }
 }
 
 /// Serializes a raw YAML value into a change-detection form that
@@ -1132,6 +1307,147 @@ mod tests {
             reparsed[0].config,
             Some(json!({"policy": "never"})),
             "neutral ctx: FR_X unset means the default branch holds"
+        );
+    }
+
+    #[test]
+    fn config_replacement_detaches_old_children_like_dsh_references() {
+        // dsh's id index holds direct object references: after layer A
+        // replaces a group's `config` wholesale, layer B patching an old
+        // child id mutates the detached object — invisible in the tree. The
+        // path index must freeze the detached row instead of patching
+        // whatever row now occupies the stale position.
+        let dir = TempDir::new("detach");
+        let base = dir.path().join("base.yml");
+        write_file(
+            &base,
+            "- id: g\n  name: group.so\n  group: true\n  config:\n    - id: c\n      name: old.so\n      group: true\n",
+        );
+        let layer_a = DumpLayer {
+            label: "a.yml".to_owned(),
+            patches: raw_rows(
+                "- id: g\n  config:\n    - id: c\n      name: new.so\n      group: true\n",
+            ),
+        };
+        let layer_b = DumpLayer {
+            label: "b.yml".to_owned(),
+            patches: raw_rows("- id: c\n  config:\n    v: 2\n"),
+        };
+        let warnings: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+        let sink = |line: &str| {
+            warnings
+                .lock()
+                .unwrap_or_else(|e| panic!("poisoned: {e}"))
+                .push(line.to_owned());
+        };
+        let dump = render_dump(BIN, &base, &[layer_a, layer_b], &sink)
+            .unwrap_or_else(|e| panic!("dump failed: {e}"));
+        assert!(
+            warnings
+                .into_inner()
+                .unwrap_or_else(|e| panic!("poisoned: {e}"))
+                .is_empty(),
+            "dsh mutates the detached child invisibly: no warning"
+        );
+        assert!(
+            !dump.contains("v: 2"),
+            "detached patch must not land: {dump}"
+        );
+        assert!(
+            !dump.contains("patched by b.yml"),
+            "the detached layer changed no row: {dump}"
+        );
+        let normalized = normalize_js_tags(&dump);
+        let parsed: Value = serde_yaml_ng::from_str(&normalized)
+            .unwrap_or_else(|e| panic!("dump must re-parse: {e}"));
+        assert_eq!(
+            parsed[0]["config"][0]["name"], "new.so",
+            "the new occupant stays untouched: {parsed:?}"
+        );
+    }
+
+    #[test]
+    fn detached_row_still_owns_its_name_and_group_checks() {
+        // Warnings about a detached row read the frozen snapshot (dsh
+        // compares against the object its reference reaches): a matching name
+        // mutates invisibly, a mismatching name still warns against the old
+        // row's name, and an insert still checks the old row's group flag.
+        let dir = TempDir::new("detach-checks");
+        let base = dir.path().join("base.yml");
+        write_file(
+            &base,
+            "- id: g\n  name: group.so\n  group: true\n  config:\n    - id: c\n      name: old.so\n      group: true\n",
+        );
+        let layer_a = DumpLayer {
+            label: "a.yml".to_owned(),
+            patches: raw_rows(
+                "- id: g\n  config:\n    - id: c\n      name: new.so\n      group: true\n",
+            ),
+        };
+        let layer_b = DumpLayer {
+            label: "b.yml".to_owned(),
+            patches: raw_rows("- id: c\n  name: old.so\n  config:\n    v: 2\n"),
+        };
+        let layer_c = DumpLayer {
+            label: "c.yml".to_owned(),
+            patches: raw_rows("- id: c\n  name: wrong.so\n  config:\n    v: 3\n"),
+        };
+        let layer_d = DumpLayer {
+            label: "d.yml".to_owned(),
+            patches: raw_rows("- id: c\n  insert:\n    - id: x\n      name: x.so\n"),
+        };
+        let warnings: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+        let sink = |line: &str| {
+            warnings
+                .lock()
+                .unwrap_or_else(|e| panic!("poisoned: {e}"))
+                .push(line.to_owned());
+        };
+        let dump = render_dump(BIN, &base, &[layer_a, layer_b, layer_c, layer_d], &sink)
+            .unwrap_or_else(|e| panic!("dump failed: {e}"));
+        assert_eq!(
+            warnings
+                .into_inner()
+                .unwrap_or_else(|e| panic!("poisoned: {e}")),
+            vec![format!(
+                "{BIN}: [c.yml] patch: name mismatch for \"c\" (expected \"old.so\", got \"wrong.so\"), skipping"
+            )],
+            "only the mismatch warns, against the detached row's name"
+        );
+        assert!(
+            !dump.contains("v: 2"),
+            "matching name mutates invisibly: {dump}"
+        );
+        assert!(!dump.contains("v: 3"), "{dump}");
+        assert!(
+            !dump.contains("x.so"),
+            "detached group insert is invisible: {dump}"
+        );
+    }
+
+    #[test]
+    fn builtin_bundle_layers_keep_relative_insert_names_literal() {
+        // Boot parses embedded bundles without a file path, so `./`/`../`
+        // insert names stay literal (PRD 6.2 anchors file layers only); the
+        // dump's raw re-parse must not anchor them to the cwd either.
+        let bundle = "- insert:\n    - id: a\n      name: ./x.so\n";
+        let rows = parse_raw_patch_list(bundle, Path::new("headless"), "patches", BIN, false)
+            .unwrap_or_else(|e| panic!("bundle parse failed: {e}"));
+        assert_eq!(
+            rows[0]["insert"][0]["name"], "./x.so",
+            "bundle names stay literal: {rows:?}"
+        );
+        let file_rows = parse_raw_patch_list(
+            bundle,
+            Path::new("/tmp/patches/fr.patch.yml"),
+            "overlay",
+            BIN,
+            true,
+        )
+        .unwrap_or_else(|e| panic!("file parse failed: {e}"));
+        assert_eq!(
+            file_rows[0]["insert"][0]["name"], "/tmp/patches/x.so",
+            "file layers anchor to their directory: {file_rows:?}"
         );
     }
 }

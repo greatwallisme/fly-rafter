@@ -264,3 +264,23 @@ dsh .env 分层权威事实（app-boot/src/index.ts + util 两包，仓库 ~/pro
 - 测试自纠四件（首轮 6 败）：①夹具把整段 Sequence 当单条 patch（raw_rows 助手）②js_tagged 测试 base 误写为 patch list（insert 组）而非 entry list——build_map 不递归 insert 键，覆盖行永不命中③boot-mount 等价断言误用 compose()（提取行是 entry 非 override，compose 全数 warn-skip）→ 改逐行 FlatRow 对比④layer_order 测试传 cwd 相对路径；另错误文案断言 starts_with → contains（fr Error 变体带自身前缀）；!!js 引号形状 = serde_yaml_ng 单引号 '' 转义，与 js-yaml 对同内容的输出逐字节同型，钉死之。
 - 门禁终态：四关全绿（fmt / clippy --workspace --all-targets -D warnings / fr-config 78 + fr-schema 16 / doc -D warnings）；CONFIG lint Quality 100% exit 0；lifecycle = 38 passed / 263 skipped / 0 failed / 0 uncertain（exit 1 预期）；guard exit 0；stamp dry-run 38/301 passed（无可盖章 trailer，与既有一致）。
 - 留 pending（本切片剩余）：fr-schema 投影面（-schema 侧 $defs/x-fr/entry 五态/diagnostics，Session 7 真源）→ 绑 x-fr 五键 + complete 假退 1 + 来自真实装配；CLI 层场景（三态互斥/拒收位置参数/default-only 禁 --patch/退出码）Phase 18。
+
+## 2026-10-22 — /code-review high --fix（commit 8686626 dump 数据面切片）
+
+### 评审结论（7 findings：6 修复提交 5753fc1，finding 7 呈 Q25）
+1. dump.rs 悬挂引用保真（高危）：apply_entry_patches 原按位置 RowPath 解析 id，dsh 索引持对象引用——group 的 config 整体替换后，后续层补丁/警告命中占据旧位置的新行（dsh 则不可见改旧子行），合法 fr 文件上 dump≠boot 装载。修复：RowTarget::{Live, Detached}（dump.rs:426）+ detach_descendants（dump.rs:744，config 写回前快照冻结旧子树全部索引行；name/group 警告仍读冻结行、变更不可见，逐点复刻 dsh 引用语义）；apply_insert_patch/apply_override_patch 拆分 + PatchKeys 共享（dump.rs:533/604/650，消 too_many_lines/too_many_arguments，无 allow）。钉测 2：dump.rs:1314 / dump.rs:1370。
+2. stack.rs staging 残留（高危）：initialize_profile_from_default 错误路径（init 失败/移走失败/并发撞车/恢复成功后）残留 .name.staging-* 旁目录，dsh 外层 catch 凡 previous 不在 staging 内即清理。修复：四路径补 remove_dir_all（stack.rs:506-553），仅 restore 失败路径保留（previous 仍在 staging 持原 profile，同 dsh）；错误路径不可移植测试，纯代码修复。
+3. dump.rs bundle 锚定（中危，潜在）：collect_dump_layers 对内置 bundle 层 raw 解析带相对名锚定（anchor_base("headless") 落 cwd），boot 对内嵌常量保持名字面——含 ./ ../ 名的 bundle 上 dump≠boot。修复：parse_raw_patch_list 增 anchor_relative 参数（dump.rs:341），bundle 层传 false；钉测 dump.rs:1429。
+4. stack.rs json_quote 转义差（低危）：手写逃逸对 \b（0x08）\f（0x0C）出 \u0008/\u000c 而非 dsh JSON.stringify（与 serde_json 同）短形式。修复：serde_json::to_string（&str 永不失败，stack.rs:438），删 std::fmt::Write 导入。
+5. 正则每调用重编译（效率）：denormalize_js_tags（dump.rs:276 每组 flush）与 normalize_js_tags（patch.rs:278 每文件解析，本 commit 触及）每次 Regex::new。修复：OnceLock（patch.rs:273、dump.rs:269）。
+6. SHIPPED_PROFILE_NAMES 文档承诺无背书（低危）：doc 注释称"单测断言同步"但测试不存在。修复：新增 shipped_profile_names_stay_in_sync_with_templates（stack.rs:1114）。
+7. SKIPPED——块标量 !!js 文本翻转，呈 Q25（下节）。
+
+### Q25（新发现，行锚定 !!js 归一化无 YAML 结构感知，待裁决）
+- 事实（本会话核实）：normalize_js_tags / denormalize_js_tags 为行锚定正则（patch.rs:278、dump.rs:276），无 YAML 结构感知——字符串值的字面文本含形如 `k: !!js v` 的行（典型：块标量 `note: |` 内容行）会在解析期被翻为 `!js`（boot 装载进来的文本即已被改），dump 输出再被 denormalize 翻回 `!!js` → 对该字符串 dump ≠ boot。
+- 评审侧记录：input 侧行为先于 8686626 存在（patch.rs 归一化非本切片新增）；根修 = YAML 结构感知归一化（按解析树只对真值位翻 tag），超出本 diff 范围。
+- 待裁决：25A 现状接受 + 登记 PRD 19.2 偏差（偏差治理规则路径）；25B 立即实现结构感知归一化（独立切片，按七步合约流先精化合同再动工）；25C 后置排期（记入下一步，fr-schema 投影面之后处理）。
+
+### 门禁复验（本会话独立复跑，非转述子代理）
+- cargo fmt --check / cargo clippy --workspace --all-targets -- -D warnings / cargo doc 全绿；cargo test --workspace 82+16 passed / 0 failed。
+- lifecycle 38 passed / 263 skipped / 0 failed（exit 1 = 263 pending 预期，基线不变）；guard exit 0。合约零改动。

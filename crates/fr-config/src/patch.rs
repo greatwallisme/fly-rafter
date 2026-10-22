@@ -268,13 +268,18 @@ pub fn parse_patch_lines(yaml: &str, ctx: &EvalContext) -> Result<Vec<PatchLine>
 /// by [`normalize_js_tags`] (flow style, exotic keys).
 static REMAINING_JS_TAG: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
 
+/// Matches `!!js` at YAML value positions (after `key:` or after a list
+/// dash); compiled once, shared by every parse.
+static NORMALIZE_JS_TAG: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+
 /// Rewrites `!!js` tag occurrences at YAML value positions (after `key:` or
 /// after a list dash) to the single-bang form; quoted content never matches.
 #[must_use]
 pub(crate) fn normalize_js_tags(yaml: &str) -> String {
-    let value_position =
+    let value_position = NORMALIZE_JS_TAG.get_or_init(|| {
         Regex::new(r"(?m)^([ \t]*(?:-[ \t]+)?[A-Za-z_][A-Za-z0-9_-]*:[ \t]+|^[ \t]*-[ \t]+)!!js")
-            .expect("valid regex");
+            .expect("valid regex")
+    });
     value_position.replace_all(yaml, "${1}!js").into_owned()
 }
 

@@ -9,7 +9,6 @@
 //! are fail-closed, and known entry names auto-init their profile directory
 //! on first use without overwriting existing files.
 
-use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -433,26 +432,11 @@ pub fn prepare_profile(
 const SHIPPED_PROFILE_NAMES: &[&str] = &["headless"];
 
 /// Quotes a string the way dsh embeds it in diagnostics (`JSON.stringify`),
-/// so the user-visible text matches byte for byte. Hand-rolled because
-/// `serde_json::to_string` cannot fail on `&str` yet still returns `Result`.
+/// so the user-visible text matches byte for byte. `serde_json` applies the
+/// exact `JSON.stringify` escape scheme (short `\b`/`\f`/`\n`/`\r`/`\t`
+/// forms, `\u00xx` for the remaining controls) and never fails on `&str`.
 pub(crate) fn json_quote(text: &str) -> String {
-    let mut out = String::with_capacity(text.len() + 2);
-    out.push('"');
-    for ch in text.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            control if control.is_control() => {
-                let _ = write!(out, "\\u{:04x}", control as u32);
-            }
-            plain => out.push(plain),
-        }
-    }
-    out.push('"');
-    out
+    serde_json::to_string(text).expect("serde_json cannot fail to serialize a string slice")
 }
 
 /// Replaces the named custom profile with a fresh copy of one shipped
@@ -519,13 +503,21 @@ pub fn initialize_profile_from_default(
     fs::create_dir_all(&profiles_dir)
         .map_err(|e| Error::Io(format!("failed to create {}: {e}", profiles_dir.display())))?;
     let fresh = staging.join("new").join(name);
-    init_profile(&fresh, template_bundles)?;
+    if let Err(error) = init_profile(&fresh, template_bundles) {
+        // Nothing was moved yet, so the previous profile does not live in the
+        // staging directory and dsh's outer catch would remove it.
+        let _ = fs::remove_dir_all(&staging);
+        return Err(error);
+    }
     let previous = staging.join("previous");
     let moved = match fs::rename(&dir, &previous) {
         Ok(()) => true,
         // An absent target is a fresh create, not an error.
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
         Err(e) => {
+            // The previous profile does not live in staging; dsh's outer
+            // catch removes the staging directory.
+            let _ = fs::remove_dir_all(&staging);
             return Err(Error::Io(format!(
                 "failed to move {} to {}: {e}",
                 dir.display(),
@@ -538,6 +530,9 @@ pub fn initialize_profile_from_default(
             // Windows reports EPERM instead of EEXIST here, so the target's
             // state identifies a concurrent winner (dsh comment).
             let _ = fs::remove_dir_all(&previous);
+            // The concurrent winner superseded the previous profile, so it no
+            // longer lives in staging and dsh's outer catch removes it.
+            let _ = fs::remove_dir_all(&staging);
             return Err(Error::Profile(format!(
                 "fr: profile {} was recreated concurrently at {}",
                 json_quote(name),
@@ -545,6 +540,8 @@ pub fn initialize_profile_from_default(
             )));
         }
         if moved && let Err(restore_error) = fs::rename(&previous, &dir) {
+            // The previous profile still lives in staging; dsh keeps the
+            // directory in exactly this case so nothing is lost.
             return Err(Error::Io(format!(
                 "fr: profile replacement failed and {} could not be restored from {}: \
                  move error {error}; restore error {restore_error}",
@@ -552,6 +549,9 @@ pub fn initialize_profile_from_default(
                 previous.display()
             )));
         }
+        // The previous profile is back in place (or never existed), so the
+        // staging copy is garbage; dsh's outer catch removes it.
+        let _ = fs::remove_dir_all(&staging);
         return Err(Error::Io(format!(
             "failed to move {} to {}: {error}",
             fresh.display(),
@@ -1106,6 +1106,20 @@ mod tests {
             assert!(
                 err.to_string().contains("names shipped profile"),
                 "{target}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn shipped_profile_names_stay_in_sync_with_templates() {
+        // The unknown-template diagnostic lists SHIPPED_PROFILE_NAMES and the
+        // case-insensitive target check reserves the same names; both must
+        // cover exactly the templates [`profile_template_bundles`] ships.
+        assert_eq!(SHIPPED_PROFILE_NAMES, &["headless"]);
+        for name in SHIPPED_PROFILE_NAMES {
+            assert!(
+                profile_template_bundles(name).is_some(),
+                "{name} must ship a template"
             );
         }
     }
