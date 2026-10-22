@@ -249,7 +249,10 @@ pub fn read_env_layer(
         Ok(content) => content,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(err) => {
-            warn(&format!("{bin}: failed to load .env: {err}"));
+            warn(&format!(
+                "{bin}: failed to load .env: {}: {err}",
+                path.display()
+            ));
             return Ok(None);
         }
     };
@@ -334,6 +337,36 @@ pub struct EnvSnapshot {
 }
 
 impl EnvSnapshot {
+    /// Fold stored keys through [`lookup_key`] on both sides of a lookup.
+    ///
+    /// dsh folds at store time (launch-environment
+    /// `createLaunchEnvironmentSnapshot`), so a query and the stored entries
+    /// meet in the same folded space on platforms with case-folded
+    /// environment names.
+    fn from_layers(
+        process: BTreeMap<String, String>,
+        project: Option<EnvLayer>,
+        user: Option<EnvLayer>,
+    ) -> Self {
+        let fold = |values: BTreeMap<String, String>| -> BTreeMap<String, String> {
+            values
+                .into_iter()
+                .map(|(name, value)| (lookup_key(&name).into_owned(), value))
+                .collect()
+        };
+        Self {
+            process: fold(process),
+            project: project.map(|mut layer| {
+                layer.values = fold(layer.values);
+                layer
+            }),
+            user: user.map(|mut layer| {
+                layer.values = fold(layer.values);
+                layer
+            }),
+        }
+    }
+
     /// Resolve one name across every layer, most trusted first.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<EnvEntry> {
@@ -435,11 +468,7 @@ pub fn load_layered_env_into(
             }
         }
     }
-    Ok(EnvSnapshot {
-        process: inherited,
-        project,
-        user,
-    })
+    Ok(EnvSnapshot::from_layers(inherited, project, user))
 }
 
 /// Resolve the Fly Rafter home from the ambient environment (dsh
@@ -454,8 +483,10 @@ pub fn resolve_home(configured: Option<&Path>) -> std::io::Result<PathBuf> {
     resolve_home_from(configured, fr_home.as_deref())
 }
 
-/// [`resolve_home`] with the `FR_HOME` value injected for testability; a
-/// blank (whitespace-only) value counts as unset (dsh `resolveRoot`).
+/// [`resolve_home`] with the `FR_HOME` value injected for testability.
+///
+/// A blank (whitespace-only) value counts as unset, while a non-blank value
+/// is used as written — trim only decides blankness (dsh `resolveRoot`).
 ///
 /// # Errors
 ///
@@ -467,7 +498,7 @@ pub fn resolve_home_from(
     let selected = match configured {
         Some(path) => path.to_path_buf(),
         None => {
-            if let Some(value) = fr_home.map(str::trim).filter(|value| !value.is_empty()) {
+            if let Some(value) = fr_home.filter(|value| !value.trim().is_empty()) {
                 PathBuf::from(value)
             } else {
                 let os_home = std::env::home_dir()
@@ -711,9 +742,12 @@ mod tests {
 
     #[test]
     fn parser_double_quote_fast_path_and_unterminated_line_form() {
-        // The double-quote fast path captures up to the LAST closing quote
-        // in the remaining content, even across real newlines (verified
-        // against node v24.22: {"A":"value\nB=2\nC="}).
+        // The double-quote fast path ends at the FIRST closing quote in the
+        // remaining content and everything after it up to the next newline
+        // is skipped; the capture itself may span real newlines (verified
+        // against node v24.22: {"A":"value\nB=2\nC="} — that input carries a
+        // single closing quote, while `A="x" B="y"` pins the first-quote
+        // rule differentially).
         let parsed = parse_env("A=\"value\nB=2\nC=\"");
         assert_eq!(parsed.get("A").map(String::as_str), Some("value\nB=2\nC="));
         assert!(!parsed.contains_key("B"));
@@ -762,11 +796,7 @@ mod tests {
                 ("ONLY_PROJECT".to_owned(), "user".to_owned()),
             ]),
         };
-        let snapshot = EnvSnapshot {
-            process: process.inherited(),
-            project: Some(project),
-            user: Some(user),
-        };
+        let snapshot = EnvSnapshot::from_layers(process.inherited(), Some(project), Some(user));
         let shared = snapshot.get("SHARED").unwrap();
         assert_eq!(shared.value, "proc");
         assert_eq!(shared.source, EnvSource::Process);
@@ -952,10 +982,12 @@ mod tests {
             resolve_home_from(Some(Path::new("~/cfg")), None).unwrap(),
             os_home.join("cfg")
         );
-        // FR_HOME beats the default and survives surrounding whitespace.
+        // FR_HOME beats the default; a non-blank value is used as written —
+        // a leading space makes it cwd-relative, and no trimming happens
+        // (dsh resolveRoot trims only for the blankness test).
         assert_eq!(
             resolve_home_from(None, Some("  /data/fr  ")).unwrap(),
-            PathBuf::from("/data/fr")
+            std::path::absolute("  /data/fr  ").unwrap()
         );
         // A blank FR_HOME counts as unset and falls back to the default.
         assert_eq!(
