@@ -9,6 +9,7 @@
 //! are fail-closed, and known entry names auto-init their profile directory
 //! on first use without overwriting existing files.
 
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -22,6 +23,21 @@ pub const PROFILES_DIR: &str = "profiles";
 /// The patch file name shared by the profile patch and the home patch
 /// (brand mapping of dsh `PROFILE_PATCH_FILENAME`).
 pub const PATCH_FILENAME: &str = "fr.patch.yml";
+
+/// Profile root file name (brand mapping of dsh `PROFILE_ROOT_FILENAME`,
+/// profile-boot.ts:88; 2026-10-22 Q23A).
+///
+/// The root stays an empty entry list: the whole assembly is composed as
+/// patch layers, so the root exists only to give boot and the dump the same
+/// readable base anchor — dsh writes it on every prepare for the same
+/// reason, and its loader include-root role does not exist in fr (the
+/// dougong loader takes a whole JSON document).
+pub const ROOT_FILENAME: &str = "fr.yml";
+
+/// Root file content rewritten on every prepare (dsh `PROFILE_ROOT_CONFIG`
+/// shape, profile-boot.ts:88-93; Q23A). Comment lines are guidance only; the
+/// `[]` entry list is the parsed payload.
+pub const ROOT_CONFIG: &str = "# 本 profile 的根文件：一份空 entry list。装配树全为补丁层组合：\n# 各 bundle 层，然后本 profile 的 fr.patch.yml，然后 --patch overlays。\n# 请编辑 fr.patch.yml，而非本文件。\n[]\n";
 
 /// The profile manifest file name. dsh derives profiles from `package.json`
 /// and pnpm projects; fr owns a dedicated file because there is no npm layer.
@@ -40,6 +56,17 @@ const HEADLESS_BUNDLE_YAML: &str = include_str!("bundles/headless/fr.patch.yml")
 pub enum EntryKind {
     /// Headless one-shot entry (`fr headless`).
     Headless,
+}
+
+impl EntryKind {
+    /// The built-in bundle name mounted as layer 1 for this entry; the dump
+    /// labels its layer with the same name.
+    #[must_use]
+    pub const fn bundle_name(self) -> &'static str {
+        match self {
+            Self::Headless => "headless",
+        }
+    }
 }
 
 /// Built-in bundle YAML by name (profile manifest `bundles:` references).
@@ -103,7 +130,12 @@ pub struct LoadedProfile {
     pub dir: PathBuf,
     /// Parsed bundle layers in manifest order.
     pub layers: Vec<Vec<PatchLine>>,
-    /// The profile's own patch layer (empty when the file is absent).
+    /// Built-in bundle names backing [`Self::layers`], in the same order; the
+    /// dump re-parses these raw (shape-only, `!!js` preserved) because the
+    /// boot-grade parse evaluates expressions and drops tags.
+    pub bundle_names: Vec<String>,
+    /// The profile's own patch layer (empty when the file is absent or the
+    /// load skipped the user layer).
     pub patch: Vec<PatchLine>,
     /// Built-in bundle names the manifest referenced but fr-config does not ship.
     pub skipped_bundles: Vec<SkippedBundle>,
@@ -187,7 +219,7 @@ fn anchor_insert_names(lines: &mut [PatchLine], base: &Path) {
 
 /// Lexically joins `base` and `rel`, collapsing `.` and `..` without touching
 /// the filesystem (same shape as dsh's `path.resolve`).
-fn join_lexical(base: &Path, rel: &Path) -> PathBuf {
+pub(crate) fn join_lexical(base: &Path, rel: &Path) -> PathBuf {
     let mut parts: Vec<std::ffi::OsString> = base
         .components()
         .filter(|component| !matches!(component, std::path::Component::CurDir))
@@ -208,7 +240,7 @@ fn join_lexical(base: &Path, rel: &Path) -> PathBuf {
 /// The directory a patch file's relative insert names anchor to: the file's
 /// parent, made absolute against the cwd when relative (dsh
 /// `dirname(resolve(file))`).
-fn anchor_base(path: &Path) -> PathBuf {
+pub(crate) fn anchor_base(path: &Path) -> PathBuf {
     let dir = path
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
@@ -305,14 +337,21 @@ fn render_manifest_template(template_bundles: &[&str]) -> String {
 /// on first use.
 ///
 /// Bundle layers resolve per the manifest; unknown bundle names are skipped
-/// non-fatally; the profile's own patch file parses to the `patch` layer;
-/// manifest and patch errors are fatal.
+/// non-fatally; the profile's own patch file parses to the `patch` layer
+/// unless `user_layer` is false (dsh `prepareProfile`'s `{ userLayer }`
+/// option: the default dump skips the user layer entirely, never reading or
+/// parsing `fr.patch.yml`); manifest errors are fatal.
 ///
 /// # Errors
 ///
 /// [`Error::Profile`] for illegal names, unknown profiles, and manifest
 /// violations; [`Error::Io`] for read failures; patch parse errors propagate.
-pub fn load_profile(home: &Path, name: &str, ctx: &EvalContext) -> Result<LoadedProfile> {
+pub fn load_profile(
+    home: &Path,
+    name: &str,
+    user_layer: bool,
+    ctx: &EvalContext,
+) -> Result<LoadedProfile> {
     validate_profile_name(name)?;
     let dir = home.join(PROFILES_DIR).join(name);
     let manifest_path = dir.join(MANIFEST_FILENAME);
@@ -326,24 +365,208 @@ pub fn load_profile(home: &Path, name: &str, ctx: &EvalContext) -> Result<Loaded
     }
     let bundles = read_profile_manifest(&dir)?;
     let mut layers = Vec::new();
+    let mut bundle_names = Vec::new();
     let mut skipped_bundles = Vec::new();
     for bundle in bundles {
         match builtin_bundle_yaml(&bundle) {
-            Some(yaml) => layers.push(parse_patch_lines(yaml, ctx)?),
+            Some(yaml) => {
+                layers.push(parse_patch_lines(yaml, ctx)?);
+                bundle_names.push(bundle);
+            }
             None => skipped_bundles.push(SkippedBundle {
                 name: bundle,
                 reason: "not a built-in bundle name".to_owned(),
             }),
         }
     }
-    let patch = load_optional_patches(&dir.join(PATCH_FILENAME), ctx)?.unwrap_or_default();
+    let patch = if user_layer {
+        load_optional_patches(&dir.join(PATCH_FILENAME), ctx)?.unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     Ok(LoadedProfile {
         name: name.to_owned(),
         dir,
         layers,
+        bundle_names,
         patch,
         skipped_bundles,
     })
+}
+
+/// Prepares a profile for boot or dump (dsh `prepareProfile`,
+/// profile-boot.ts:194-201; 2026-10-22 Q23A/Q20A).
+///
+/// A `from_default_profile` template first replaces the existing profile
+/// directory (staging rename dance, dsh `initializeProfileFromDefault`); the
+/// profile then loads with or without its user patch layer; finally the root
+/// file ([`ROOT_FILENAME`]) is rewritten unconditionally so boot and the
+/// dump anchor on the same readable base.
+///
+/// # Errors
+///
+/// Propagates [`load_profile`] errors; unknown replacement templates and
+/// shipped-name targets are rejected (see
+/// [`initialize_profile_from_default`]); root write failures are
+/// [`Error::Io`].
+pub fn prepare_profile(
+    home: &Path,
+    name: &str,
+    user_layer: bool,
+    from_default_profile: Option<&str>,
+    warn: &dyn Fn(&str),
+    ctx: &EvalContext,
+) -> Result<LoadedProfile> {
+    if let Some(template) = from_default_profile {
+        initialize_profile_from_default(home, name, template, warn)?;
+    }
+    let loaded = load_profile(home, name, user_layer, ctx)?;
+    let root = loaded.dir.join(ROOT_FILENAME);
+    fs::write(&root, ROOT_CONFIG)
+        .map_err(|e| Error::Io(format!("failed to write {}: {e}", root.display())))?;
+    Ok(loaded)
+}
+
+/// Shipped (built-in) profile names — the entry kinds. Replacement targets
+/// colliding with these (case-insensitively) are rejected; kept in sync with
+/// [`profile_template_bundles`], which a unit test asserts below.
+const SHIPPED_PROFILE_NAMES: &[&str] = &["headless"];
+
+/// Quotes a string the way dsh embeds it in diagnostics (`JSON.stringify`),
+/// so the user-visible text matches byte for byte. Hand-rolled because
+/// `serde_json::to_string` cannot fail on `&str` yet still returns `Result`.
+pub(crate) fn json_quote(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            control if control.is_control() => {
+                let _ = write!(out, "\\u{:04x}", control as u32);
+            }
+            plain => out.push(plain),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Replaces the named custom profile with a fresh copy of one shipped
+/// template (dsh `initializeProfileFromDefault`, profile-boot.ts:102-165;
+/// Q20A/Q23A).
+///
+/// Only the template's bundle list is copied; local state from a same-named
+/// profile is not read. The new profile assembles in a `.<name>.staging-*`
+/// directory beside the profiles directory and moves into place; only then
+/// is the previous directory removed. A failed move restores the previous
+/// directory; when restoring also fails, the error names the staging path
+/// holding it.
+///
+/// # Errors
+///
+/// [`Error::Profile`] for an unknown template, a shipped-name target
+/// (compared without case), or a concurrent recreation; [`Error::Io`] for
+/// file-system failures.
+pub fn initialize_profile_from_default(
+    home: &Path,
+    name: &str,
+    from_default_profile: &str,
+    warn: &dyn Fn(&str),
+) -> Result<()> {
+    validate_profile_name(name)?;
+    let Some(template_bundles) = profile_template_bundles(from_default_profile) else {
+        // dsh sorts the expected keys; the const is kept sorted.
+        let expected = SHIPPED_PROFILE_NAMES
+            .iter()
+            .map(|value| json_quote(value))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(Error::Profile(format!(
+            "fr: unknown default profile {}; expected one of {expected}",
+            json_quote(from_default_profile)
+        )));
+    };
+    // Case-insensitive file systems resolve a case variant such as `Headless`
+    // to the shipped directory, so the target check ignores case too.
+    if let Some(shipped) = SHIPPED_PROFILE_NAMES
+        .iter()
+        .find(|shipped| shipped.eq_ignore_ascii_case(name))
+    {
+        return Err(Error::Profile(format!(
+            "fr: profile {} names shipped profile {} and cannot be a custom profile target; \
+             omit --from-default-profile to use it",
+            json_quote(name),
+            json_quote(shipped)
+        )));
+    }
+    let profiles_dir = home.join(PROFILES_DIR);
+    let dir = profiles_dir.join(name);
+    // The staging directory sits beside the target so both renames stay on
+    // one filesystem; pid plus wall-clock nanos stand in for mkdtemp's random
+    // suffix (uniqueness for concurrent replaces is best-effort, matching the
+    // dsh concurrency caveat).
+    let staging = profiles_dir.join(format!(
+        ".{name}.staging-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or_else(|_| 0, |d| d.as_nanos()),
+    ));
+    fs::create_dir_all(&profiles_dir)
+        .map_err(|e| Error::Io(format!("failed to create {}: {e}", profiles_dir.display())))?;
+    let fresh = staging.join("new").join(name);
+    init_profile(&fresh, template_bundles)?;
+    let previous = staging.join("previous");
+    let moved = match fs::rename(&dir, &previous) {
+        Ok(()) => true,
+        // An absent target is a fresh create, not an error.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => {
+            return Err(Error::Io(format!(
+                "failed to move {} to {}: {e}",
+                dir.display(),
+                previous.display()
+            )));
+        }
+    };
+    if let Err(error) = fs::rename(&fresh, &dir) {
+        if dir.exists() {
+            // Windows reports EPERM instead of EEXIST here, so the target's
+            // state identifies a concurrent winner (dsh comment).
+            let _ = fs::remove_dir_all(&previous);
+            return Err(Error::Profile(format!(
+                "fr: profile {} was recreated concurrently at {}",
+                json_quote(name),
+                dir.display()
+            )));
+        }
+        if moved && let Err(restore_error) = fs::rename(&previous, &dir) {
+            return Err(Error::Io(format!(
+                "fr: profile replacement failed and {} could not be restored from {}: \
+                 move error {error}; restore error {restore_error}",
+                dir.display(),
+                previous.display()
+            )));
+        }
+        return Err(Error::Io(format!(
+            "failed to move {} to {}: {error}",
+            fresh.display(),
+            dir.display()
+        )));
+    }
+    if let Err(error) = fs::remove_dir_all(&staging) {
+        // The replacement is complete; leftover files only occupy space.
+        warn(&format!(
+            "fr: replaced profile {} but could not remove {}: {error}",
+            json_quote(name),
+            staging.display()
+        ));
+    }
+    Ok(())
 }
 
 /// The ordered layer stack for one launch.
@@ -359,16 +582,24 @@ pub struct StackOutcome {
 /// bundle, then the selected profile (bundle stack + own patch), then the
 /// home patch, then required `--patch` overlays.
 ///
+/// A selected profile goes through [`prepare_profile`], so boot and the dump
+/// anchor on the same freshly rewritten root file (Q23A) and a
+/// `from_default_profile` template replaces the profile before loading
+/// (Q20A, shared with the dump).
+///
 /// # Errors
 ///
-/// Fails on illegal profile names, unknown profiles, manifest errors,
-/// unreadable files, required overlay absence, and patch parse errors —
-/// parse and required-file failures are fail-closed (startup dies).
+/// Fails on illegal profile names, unknown profiles, replacement template
+/// errors, manifest errors, unreadable files, required overlay absence, and
+/// patch parse errors — parse and required-file failures are fail-closed
+/// (startup dies).
 pub fn load_stack(
     home: &Path,
     entry: EntryKind,
     profile: Option<&str>,
     overlays: &[PathBuf],
+    from_default_profile: Option<&str>,
+    warn: &dyn Fn(&str),
     ctx: &EvalContext,
 ) -> Result<StackOutcome> {
     let entry_yaml = match entry {
@@ -379,7 +610,7 @@ pub fn load_stack(
     // empty layer is appended.
     let (profile_layers, profile_patch, skipped_bundles) = match profile {
         Some(name) => {
-            let loaded = load_profile(home, name, ctx)?;
+            let loaded = prepare_profile(home, name, true, from_default_profile, warn, ctx)?;
             (loaded.layers, Some(loaded.patch), loaded.skipped_bundles)
         }
         None => (Vec::new(), None, Vec::new()),
@@ -523,7 +754,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("mkdir failed: {e}"));
         fs::write(dir.join(MANIFEST_FILENAME), "bundles: [headless, nope]\n")
             .unwrap_or_else(|e| panic!("write failed: {e}"));
-        let loaded = load_profile(home.path(), "work", &EvalContext::neutral())
+        let loaded = load_profile(home.path(), "work", true, &EvalContext::neutral())
             .unwrap_or_else(|e| panic!("load failed: {e}"));
         assert_eq!(loaded.layers.len(), 1, "only the known bundle loads");
         assert_eq!(loaded.skipped_bundles.len(), 1);
@@ -547,7 +778,7 @@ mod tests {
     #[test]
     fn fresh_headless_profile_auto_inits() {
         let home = TempHome::new("auto");
-        let loaded = load_profile(home.path(), "headless", &EvalContext::neutral())
+        let loaded = load_profile(home.path(), "headless", true, &EvalContext::neutral())
             .unwrap_or_else(|e| panic!("auto-init failed: {e}"));
         assert!(
             home.path()
@@ -569,7 +800,7 @@ mod tests {
     #[test]
     fn unknown_profile_name_errors() {
         let home = TempHome::new("ghost");
-        let outcome = load_profile(home.path(), "ghost", &EvalContext::neutral());
+        let outcome = load_profile(home.path(), "ghost", true, &EvalContext::neutral());
         assert!(outcome.is_err(), "unknown profile must fail");
     }
 
@@ -606,6 +837,8 @@ mod tests {
             EntryKind::Headless,
             Some("headless"),
             &[overlay],
+            None,
+            &|_| {},
             &EvalContext::neutral(),
         )
         .unwrap_or_else(|e| panic!("load_stack failed: {e}"));
@@ -632,6 +865,8 @@ mod tests {
             EntryKind::Headless,
             None,
             &[],
+            None,
+            &|_| {},
             &EvalContext::neutral(),
         )
         .unwrap_or_else(|e| panic!("entry-only stack failed: {e}"));
@@ -737,5 +972,141 @@ mod tests {
             Some("./matcher"),
             "override-row name is a matcher and stays untouched"
         );
+    }
+
+    #[test]
+    fn prepare_profile_rewrites_root_and_user_layer_flag_gates_patch_read() {
+        let home = TempHome::new("prepare-root");
+        let profile_dir = home.path().join(PROFILES_DIR).join("headless");
+        init_profile(&profile_dir, &[]).unwrap_or_else(|e| panic!("init failed: {e}"));
+        // A user edit to the root file is reset on every prepare (dsh
+        // writes cordis.yml unconditionally; the root is tool-owned).
+        fs::write(profile_dir.join(ROOT_FILENAME), "- id: user-edit\n")
+            .unwrap_or_else(|e| panic!("write root failed: {e}"));
+        // A syntactically broken patch file would be fatal with user_layer,
+        // and must be unread with user_layer=false (default-only recovery).
+        fs::write(profile_dir.join(PATCH_FILENAME), "- id: a\n  bogus: 1\n")
+            .unwrap_or_else(|e| panic!("write patch failed: {e}"));
+        let loaded = prepare_profile(
+            home.path(),
+            "headless",
+            false,
+            None,
+            &|_| {},
+            &EvalContext::neutral(),
+        )
+        .unwrap_or_else(|e| panic!("default-only prepare failed: {e}"));
+        let root = fs::read_to_string(profile_dir.join(ROOT_FILENAME))
+            .unwrap_or_else(|e| panic!("read root failed: {e}"));
+        assert_eq!(root, ROOT_CONFIG, "root reset to the canonical content");
+        assert!(
+            loaded.patch.is_empty(),
+            "user layer skipped: the broken patch file was never parsed"
+        );
+        // With the user layer on, the same broken file is fail-closed.
+        let outcome = prepare_profile(
+            home.path(),
+            "headless",
+            true,
+            None,
+            &|_| {},
+            &EvalContext::neutral(),
+        );
+        assert!(outcome.is_err(), "broken user patch must fail the load");
+    }
+
+    #[test]
+    fn from_default_profile_replaces_existing_profile() {
+        let home = TempHome::new("from-default");
+        let profile_dir = home.path().join(PROFILES_DIR).join("work");
+        init_profile(&profile_dir, &[]).unwrap_or_else(|e| panic!("init failed: {e}"));
+        fs::write(profile_dir.join(MANIFEST_FILENAME), "bundles: [headless]\n")
+            .unwrap_or_else(|e| panic!("write manifest failed: {e}"));
+        fs::write(
+            profile_dir.join(PATCH_FILENAME),
+            "- id: old\n  disabled: true\n",
+        )
+        .unwrap_or_else(|e| panic!("write patch failed: {e}"));
+        let warnings: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+        prepare_profile(
+            home.path(),
+            "work",
+            true,
+            Some("headless"),
+            &|line| {
+                warnings
+                    .lock()
+                    .unwrap_or_else(|e| panic!("poisoned: {e}"))
+                    .push(line.to_owned());
+            },
+            &EvalContext::neutral(),
+        )
+        .unwrap_or_else(|e| panic!("replace failed: {e}"));
+        // The template replaces the profile wholesale: manifest reset to the
+        // template bundle list, patch and root reset to their templates.
+        let manifest = fs::read_to_string(profile_dir.join(MANIFEST_FILENAME))
+            .unwrap_or_else(|e| panic!("read manifest failed: {e}"));
+        assert_eq!(
+            manifest,
+            render_manifest_template(profile_template_bundles("headless").unwrap_or(&[])),
+            "manifest reset to the shipped template"
+        );
+        let patch = fs::read_to_string(profile_dir.join(PATCH_FILENAME))
+            .unwrap_or_else(|e| panic!("read patch failed: {e}"));
+        assert_eq!(patch, PATCH_TEMPLATE, "patch reset to the blank template");
+        let root = fs::read_to_string(profile_dir.join(ROOT_FILENAME))
+            .unwrap_or_else(|e| panic!("read root failed: {e}"));
+        assert_eq!(root, ROOT_CONFIG, "root written by prepare");
+        assert!(
+            warnings
+                .into_inner()
+                .unwrap_or_else(|e| panic!("poisoned: {e}"))
+                .is_empty(),
+            "no staging-cleanup warnings expected"
+        );
+        let staging_leftovers =
+            fs::read_dir(profile_dir.parent().unwrap_or_else(|| panic!("parent")))
+                .unwrap_or_else(|e| panic!("readdir failed: {e}"))
+                .filter_map(std::result::Result::ok)
+                .any(|entry| {
+                    entry
+                        .file_name()
+                        .to_str()
+                        .is_some_and(|name| name.starts_with(".work.staging-"))
+                });
+        assert!(
+            !staging_leftovers,
+            "staging directory removed after a successful replace"
+        );
+    }
+
+    #[test]
+    fn from_default_rejects_unknown_template_and_shipped_target() {
+        let home = TempHome::new("from-default-guard");
+        let unknown = prepare_profile(
+            home.path(),
+            "work",
+            true,
+            Some("nope"),
+            &|_| {},
+            &EvalContext::neutral(),
+        );
+        let err = unknown.expect_err("unknown template must be rejected");
+        assert!(err.to_string().contains("unknown default profile"), "{err}");
+        for target in ["headless", "HEADLESS"] {
+            let shipped = prepare_profile(
+                home.path(),
+                target,
+                true,
+                Some("headless"),
+                &|_| {},
+                &EvalContext::neutral(),
+            );
+            let err = shipped.expect_err("shipped target must be rejected");
+            assert!(
+                err.to_string().contains("names shipped profile"),
+                "{target}: {err}"
+            );
+        }
     }
 }

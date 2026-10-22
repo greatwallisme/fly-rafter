@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod cond;
+pub mod dump;
 pub mod env;
 pub mod error;
 pub mod patch;
@@ -15,6 +16,7 @@ pub mod source;
 pub mod stack;
 
 pub use cond::{EvalContext, eval, host_platform};
+pub use dump::{DumpLayer, collect_dump_layers, render_dump};
 pub use env::{
     BOOTSTRAP_NAMES, BOOTSTRAP_PREFIXES, ENV_FILENAME, EnvEntry, EnvLayer, EnvSink, EnvSnapshot,
     EnvSource, FR_HOME_DIR_NAME, FR_HOME_ENV, HOME_LAYER_PROXY_NAMES, is_bootstrap_only,
@@ -27,7 +29,8 @@ pub use patch::{
 };
 pub use source::{PathResolver, SourceKind, SourceSpec, check_trust_boundary};
 pub use stack::{
-    EntryKind, LoadedProfile, SkippedBundle, StackOutcome, builtin_bundle_yaml, init_profile,
-    load_optional_patches, load_profile, load_required_overlay, load_stack,
-    profile_template_bundles, read_profile_manifest, validate_profile_name,
+    EntryKind, LoadedProfile, ROOT_CONFIG, ROOT_FILENAME, SkippedBundle, StackOutcome,
+    builtin_bundle_yaml, init_profile, initialize_profile_from_default, load_optional_patches,
+    load_profile, load_required_overlay, load_stack, prepare_profile, profile_template_bundles,
+    read_profile_manifest, validate_profile_name,
 };

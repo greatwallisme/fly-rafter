@@ -49,6 +49,9 @@ PAIRS = [
     ("专名检查大小写不敏感", "pending_req_fr_config", "bootstrap_names_and_prefixes_case_insensitive"),
     ("cwd 即家目录时家层不读", "pending_req_fr_config", "layered_cwd_home_dedup_reads_directory_once"),
     ("env 解析方言对齐 Node util.parseEnv", "pending_req_fr_config", "parser_matches_node_parse_env_official_fixture"),
+    ("dump 输出注释分层逐字同型", "pending_req_fr_config", "composes_layers_prints_verbatim_js_and_labels_sections"),
+    ("default-only 恢复诊断不读不解析用户层", "pending_req_fr_config", "default_only_collects_bundle_layers_only_and_skips_broken_user_files"),
+    ("from-default-profile 以出厂模板替换", "pending_req_fr_config", "from_default_profile_replaces_existing_profile"),
 ]
 
 
@@ -62,11 +65,12 @@ def main() -> None:
         si = hits[0]
         ti = next(i for i in range(si + 1, len(lines)) if lines[i].startswith("  Test: "))
         current = lines[ti].removeprefix("  Test: ").strip()
+        if current == new:
+            continue
         if not current.startswith(expected):
             raise SystemExit(f"{title!r}: expected selector {expected!r}, found {current!r}")
-        if current != new:
-            lines[ti] = f"  Test: {new}\n"
-            bound += 1
+        lines[ti] = f"  Test: {new}\n"
+        bound += 1
     if bound == 0 and len(PAIRS) > 0:
         return
     SPEC.write_text("".join(lines), encoding="utf-8")

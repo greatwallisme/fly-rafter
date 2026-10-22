@@ -5,8 +5,8 @@
 
 ## Next Step
 【2026-10-22 起强制】实现一律按七步合约流（CLAUDE.md「开发工作流」节）：任务启动 = 精化对应合同四要素（绑定真实测试选择器、异常场景 ≥ 正常场景）→ lint 0.7 → contract → lifecycle 自检循环（fail 修码不改合同，改合同须先沟通）→ guard → explain → stamp。
-CONFIG 合约七步回补已执行（Q15A/Q16A）：35 场景绑定真测试（lifecycle 35 passed / 260 skipped / 0 failed），pre-commit 守卫已装（--code . 已修正）。
-Phase 12 续（Q18-Q20A 已落地，文档与合约层全绿）：下一切片 = fr-config dump 数据面实现（collect_dump_layers + render_dump：快照算法、# == 分隔注释、!!js 不求值变体、prepare 语义）→ fr-schema 投影面（-schema 侧 $defs/x-fr/entry 五态/diagnostics）→ 四关 + lifecycle 新增绑定（基线 35 passed / 266 skipped）。dsh 真源：findings「呈 Q18-Q20」节 file:line 全证据。
+fr-config dump 数据面已完成（Q23A/Q24A，2026-10-22）：dump.rs 新模块 + stack.rs prepare 语义（fr.yml 根文件/user_layer 门/from-default staging 替换），四关全绿，lifecycle 38 passed / 263 skipped / 0 failed，guard exit 0。
+下一切片 = fr-schema 投影面（dump-config-schema 侧：$schema 2020-12 + x-fr 五键 {profile, complete, entries, diagnostics, patchSchema:'#/$defs/patchList'} + entry 五态 schema/partial/absent/unsupported/error + diagnostics stderr 逐条 + complete 假退 1；复用 collect_dump_layers；D3 = Session 7 真源，findings「Phase 12 续 Session 7」节）→ 绑 x-fr 五键 / complete 假退 1 / dump 来自真实装配 → 四关 + lifecycle + 呈报。
 
 ## Current Phase
 Phase 12

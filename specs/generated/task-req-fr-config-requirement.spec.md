@@ -203,13 +203,13 @@ Scenario: dump 命令输出来自真实装配
   那么 分别输出合成后插件树与全部插件 config schema
 
 Scenario: dump 输出注释分层逐字同型
-  Test: pending_req_fr_config_dump
+  Test: composes_layers_prints_verbatim_js_and_labels_sections
   假设 bundle、profile patch、家目录 patch 与 --patch 多层修改同一行并插入新行
   当 运行 fr dump-config 时
   那么 输出 YAML 文本中 # == 源文件[, patched by 层…] 分隔注释按连续同源行分组，!!js 表达式逐字未求值，整篇可再 parse 且等于同参启动挂载结果
 
 Scenario: default-only 恢复诊断不读不解析用户层
-  Test: pending_req_fr_config_default_only
+  Test: default_only_collects_bundle_layers_only_and_skips_broken_user_files
   假设 profile 的 fr.patch.yml 含语法损坏内容且以 --default-only 调用
   当 运行 fr dump-config 时
   那么 仅输出 bundle 层，损坏文件未读未解析且不报错
@@ -233,7 +233,7 @@ Scenario: complete 为假退出码 1
   那么 diagnostics 含该条且进程退出码为 1
 
 Scenario: from-default-profile 以出厂模板替换
-  Test: pending_req_fr_config_from_default_profile
+  Test: from_default_profile_replaces_existing_profile
   假设 自定义 profile 已存在且携带 from-default-profile 指向 headless
   当 数据面装载该 profile 时
   那么 出厂模板替换既有 profile 内容后装载（非首用初始化的绝不覆盖语义）

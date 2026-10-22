@@ -248,21 +248,7 @@ pub fn parse_patch_lines(yaml: &str, ctx: &EvalContext) -> Result<Vec<PatchLine>
     // the single-bang form survives as a `Value::Tagged`. Normalize value
     // positions `!!js` -> `!js` line-anchored so quoted content is untouched.
     let normalized = normalize_js_tags(yaml);
-    // Flow-style tags (`{p: !!js "x"}`) are outside the recognized value
-    // positions and would silently lose their tag; reject them fail-closed.
-    if REMAINING_JS_TAG
-        .get_or_init(|| {
-            // Non-anchored: any remaining `key: !!js` or `- !!js` value slot.
-            Regex::new(r"(:[ \t]+|[ \t]-[ \t]+)!!js").expect("valid regex")
-        })
-        .is_match(&normalized)
-    {
-        return Err(Error::PatchParse(
-            "`!!js` tag outside a recognized value position (flow style is not supported); \
-             write `key: !!js \"expr\"` on its own line"
-                .to_owned(),
-        ));
-    }
+    ensure_no_flow_style_js(&normalized)?;
     let doc: serde_yaml_ng::Value =
         serde_yaml_ng::from_str(&normalized).map_err(|e| Error::PatchParse(e.to_string()))?;
     let seq = doc.as_sequence().ok_or_else(|| {
@@ -285,11 +271,36 @@ static REMAINING_JS_TAG: std::sync::OnceLock<Regex> = std::sync::OnceLock::new()
 /// Rewrites `!!js` tag occurrences at YAML value positions (after `key:` or
 /// after a list dash) to the single-bang form; quoted content never matches.
 #[must_use]
-fn normalize_js_tags(yaml: &str) -> String {
+pub(crate) fn normalize_js_tags(yaml: &str) -> String {
     let value_position =
         Regex::new(r"(?m)^([ \t]*(?:-[ \t]+)?[A-Za-z_][A-Za-z0-9_-]*:[ \t]+|^[ \t]*-[ \t]+)!!js")
             .expect("valid regex");
     value_position.replace_all(yaml, "${1}!js").into_owned()
+}
+
+/// Rejects `!!js` tags left over after normalization: value positions not
+/// covered by [`normalize_js_tags`] (flow style, exotic keys). The fr parse
+/// dialect cannot preserve a tag there, so failing closed beats silently
+/// dropping it. Shared by the boot-grade and the dump raw parses.
+///
+/// # Errors
+///
+/// [`Error::PatchParse`] when a flow-style `!!js` value position remains.
+pub(crate) fn ensure_no_flow_style_js(normalized: &str) -> Result<()> {
+    if REMAINING_JS_TAG
+        .get_or_init(|| {
+            // Non-anchored: any remaining `key: !!js` or `- !!js` value slot.
+            Regex::new(r"(:[ \t]+|[ \t]-[ \t]+)!!js").expect("valid regex")
+        })
+        .is_match(normalized)
+    {
+        return Err(Error::PatchParse(
+            "`!!js` tag outside a recognized value position (flow style is not supported); \
+             write `key: !!js \"expr\"` on its own line"
+                .to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 /// A fully resolved assembly row after composition.

@@ -233,3 +233,34 @@ dsh .env 分层权威事实（app-boot/src/index.ts + util 两包，仓库 ~/pro
 - 新增 3 钉测：`layer_keeps_file_order_and_last_duplicate_value`（层文件序 + 重复键首现位末值胜）、`fold_keys_case_collision_keeps_file_later_value_at_first_position`（Path/PATH 大写折叠碰撞文件后者胜 + 恒等折叠保序双向）、`snapshot_layer_case_variants_stay_distinct_off_windows`（非 Windows 恒等不碰撞）。`parse_env` 公共面保持 BTreeMap 零变化（9073 差分输入钉死的行为面不动）。
 - 验证：四关全绿（fmt / clippy --workspace --all-targets -D warnings / fr-config 65 + fr-schema 16 tests / doc 零警告）；CONFIG lifecycle 35 passed / 266 skipped / 0 failed 与基线一致；guard exit 0；合同零改动（CONFIG 合约仅 patch 行「插入序」钉死文本，无 env 层存储顺序条目，rg 实证）。
 - 类型泄漏裁定（M-DONT-LEAK-TYPES）：全仓消费面核实 `EnvLayer`/`EnvSnapshot` 仅 fr-config 内部使用 + lib.rs 再导出（fr 宿主 crate 未建），工作区内 crate 顺序保留即 22A1 裁决语义本体，`pub values: IndexMap` 字段文档已注明依据——接受已声明泄漏。
+
+## 2026-10-22 — dump 数据面真源全读（fr-config 切片动工前，会话恢复后）
+
+### 事实（file:line 实证，本会话核实）
+1. 根文件：`PROFILE_ROOT_FILENAME='cordis.yml'`（apps/cli/src/profile-boot.ts:88）；`PROFILE_ROOT_CONFIG` = 3 行注释头 + `[]`（"Edit cordis.patch.yml, not this file"，profile-boot.ts:88-93 邻域）；`prepareProfile`（profile-boot.ts:194-201）**每次装载无条件重写**该文件，boot 与 dump 共用；文件存在理由 = cordis Loader 需真实 include 根锚定 baseUrl + dump 同锚组合（:194-199 docstring），兼防 Loader 树写回把组合行烘进文件——fr dougong loader 吃整份 JSON、无 include 根、reconcile 不写回配置文件，两项理由在 fr 均不存在。
+2. 错误三连落点 = `renderConfigDump` 读根文件三段 throw（app-boot index.ts:635-）；`runDumpConfig` 传 `join(loaded.dir, PROFILE_ROOT_FILENAME)`（dump-config.ts:41）。
+3. `prepareProfile(name, userLayer=!defaultOnly, fromDefaultProfile)`（profile-boot.ts:194-201）：有 fromDefaultProfile 先替换；`userLayer=false` 跳过 cordis.patch.yml 读与解析（default-only 的"从不解析"）。
+4. `initializeProfileFromDefault`（profile-boot.ts:102-165）：模板未知名 throw（expected 按序）；目标名撞 shipped 名（大小写不敏感）throw "names shipped profile"；staging = `mkdtemp('.<name>.staging-')` 于 profiles 目录旁（同一文件系统）→ `initProfile(staging/new/<name>)` → `rename(dir→staging/previous)`（ENOENT 容忍）→ `rename(fresh→dir)`；并发撞车 = 目标已存在（Windows EPERM 口径按 existsSync 判）→ 删 previous + throw "recreated concurrently"；restore 失败 → AggregateError 指名 staging 路径；收尾 staging 清不掉仅 stderr 警告（替换已完成）。
+5. `applyEntryPatches`（vendor/include/src/index.ts:57-127）全语义：patches 空 → `[...data]`；否则 `structuredClone(data)`；索引 id→entry **递归进 group 条目的数组 config**（:70-77）；insert 带 id → 目标须存在且 group（警告 `patch insert: entry %C not found` / `patch insert: entry %C is not a group`），target.config 数组 push；insert 无 id → 根级 push；**每次 insert 后 buildMap(insert)**（同列表后补丁可命中先插行，:113-118）；无 id 非插入行 → 警告 `patch: id is required for non-insert patches`；未命中 → `patch: entry %C not found`；name 不匹配 → `patch: name mismatch for %C (expected %C, got %C), skipping`；其余键逐键覆盖（id 键跳过）。`%C` = `JSON.stringify(参数)`（renderConfigDump warn 内联替换，index.ts:671-676）。dump 警告输出格式：`<bin>: [<层label>] <替换后文本>`。
+6. fr compose() 既有已裁差异（Q1/Q2，boot 路径不动）：无 group、insert 不带 id、id 缺失解析期拒绝、警告文案 fr 变体（`patch: entry {id} not found, skipped` 等）。
+7. config-dump.spec.ts 6 测试：①分层组合+!!js 逐字+注释标注（:48-101，`# == base.yml, patched by surface.yml`、插入行 origin=插入层、注释序断言）②连续同源行单注释（:103-116）③单次展平调用 = group 子行不被后续层命中 + 层标签警告（:118-150）④未命中 warn 带层标签继续组合（:152-174）⑤warn 默认 stderr 逐行（:176-186）⑥根文件缺失/坏 YAML/非数组三连 throw（:188-200）。
+8. 全库 rg 实证零命中：cordis.yml/根文件/fr.yml 于 PRD/intake/KLL/spec——根文件从未被裁决（Q1-Q5 布局 = profile.yml + fr.patch.yml，PRD 6.1）。
+
+### 新分叉登记（呈 Q23/Q24，裁决记录待补）
+- Q23 dump base 锚点与错误三连落点（23A 增根文件 fr.yml / 23B 内存空 base + 死文本勘误）——见会话消息。
+- Q24 dump 离线工具口径（24A dsh structural-trust 逐字移植 / 24B 受限于 fr 裁定格式）——见会话消息。
+
+### Q23/Q24 裁决落地（2026-10-22 用户裁决 23A + 24A）
+- Q23A：profile 布局增根文件 `fr.yml`（cordis.yml 品牌映射），load/prepare 每次装载无条件重写（boot+dump 共用同参 base），dump 读它为 base、错误三连真实成立；PRD 6.1 布局勘误 + 23 决策 23。
+- Q24A：dump 离线工具 = dsh structural-trust 逐字移植——层文件 shape-only 解析（任意键保留、!!js raw）+ raw compose 完整移植 applyEntryPatches（group 递归索引、insert 带 id、五条 dsh 警告文案原样、%C=JSON.stringify）；boot 严格解析不动。
+
+### dump 数据面切片落地（2026-10-22，Q23A/Q24A 执行）
+- PRD：6.1 装载文件布局补 fr.yml 根文件（每次装载无条件重写，boot 与 dump 共用同参 base）；23 决策 23（Q23A/Q24A 全文）。
+- crates/fr-config 新增 src/dump.rs（Q24A dsh structural-trust 逐字移植）：DumpLayer/collect_dump_layers（entry bundle 恒为首层 + manifest bundle 层 + profile patch(存在才入) + home patch + overlays 绝对路径 label；default_only 仅 bundle 层不读用户文件）+ render_dump（层前缀各单次 apply_entry_patches 展平调用、# == 连续同源分组注释、!!js 逐字（denormalize_js_tags 把 serde_yaml_ng 的 !js 反规范化回 !!js 值位）、canonical_form 变更检测（Tagged 显式标注）、警告新尾段带层标签）+ apply_entry_patches 全语义移植（group 递归索引、insert 带 id 指向 group、五条 dsh 警告文案原样、name 缺失渲染 "undefined"、%C=JSON 式引述）+ parse_raw_patch_list shape-only（任意键保留、!!js raw、flow 式 tag 仍 fail-closed）+ raw insert 名锚定（Q6 同规则）。
+- stack.rs：ROOT_FILENAME=fr.yml + ROOT_CONFIG 模板（品牌中文注释头 + []，Q23A）；load_profile 增 user_layer 参数（false = 跳过 fr.patch.yml 读与解析）；prepare_profile（from_default 替换 → load → 无条件重写根文件）；initialize_profile_from_default（staging rename 舞步：mkdtemp 式 .name.staging-* 旁目录、ENOENT 容忍、并发撞车 existsSync 判定、restore 失败聚合报错、清理失败仅 warn——dsh profile-boot.ts:102-165 逐字；shipped 名大小写不敏感保留，SHIPPED_PROFILE_NAMES=["headless"]）；load_stack 增 from_default_profile + warn 参数（Some(profile) 走 prepare）；EntryKind::bundle_name()；LoadedProfile.bundle_names（dump 重解析 raw 用，boot 级解析已求值不可复用）。
+- json_quote（JSON.stringify 式引述，手写避 unwrap）pub(crate) 于 stack.rs，dump 复用。
+- 绑定 +3：注释分层同型 → composes_layers_prints_verbatim_js_and_labels_sections；default-only 不读用户层 → default_only_collects_bundle_layers_only_and_skips_broken_user_files；from-default-profile 替换 → from_default_profile_replaces_existing_profile。bind-config-tests.py 补已绑定态幂等（current==new 即跳过）——原实现只在重生成态可重放，增量运行会误报 expected 不匹配。
+- 新测试 13：dump 侧 10（dsh config-dump.spec.ts 六测对应移植 + boot-mount 等价锚点（dump 逐行 FlatRow == compose(stack.layers).rows）+ default-only + 层序 label + raw shape + tag override 往返）+ stack 侧 3（prepare 重写根/user_layer 门 + from-default 替换 + unknown/shipped 拒绝）。
+- 测试自纠四件（首轮 6 败）：①夹具把整段 Sequence 当单条 patch（raw_rows 助手）②js_tagged 测试 base 误写为 patch list（insert 组）而非 entry list——build_map 不递归 insert 键，覆盖行永不命中③boot-mount 等价断言误用 compose()（提取行是 entry 非 override，compose 全数 warn-skip）→ 改逐行 FlatRow 对比④layer_order 测试传 cwd 相对路径；另错误文案断言 starts_with → contains（fr Error 变体带自身前缀）；!!js 引号形状 = serde_yaml_ng 单引号 '' 转义，与 js-yaml 对同内容的输出逐字节同型，钉死之。
+- 门禁终态：四关全绿（fmt / clippy --workspace --all-targets -D warnings / fr-config 78 + fr-schema 16 / doc -D warnings）；CONFIG lint Quality 100% exit 0；lifecycle = 38 passed / 263 skipped / 0 failed / 0 uncertain（exit 1 预期）；guard exit 0；stamp dry-run 38/301 passed（无可盖章 trailer，与既有一致）。
+- 留 pending（本切片剩余）：fr-schema 投影面（-schema 侧 $defs/x-fr/entry 五态/diagnostics，Session 7 真源）→ 绑 x-fr 五键 + complete 假退 1 + 来自真实装配；CLI 层场景（三态互斥/拒收位置参数/default-only 禁 --patch/退出码）Phase 18。
