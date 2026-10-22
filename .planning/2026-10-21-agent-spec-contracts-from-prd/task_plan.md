@@ -4,9 +4,8 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Q27A/Q28A/Q29A 裁决落地（2026-10-23）：to_json_schema 单一全投影面（每节点 nullable + 值位 loaderExpression 包裹，dsh 钉住形态逐位核符）；同名异 schema 分裂活化 ambiguity/complete 门（+1 钉测 +1 场景，309）；complete_1 场景退回 pending。四关全绿（88+28 tests），lifecycle 48 passed / 261 skipped / 0 failed，guard exit 0，stamp 一致；PRD 6.3 / 19.2 补条 13（Q26B 悬空引用补记）/ 23 决策 26；管线三门禁 0/0/0，questions 0 blocking。
-待用户：本轮合同验收（explain 可渲染）+ 下一切片指定。
-下一切片候选（待用户指定或确认）：按 PRD 20 M1 顺序推进 fr-session（v4 全量）或 M1 宿主切片（fr 二进制 + dump CLI 流面：stdout JSON/\n、diagnostics stderr、complete 假退 1——届时重绑 complete_1 场景）。
+Q30B 宿主切片落地（2026-10-23，用户裁决 B）：crates/fr 新建（bin：解析器 + dump 两子命令 + 根调用面），CONFIG 合约 +5 场景绑定 +2 重绑（complete_1 → incomplete_schema_dump_exits_one，default-only 拒 --patch → dump_arg_validation_error_family），场景 309→314。四关全绿（fr 8 + fr-config 88 + fr-schema 28 tests），lifecycle 55 passed / 259 skipped / 0 failed，guard exit 0，三门禁 0/0/0，questions 40/0 blocking；PRD 6.3 勘误 + 23 决策 27；fr-config 增 schema_lookup 再导出（依赖方向：fr 只依 fr-config）。Phase 12 整段关闭（dump CLI 侧已落，场景绑定随切片递增属常态）。
+待用户：本轮切片验收（explain 可渲染）+ 下一切片指定（默认回 PRD 20 顺序 Phase 13 fr-session v4 全量）。
 
 ## Current Phase
 Phase 12
@@ -89,9 +88,9 @@ Phase 12
 - [x] 分层文件装载栈（项完成于 2026-10-22，Q1-Q5 裁决落地：stack.rs 11 tests，四关全绿）
 - [x] ConfigSchema 声明框架（2026-10-22 Q7-Q10 裁决落地：fr-schema 独立 crate 描述树单一真源 + validate/to_json_schema 双派生 + registry lookup absent 语义；fr-config compile_to_loader_doc 挂接 schema_of 校验槽，2 钉测；四关全绿 42+15 tests）
 - [x] .env 分层（2026-10-22 Q11-Q14 裁决落地：49 名全表 + 四前缀、失败语义五点、materialize+快照双轨、Node util.parseEnv 方言自实现 + 官方 fixture 钉测、resolve_home；env.rs 19 tests，四关全绿）
-- [ ] dump-config / dump-config-schema 数据面（CLI 侧在 fr 宿主）
-- [ ] 对照 REQ-FR-CONFIG 场景逐条落测试（已落 24，随切片递增）
-- **Status:** in_progress
+- [x] dump-config / dump-config-schema 数据面 + CLI 流面（CLI 随 Q30B 宿主切片落地于 crates/fr，2026-10-23）
+- [x] 对照 REQ-FR-CONFIG 场景逐条落测试（已绑 55，其余 259 pending 随后续 crate 切片递增）
+- **Status:** complete
 
 ### Phase 13: fr-session v4 全量
 - [ ] SessionEvent 全集（判别联合、dsh types.ts 逐字字段、五扩展 log-only）
@@ -142,7 +141,7 @@ Phase 12
 - **Status:** modules pending
 
 ### Phase 18: fr-subagent + fr-headless + fr 宿主
-- subagent spawn/fork 子 realm、配套 5 工具；headless CLI/输出/截断梯/--session-id 四拒门禁；fr 装配器+事件泵+入口分发；dump-config 系 CLI；M1 验收六条逐条验证
+- subagent spawn/fork 子 realm、配套 5 工具；headless CLI/输出/截断梯/--session-id 四拒门禁；fr 装配器+事件泵+入口分发（dump-config 系 CLI 已随 Q30B 切片前置于 Phase 12 落地）；M1 验收六条逐条验证
 - **Status:** pending
 
 ### Phase 19: M1 验收收尾

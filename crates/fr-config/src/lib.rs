@@ -23,6 +23,7 @@ pub use env::{
     load_layered_env_into, parse_env, read_env_layer, resolve_home, resolve_home_from,
 };
 pub use error::Error;
+pub use fr_schema::lookup as schema_lookup;
 pub use patch::{
     CompileFailure, CompileOutcome, ComposeOutcome, FlatRow, PatchLine, compile_to_loader_doc,
     compose, parse_patch_lines,

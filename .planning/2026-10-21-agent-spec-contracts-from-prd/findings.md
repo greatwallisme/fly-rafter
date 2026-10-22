@@ -380,3 +380,26 @@ dsh .env 分层权威事实（app-boot/src/index.ts + util 两包，仓库 ~/pro
 - clippy --all-targets 抓 7850a55 遗留三处（文档首段过长 / `nth % 2` → `is_multiple_of` / 测试内嵌 fn rule_id 提至 tests mod 层）——前轮项目门 `clippy -- -D warnings` 不含 --all-targets 漏检测试代码；本轮起双口径并跑。
 - code-quality hook 拦 nullable 中 unreachable!——改 type_name 由构造臂传入的全函数，无占位类构造。
 - 管线 transition 首轮误用文件名且 rg 缺 -I 致 ID 污染全败——改 frontmatter id 纯提取后 20/20 过。
+
+## 2026-10-23 — Q30B 宿主切片：fr 二进制 + dump CLI 流面
+
+### 裁决与实现
+- 用户裁决 Q30B（推荐 A 被否，选 B 宿主切片）：crates/fr 新 bin crate，workspace members 增补；依赖方向合规 = fr 只依赖 fr-config（fr-schema 注册表经 `pub use fr_schema::lookup as schema_lookup` 再导出，fr 不直依 fr-schema，PRD 4.5）。
+- dsh CLI 真源全读（args.ts 全文 + bin.ts + dump-config.ts + dump-config-schema.ts + args.spec.ts + dump-config-schema.expected.e2e.ts），行为面逐条移植：校验序 = profile 缺/空 → --patch 空值 → --from-default-profile 空值 → 内参非空 → default-only+patch 互斥（dsh resolveBoot 顺序）；首个无法识别 token 起整体为内参（含 -h 与后续已知旗标，dsh allowUnknownOption + passThroughOptions 语义）；got-list 逐参数 JSON.stringify。
+- fr 子命令形态映射（决策 27）：dsh 三旗标（--dump-config/--dump-default-config/--dump-config-schema）→ fr 两子命令 + --default-only 旗标（kebab 映射，互斥文案同步映射旗标名）；dsh 三旗标互斥报错在子命令形态无可触达调用不移植；dsh desktop 拒绝与 plugin/pnpm 转发不适用 fr（无该入口/无 pnpm 层，未移植）。
+- 退出码面：!complete → 顺序输出后以 ExitCode 1 结束（等价 dsh process.exitCode=1）；dump 致命错误单行 stderr + exit 1（dsh 未捕获 throw 的 fr 等价，消息为 fr-config 错误三连）；schema happy 路径 stderr 为空（absent 不破 complete，empty registry 下 headless 14 行全 absent → complete true）。
+- M1 入口包层恒为 headless（EntryKind 单变体），入口选择面留 M2+（决策 27 载明）。
+
+### 合同层（七步流 1-2）
+- PRD 6.3 三 dump 态段勘误（fr CLI 形态 + 错误族逐字 + 根调用面）+ CLI 旗标尾句改已落地；23 决策 27；intake CONFIG-5 条款扩写 + 5 新场景（拒收内参/参数校验族/流面分流/致命错误/根调用面），309→314；bind-config-tests.py complete_1 重绑 incomplete_schema_dump_exits_one + default-only 拒 --patch 补绑 dump_arg_validation_error_family + 5 新绑定。
+- 管线全序列重跑（import → accepted 20 → draft-specs → refine → depends 清理 → 绑定重放）；lint CONFIG Quality 门 exit 0（仅 open-question advisory）。
+
+### 门禁（本会话实跑）
+- 四关全绿：fmt --check / clippy 双口径（--all-targets + plain，-D warnings）/ cargo test 8+88+28 全过 0 fail / cargo doc。
+- lifecycle（CONFIG）：314 场景 55 passed / 259 skipped / 0 failed（exit 1 属 skipped 基线）；guard exit 0；三门禁 0 errors；questions 40 total 0 blocking。
+
+### 自纠
+- 首轮 cargo build 3 错（Result 路径 fr_config::error::Result；overlays 类型 Vec<PathBuf>）且 `| tail` 再吞退出码——pipefail 纪律复记；转后台任务一律读输出文件实判。
+- 测试用例错误一次：`fr dump-config-schema --bogus` 期望内参报错但 dsh 语义 profile 缺失检查先行（action 先于 resolveBoot）——实现本就正确，用例补 --profile 后过；exact 断言定案。
+- clippy --all-targets 抓 2 处 assert_is_empty（workspace lint 表既有项）→ assert_eq!。
+- 管线 transition 复踩 REQ-NNN 占位符（req-template.md 的 id）——agent-spec 拒绝 accepted→accepted 无状态影响；后续 ID 提取应过滤 req-fr-*。

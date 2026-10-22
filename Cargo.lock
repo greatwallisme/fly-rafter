@@ -569,6 +569,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "fr"
+version = "0.1.0"
+dependencies = [
+ "fr-config",
+ "serde_json",
+]
+
+[[package]]
 name = "fr-config"
 version = "0.1.0"
 dependencies = [
