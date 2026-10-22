@@ -104,3 +104,15 @@
 - 修复 R1（中）：fr-schema Integer 校验对齐 JSON Schema 2020-12 零小数语义（f64 域判整 + const fn widen 界宽 + expect 理由化豁免），新增钉测 3 点；修复 R2（低）：default 类型化（Option<String>/Option<i64>/Option<f64>），违例默认值类型层不可构造。
 - 连带 clippy 4 项清零（unreadable_literal / wrapper fn / too_many_lines → type_object+project_properties 提取 / missing_const_for_fn）。
 - 终态：四关全绿（fmt / clippy --workspace --all-targets -D warnings / 42+16 tests / doc -D warnings），schema.rs 单文件 +97/-57 待用户评审；Next Step → .env 分层（CONFIG-13）。
+
+## Session 9 — 2026-10-22（Phase 12 续：.env 分层 dsh 真源核实）
+- `55408f5` 基线确认（已提交、工作树净）；Next Step = .env 分层（CONFIG-13）。
+- dsh .env 分层真源核实完毕，file:line 全证据落 findings.md Session 9 节：loadLayeredEnv（app-boot index.ts:238-259，两文件先全解析校验再统一应用的原子序、cwd==home 家层不读、process.env 已设名不覆盖）+ readEnvLayer（:193-225，ENOENT 静默/他错 warn 跳层非致命/大小写不敏感专名检查/home 层代理四键豁免）+ BOOTSTRAP_NAMES 49 精确名（:136-157）+ BOOTSTRAP_PREFIXES 四前缀（:160，无 NODE_ 前缀）+ HOME_LAYER_PROXY_NAMES（:169）+ loadEnv 单层变体仅测试夹具用（fr 负向钉不实现）+ 快照包（launch-environment/src/index.ts，get/getFrom 信任序 + ctx 槽 + launchedThroughSsh——app-boot 内无消费方，属后续里程碑）+ resolveDshHome（home-paths index.ts:115-121，configured > 空白未设的 $DSH_HOME > ~/.dsh，~ 展开）+ 调用点 bin.ts:36。
+- 发现 PRD/intake 与真源差异 8 项（G1-G8，findings Session 9）：G1「NODE_* 前缀」概称失真（dsh 无此前缀、仅 4 精确名）；G2 缺 DYLD_/BASH_FUNC_ 前缀；G3 46 名全表未入规格 + DEEPSEEK_* 品牌化未显式裁决；G4 拒绝语义未钉（throw 终止/原子序/warn 跳层/ENOENT 静默）；G5 大小写不敏感未记；G6 cwd==home 去重未记；G7 解析语法=node:util parseEnv、Rust 载体未定；G8 应用机制=dsh 双机制（快照+materialize）vs fr cond.rs 直读 std::env::var。
+- 集中呈 Q11-Q14（bootstrap 名单口径/失败与边界语义/应用机制与快照/解析器载体）+ 推定项 D0（resolve_home 归属 fr-config，依赖方向唯一落点）；事实/选项/推荐/裁决后动作序列落 findings.md「待裁决问题登记（2026-10-22 呈 Q11-Q14）」节；task_plan Next Step 同步待裁决。
+- 用户裁决 Q11A/Q12A/Q13A/Q14A（D0 未否决按推定成立）后落地：PRD 6.4 .env 段重写 + 19.2 条 10 + 23 决策 21；intake CONFIG-13 条款重写 + 6 新场景（原子性/读错误跳层/大小写/cwd==home 去重/双轨快照/解析方言），场景 1215→1221；管线复跑全绿（accepted 20/20、lint 0 errors、graph/plan --gate exit 0、questions 0 blocking）。
+- 计数自纠：bootstrap 名单实为 49 名（原记 46 系点数失误，缺 REQUESTS_CA_BUNDLE/CURL_CA_BUNDLE/NODE_TLS_REJECT_UNAUTHORIZED），全部文档改正并以 dsh 源实证。
+- 实现：crates/fr-config/src/env.rs（parse_env 全语义移植 Node C++ Dotenv::ParseContent + read_env_layer fail-closed + EnvSnapshot get/get_from + load_layered_env_into 原子应用 + resolve_home 族；19 tests 含官方 valid.env fixture 逐字节断言）；error.rs EnvBootstrap + patch.rs err_message 补臂。
+- 关键结构决定：fr-config 既有 #![forbid(unsafe_code)] vs Rust 2024 set_var unsafe——未放宽 forbid，以 EnvSink 承载 materialize 接缝，ProcessEnv 适配器（3 行 unsafe）后置 Phase 18 宿主 crate；已呈用户知悉。
+- 测试教训：EXPECTED 45 长度编译期逮住；双引号快路径跨行捕获与 get_from 层可达性两处期望错经 node v24.22 实证后改测试。
+- 终态：四关全绿（fmt / clippy --workspace --all-targets -D warnings / 61+16 tests / doc -D warnings），工作树待用户评审提交；Next Step → dump-config / dump-config-schema 数据面。

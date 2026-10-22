@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 12 续：.env 分层（CONFIG-13：进程 env > 项目 .env > FR_HOME/.env，已设名不覆盖，bootstrap 专名拒绝，家目录层代理四键例外；dsh app-boot index.ts:126-260 品牌映射）——dsh 真源核实 → 有分叉则集中呈裁 → 实现 + 四关。
+Phase 12 续：dump-config / dump-config-schema 数据面（对齐 dsh ConfigSchemaDump 的 $defs + x- 扩展与 entry 五态；`fr dump-config` 合成装配树同型 diff 锚点；x- 前缀品牌命名实现期定）——dsh 真源已有（findings Session 7）；有分叉集中呈裁，无分叉则实现 + 四关。
 
 ## Current Phase
 Phase 12
@@ -86,7 +86,7 @@ Phase 12
 - [x] cond.rs 受限表达式求值器（递归下降；!!js→!js 行锚定归一化绕 libyaml tag 丢失）
 - [x] 分层文件装载栈（项完成于 2026-10-22，Q1-Q5 裁决落地：stack.rs 11 tests，四关全绿）
 - [x] ConfigSchema 声明框架（2026-10-22 Q7-Q10 裁决落地：fr-schema 独立 crate 描述树单一真源 + validate/to_json_schema 双派生 + registry lookup absent 语义；fr-config compile_to_loader_doc 挂接 schema_of 校验槽，2 钉测；四关全绿 42+15 tests）
-- [ ] .env 分层（进程 env > 项目 .env > FR_HOME/.env；已设名不覆盖；专名拒绝；代理四键例外）
+- [x] .env 分层（2026-10-22 Q11-Q14 裁决落地：49 名全表 + 四前缀、失败语义五点、materialize+快照双轨、Node util.parseEnv 方言自实现 + 官方 fixture 钉测、resolve_home；env.rs 19 tests，四关全绿）
 - [ ] dump-config / dump-config-schema 数据面（CLI 侧在 fr 宿主）
 - [ ] 对照 REQ-FR-CONFIG 场景逐条落测试（已落 24，随切片递增）
 - **Status:** in_progress

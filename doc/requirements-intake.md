@@ -27,7 +27,7 @@ dsh 依赖 cordis 原生分层补丁能力装配插件；dougong loader 只接�
 - [REQ-FR-CONFIG-10] 默认装配树 MUST 与 dsh base cordis.patch.yml 插件 id 集合同型（品牌映射后），并冻结 PRD 6.4 未记载默认值：agent-instructions maxBytes 65536、projection-cache 200 事件 5000ms、web searchProvider deepseek-official 与 fetchProvider http、repeat argumentsPreviewChars 500、标题 maxOutputTokens 4096、tools 默认 native、storage-domain backend json（dsh cordis.patch.yml 各行）。
 - [REQ-FR-CONFIG-11] 启动失败策略 MUST（对齐 dsh required-id 审计 [app-boot index.ts:944-961,1092-1114]）：仅 bootstrap 入口 Include 与必需插件 id 集（fr 对应 agent-loop 与当前子命令入口插件）激活失败时以 StartupError 拒启动（错误列出失败与等待清单）；其余插件失败一律单条警告、兄弟继续；注入服务缺失 → 插件 fiber 置 pending 容忍（其 id 属必需集则致命）；导入失败记录错误后不留实例、不中止装配；patch 未知 id 警告跳过永不致命；覆盖行语义 MUST 为按键覆盖（2026-10-22 Q1 勘误，对齐 dsh applyEntryPatches），patch 行内仅其余键作用于该行自身。
 - [REQ-FR-CONFIG-12] patch 行内 env 缺省表达式 MUST 以受限子集（CONFIG-4）表达 dsh !!js 形态的对应语义：`env.FR_PERMISSION_MODE ?? workspace-write` 与 `danger-full-access` 的相等比较求值结果 MUST 与 dsh `process.env.DSH_PERMISSION_MODE ?? 'workspace-write'` 逐值一致（dsh cordis.patch.yml:246,262）。
-- [REQ-FR-CONFIG-13] .env 分层 MUST（2026-10-22 用户裁决纳入，PRD 6.4；对齐 dsh app-boot index.ts:126-260 品牌映射后）：fr-config 启动期解析环境 = 继承进程 env > 项目 `.env`（自 cwd）> 家目录 `.env`（`<FR_HOME>/.env`）；`.env` 中已设名 MUST NOT 覆盖更高层已存在的值；bootstrap 专名在任何 `.env` 层拒绝：PATH、NODE_ 前缀、代理名、DEEPSEEK_BASE_URL、全部 FR_ 与 XDG_ 前缀；家目录层例外可设 HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / NO_PROXY 四键。
+- [REQ-FR-CONFIG-13] .env 分层 MUST（2026-10-22 用户裁决纳入，Q11A/Q12A/Q13A/Q14A 定稿；bootstrap 49 名全表以 PRD 6.4 为真源）：fr-config 启动期解析环境 = 继承进程 env > 项目 `.env`（自 cwd）> 家目录 `.env`（`<FR_HOME>/.env`）；两文件 MUST 先全部解析校验、后统一应用（任一层 bootstrap 违例则两文件均不应用）；`cwd == FR_HOME` 时家目录层 MUST NOT 重复读取；`.env` 中已设名 MUST NOT 覆盖更高层已存在的值（应用序 project → user，逐名仅在更高层未设时 materialize 进程 env）；bootstrap 专名在任何 `.env` 层拒绝（大小写不敏感）：49 个精确名 = dsh BOOTSTRAP_NAMES（app-boot index.ts:136-157）逐字（DEEPSEEK_BASE_URL 与 DEEPSEEK_SEARCH_BASE_URL 保留原名）+ 四前缀 FR_ / XDG_ / DYLD_ / BASH_FUNC_（DSH_ 品牌映射）；家目录层例外仅 HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / NO_PROXY 四键（项目层设代理名仍拒绝）；bootstrap 违例 MUST 终止启动（fail-closed）；`.env` 读错误非 ENOENT = stderr 一行警告 + 该层按空层跳过（非致命）；ENOENT = 静默空层；机制为双轨 = materialize 进程 env（unsafe set_var 启动期单线程）+ 返回不可变环境快照（层序 process > project-env > user-env 的 get / get_from 逐名来源查询，消费方后续里程碑接线）；`.env` 解析语法 MUST 对齐 Node util.parseEnv 方言（自实现，以 Node 官方源码为钉测蓝本）；home 解析 = 显式 configured > `$FR_HOME`（trim 后空白视为未设）> `~/.fly-rafter`（~ 前缀展开后归一）；dsh 单层 loadEnv 变体仅测试夹具使用，fr 不实现（负向钉）
 ## Scenarios
 
 Rule: REQ-FR-CONFIG-1 — 分层装配与按键覆盖
@@ -1510,6 +1510,35 @@ Rule: REQ-FR-CONFIG-13 — .env 分层
   假设 项目 .env 试图设 FR_SESSIONS_ROOT 与 PATH，家目录 .env 试图设 HTTPS_PROXY
   当 解析各层时
   那么 前两者在任何 .env 层均拒绝（FR_ 前缀与 bootstrap 专名）；家目录层的 HTTPS_PROXY 依例外接受，项目层设代理四键仍拒绝
+场景: 任一层违例两文件均不应用
+  假设 项目 .env 含合法变量，家目录 .env 含 FR_ 前缀违例名
+  当 启动解析分层环境时
+  那么 启动终止报错，且项目 .env 的合法值也不应用
+
+场景: 读错误非 ENOENT 警告跳层
+  假设 某 .env 路径存在但不可读（如为目录）
+  当 解析该层时
+  那么 stderr 输出一行警告，该层按空层跳过，启动继续
+
+场景: 专名检查大小写不敏感
+  假设 项目 .env 以小写 path= 设置变量
+  当 bootstrap 校验时
+  那么 该行拒绝，启动终止
+
+场景: cwd 即家目录时家层不读
+  假设 进程 cwd 与 FR_HOME 解析为同一路径
+  当 启动解析分层环境时
+  那么 家目录层不读取，仅项目层生效一次
+
+场景: materialize 与环境快照双轨
+  假设 项目 .env 设未被进程环境定义的变量 X
+  当 分层解析完成后
+  那么 进程 env 可读到 X，且返回的快照按 process > project-env > user-env 层序提供逐名来源查询
+
+场景: env 解析方言对齐 Node util.parseEnv
+  假设 .env 含 # 注释行、单引号与双引号值、双引号内转义与跨行多行值
+  当 解析该文件时
+  那么 各形态结果与 Node util.parseEnv 方言逐值一致（键值去包裹、转义展开、多行保留）
 
 ## Dependencies
 
@@ -1524,6 +1553,7 @@ None.
 - confidence: high（PRD 第 6 节字段级规格，dougong 事实已一手核实）
 - doc/dsh-source-notes.md: 源码级技术关键点（file:line 证据）
 - dsh app-boot 装载栈（2026-10-22 Q1-Q5 裁决依据）：profile.ts:37-103,169-195,740-806；profile-context.ts:63-85；index.ts:520-593
+- dsh .env 分层（2026-10-22 Q11-Q14 裁决依据）：app-boot src/index.ts:114-259（loadLayeredEnv:238-259 / readEnvLayer:193-225 / BOOTSTRAP_NAMES:136-157 / BOOTSTRAP_PREFIXES:160 / HOME_LAYER_PROXY_NAMES:169）；util/launch-environment/src/index.ts:16-137（快照 get/getFrom 信任序与 ctx 槽）；util/home-paths/src/index.ts:76-121（resolveRoot / resolveDshHome）
 
 ## Open Questions
 

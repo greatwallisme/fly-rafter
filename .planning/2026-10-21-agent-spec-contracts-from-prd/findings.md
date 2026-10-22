@@ -104,3 +104,74 @@ dsh config-schema 真源（app-boot/src/config-schema/ + apps/cli/src/dump-confi
 核实无缺口 2 项：激活期链接副本再校验场景（pending_req_fr_config_fail_closed）按决策 20 属插件 crate 落地期、pending 选择器合规非缺陷；patch.rs format_config_violations 的 let _ = write!（String fmt::Write 不可能失败）带注释合规。
 
 终态：四关复跑 exit 0（fmt / clippy / 42+16 tests / doc -D warnings）；工作树 schema.rs 单文件改动待用户评审；合约三门禁不受影响（未触需求/合约文件）。
+
+## 2026-10-22 — Phase 12 续：.env 分层 dsh 真源核实（Session 9）
+
+基线：`55408f5`（Session 8 评审修复）已提交，工作树净。
+
+dsh .env 分层权威事实（app-boot/src/index.ts + util 两包，仓库 ~/project/reference/cordis/deepseek-harness）：
+
+- loadLayeredEnv（app-boot/src/index.ts:238-259）：home=resolveDshHome()；inherited={...process.env}；两文件先全部解析校验、后统一应用（:244 注释 "a rejection must not leave one file applied"——任一层违例两文件均不应用）；project=readEnvLayer(cwd)，user=(home===resolve(cwd))?undefined:readEnvLayer(home)——cwd==home 时家层不读（:246）；应用序 [project,user]，`process.env[name]===undefined` 才写（:251，不覆盖既有、project 先应用故同名 project 胜 user）；返回快照 [{process,inherited},{project-env,path,values},{user-env,path,values}]（:254-258）。
+- readEnvLayer（index.ts:193-225）：读 resolve(dir)/.env；ENOENT 静默返回 undefined；其他读错误 warn 一行 stderr 后返回 undefined（非致命跳过层，:201-207）；parseEnv=node:util 内置 .env 解析（:11,:209）；bootstrap 检查大小写不敏感（toUpperCase :180,:211）；home 层代理四键豁免（:212-213）；违例 throw（消息含 remedy 文案 :214-222）→ 启动终止（bin.ts:41 StartupError 路径）。
+- BOOTSTRAP_NAMES（index.ts:136-157，49 精确名）：PATH,HOMEDIR 组（PATH/HOME/USERPROFILE/SHELL）；NODE_OPTIONS/NODE_PATH/NODE_EXTRA_CA_CERTS；LD_PRELOAD/LD_LIBRARY_PATH/LD_AUDIT；解释器 hooks（BASH_ENV/ENV/SHELLOPTS/BASHOPTS/PERL5OPT/PERL5LIB/PYTHONSTARTUP/PYTHONPATH/RUBYOPT/RUBYLIB/JAVA_TOOL_OPTIONS/_JAVA_OPTIONS/JDK_JAVA_OPTIONS/PYTHONHOME）；VCS/编辑器组（GIT_SSH/GIT_SSH_COMMAND/GIT_EXTERNAL_DIFF/GIT_PAGER/GIT_EDITOR/GIT_ASKPASS/SSH_ASKPASS/GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM/GIT_CONFIG_COUNT/EDITOR/VISUAL/PAGER/BROWSER）；网络信任组（DEEPSEEK_BASE_URL/DEEPSEEK_SEARCH_BASE_URL/SSL_CERT_FILE/SSL_CERT_DIR/HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY/REQUESTS_CA_BUNDLE/CURL_CA_BUNDLE/NODE_TLS_REJECT_UNAUTHORIZED）。
+- BOOTSTRAP_PREFIXES（index.ts:160）：DSH_、XDG_、DYLD_、BASH_FUNC_——无 NODE_ 前缀（NODE_* 概称是 PRD 侧失真）。
+- HOME_LAYER_PROXY_NAMES（index.ts:169）：HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY（仅 home 层豁免，:163-168 注释阐明理由：随仓库 clone 而来的 invoking 目录文件不可信、home 文件是用户自有，且 DSH_HOME 本身 bootstrap-only 无法被 .env 搬走）。
+- loadEnv 单层变体（index.ts:121-133，process.loadEnvFile、无 bootstrap 校验）：仅测试夹具使用（app-boot.spec.ts:45-90、loader-smoke headless-driver.ts:21）——产品路径全走 loadLayeredEnv；fr 不实现单层等价物（负向钉）。
+- 快照包 util/launch-environment/src/index.ts（137 行）：get/getFrom 按信任序 process>project-env>user-env（SOURCE_ORDER :22）；win32 名折叠大写、POSIX 精确（lookupKey :66-69）；ctx 槽 launchEnvironment（:126-130，launcher 于任何 config entry mount 前填）+ launchEnvironmentOf（无槽回退 {process,process.env}）；launchedThroughSsh（:120-125：SSH_CONNECTION/SSH_TTY 仅 process 层、非空即真——"Project and user .env values never establish an SSH session"）；README：consumers resolve through it instead of a flattened process.env; launchers may still materialize accepted values——**dsh 双机制：快照（consumer 权威）+ materialize 进 process.env（config 表达式/三方库可见）**。
+- 快照在 app-boot src 内无消费（profile-boot.ts 无 launchEnvironment 命中）——消费方属后续里程碑（core ctx 槽/SSH 检测）。
+- resolveDshHome（home-paths/src/index.ts:115-121 + resolveRoot :76-97）：configured > $DSH_HOME（trim 后空串=未设）> join(homedir(),'.dsh')；expandHomePath（'~'/'~/'/'~\'，:59-64）；resolve 归一。品牌映射（PRD:178）：DSH_HOME→FR_HOME、.dsh→.fly-rafter。
+- 调用点：apps/cli/src/bin.ts:36（profile 启动 environment: loadLayeredEnv('dsh')，先于 runProfile）、desktop-host:26、webworker worker-host:358/436。
+- .env 解析语法 = node:util parseEnv（Node 内置 .env 方言）；fr Rust 侧载体未定。
+
+与 PRD/intake 的差异（勘误/缺口候选）：
+- G1 PRD:263「NODE_* 前缀」概称失真：dsh 无 NODE_ 前缀，仅 4 个精确 NODE_ 名；PRD 概称比 dsh 宽（会多拒任意 NODE_FOO）。
+- G2 PRD 前缀清单（FR_/XDG_）缺 DYLD_、BASH_FUNC_（非品牌前缀，应逐字搬运）。
+- G3 PRD 专名仅示例（PATH/代理名/DEEPSEEK_BASE_URL）；dsh 49 名全表须入规格；DEEPSEEK_BASE_URL/DEEPSEEK_SEARCH_BASE_URL 是否品牌化未显式裁决（intake 现文保留原名）。
+- G4 拒绝语义未钉：违例=throw 启动终止；两文件先全解析校验再统一应用（原子）；读错误非 ENOENT=warn 一行+层跳过非致命；ENOENT 静默。
+- G5 专名检查大小写不敏感未记（.env 设 path= 也拒）。
+- G6 cwd==home 家层不读（去重）未记。
+- G7 .env 解析语法=Node util.parseEnv；Rust 载体未定。
+- G8 应用机制=dsh 双机制（快照+materialize）；fr cond.rs:60 现直读 std::env::var；Rust edition 2024 中 env::set_var 为 unsafe。
+- fr 侧现状：stack.rs load_stack(home:&Path,...) home 参数化；FR_HOME 解析未实现（PRD:178 品牌行已有）。
+
+## 待裁决问题登记（2026-10-22 呈 Q11-Q14）
+
+### Q11 bootstrap 名单口径（G1/G2/G3）— 待裁决
+- 事实：dsh = 49 精确名（index.ts:136-157）+ 4 前缀（DSH_/XDG_/DYLD_/BASH_FUNC_ :160），无 NODE_ 前缀；检查大小写不敏感。
+- A（推荐）：49 名逐字搬运 + 前缀 FR_（DSH_ 品牌映射）/XDG_/DYLD_/BASH_FUNC_；DEEPSEEK_BASE_URL 与 DEEPSEEK_SEARCH_BASE_URL 保留原名（provider 名 deepseek-official 未变，1:1）；PRD 6.4 勘误（删「NODE_*」概称、补全表与四前缀）+ intake CONFIG-13 同步
+- B：按 PRD 现文字面（NODE_ 前缀 + FR_/XDG_ + 示例专名）——宽严双向偏离 dsh
+
+### Q12 失败与边界语义（G4/G5/G6）— 待裁决
+- 事实：dsh 违例=该层解析即 throw→启动终止（bin.ts:41 StartupError）；两文件先全解析校验再统一应用（原子）；读错误非 ENOENT=stderr 一行 warn+该层跳过非致命；ENOENT 静默；大小写不敏感检查；cwd==home 家层不读。
+- A（推荐）：五点全对齐 dsh；PRD 6.4 补语义段 + intake CONFIG-13 扩充 + 场景 +N
+- B：违例仅跳过该变量不终止启动（偏离 dsh fail-closed）
+
+### Q13 应用机制与快照（G8）— 待裁决
+- 事实：dsh 双机制=materialize 进 process.env（:249-253，!!js 表达式与三方库依赖此）+ 快照返回（consumer 权威，M1 无消费方）；fr cond.rs:60 直读 std::env::var；edition 2024 env::set_var 为 unsafe。
+- A：双机制全对齐——materialize（unsafe set_var，启动期单线程、任何线程/异步运行时启动前，Safety 注释论证）+ LaunchEnvironmentSnapshot 等价物随 fr-config 交付（消费方后置）
+- B（推荐）：M1 仅 materialize（unsafe set_var 同上论证）；快照等价物后置到出现消费方的里程碑（避免无消费方代码；结构小，Phase 18 宿主接线时按需补）
+- C：仅快照不 materialize，cond.rs 改经快照查——未来任意 std::env::var 调用点与子进程 environ 漏读，偏离 dsh materialize 理由
+
+### Q14 .env 解析器载体（G7）— 待裁决
+- 事实：dsh 用 node:util parseEnv（Node 内置 .env 方言：# 注释、单/双引号、双引号内转义与多行值等）。
+- A（推荐）：fr-config 自实现语义对齐解析器，实现期以 Node 官方文档+源码为钉测蓝本逐条钉
+- B：dotenvy crate——含变量扩展等 Node 无语义，禁用后仍有漂移风险，与 1:1 冲突需逐项核对
+
+### 推定项（非分叉，可否决）
+- D0：fr-config 增 resolve_home(configured: Option<&Path>) -> PathBuf，对齐 home-paths resolveRoot 语义（FR_HOME trim 空白=未设 > ~/.fly-rafter，~ 展开，resolve 归一）；依赖方向规则（领域 crate 不得依赖入口 crate）使归属唯一，stack.rs 现有 home 参数由其喂。
+
+### 裁决后动作序列
+1. PRD 6.4 .env 段勘误/扩充（按 Q11A/Q12A）+ 19.2 条 + 23 决策；intake CONFIG-13 条款扩充 + 场景补齐（三层序/不覆盖/拒绝+例外已有 3 场景，补原子性/读错误跳过/大小写/cwd==home 去重/全表拒绝族）
+2. 全管线复跑三门禁（import→accepted×20→lint/graph/plan --gate）
+3. fr-config 实现：resolve_home + env.rs（parse 层 + bootstrap 校验 + materialize）+ 钉测；四关全绿
+
+### Q11-Q14 裁决结果与落地记录（2026-10-22，Session 9 续）
+
+- 用户裁决 Q11A/Q12A/Q13A/Q14A（D0 未否决按推定成立）：bootstrap 名单 = dsh 49 精确名逐字（DEEPSEEK_* 保留原名）+ FR_/XDG_/DYLD_/BASH_FUNC_ 四前缀；失败语义五点全对齐 dsh；应用 = materialize + 快照双轨全对齐；解析器 = fr-config 自实现对齐 Node util.parseEnv。
+- 计数自纠：bootstrap 名单实为 49 名（原记 46 系点数失误——REQUESTS_CA_BUNDLE/CURL_CA_BUNDLE/NODE_TLS_REJECT_UNAUTHORIZED 在 NO_PROXY 之后），PRD/intake/findings/progress 已全部改正并以 dsh 源 rg -o 实证 49。
+- PRD 落地 3 处：6.4 .env 段重写（层序/原子性/双轨/49 名全表/代理例外/失败语义/解析语法/D0 home 解析）；19.2 条 10；23 决策 21。intake CONFIG-13 条款重写 + 6 新场景（原子性/读错误跳层/大小写/cwd==home 去重/双轨快照/解析方言），场景 1215→1221；管线复跑全绿（accepted 20/20、lint 0 errors、graph/plan --gate exit 0、questions 0 blocking）。
+- 语法钉死：parseEnv 实现为 Node C++ Dotenv::ParseContent（src/node_dotenv.cc，v22.x；main 分支无此函数、C++ 才是真源）。关键语义：\r 全局剥除；双引号快路径捕获到剩余内容最后一个闭引号（可跨真实换行，node v24.22 实证 {"A":"value\nB=2\nC="}）；未闭引号取行含引号符；未加引号值遇 # 即切（无需空格）；export 前缀（含多空格）剥离；重复键后者胜；\n 展开重扫 pos+=1 怪癖（\\n → 反斜杠+真实换行）。
+- 实现落地：crates/fr-config/src/env.rs（496→约 920 行含 19 tests；parse_env 全语义移植 + read_env_layer fail-closed + EnvSnapshot get/get_from（win32 折叠）+ load_layered_env_into 原子两文件先校验后应用 + resolve_home/resolve_home_from（FR_HOME 空白未设 > ~/.fly-rafter，~ 展开，std::path::absolute）+ 官方 valid.env fixture 逐字节入 tests/fixtures 并按 node 官方测试全量断言）；error.rs 增 EnvBootstrap(String)；patch.rs err_message 补臂。
+- 关键结构决定（呈用户知悉）：fr-config lib.rs 既有 #![forbid(unsafe_code)]，而 Rust 2024 set_var 为 unsafe——未放宽 forbid（质量红线），以 EnvSink trait 承载 materialize 接缝；含 unsafe 的 ProcessEnv 适配器（3 行）落 Phase 18 宿主 crate 启动最先调用。Q13A 的双轨机制（materialize 语义 + 快照结构）已全部交付于 fr-config 侧。
+- 排障：EXPECTED 数组 46 长度误记（实 45，node checkObj 45 键）编译期逮住；两处测试期望错（双引号快路径跨行捕获、get_from 层可达性）经 node v24.22 实证后改测试而非改实现；clippy 12 项清零（too_long_first_doc_paragraph×4/doc_markdown×2/option_if_let_else×2/collapsible_if×2/range_plus_one×2/single_match_else×2 中的实际清单）。
+- 终态：四关全绿（fmt / clippy --workspace --all-targets -D warnings / 61+16 tests / doc -D warnings）；工作树待用户评审提交；Next Step → dump-config / dump-config-schema 数据面。

@@ -113,7 +113,8 @@ fn err_message(error: &Error) -> String {
         Error::PatchLine { message, .. }
         | Error::PatchParse(message)
         | Error::Io(message)
-        | Error::Profile(message) => message.clone(),
+        | Error::Profile(message)
+        | Error::EnvBootstrap(message) => message.clone(),
     }
 }
 

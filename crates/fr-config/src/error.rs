@@ -27,6 +27,13 @@ pub enum Error {
     /// malformed `profile.yml` manifest.
     #[error("profile error: {0}")]
     Profile(String),
+
+    /// A `.env` layer set a bootstrap-only name that only the launching
+    /// environment may set; startup is refused (fail-closed, dsh
+    /// `readEnvLayer` throw path). The message is the full user-facing
+    /// diagnostic.
+    #[error("{0}")]
+    EnvBootstrap(String),
 }
 
 /// Convenience alias for configuration results.
