@@ -12,7 +12,7 @@
 //! fr assemblies carry no builtin forms (PRD 4), so the document must not
 //! claim to accept rows fr rejects.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 use serde_yaml_ng::Value as RowValue;
@@ -166,7 +166,7 @@ pub fn dump_config_schema<'s>(
     let (mut collected, valid) = walk_rows(rows, schema_of, &mut diagnostics);
     // Patch targets: last id wins across the composed tree; an invalid row
     // carrying an id clears it (dsh `indexTargets` with byOptions misses).
-    let mut targets: BTreeMap<String, usize> = BTreeMap::new();
+    let mut targets = OrderedTargets::default();
     index_targets(rows, &valid, true, &mut targets);
     let mut definitions = base_definitions();
     project_definitions(&mut collected, &mut definitions);
@@ -203,9 +203,9 @@ fn walk_rows<'s>(
     rows: &[RowValue],
     schema_of: &dyn Fn(&str) -> Option<&'s Schema>,
     diagnostics: &mut Vec<SchemaDiagnostic>,
-) -> (Vec<Collected<'s>>, Vec<usize>) {
+) -> (Vec<Collected<'s>>, HashSet<usize>) {
     let mut collected: Vec<Collected<'_>> = Vec::new();
-    let mut valid: Vec<usize> = Vec::new();
+    let mut valid: HashSet<usize> = HashSet::new();
     for (index, row) in rows.iter().enumerate() {
         let path = format!("/{index}");
         let mut entry = SchemaEntry {
@@ -224,7 +224,7 @@ fn walk_rows<'s>(
                     schema = Some(hit);
                     entry.status = EntryStatus::Schema;
                 }
-                valid.push(index);
+                valid.insert(index);
             }
             Some(message) => {
                 diagnostics.push(SchemaDiagnostic {
@@ -240,9 +240,10 @@ fn walk_rows<'s>(
 }
 
 /// The fixed `$defs` skeleton shared by every document (dsh document.ts
-/// definitions minus the cut include carrier face).
-fn base_definitions() -> BTreeMap<String, Value> {
-    let mut definitions: BTreeMap<String, Value> = BTreeMap::new();
+/// definitions minus the cut include carrier face), in dsh's insertion
+/// order.
+fn base_definitions() -> serde_json::Map<String, Value> {
+    let mut definitions = serde_json::Map::new();
     definitions.insert("loaderExpression".into(), loader_expression());
     definitions.insert("entryMetadata".into(), entry_metadata());
     definitions.insert(
@@ -271,7 +272,10 @@ fn base_definitions() -> BTreeMap<String, Value> {
 
 /// Projects registry hits to `configN` definitions cached per plugin name
 /// and fills every entry's `configRef` (misses take [`UNKNOWN_CONFIG`]).
-fn project_definitions(collected: &mut [Collected<'_>], definitions: &mut BTreeMap<String, Value>) {
+fn project_definitions(
+    collected: &mut [Collected<'_>],
+    definitions: &mut serde_json::Map<String, Value>,
+) {
     let mut projections: HashMap<String, String> = HashMap::new();
     for slot in collected.iter_mut() {
         if let Some(schema) = slot.schema {
@@ -364,10 +368,11 @@ fn entry_rules(
 }
 
 /// Builds the id-conditional patch rules binding overrides to their
-/// target's projection (dsh patch rules).
-fn patch_rules(targets: &BTreeMap<String, usize>, collected: &[Collected<'_>]) -> Vec<Value> {
+/// target's projection (dsh patch rules), in the targets map's insertion
+/// order (dsh first-set order).
+fn patch_rules(targets: &OrderedTargets, collected: &[Collected<'_>]) -> Vec<Value> {
     let mut rules: Vec<Value> = Vec::new();
-    for (id, index) in targets {
+    for (id, index) in &targets.entries {
         let Some(target) = collected.get(*index) else {
             continue;
         };
@@ -384,9 +389,10 @@ fn patch_rules(targets: &BTreeMap<String, usize>, collected: &[Collected<'_>]) -
     rules
 }
 
-/// Inserts the composed `entry` and `patch` definitions over the skeleton.
+/// Inserts the composed `entry` and `patch` definitions over the skeleton,
+/// appended after the base and `configN` definitions (dsh assignment order).
 fn insert_entry_and_patch(
-    definitions: &mut BTreeMap<String, Value>,
+    definitions: &mut serde_json::Map<String, Value>,
     entry_rules: Vec<Value>,
     patch_rules: Vec<Value>,
 ) {
@@ -446,7 +452,7 @@ fn assemble_document(
     profile: &str,
     entries: &[SchemaEntry],
     diagnostics: &[SchemaDiagnostic],
-    definitions: BTreeMap<String, Value>,
+    definitions: serde_json::Map<String, Value>,
     complete: bool,
 ) -> Value {
     let x_fr = object([
@@ -485,7 +491,7 @@ fn assemble_document(
         ),
         ("type", string("array")),
         ("items", definition_ref("entry")),
-        ("$defs", Value::Object(definitions.into_iter().collect())),
+        ("$defs", Value::Object(definitions)),
         ("x-fr", x_fr),
     ])
 }
@@ -526,16 +532,44 @@ fn validate_entry(row: &RowValue) -> Option<String> {
     None
 }
 
+/// Insertion-ordered id map reproducing dsh's JS `Map` semantics: `set`
+/// keeps an existing key's original position, `remove` preserves the
+/// remaining keys' relative order (JS `Map.delete`; `serde_json::Map`'s
+/// `remove` is swap-based under `preserve_order` and would reorder them).
+#[derive(Default)]
+struct OrderedTargets {
+    /// `(id, row index)` pairs in first-set order.
+    entries: Vec<(String, usize)>,
+}
+
+impl OrderedTargets {
+    /// JS `Map.set`: overwrite in place, append otherwise.
+    fn set(&mut self, id: String, index: usize) {
+        if let Some(slot) = self.entries.iter_mut().find(|(key, _)| *key == id) {
+            slot.1 = index;
+        } else {
+            self.entries.push((id, index));
+        }
+    }
+
+    /// JS `Map.delete`: close the gap without reordering survivors.
+    fn remove(&mut self, id: &str) {
+        self.entries.retain(|(key, _)| key != id);
+    }
+}
+
 /// Indexes patch targets over the composed tree (dsh `indexTargets`): a
 /// valid collected row with a nonempty literal `id` claims the target, any
 /// other row carrying the same id clears it. Descends into truthy-group
 /// config arrays where no row can be a collected entry (fr walks no carrier
-/// subtrees), preserving dsh's clear-on-miss semantics.
+/// subtrees), preserving dsh's clear-on-miss semantics. `valid` is only
+/// consulted at the collectable (top) level; carrier-descended rows always
+/// clear.
 fn index_targets(
     rows: &[RowValue],
-    valid: &[usize],
+    valid: &HashSet<usize>,
     collectable: bool,
-    targets: &mut BTreeMap<String, usize>,
+    targets: &mut OrderedTargets,
 ) {
     for (index, row) in rows.iter().enumerate() {
         let RowValue::Mapping(_) = row else {
@@ -545,7 +579,7 @@ fn index_targets(
             && !id.is_empty()
         {
             if collectable && valid.contains(&index) {
-                targets.insert(id.clone(), index);
+                targets.set(id.clone(), index);
             } else {
                 targets.remove(id);
             }
@@ -979,6 +1013,20 @@ mod tests {
             7,
             "no configN may exist without registry hits"
         );
+        let order: Vec<&str> = definitions.keys().map(String::as_str).collect();
+        assert_eq!(
+            order,
+            [
+                "loaderExpression",
+                "entryMetadata",
+                "entryList",
+                "patchList",
+                "unknownConfig",
+                "entry",
+                "patch"
+            ],
+            "$defs must print in dsh insertion order"
+        );
     }
 
     /// Pins the registry-hit face: `schema` status, a shared `configN`
@@ -1014,6 +1062,21 @@ mod tests {
             definitions.get("config0"),
             Some(&to_json_schema(&schema)),
             "config0 must equal the declaration's projection"
+        );
+        let order: Vec<&str> = definitions.keys().map(String::as_str).collect();
+        assert_eq!(
+            order,
+            [
+                "loaderExpression",
+                "entryMetadata",
+                "entryList",
+                "patchList",
+                "unknownConfig",
+                "config0",
+                "entry",
+                "patch"
+            ],
+            "configN definitions append before entry/patch, as in dsh"
         );
         assert!(dumped.complete);
     }
@@ -1120,6 +1183,36 @@ mod tests {
             .and_then(Value::as_array)
             .unwrap_or_else(|| panic!("patch allOf missing"));
         assert_eq!(all_of[1], patch_rule("t", "a", "#/$defs/config0"));
+
+        // Patch rules print in dsh's first-set order, not id-sorted order.
+        fn rule_id(dumped: &SchemaDump, offset: usize) -> String {
+            defs(&dumped.document)
+                .get("patch")
+                .and_then(Value::as_object)
+                .and_then(|patch| patch.get("allOf"))
+                .and_then(Value::as_array)
+                .unwrap_or_else(|| panic!("patch allOf missing"))[offset]
+                .get("if")
+                .and_then(|branch| branch.get("properties"))
+                .and_then(|properties| properties.get("id"))
+                .and_then(Value::as_object)
+                .and_then(|id| id.get("const"))
+                .and_then(Value::as_str)
+                .unwrap_or_else(|| panic!("rule id missing"))
+                .to_owned()
+        }
+        let ordered = parse_rows("- id: b\n  name: x\n- id: a\n  name: y\n- id: b\n  name: z\n");
+        let dumped = dump(&ordered);
+        assert_eq!(rule_id(&dumped, 1), "b", "first-set order, not id-sorted");
+        assert_eq!(rule_id(&dumped, 2), "a");
+
+        // A cleared id leaves the remaining ids' relative order intact
+        // (dsh Map.delete; serde_json remove would swap-reorder them).
+        let cleared =
+            parse_rows("- id: a\n  name: x\n- id: b\n  name: y\n- id: c\n  name: z\n- id: a\n");
+        let dumped = dump(&cleared);
+        assert_eq!(rule_id(&dumped, 1), "b");
+        assert_eq!(rule_id(&dumped, 2), "c", "delete keeps remaining order");
     }
 
     /// Pins the stable diagnostics order: path-less diagnostics (skipped
