@@ -109,7 +109,10 @@ fn convert_config(
 
 fn err_message(error: &Error) -> String {
     match error {
-        Error::PatchLine { message, .. } | Error::PatchParse(message) => message.clone(),
+        Error::PatchLine { message, .. }
+        | Error::PatchParse(message)
+        | Error::Io(message)
+        | Error::Profile(message) => message.clone(),
     }
 }
 
@@ -254,7 +257,7 @@ pub fn parse_patch_lines(yaml: &str, ctx: &EvalContext) -> Result<Vec<PatchLine>
     {
         return Err(Error::PatchParse(
             "`!!js` tag outside a recognized value position (flow style is not supported); \
-             use `key: !!js \"expr\"` on its own line"
+             write `key: !!js \"expr\"` on its own line"
                 .to_owned(),
         ));
     }

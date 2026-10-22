@@ -17,6 +17,16 @@ pub enum Error {
         /// Human-readable rule violation.
         message: String,
     },
+
+    /// A file-system operation failed during layered loading; the path is
+    /// embedded in the message.
+    #[error("config io error: {0}")]
+    Io(String),
+
+    /// The profile layer is invalid: illegal name, unknown profile, or a
+    /// malformed `profile.yml` manifest.
+    #[error("profile error: {0}")]
+    Profile(String),
 }
 
 /// Convenience alias for configuration results.

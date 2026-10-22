@@ -203,8 +203,10 @@ fly-rafter/
 1. 入口默认 bundle（headless/tui/acp/sdk/web 各自的内置清单，角色同 dsh `packages/bundle/*`）
 2. profile bundle 栈（`fr --profile <name>`，`fr <name>` 为缩写）
 3. profile patch
-4. 家目录 patch（`~/.fly-rafter/profiles/`）
+4. 家目录 patch（`<FR_HOME>/fr.patch.yml`，2026-10-22 Q1 勘误：原括号 `~/.fly-rafter/profiles/` 与 dsh 真源 home 根不符）
 5. `--patch <file>` 命令行补丁
+
+**装载文件语义（2026-10-22 Q1-Q5 裁决，对齐 dsh app-boot `profile.ts` / `profile-context.ts` / `index.ts`）**：profile = `<FR_HOME>/profiles/<name>/` 目录，清单 `profile.yml`（`bundles:` 列表仅引用宿主内置命名 bundle，未知名 → skipped 警告非致命）；profile patch = `<profile>/fr.patch.yml`（可选，缺文件 = 空层）；家目录 patch = `<FR_HOME>/fr.patch.yml`（可选，缺文件 = 空层）；`--patch` 为必需文件，缺文件即启动失败；任何 patch 解析错误 fail-closed 终止启动；profile 名校验拒绝空名、含 `/` 或 `\`、`.`、`..`、`node_modules`；已知入口名的 profile 首次使用自动初始化（清单 + 空白 patch 模板，绝不覆盖既有文件；fr 模板 bundles 为空列表——入口默认 bundle 恒在层 1，不重复挂载，dsh 模板 bundles 的职责由层 1 等价承担），未知名报错。入口默认 bundle 以嵌入 YAML 文本常量进 fr-config，与用户 patch 走同一解析路径；M1 为最小 headless 集（仅装 M1 存在的 crate、config 值逐条对齐 6.4 表），完整 dsh 品牌映射抽取随后续里程碑。
 
 **合并语义（2026-10-22 勘误对齐 dsh 源码 `vendor/include/src/index.ts:57-127`，Q1/Q2 裁决）**：行内 `id`/`name` 是**匹配器**；其余键**逐键覆盖**（`config` 作为单键整体替换、不深合并；只写 `disabled` 的覆盖行仅翻转 disabled、其余键不动）；覆盖行未命中 id → 警告并跳过（不报错、不致命）；`name` 不匹配 → 警告并跳过；行序 = 首次插入序（覆盖不改变行位置）；`insert` 行向装配根插入新行（Q2：fr 不做 `group` 嵌套，仅根级插入）；后续层可覆盖先前层插入的行。
 
@@ -622,9 +624,9 @@ fr headless [TASK] [--session-id <id>] [--json] [--help]
 2. 品牌/命名替换（第 5 节表）——文本级唯一改动为身份句
 3. 插件配置键由 dsh 的 camelCase 转为 kebab-case（用户裁决 2026-10-21，见第 5 节适配表与 5.1）：不承诺与 dsh 配置文件互换；协议 wire 层（会话事件、工具 schema、SDK/ACP 参数）不受影响，仍逐字 1:1
 4. 除上述各条与 19.1 排除项外，**不存在其他已知偏差**；实现中发现新的不可避免偏差必须先记录到本节并经用户确认
-5. PRD 勘误（2026-10-21 源码核对，按 dsh 源码修正正文 12 处）：会话头 seedLength、tool/call 时序、绑定名规则、PTC wire 帧、程序 fs 访问、CONTEXT_ORDERS 行号、AGENTS.md 注入形态、image_request_target、SDK 未知方法错误码、空渲染语义、审批切换文案、独占发布细节；依据见 doc/dsh-source-notes.md
 5. PRD 勘误与源码补遗（2026-10-21 源码核对）：正文 12 处与 dsh 源码不符已按源码修正（会话头 seedLength、tool/call 时序、绑定名规则、PTC wire 帧、程序 fs 访问、CONTEXT_ORDERS 行号、AGENTS.md 注入形态、image_request_target、SDK 未知方法错误码、空渲染语义、审批切换文案、独占发布细节）；另将 dsh 源码级技术关键点（默认装配树锚点、surface 硬约束、两级补偿、header 判定算法、缓存友好路由、管线与调度细则、PTC 实现细则、组装确定性、审批细则、流装配结算、三 provider 协议细则、入口输出细则、ACP 与 SDK 生命周期细则）并入正文各节。全部依据见 doc/dsh-source-notes.md（file:line 证据）
 6. 装配语义勘误（2026-10-22 Q1-Q3 裁决）：6.1 "按 id 整行替换"勘误为 dsh 实际的**按键覆盖**语义（id/name 匹配器、逐键覆盖、config 整键替换不深合并、未命中 id 或 name 不匹配均警告跳过、行序=首次插入序）；行模型增补 `insert`（根级插入，不做 group——base patch 未用、dougong 无组概念）；`!!js` 子集按 bundle patches 全量盘点（22 处）扩充：env `??` 默认链、相等比较、平台三元、裸 env 值、字面量、profile-context 布尔（dsh `ctx.get('profileContext')` 的 fr 等价物）；"dsh 中该语法仅用于平台门控与 env 读取"的原表述勘误；sdk-app `getBuiltinModule` 路径解析类 6 处不做（对象属桌面打包面，19.1 已裁）。依据 `vendor/include/src/index.ts:57-127`
+7. 装载文件布局勘误与裁决（2026-10-22 Q1-Q5）：6.1 家目录 patch 括号路径 `~/.fly-rafter/profiles/` 勘误为 `<FR_HOME>/fr.patch.yml`（dsh 真源为 home 根 cordis.patch.yml，profile-context.ts:78）；profile 清单定为 `<profile>/profile.yml`（`bundles:` 仅引用宿主内置命名 bundle，未知名 skipped 警告非致命——dsh 的 npm 包栈与 pnpm 机制在 fr 无对应物，插件市场已裁）；profile 模板自动初始化纳入 M1（1:1 dsh 首用 init：绝不覆盖既有文件，未知名报错）；入口默认 bundle 为嵌入 YAML 常量、与用户 patch 同一解析路径（dsh bundle 与用户 patch 同 schema，app-boot index.ts:268）；M1 默认 bundle 为最小 headless 集，完整品牌映射抽取后置。依据 `packages/boot/app-boot/src/{profile.ts,profile-context.ts,index.ts}`
 
 ### 19.3 wire 层声明
 
@@ -689,3 +691,4 @@ fr headless [TASK] [--session-id <id>] [--json] [--help]
 15. 命名硬约束（Rust 风格，禁 TS 风格）：代码标识符 snake_case，自有用户可见命名 kebab-case；dsh camelCase 插件配置键转 kebab-case（19.2 条 3），协议 wire 层保持逐字 1:1
 16. 插件仅 dylib 与 wasm 两形态（2026-10-22 用户裁决）：第一方组件全部为 C-ABI dylib 工件（内核家族仅依赖 dougong-abi），wasm 仅承载第三方沙箱扩展；loader builtin 表在 fr 装配中从不使用；fr-config 为宿主直链库（非插件，先于装载存在）；宿主进程内面 = dougong 内核 + dougong-loader + fr-config + 宿主壳（CLI 解析/事件泵/入口分发）；跨边界载荷一律 Invoker 通道 JSON 字节，共享形状经 fr-wire 纯 serde 库按副本共享
 17. 装配合并语义对齐 dsh 源码（2026-10-22 Q1-Q3 裁决）：按键覆盖（id/name 匹配器、逐键覆盖、config 整键替换、missed warn-skip、首次插入序）；`insert` 根级插入、不做 group；`!!js` 子集 = env `??` 默认链、相等比较（`==`/`===`）、平台三元、裸 env 值读取、字面量、profile-context 布尔（含 `!` 取反）
+18. 装载文件布局（2026-10-22 Q1-Q5 裁决）：家目录 patch = `<FR_HOME>/fr.patch.yml`（对齐 dsh home 根）；profile 清单 = `<profile>/profile.yml`，bundles 仅引用宿主内置命名 bundle、未知名 skipped 非致命；profile 模板自动初始化纳入 M1（首用建清单+空白 patch，不覆盖既有；fr 模板 bundles 为空——入口默认 bundle 恒在层 1）；入口默认 bundle 为嵌入 YAML 常量走同一解析路径；M1 默认 bundle 为最小 headless 集（完整品牌映射抽取后置）

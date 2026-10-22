@@ -1,0 +1,42 @@
+# Headless entry default bundle (M1 minimal set; PRD 6.1/6.4, 2026-10-22 Q5B).
+# One flat insert group (same shape as the dsh base patch). Tool-level config
+# defaults from PRD 6.4 (repeat/glob/todo/bash-timeout) land with the
+# fr-tools-builtin config schema (Phase 16) and are intentionally absent here.
+- insert:
+    - id: llm-primary
+      name: fr-llm-deepseek
+      config:
+        model: deepseek-flash
+    - id: approval-policy
+      name: fr-approval
+      config:
+        policy: !!js "(env.FR_PERMISSION_MODE ?? 'workspace-write') === 'danger-full-access' ? 'never' : 'ask'"
+    - id: sandbox
+      name: fr-sandbox
+      config:
+        mode: !!js "env.FR_PERMISSION_MODE ?? 'workspace-write'"
+    - id: session-persistence
+      name: fr-session
+    - id: agent-loop
+      name: fr-agent-loop
+    - id: system-prompt
+      name: fr-system-prompt
+    - id: tools
+      name: fr-tools
+      config:
+        max-parallel-tool-calls: 10
+        mode: native
+    - id: tools-builtin
+      name: fr-tools-builtin
+    - id: shell
+      name: fr-shell
+    - id: compaction
+      name: fr-compaction
+    - id: mcp
+      name: fr-mcp
+    - id: ptc
+      name: fr-ptc
+    - id: subagent
+      name: fr-subagent
+    - id: headless-entry
+      name: fr-headless

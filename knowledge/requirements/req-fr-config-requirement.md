@@ -13,7 +13,7 @@ dsh 依赖 cordis 原生分层补丁能力装配插件；dougong loader 只接�
 
 ## Requirements
 
-- [REQ-FR-CONFIG-1] fr-config MUST 解析 fr.patch.yml 有序分层装配（自底向上：入口默认 bundle → profile bundle 栈 → profile patch → 家目录 patch → `--patch` 命令行补丁），合并语义 MUST 对齐 dsh `applyEntryPatches`（2026-10-22 Q1/Q2 裁决，vendor/include/src/index.ts:57-127）：行内 id/name 为匹配器，其余键**逐键覆盖**（config 整键替换不深合并；只携 disabled 的覆盖行仅翻转 disabled）；覆盖行未命中 id 或 name 不匹配 → 警告跳过（不致命、不进 failures）；行序 = 首次插入序；`insert` 行 MUST 向装配根插入新行（fr 不做 group 嵌套），后续层 MUST 能覆盖先前层插入的行。
+- [REQ-FR-CONFIG-1] fr-config MUST 解析 fr.patch.yml 有序分层装配（自底向上：入口默认 bundle → profile bundle 栈 → profile patch → 家目录 patch → `--patch` 命令行补丁），合并语义 MUST 对齐 dsh `applyEntryPatches`（2026-10-22 Q1/Q2 裁决，vendor/include/src/index.ts:57-127）：行内 id/name 为匹配器，其余键**逐键覆盖**（config 整键替换不深合并；只携 disabled 的覆盖行仅翻转 disabled）；覆盖行未命中 id 或 name 不匹配 → 警告跳过（不致命、不进 failures）；行序 = 首次插入序；`insert` 行 MUST 向装配根插入新行（fr 不做 group 嵌套），后续层 MUST 能覆盖先前层插入的行。装载文件布局 MUST（2026-10-22 Q1/Q2/Q3 裁决，对齐 dsh app-boot profile.ts / profile-context.ts / index.ts）：profile = `<FR_HOME>/profiles/<name>/`，名字校验拒绝空名、含 `/` 或 `\`、`.`、`..`、`node_modules`；清单 `profile.yml` 的 `bundles:` 仅引用宿主内置命名 bundle，未知名 → skipped 警告非致命；profile patch = `<profile>/fr.patch.yml`（可选，缺文件 = 空层）；家目录 patch = `<FR_HOME>/fr.patch.yml`（可选，缺文件 = 空层）；`--patch` 为必需文件、缺文件报错终止；任何 patch 解析错误 fail-closed；已知入口名的 profile 首次使用自动初始化（清单 + 空白 patch 模板，绝不覆盖既有文件；fr 模板 bundles 为空列表——入口默认 bundle 恒在层 1，不重复挂载），未知名报错。
 - [REQ-FR-CONFIG-2] fr-config MUST 将展开后的装配编译为 dougong loader JSON 文档（source.kind 仅 dylib/wasm：行 name 经产物解析规则映射——字面路径，或 `FR_PLUGIN_PATH` 各目录与安装库目录 `<prefix>/lib/fr/` 下按 slug（`-`→`_`）先查 `lib<slug>.so`（dylib）再查 `<slug>.wasm`（wasm），先命中定形态，未命中进入 failures；config 对象、isolate），经 `Reconciler::replace + apply` 幂等收敛；编译产物 MUST 为 dougong `Config::parse` 可接受的合法文档，且 MUST NOT 出现 builtin source。
 - [REQ-FR-CONFIG-3] fr-config MUST 在装配期对每行 config 依据插件导出的 ConfigSchema 校验；单行校验失败进入 `Report::failures`，MUST NOT 阻塞其余槽位。
 - [REQ-FR-CONFIG-4] patch 行内条件表达式（`!!js` 标记或 `!!js ` 前缀字符串）MUST 限于受限声明式子集（2026-10-22 Q3A 勘误扩充）：`env.NAME ?? 默认值` 链、相等比较（`==`/`===`）、`platform === 'linux'|'macos'|'windows'` 与平台三元、裸 env 值读取、字面量、`profile-context` 布尔（dsh `ctx.get('profileContext')` 的 fr 等价物：入口/profile 上下文存在性，支持 `!` 取反）；MUST NOT 支持任意 JS 求值；子集外表达式（如 `getBuiltinModule` 类）MUST 求值失败 fail-closed（patch 文档整体拒绝，启动终止——对齐 dsh 用户层 patch 错误抛出语义）。
@@ -60,6 +60,46 @@ Rule: REQ-FR-CONFIG-1 — 分层装配与按键覆盖
   假设 某 bundle 层以 insert 行插入两个新 id
   当 合并完成后
   那么 新行按插入序追加于行列表尾，后续层可按 id 覆盖这些插入行
+
+场景: profile 清单 bundle 栈按清单序叠加
+  假设 profile.yml 的 bundles 列表为 [a, b] 且两者均为内置命名 bundle
+  当 装载该 profile 时
+  那么 bundle 层按清单序（先列者先应用）叠加于入口默认 bundle 之后、profile patch 之前
+
+场景: profile 清单未知名 skipped 警告非致命
+  假设 profile.yml bundles 引用了不存在的 bundle 名
+  当 装载该 profile 时
+  那么 该名进入 skipped 列表并附原因，其余 bundle 正常装载，不致命
+
+场景: profile 名校验拒绝非法名
+  假设 profile 名为空、含 / 或 \、等于 . 或 ..、或为 node_modules
+  当 解析 profile 引用时
+  那么 拒绝并报错，不产生文件系统副作用
+
+场景: profile 模板首用自动初始化
+  假设 FR_HOME/profiles/headless 目录不存在
+  当 首次以 profile 名 headless 装载时
+  那么 自动创建目录、profile.yml（bundles 为空列表）与空白 fr.patch.yml 模板，绝不覆盖既有文件
+
+场景: 未知 profile 名报错
+  假设 profile 名无内置模板且对应目录不存在
+  当 装载该 profile 时
+  那么 报错指明 profile 不存在，启动终止
+
+场景: 可选 patch 缺文件为空层
+  假设 profile patch 与家目录 patch 文件均不存在
+  当 装载时
+  那么 两处均按空层处理，不报错
+
+场景: --patch 缺文件报错
+  假设 --patch 给出的路径不存在
+  当 装载 overlays 时
+  那么 报错并终止启动
+
+场景: patch 解析错误 fail-closed
+  假设 任一层 patch 文件存在解析错误（行 schema 违例或子集外表达式）
+  当 装载时
+  那么 报错并终止启动，不产生部分装配产物
 
 Rule: REQ-FR-CONFIG-2 — 编译为 loader 文档
 
@@ -1451,12 +1491,13 @@ None.
 
 ## Source Trace
 
-- doc/prd.md#6.1: 装配 = 有序 bundle 栈；后行按 id 整行替换前行（含 config、disabled）
+- doc/prd.md#6.1: 装配 = 有序 bundle 栈；按键覆盖合并语义与装载文件布局（2026-10-22 Q1-Q5 勘误后）
 - doc/prd.md#6.2: 编译产物为 dougong loader 文档；"分层、行覆盖、YAML 在 dougong 中一概不存在——它们全部是 fr-config 的职责"
 - doc/prd.md#6.3: 每个插件 crate 导出 static ConfigSchema；失败进入 Report::failures 不阻塞其他槽；fr dump-config / dump-config-schema
 - doc/prd.md#6.4: 关键默认值表
 - confidence: high（PRD 第 6 节字段级规格，dougong 事实已一手核实）
 - doc/dsh-source-notes.md: 源码级技术关键点（file:line 证据）
+- dsh app-boot 装载栈（2026-10-22 Q1-Q5 裁决依据）：profile.ts:37-103,169-195,740-806；profile-context.ts:63-85；index.ts:520-593
 
 ## Open Questions
 

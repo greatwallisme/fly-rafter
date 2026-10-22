@@ -191,3 +191,10 @@
 - PRD 改写 11 处：1.4.2 原则、4.2 装配器、4.3 全节重写（两形态表+裁决依据+负向钉 builtin）、4.4 跨边界载荷形状、4.5 布局（fr-wire 入列、插件 crate 全 cdylib 仅依赖 dougong-abi）、6.2 产物解析规则（FR_PLUGIN_PATH → 安装库目录，lib<slug>.so / <slug>.wasm，未命中进 failures）、6.3 schema 真源宿主侧+双侧校验、8.1 循环 dylib 工件、20 M1 范围注记、22 风险对策、23 决策 16
 - intake 改写：CONFIG-2（source 仅 dylib/wasm+解析规则+禁 builtin）、CONFIG-8（全节重写：两形态、第一方全 dylib、信任校验、禁 builtin）；场景 +3（第一方 wasm 拒绝改写、工件缺失失败、产物无 builtin）、改 3（Invoker 通道泛化、两形态装载、循环 fiber 工件归属）；AGENT-LOOP 场景 1 处
 - 全管线复跑全绿：accepted×20、三门禁通过、场景 1193→1195
+
+## 八、装载文件布局裁决（2026-10-22 Q1-Q5）
+
+用户裁决：Q1A 家目录 patch = `<FR_HOME>/fr.patch.yml`（对齐 dsh home 根，PRD 6.1 勘误 + 19.2 条 7 + 23 决策 18）；Q2A profile 清单 = `<profile>/profile.yml`（bundles 仅引用宿主内置命名 bundle，未知名 skipped 警告非致命）；Q3A profile 模板自动初始化纳入 M1（1:1 dsh 首用 init，绝不覆盖既有文件；fr 模板 bundles=[] 为 Q2A+Q5B 推导——入口默认 bundle 恒在层 1）；Q4A 入口默认 bundle 为嵌入 YAML 常量、与用户 patch 同一解析路径；Q5B M1 默认 bundle 为最小 headless 集（14 行单 insert 组，config 值逐条对齐 PRD 6.4；工具级默认值随 Phase 16 fr-tools-builtin config schema 落地）。
+
+- PRD 落地 5 处（6.1 勘误 + 装载文件语义段、19.2 去重 + 条 7、23 决策 18）；intake CONFIG-1 扩充 + 8 新场景；管线复跑全绿场景 1210。
+- fr-config stack.rs 落地（装载/名字校验/清单/初始化/装配 + 11 tests），tests 26→37，四关全绿。

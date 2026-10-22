@@ -69,3 +69,15 @@
 - fr-config 实现：cond.rs（受限表达式求值器：递归下降、?? 链语法消费、单双引号字面量、profile-context 布尔）；patch.rs 重写（PatchLine{id,name,config,disabled,insert}、compose 按 dsh 语义、row_from_value 走行保 tag、!!js→!js 行锚定归一化——libyaml 二级句柄展开致 serde_yaml_ng 丢 quoted tag 的规避）。tests 12→24，四关全绿。
 - 排障记录：eat("?") 误吞 "??"（lookahead 修复）；serde_json 不认单引号字面量（手写扫描）；PatchLineRaw derive 路径丢 tag（整文档解 Value 后手工走行）。
 - 代码评审（/code-review high --fix，后台代理因 API 模型名 400 失败，本会话直接执行，subagent 用量 0/2）：评审对象 0d3e87e。发现 5 项并全部修复：R1（中）flow 风格 !!js 会被 libyaml 静默丢 tag 成普通字符串 → 归一化后残留检测 fail-closed + 钉测；R2 链式 ??（PRD"链"语义）→ 循环消费 + 钉测（含空串非 nullish 语义）；R3 未用变体 InvalidPath 删除；R4 regex 移入 workspace 依赖；R5 测试名名实不符更名。修复过程 clippy 收尾 3 处（must_use 误挂 static、同体 match 臂、# Panics）。终态：四关全绿 26 tests。
+
+## Session 6 — 2026-10-22（Phase 12 续：装载栈真源核实）
+
+- 6528ee8 基线四关全绿 26 tests 确认（工作树干净）。
+- dsh 装载栈真源核实完毕（app-boot profile.ts / profile-context.ts / index.ts，file:line 证据落 findings.md）：应用序 bundle 层 → profile patch → 家目录 patch → --patch overlays；可选/必需文件语义、bundle skip 非致命、名字校验、模板自动初始化。
+- 发现 doc/prd.md:206 家目录 patch 括号路径（profiles/）与 dsh 真源（home 根）不一致，列勘误候选。
+- 集中呈 Q1-Q5（家目录 patch 位置 / profile 清单与 bundle 栈 / 模板初始化范围 / 默认 bundle 形态 / 内容来源），问题全文（事实/选项/推荐/裁决后动作序列）已登记 findings.md「待裁决问题登记」节，待裁决后动代码。
+- 用户裁决 Q1A/Q2A/Q3A/Q4A/Q5B（2026-10-22）：装载文件布局定稿；Q3A 与推荐 B 不同（模板自动初始化纳入 M1），按裁决执行。
+- PRD 落地 5 处：6.1 家目录 patch 路径勘误（<FR_HOME>/fr.patch.yml）+ 新增装载文件语义段（profile.yml 清单/名字校验/模板初始化/可选与必需文件语义/最小 M1 bundle 范围）；19.2 重复条 5 机械去重 + 新条 7；23 决策 18。
+- intake CONFIG-1 扩充（装载文件布局 MUST）+ 8 新场景；CONFIG Source Trace 增 app-boot file:line 证据并同步 6.1 勘误表述。全管线复跑全绿：accepted 20/20、三门禁 0 errors，场景 1202→1210。
+- fr-config stack.rs 落地：PROFILES_DIR/PATCH_FILENAME/MANIFEST_FILENAME 常量、validate_profile_name（dsh profile.ts:169-176 规则）、read_profile_manifest（严格 schema 未知键拒绝）、load_optional_patches/load_required_overlay（可选缺文件=空层、必需缺文件=启动失败）、init_profile（幂等绝不覆盖）、load_profile（首用模板初始化、未知名报错）、load_stack（入口 bundle → profile 栈+patch → 家目录 patch → overlays 五层装配）、内置 headless bundle 资产（14 行单 insert 组，6.4 值对齐）。tests 26→37，四关全绿（fmt/clippy -D warnings/test/doc）。
+- 排障：clippy 重构引入 profile patch 无条件推入的幽灵空层（entry-only 栈 layers=2 被 37 号测试逮住，改 Option 条件推入）；const fn 内 &str 字面量匹配要求 const PartialEq（未稳定）→ 去 const；hook 误报 patch.rs "use inside function body" 系错误文案含 "use" 字样，改写为 "write"；rg 多文件模式 -o 带 path: 前缀导致 transition 首跑全败，改逐文件提取修复。

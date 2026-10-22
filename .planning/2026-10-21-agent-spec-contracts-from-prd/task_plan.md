@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 12 续：分层文件装载栈（入口默认 bundle / profile 栈 / 家目录 patch / --patch 的加载与展开 API）。
+Phase 12 续：ConfigSchema 声明框架（宿主侧 schema 库，装配期校验进 failures，激活期插件工件内同一 schema 库链接副本双侧校验；PRD 6.3）。
 
 ## Current Phase
 Phase 12
@@ -84,7 +84,7 @@ Phase 12
 - [x] 2026-10-22 Q1-Q3 裁决：合并语义对齐 dsh applyEntryPatches（按键覆盖/warn-skip/首插序）；insert 根级；!!js 子集扩充（env ?? 链/相等/平台三元/裸 env/字面量/profile-context 布尔）——PRD 6.1/6.2/5/19.2/23 与 intake CONFIG-1/4/11/12 已勘误，管线全绿 1202 场景
 - [x] 补丁行模型 + 合并器 compose（dsh 语义）+ 产物解析 + 信任校验 + 编译产出 doc+failures（禁 builtin）
 - [x] cond.rs 受限表达式求值器（递归下降；!!js→!js 行锚定归一化绕 libyaml tag 丢失）
-- [ ] 分层文件装载栈（入口默认 bundle / profile 栈 / 家目录 patch / --patch 文件加载与展开）
+- [x] 分层文件装载栈（项完成于 2026-10-22，Q1-Q5 裁决落地：stack.rs 11 tests，四关全绿）
 - [ ] ConfigSchema 声明框架（宿主侧 schema 库，装配期校验进 failures，激活期双侧校验）
 - [ ] .env 分层（进程 env > 项目 .env > FR_HOME/.env；已设名不覆盖；专名拒绝；代理四键例外）
 - [ ] dump-config / dump-config-schema 数据面（CLI 侧在 fr 宿主）
