@@ -145,9 +145,21 @@ fn expand_double_quoted_newlines(value: &str) -> String {
 /// duplicate key wins.
 #[must_use]
 pub fn parse_env(input: &str) -> BTreeMap<String, String> {
+    parse_env_entries(input).into_iter().collect()
+}
+
+/// Parse `.env` content into `(name, value)` pairs in file order (same
+/// dialect as [`parse_env`]).
+///
+/// dsh validates each layer by iterating `Object.keys` of the parsed
+/// object (app-boot `src/index.ts` `readEnvLayer`), so the first
+/// bootstrap-only name in file order — not in sorted order — is the one a
+/// refusal names; duplicate keys keep their first position, and collecting
+/// into a map yields the last-assignment-wins view.
+fn parse_env_entries(input: &str) -> Vec<(String, String)> {
     let flat = input.replace('\r', "");
     let mut content: &str = trim_spaces(&flat);
-    let mut store = BTreeMap::new();
+    let mut store = Vec::new();
     while !content.is_empty() {
         if content.starts_with('\n') || content.starts_with('#') {
             content = skip_to_next_line(content);
@@ -163,7 +175,7 @@ pub fn parse_env(input: &str) -> BTreeMap<String, String> {
         let mut key = trim_spaces(&content[..eq]);
         content = &content[eq + 1..];
         if content.is_empty() || content.starts_with('\n') {
-            store.insert(key.to_owned(), String::new());
+            store.push((key.to_owned(), String::new()));
             continue;
         }
         content = trim_spaces(content);
@@ -174,39 +186,39 @@ pub fn parse_env(input: &str) -> BTreeMap<String, String> {
             key = trim_spaces(rest);
         }
         if content.is_empty() {
-            store.insert(key.to_owned(), String::new());
+            store.push((key.to_owned(), String::new()));
             break;
         }
         if content.starts_with('"')
             && let Some(close) = content[1..].find('"')
         {
             let value = expand_double_quoted_newlines(&content[1..=close]);
-            store.insert(key.to_owned(), value);
+            store.push((key.to_owned(), value));
             content = skip_to_next_line(&content[close + 2..]);
             continue;
         }
         if content.starts_with('"') || content.starts_with('\'') || content.starts_with('`') {
             let quote = content.as_bytes()[0] as char;
             if let Some(close) = content[1..].find(quote) {
-                store.insert(key.to_owned(), content[1..=close].to_owned());
+                store.push((key.to_owned(), content[1..=close].to_owned()));
                 content = skip_to_next_line(&content[close + 2..]);
                 continue;
             }
             if let Some(nl) = content.find('\n') {
-                store.insert(key.to_owned(), content[..nl].to_owned());
+                store.push((key.to_owned(), content[..nl].to_owned()));
                 content = &content[nl + 1..];
             } else {
-                store.insert(key.to_owned(), content.to_owned());
+                store.push((key.to_owned(), content.to_owned()));
                 break;
             }
         } else if let Some(nl) = content.find('\n') {
             let line = &content[..nl];
             let value = line.find('#').map_or(line, |hash| &line[..hash]);
-            store.insert(key.to_owned(), trim_spaces(value).to_owned());
+            store.push((key.to_owned(), trim_spaces(value).to_owned()));
             content = &content[nl + 1..];
         } else {
             let value = content.find('#').map_or(content, |hash| &content[..hash]);
-            store.insert(key.to_owned(), trim_spaces(value).to_owned());
+            store.push((key.to_owned(), trim_spaces(value).to_owned()));
             break;
         }
         content = trim_spaces(content);
@@ -256,9 +268,9 @@ pub fn read_env_layer(
             return Ok(None);
         }
     };
-    let values = parse_env(&content);
+    let entries = parse_env_entries(&content);
     let is_home = dir == home;
-    for name in values.keys() {
+    for (name, _) in &entries {
         if !is_bootstrap_only(name) {
             continue;
         }
@@ -281,7 +293,10 @@ pub fn read_env_layer(
             path.display()
         )));
     }
-    Ok(Some(EnvLayer { path, values }))
+    Ok(Some(EnvLayer {
+        path,
+        values: entries.into_iter().collect(),
+    }))
 }
 
 /// Which layer supplied a value, ordered most to least trusted (dsh
@@ -972,6 +987,33 @@ mod tests {
         assert!(message.contains("sets \"PATH\""));
         assert!(message.contains("export PATH instead of putting it in a .env file"));
         assert!(!message.contains("does not travel"));
+    }
+
+    #[test]
+    fn bootstrap_violation_names_first_in_file_order() {
+        // dsh iterates Object.keys in file insertion order and refuses on
+        // the first violating name (app-boot src/index.ts readEnvLayer);
+        // sorted-key iteration would name PATH for both files.
+        for (content, named) in [
+            ("VISUAL=vim\nPATH=/evil\n", "VISUAL"),
+            ("PATH=/evil\nVISUAL=vim\n", "PATH"),
+        ] {
+            let project = TempLayer::new("order-proj");
+            let home = TempLayer::new("order-home");
+            project.write_env(content);
+            let mut sink = MapSink::new(&[]);
+            let error = load_layered_env_into("fr", &project.path, &home.path, &|_| {}, &mut sink)
+                .unwrap_err();
+            let message = match &error {
+                Error::EnvBootstrap(message) => message,
+                other => panic!("unexpected error: {other:?}"),
+            };
+            let needle = format!("sets \"{named}\"");
+            assert!(
+                message.contains(needle.as_str()),
+                "content {content}: {message}"
+            );
+        }
     }
 
     #[test]

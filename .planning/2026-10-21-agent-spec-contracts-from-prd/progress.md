@@ -147,3 +147,5 @@
 - refine-drafts.py BOUNDARIES 补 crates/fr-schema/**（Q17A 固化进生成器——重生成不再丢边界）；bind-config-tests.py 两处 expected 前缀改 pending_*（适配重生成态）；管线全序列重跑：import → accepted 20/20 → draft-specs → refine 20 → depends 清理 → 绑定重放 35/35 → 三门禁 0/0/0 → questions 0 blocking → CONFIG lint Quality 100%。
 - 下一切片：fr-config dump 数据面（collect_dump_layers + render_dump 快照算法/分隔注释/!!js 不求值变体 + prepare 语义）→ fr-schema 投影面（-schema 侧）→ 四关 + lifecycle 新增绑定。
 - refined 合约 lifecycle 复跑留档（301 场景）：35 passed / 266 skipped / 0 failed / exit 1——绑定 35 全部真实验证通过且重生成后依然稳定，6 新场景 pending 属实现期绑定对象，基线与预期完全一致。
+- /code-review high --fix（commit 7f8948c）完成：5 findings，4 项修复提交 324c8a3（FR_HOME 原值 / 快照存储期键折叠 / 告警含路径 / 注释勘误）；差分 harness 9073 输入证 parser 零分歧；四关绿 + lifecycle 35/266/0 与基线一致 + guard 过；finding 5 呈 Q21 待裁决（5A 现状 / 5B parse_env 保序重构）。
+- Q21A（finding 5）落地并提交：parse_env_entries 文件序核心 + parse_env BTreeMap 包裹公共面零变化 + read_env_layer 按文件序点名首个违规名（dsh Object.keys 插入序）；新增双向钉测；四关绿（62+16 tests）+ lifecycle 35/266/0 基线不变 + 合同零改动；新发现 Q22（Windows 折叠碰撞覆盖序：dsh 文件序后者胜 vs fr 字典序后者胜，from_layers 折叠 BTreeMap 序）呈裁决 22A 修 / 22B 登记 19.2。

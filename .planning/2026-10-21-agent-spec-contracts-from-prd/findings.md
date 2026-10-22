@@ -210,3 +210,20 @@ dsh .env 分层权威事实（app-boot/src/index.ts + util 两包，仓库 ~/pro
 2. fr-config 数据面：collect_dump_layers + render_dump（快照算法 + 分隔注释 + !!js 不求值变体 + prepare 语义）；fr-schema 投影面（-schema 侧）
 3. 四关 + lifecycle 基线（35 passed）上新增绑定 + 呈报
 - 终态：四关全绿（fmt / clippy --workspace --all-targets -D warnings / 61+16 tests / doc -D warnings）；工作树待用户评审提交；Next Step → dump-config / dump-config-schema 数据面。
+
+## 代码评审 round（commit 7f8948c，/code-review high --fix，2026-10-22）
+- 5 findings（crates/fr-config/src/env.rs，全数 1:1 dsh 偏差或注释失真）；4 项已修复并提交 **324c8a3**，1 项留裁决（Q21）。
+- 已修 4 项：① FR_HOME 非空值原样直用、trim 仅判空（dsh resolveRoot，home-paths index.ts:102-109；原实现连带测试把偏差行为钉死，已一并勘正，期望改为 std::path::absolute(原值)——前导空格按 Node resolve 语义变 cwd 相对）；② EnvSnapshot 新增私有 from_layers 构造器，三层存储键全部经 lookup_key 折叠（dsh 存储期折叠，launch-environment index.ts:60-100；Unix 恒等无行为变化，Windows 分叉消除）；③ 非 ENOENT 读失败告警内嵌失败文件路径（对齐 dsh `${String(error)}` 含路径）；④ 双引号快路径注释勘误为「首个闭引号即止、余文至行尾跳过」（原注释称 LAST closing quote，与代码及 Node 行为均不符，差分 harness 9073 输入 = 73 定向 + 9000 fuzz 对 Node v24.22 util.parseEnv 零语义分歧，harness 用后即删）。
+- 修复后独立复跑验证：四关全绿（fmt / clippy --workspace --all-targets -D warnings / 61+16 tests / doc）；CONFIG lifecycle 复跑 = 35 passed / 266 skipped / 0 failed / 0 uncertain（与修前基线一致，exit 1 属预期）；stamp --dry-run Spec-Passing: false（266 未绑，无可盖 trailer，与既有提交同）。
+- Q21（finding 5 未修，留裁决）：bootstrap 违规名校验遍历 BTreeMap 字典序键——.env 同时含多个违规名时 fatal 诊断点名「字典序首个」，dsh（Object.keys 插入序）点名「文件内首个」；同为拒绝启动，仅诊断文本变量名不同。5A 保持现状（重构 parse_env 保文件序涉及公共返回类型语义与已绑定场景回归，收益仅诊断文本顺序）；5B 重构 parse_env 保留文件序并对齐点名顺序（需回归 .env 分层 9 绑定场景）。
+
+### Q21 裁决落地（2026-10-22 用户裁决 5B，提交见 git log）
+- parse_env 重构保序：解析核心 `parse_env_entries` 产出文件序 `Vec<(String, String)>`（重复键保留首现位置，collect 成 map 即 last-wins 视图），公共 `parse_env -> BTreeMap` 包裹零变化（差分 harness 钉死的 9,073 输入行为面不动）；`read_env_layer` 迭代文件序 entries 点名首个违规名，对齐 dsh `readEnvLayer` 的 `Object.keys` 插入序（app-boot index.ts:213-231，单遍逐键 exact+prefix 一次判定）。
+- 新增钉测 `bootstrap_violation_names_first_in_file_order`：`VISUAL=vim`+`PATH=/evil` 双向文件序各一例——字典序两种都点名 PATH，唯文件序才能双向各自点名，钉死语义。
+- 验证：四关全绿（62+16 tests，fmt 自动归一后 --check 过）；CONFIG lifecycle 35 passed / 266 skipped / 0 failed 与基线一致；合同零改动（spec 无顺序钉死文本，rg 实证）。
+
+### Q22（新发现，Windows 折叠碰撞覆盖序分叉，待裁决）
+- 事实：dsh `createLaunchEnvironmentSnapshot`（launch-environment index.ts:85-93）以 `Object.entries`（文件序）构造折叠 Map——同层大小写变体碰撞时**文件后者胜**；fr `EnvSnapshot::from_layers`（env.rs:346-）折叠 BTreeMap（字典序），碰撞时**字典序后者胜**（ASCII `PATH` < `Path`，反而文件前者存活）。例：家层 `.env` `Path=a`+`PATH=b`，Windows 下 `snapshot.get("PATH")`：dsh 返回 b，fr 返回 a。
+- 触发条件三重叠加：Windows（`lookup_key` 仅 win32 折叠，dsh `lookupKey` 同构 index.ts:63-66）+ 同层内 + 同折叠键不同原写法。Unix 恒等无碰撞，快照其余行为与 finding 2 修复后完全一致。
+- 修复代价：`EnvLayer.values` 现为 `BTreeMap`（文件序在存储时已丢），保序需层存储改序敏感容器（indexmap 依赖或 Vec 双轨），波及 `EnvLayer` 公共字段与快照构造链。
+- 选项：22A 修（层存储保序，对齐 dsh 文件序覆盖语义）；22B 不修，PRD 19.2 登记已知偏差。
