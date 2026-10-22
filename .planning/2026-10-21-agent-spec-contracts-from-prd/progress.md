@@ -116,3 +116,34 @@
 - 关键结构决定：fr-config 既有 #![forbid(unsafe_code)] vs Rust 2024 set_var unsafe——未放宽 forbid，以 EnvSink 承载 materialize 接缝，ProcessEnv 适配器（3 行 unsafe）后置 Phase 18 宿主 crate；已呈用户知悉。
 - 测试教训：EXPECTED 45 长度编译期逮住；双引号快路径跨行捕获与 get_from 层可达性两处期望错经 node v24.22 实证后改测试。
 - 终态：四关全绿（fmt / clippy --workspace --all-targets -D warnings / 61+16 tests / doc -D warnings），工作树待用户评审提交；Next Step → dump-config / dump-config-schema 数据面。
+
+## Session 10 — 2026-10-22（七步合约流确立 + 已完成部分按七步复查）
+
+- 用户指令两条：① 此前开发未走 agent-spec 工作流，此后一律按七步合约流（init→lint 0.7→contract→lifecycle→guard→explain→stamp；lifecycle fail 修码不改合同，改合同须先沟通）；② 按七步复查已完成部分，并将七步写入 CLAUDE.md。
+- 落盘三处：CLAUDE.md 新增「开发工作流（agent-spec 七步合约流，2026-10-22 起强制）」节（七步表 + 第 4 步纪律）；「当前阶段」刷新为 M1 已动工（7f8948c），删除已失真的"实现未开始/禁止创建 Rust 代码"警示；持久记忆 agent-spec-seven-step-workflow（type: feedback）。
+- 七步复查对象 = CONFIG 合约（specs/generated/task-req-fr-config-requirement.spec.md，295 场景；基线 7f8948c 工作树净）：
+  - 步 1 写合同：部分满足——init 已于 2026-10-21 完成；Decisions/Boundaries 已随 Q1-Q14 历次裁决精化；但 295 个 Test 选择器全部 pending_*，未绑定真实测试（合约 Boundaries 自述：绑定真名前不得标记完成）。
+  - 步 2 lint --min-score 0.7：PASS（Quality 100%，score 0.9992；68 条 advisory 非门禁项：2 testability 主观词 'clean'、63 verification-metadata 缺 Level/替身标注、1 场景缺 Then、Rule 分组缺失、2 open-question）。
+  - 步 3 contract：渲染成功，Intent/Decisions/Boundaries/Completion Criteria 四要素齐备。
+  - 步 4 lifecycle --code .：FAIL（exit 1）——295/295 Skip、passed=False、quality 0.9992、lint_issues 68；根因 = 选择器 pending（草稿态设计预期，非代码缺陷）；按第 4 步纪律不擅改合同，呈裁决。
+  - 步 5 guard --spec-dir specs/generated --code .：FAIL（guard_exit=1）——20/20 合约 verification not passing（合计 1221 场景全 Skip）；guard 语义为全仓合约必须全过，现恒红直至合约全部绑定。
+  - 步 6 explain --format markdown：渲染成功——295 total / 0 passed / 295 skipped / Pass Rate 0.0%。
+  - 步 7 stamp --dry-run：命令 exit 0 但 Spec-Passing: false（无可盖章提交）；0d3e87e..7f8948c 六个历史提交均无合同 trailer。
+- 需求层三开关复跑全绿（lint-knowledge / requirements graph / requirements plan 均 exit 0）。
+- 差距清单四条：① 295 选择器全 pending，已写 61+16 个测试未与合同绑定；② lifecycle 在已完成的六个提交周期中从未执行（此前只跑 cargo 四关 + 需求层三开关）；③ 守卫未安装（无 pre-commit/CI）；④ 无合同↔提交 trailer 溯源。
+- 集中呈 Q15（已完成切片的合同绑定回补策略 A 逐切片立即回补 / B 仅向前执行、历史延至 Phase 19 / C 向前执行 + 每 Phase 收尾集中回补，推荐 C）+ Q16（守卫安装时机 A 现装 pre-commit 会立即阻断一切提交 / B 暂不装待合约逐步转绿、以提交前手动 guard 或按切片 lifecycle 替代，推荐 B / C 直接建 CI pipeline）。
+- 事故自纠三件：MEMORY.md 追加误用空 old_string（无效编辑）→ 重读真实末行后修复；contract/explain 的 exit=101 均系我方 head 截断管道 EPIPE 伪退出（渲染内容完整，非合约错误）；sleep 轮询被环境 SIGTERM（exit 143）→ 改直读后台输出文件。
+- 待用户裁决 Q15/Q16；裁决后恢复 dump-config / dump-config-schema 数据面（按七步执行）。
+- 用户裁决 Q15A/Q16A（2026-10-22）：立即逐切片回补绑定 + 现装 pre-commit 守卫（已知照其会阻断提交直至合约转绿）。
+- Q15A 落地：scripts/bind-config-tests.py 入库（幂等绑定映射，35 对显式断言后替换；需求再生成清空 specs/generated 后可重放）；35 场景绑定真实测试——合并 compose 6、装载栈 10、schema 槽 2、fr-schema 派生 1、信任边界 2、cond 表达式 5、.env 分层 9；修复试点误绑 1 处（disabled 行使插件不装载 → compiles_resolved_rows_and_excludes_disabled；根因 = 选择器字符串跨场景共享，试点 sed 按选择器误伤，改按场景名定位逐一替换）。
+- 留 pending 260 构成：未实现切片（config dsh-* 默认/约束 150 对——fr-schema registry 空表待插件 schema 声明；默认值逐项 36；dump-config 系/宿主/事件泵/启动策略/激活期校验/realm/invoker/dylib 镜像）+ 已实现但缺组合钉测 5（bundle 栈按清单序叠加、未配置关键默认值逐项、FR_PERMISSION_MODE 覆盖、产物全 dylib 无 builtin、bootstrap 专名+代理例外组合——补钉测后绑定，禁名不副实）+ Phase 18 依赖 1（materialize 双轨，ProcessEnv 适配器后置）。
+- 门禁终态：lint 复跑 Quality 100% PASS；lifecycle 复跑 = 35 passed / 260 skipped / 0 failed / exit 1（整体未过属预期，260 未绑）；pre-commit 已装（.git/hooks/pre-commit）并修正模板缺陷 --code src → --code .（本仓库代码在 crates/，src/ 不存在）；guard 全仓语义 = 其余 19 份未绑合约继续阻断 commit 直至全部转绿（Q16A 已知照接受）。
+- 新呈 Q17（合同改动，按第 4 步纪律须先沟通）：CONFIG 合约 Boundaries Allowed 仅列 crates/fr-config/** 与 crates/fr/**，缺 crates/fr-schema/**（Q8A 已裁 fr-schema 独立 crate，草稿生成时边界未同步；35 个绑定中 1 个选择器即指向 fr-schema 测试）；dump-config 数据面实现将触 fr-schema，需先裁决补边界再动工。
+- 用户裁决 Q17A（2026-10-22）：Allowed 补 crates/fr-schema/**（Edit 落盘）；lint 复跑 Quality 100% PASS。
+- dump-config 数据面第 1 步（真源核实）完成，findings.md「待裁决问题登记（呈 Q18-Q20）」节落盘：dump-config.ts 76 行 + args.ts 216 行 + renderConfigDump（app-boot index.ts:635-）+ config-dump.spec.ts 注释形状规格全读实证；新发现 PRD 未载能力两项（--dump-default-config 恢复诊断、--from-default-profile 出厂模板替换）；x- 前缀定名（PRD:246 明示本轮）；推定项 D1 品牌 NAME/D2 同型 YAML 注释输出/D3 schema 侧 Session 7 真源。
+- 事故自纠：rg 误用 `-rln` 触发 --replace 把匹配文本替换为 "ln"（CLAUDE.md 明载的 -r 陷阱），首批检索输出失真——识别后以无 replacement 方式重读全部真源。
+- 用户裁决 Q18A/Q19A/Q20A（D1-D3 未否决按推定成立，2026-10-22）落地：PRD 6.3 dump 段重写（三 dump 态、YAML 注释逐字节同型、`!!js` 逐字、前缀快照算法、x-fr 定名、entry 五态、diagnostics stderr、complete 假退 1、default-only 恢复诊断、from-default-profile 模板替换）+ 19.2 条 11 + 23 决策 22；intake CONFIG-5 条款全量重写 + 6 新场景（注释分层同型/default-only 不读用户层/default-only 禁 --patch/x-fr 五键/complete 假退 1/from-default-profile 替换），场景 295→301。
+- 附带修复 Session 9 残留：PRD 19.2 条 10 与 23 决策 21 的「46 精确名」→ 49（Session 9 只改正了 6.4/intake，遗漏 19.2/23 两处；KLL 与合约草稿因未重跑 import/draft-specs 同为 46）——本轮 import+draft 重生成后 KLL/合约自动归 49，rg 全库实证零 46 残留。
+- refine-drafts.py BOUNDARIES 补 crates/fr-schema/**（Q17A 固化进生成器——重生成不再丢边界）；bind-config-tests.py 两处 expected 前缀改 pending_*（适配重生成态）；管线全序列重跑：import → accepted 20/20 → draft-specs → refine 20 → depends 清理 → 绑定重放 35/35 → 三门禁 0/0/0 → questions 0 blocking → CONFIG lint Quality 100%。
+- 下一切片：fr-config dump 数据面（collect_dump_layers + render_dump 快照算法/分隔注释/!!js 不求值变体 + prepare 语义）→ fr-schema 投影面（-schema 侧）→ 四关 + lifecycle 新增绑定。
+- refined 合约 lifecycle 复跑留档（301 场景）：35 passed / 266 skipped / 0 failed / exit 1——绑定 35 全部真实验证通过且重生成后依然稳定，6 新场景 pending 属实现期绑定对象，基线与预期完全一致。

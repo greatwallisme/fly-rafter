@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SPECS = ROOT / "specs" / "generated"
 
 BOUNDARIES: dict[str, list[str]] = {
-    "REQ-FR-CONFIG": ["crates/fr-config/**", "crates/fr/**"],
+    "REQ-FR-CONFIG": ["crates/fr-config/**", "crates/fr-schema/**", "crates/fr/**"],
     "REQ-FR-SESSION": ["crates/fr-session/**"],
     "REQ-FR-AGENT-LOOP": ["crates/fr-agent-loop/**"],
     "REQ-FR-TOOLS": ["crates/fr-tools/**"],

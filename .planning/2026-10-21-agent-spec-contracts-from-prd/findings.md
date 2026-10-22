@@ -174,4 +174,39 @@ dsh .env 分层权威事实（app-boot/src/index.ts + util 两包，仓库 ~/pro
 - 实现落地：crates/fr-config/src/env.rs（496→约 920 行含 19 tests；parse_env 全语义移植 + read_env_layer fail-closed + EnvSnapshot get/get_from（win32 折叠）+ load_layered_env_into 原子两文件先校验后应用 + resolve_home/resolve_home_from（FR_HOME 空白未设 > ~/.fly-rafter，~ 展开，std::path::absolute）+ 官方 valid.env fixture 逐字节入 tests/fixtures 并按 node 官方测试全量断言）；error.rs 增 EnvBootstrap(String)；patch.rs err_message 补臂。
 - 关键结构决定（呈用户知悉）：fr-config lib.rs 既有 #![forbid(unsafe_code)]，而 Rust 2024 set_var 为 unsafe——未放宽 forbid（质量红线），以 EnvSink trait 承载 materialize 接缝；含 unsafe 的 ProcessEnv 适配器（3 行）落 Phase 18 宿主 crate 启动最先调用。Q13A 的双轨机制（materialize 语义 + 快照结构）已全部交付于 fr-config 侧。
 - 排障：EXPECTED 数组 46 长度误记（实 45，node checkObj 45 键）编译期逮住；两处测试期望错（双引号快路径跨行捕获、get_from 层可达性）经 node v24.22 实证后改测试而非改实现；clippy 12 项清零（too_long_first_doc_paragraph×4/doc_markdown×2/option_if_let_else×2/collapsible_if×2/range_plus_one×2/single_match_else×2 中的实际清单）。
+
+## 待裁决问题登记（2026-10-22 呈 Q18-Q20：dump-config / dump-config-schema 数据面）
+
+### 事实（dsh 真源，file:line 实证，2026-10-22 本轮核实）
+- CLI 旗标（apps/cli/src/args.ts:168-173,111-136）：--profile / --from-default-profile <name>（:169，出厂模板替换自定义 profile）/ --patch（可重复）/ --dump-config / --dump-config-schema / --dump-default-config 三 dump 旗标互斥（:120）；dumps 拒收 app 位置参数（:125-127）；--dump-default-config 禁 --patch（:132-134）。
+- runDumpConfig（apps/cli/src/dump-config.ts:32-42）：prepareProfile(profile, !defaultOnly, fromDefaultProfile) → collectConfigDumpLayers → renderConfigDump('dsh', profile 根文件, layers) 写 stdout；defaultOnly = 省略 profile 用户层与 overlays 且**从不解析** profile patch 文件（:26-28，坏 cordis.patch.yml 的恢复诊断）。
+- collectConfigDumpLayers（dump-config.ts:51-75）：bundle 层（label=packageName）→ profile patch（label=路径，existsSync 才入）→ 家 patch（loadOptionalPatches）→ 各 --patch overlay（label=绝对路径，loadOverlayPatches）；defaultOnly 仅 bundle 层。schema dump 复用同一收集器（dump-config-schema.ts:8）。
+- renderConfigDump（packages/boot/app-boot/src/index.ts:635-）：读+解析 profile 根文件为 base（错误三连 throw：`dsh: failed to read config` / `failed to parse config` / `must be a top-level YAML array of entries`）；快照算法 = 层前缀 1..k 各做**单次** applyEntryPatches（structuredClone 展平，与 boot 完全同参；:661-675 注释钉死单次调用语义——分层调用会让 group config 替换的子行被后续层命中，boot 不会）；输出 = YAML 文本，`# == <源文件>[, patched by <层>…]` 分隔注释按连续同 (origin, patchers) 行分组；`!!js` 表达式**逐字打印不求值**（spec: `dump toContain '!!js process.env.DSH_DUMP_SPEC'`）；整篇可再 parse 且等于 boot 挂载结果；插入行 origin = 插入层。规格测试 packages/boot/app-boot/tests/config-dump.spec.ts:47-140 逐字钉死注释形状。
+- loadOverlayPatches（app-boot/src/index.ts:540）/ loadOptionalPatches / ConfigDumpLayer{label, patches}（:596-599）。
+- dump-config-schema 侧：Session 7 已核（ConfigSchemaDump types.ts:49-60、x-cordis、entry 五态 types.ts:42、diagnostics stderr `dsh: <level>:[<path>] <message>`、!x-cordis.complete → exit 1、stdout 单份 JSON.stringify(dump, null, 2)；机制规模 collect 249/document 169/projector 455 等 ≈1130 行）。
+- PRD 现状：6.3（PRD:246）钉 fr dump-config 输出合成后插件树 + 「x- 扩展键品牌前缀于 fr 宿主实现期定」；6.4（PRD:261）默认装配树 90 行插件 id 集合为同型 diff 锚点；M1 验收 5 = 两命令可用。PRD/intake 未载 --dump-default-config 与 --from-default-profile 等价物（rg 实证零命中）——两能力为真源新发现。
+
+### Q18 x- 扩展键品牌前缀（dump-config-schema 输出，PRD:246 明示本轮定）
+- A（推荐）：`x-fr`——与 FR_ 环境前缀、命令名 fr、产品短名一致
+- B：`x-fly-rafter`——全名 kebab
+- C：保留 `x-cordis`——该键是 dsh 自有 CLI 输出扩展、非协议 wire，保留他品牌与命名硬约束冲突
+
+### Q19 --dump-default-config 等价物（恢复诊断，真源新发现）
+- A（推荐）：纳入 M1——数据面 default_only 分支 + `fr dump-config --default-only`（形态随 fr 子命令风格 kebab）；PRD 6.3 + intake CONFIG-5 补条款场景
+- B：M1 排除，PRD 19.2 登记偏差（1:1 缺口）
+
+### Q20 --from-default-profile 等价物（出厂模板替换，真源新发现）
+- 事实：launcher 全局旗标，dump 与 boot 共用；语义 = 出厂模板**替换**自定义 profile（区别于已实现的首用初始化绝不覆盖）。
+- A（推荐）：纳入规格——Phase 18 宿主 CLI flag 表 + 本期数据面 API 预留 from_default_profile 参数；PRD 18/6.3 + intake 补条款
+- B：排除，19.2 登记
+
+### 推定项（非分叉，可否决）
+- D1：品牌 NAME 'dsh'→'fr'（错误前缀 `fr: failed to read config …`）；PRD 品牌映射既定原则覆盖
+- D2：dump 输出 = YAML 带注释逐字节同型（# == 分隔、!!js 逐字、前缀快照单次 applyEntryPatches 算法、整篇可 parse）——PRD「同型 diff 锚点」直接落实
+- D3：dump-config-schema 输出形状以 Session 7 真源为准，x- 键按 Q18 裁决
+
+### 裁决后动作序列
+1. PRD 6.3 勘误（三 dump 态、输出形状逐字、x- 定名）+ 6.4/18 按 Q19/Q20 + 19.2/23 决策；intake CONFIG-5 扩条款 + 场景；管线复跑三门禁
+2. fr-config 数据面：collect_dump_layers + render_dump（快照算法 + 分隔注释 + !!js 不求值变体 + prepare 语义）；fr-schema 投影面（-schema 侧）
+3. 四关 + lifecycle 基线（35 passed）上新增绑定 + 呈报
 - 终态：四关全绿（fmt / clippy --workspace --all-targets -D warnings / 61+16 tests / doc -D warnings）；工作树待用户评审提交；Next Step → dump-config / dump-config-schema 数据面。

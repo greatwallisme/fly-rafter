@@ -17,7 +17,7 @@ dsh 依赖 cordis 原生分层补丁能力装配插件；dougong loader 只接�
 - [REQ-FR-CONFIG-2] fr-config MUST 将展开后的装配编译为 dougong loader JSON 文档（source.kind 仅 dylib/wasm：行 name 经产物解析规则映射——字面路径，或 `FR_PLUGIN_PATH` 各目录与安装库目录 `<prefix>/lib/fr/` 下按 slug（`-`→`_`）先查 `lib<slug>.so`（dylib）再查 `<slug>.wasm`（wasm），先命中定形态，未命中进入 failures；config 对象、isolate），经 `Reconciler::replace + apply` 幂等收敛；编译产物 MUST 为 dougong `Config::parse` 可接受的合法文档，且 MUST NOT 出现 builtin source。insert 行 name 为 `./`/`../` 开头的相对路径 MUST 在装载期锚定到所在补丁文件目录转绝对（2026-10-22 Q6 裁决，对齐 dsh anchorInsertedPluginNames index.ts:550-561，词法归一不做符号链接解析）；覆盖行 name 为匹配器 MUST NOT 锚定；无 `./`/`../` 前缀的含分隔符 name 保持字面路径。
 - [REQ-FR-CONFIG-3] fr 的 config schema 以 fr-schema 声明式描述树为单一真源（2026-10-22 Q7 裁决，等价 dsh schemastery 校验+投影双重角色）：每插件 schema 为 fr-schema 描述符（受限子集，M1 面 = string/number/integer/boolean/object/array/dict；meta 注解仅 default 与 description；子集外声明不可构造——fail-closed），同一声明派生 `validate` 与 `to_json_schema`（JSON Schema 2020-12 关键词面，对齐 dsh ConfigJsonSchemaObject）。fr-config MUST 在装配期按插件 slug 查 fr-schema 注册表对每行 config 校验：查无 schema MUST 跳过该行校验（2026-10-22 Q9 裁决，对齐 dsh absent 标注；第三方字面路径工件宿主侧本无其 schema，不构成装载障碍）；有 schema 且单行校验失败进入 `Report::failures`，MUST NOT 阻塞其余槽位。插件工件 MUST 在激活体顶部以 fr-schema 链接副本对 config 再校验（双侧校验），激活期校验失败按插件装载失败 fail-closed。
 - [REQ-FR-CONFIG-4] patch 行内条件表达式（`!!js` 标记或 `!!js ` 前缀字符串）MUST 限于受限声明式子集（2026-10-22 Q3A 勘误扩充）：`env.NAME ?? 默认值` 链、相等比较（`==`/`===`）、`platform === 'linux'|'macos'|'windows'` 与平台三元、裸 env 值读取、字面量、`profile-context` 布尔（dsh `ctx.get('profileContext')` 的 fr 等价物：入口/profile 上下文存在性，支持 `!` 取反）；MUST NOT 支持任意 JS 求值；子集外表达式（如 `getBuiltinModule` 类）MUST 求值失败 fail-closed（patch 文档整体拒绝，启动终止——对齐 dsh 用户层 patch 错误抛出语义）。
-- [REQ-FR-CONFIG-5] fr MUST 提供 `fr dump-config` 与 `fr dump-config-schema`，内容由真实装配生成（文档即生成物）。
+- [REQ-FR-CONFIG-5] fr MUST 提供 `fr dump-config` 与 `fr dump-config-schema`，内容由真实装配生成（文档即生成物）。`fr dump-config` MUST 输出合成装配树 YAML 文本、逐字节同型对齐 dsh `--dump-config`（2026-10-22 Q18-Q20 裁决，apps/cli/src/dump-config.ts + app-boot index.ts:635- 实证）：`# == <源文件>[, patched by <层>…]` 分隔注释按连续同源行分组；`!!js` 表达式逐字打印不求值；快照算法 = 层前缀各做单次 applyEntryPatches 同参展平（分层调用会让 group config 替换的子行被后续层命中，boot 不会）；整篇可再 parse 且等于同参启动挂载结果；层序 = bundle 层（label=包名）→ profile patch（label=路径，存在才入）→ 家目录 patch → `--patch` overlays（label=绝对路径）；错误三连 `fr: failed to read config` / `fr: failed to parse config` / `fr: config <path> must be a top-level YAML array of entries`。`fr dump-config-schema` MUST 输出 ConfigSchemaDump 等价物：`$schema` 2020-12 + `x-fr` 扩展键（Q18A，对齐 dsh `x-cordis`：{profile, complete, entries, diagnostics, patchSchema:'#/$defs/patchList'}）+ entry 五态 schema/partial/absent/unsupported/error + diagnostics 逐条 stderr（`fr: <level>:[<path>] <message>`）+ complete 为假时退出码 1。三 dump 态互斥且拒收 app 位置参数；`--default-only`（Q19A，对齐 dsh `--dump-default-config`）为恢复诊断：仅 bundle 层、不读不解析 profile patch 与家目录 patch（坏 patch 文件亦可 dump）、不接受 `--patch`。`from-default-profile`（Q20A，对齐 dsh `--from-default-profile`）= 以出厂模板**替换**自定义 profile 后装载（区别于首用初始化绝不覆盖），dump 与 boot 共用；CLI 旗标宿主期落地，数据面 API 预留。
 - [REQ-FR-CONFIG-6] fr MUST 提供关键默认值：默认模型 provider `deepseek-official`、model `deepseek-flash`；`FR_PERMISSION_MODE ?? workspace-write`（workspace root = 进程启动 cwd）；非 danger-full-access 时审批策略 `'ask'`；会话存储 `<FR_HOME>/sessions`、storages `<FR_HOME>/storages`；bash `timeout-ms` 60000；重复工具提醒阈值 [3, 5, 8]；`sample-over-cap-glob-results: false`；`allow-parallel-in-progress: true`；会话标题默认：无 LLM 时回退 5 词/40 字节（上限 80 字节），LLM 标题 targetWords 5（CJK 10）、maxInput 4096 字节、超时 60s。
 - [REQ-FR-CONFIG-7] fr 宿主二进制 MUST 仅含装配器、事件泵、入口分发三件事：事件泵驱动 tokio runtime，把入口信号（headless 任务 / TUI 按键 / ACP·SDK 协议帧）转发到对应入口插件监听器；按子命令装配对应入口 profile（headless/tui/acp/sdk/web）；宿主对 agent 循环零感知。FR_HOME 默认 `~/.fly-rafter`，家目录结构与 dsh `~/.dsh/` 同构（sessions/storages/profiles）。
 - [REQ-FR-CONFIG-8] 插件仅 dylib 与 wasm 两形态（2026-10-22 用户裁决，废除 builtin），MUST 共用 dougong 五步契约（声明 → 激活 → 服务 → 监听 → 释放，跨边界经 descriptor + C-ABI 导出表表达）：全部第一方插件 MUST 为 C-ABI dylib 工件（cdylib、内核家族仅依赖 dougong-abi、代码镜像进程内永不卸载，换版本即重启进程）；wasm 组件（wasm32-wasip2）仅为第三方沙箱扩展（零能力 WASI：wasip2 guest 必然声明 wasi:io 导入而宿主挂载零能力 WasiCtx 的惰性定义，能力面为零、导入声明不为零；fuel/epoch/内存帽；经 WIT world `dougong:kernel/host` 交互；零能力 WASI 无网络与文件系统，第一方组件 MUST NOT 以 wasm 承载）。fr-config MUST 按信任边界校验每行：第一方插件名 MUST 解析为 dylib source（解析命中 wasm 产物即为违规），wasm 仅当产物为第三方 `.wasm`；违规行进入 failures；loader builtin 表 MUST NOT 出现在 fr 装配产物中。
@@ -26,7 +26,7 @@ dsh 依赖 cordis 原生分层补丁能力装配插件；dougong loader 只接�
 - [REQ-FR-CONFIG-10] 默认装配树 MUST 与 dsh base cordis.patch.yml 插件 id 集合同型（品牌映射后），并冻结 PRD 6.4 未记载默认值：agent-instructions maxBytes 65536、projection-cache 200 事件 5000ms、web searchProvider deepseek-official 与 fetchProvider http、repeat argumentsPreviewChars 500、标题 maxOutputTokens 4096、tools 默认 native、storage-domain backend json（dsh cordis.patch.yml 各行）。
 - [REQ-FR-CONFIG-11] 启动失败策略 MUST（对齐 dsh required-id 审计 [app-boot index.ts:944-961,1092-1114]）：仅 bootstrap 入口 Include 与必需插件 id 集（fr 对应 agent-loop 与当前子命令入口插件）激活失败时以 StartupError 拒启动（错误列出失败与等待清单）；其余插件失败一律单条警告、兄弟继续；注入服务缺失 → 插件 fiber 置 pending 容忍（其 id 属必需集则致命）；导入失败记录错误后不留实例、不中止装配；patch 未知 id 警告跳过永不致命；覆盖行语义 MUST 为按键覆盖（2026-10-22 Q1 勘误，对齐 dsh applyEntryPatches），patch 行内仅其余键作用于该行自身。
 - [REQ-FR-CONFIG-12] patch 行内 env 缺省表达式 MUST 以受限子集（CONFIG-4）表达 dsh !!js 形态的对应语义：`env.FR_PERMISSION_MODE ?? workspace-write` 与 `danger-full-access` 的相等比较求值结果 MUST 与 dsh `process.env.DSH_PERMISSION_MODE ?? 'workspace-write'` 逐值一致（dsh cordis.patch.yml:246,262）。
-- [REQ-FR-CONFIG-13] .env 分层 MUST（2026-10-22 用户裁决纳入，Q11A/Q12A/Q13A/Q14A 定稿；bootstrap 46 名全表以 PRD 6.4 为真源）：fr-config 启动期解析环境 = 继承进程 env > 项目 `.env`（自 cwd）> 家目录 `.env`（`<FR_HOME>/.env`）；两文件 MUST 先全部解析校验、后统一应用（任一层 bootstrap 违例则两文件均不应用）；`cwd == FR_HOME` 时家目录层 MUST NOT 重复读取；`.env` 中已设名 MUST NOT 覆盖更高层已存在的值（应用序 project → user，逐名仅在更高层未设时 materialize 进程 env）；bootstrap 专名在任何 `.env` 层拒绝（大小写不敏感）：46 个精确名 = dsh BOOTSTRAP_NAMES（app-boot index.ts:136-157）逐字（DEEPSEEK_BASE_URL 与 DEEPSEEK_SEARCH_BASE_URL 保留原名）+ 四前缀 FR_ / XDG_ / DYLD_ / BASH_FUNC_（DSH_ 品牌映射）；家目录层例外仅 HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / NO_PROXY 四键（项目层设代理名仍拒绝）；bootstrap 违例 MUST 终止启动（fail-closed）；`.env` 读错误非 ENOENT = stderr 一行警告 + 该层按空层跳过（非致命）；ENOENT = 静默空层；机制为双轨 = materialize 进程 env（unsafe set_var 启动期单线程）+ 返回不可变环境快照（层序 process > project-env > user-env 的 get / get_from 逐名来源查询，消费方后续里程碑接线）；`.env` 解析语法 MUST 对齐 Node util.parseEnv 方言（自实现，以 Node 官方源码为钉测蓝本）；home 解析 = 显式 configured > `$FR_HOME`（trim 后空白视为未设）> `~/.fly-rafter`（~ 前缀展开后归一）；dsh 单层 loadEnv 变体仅测试夹具使用，fr 不实现（负向钉）
+- [REQ-FR-CONFIG-13] .env 分层 MUST（2026-10-22 用户裁决纳入，Q11A/Q12A/Q13A/Q14A 定稿；bootstrap 49 名全表以 PRD 6.4 为真源）：fr-config 启动期解析环境 = 继承进程 env > 项目 `.env`（自 cwd）> 家目录 `.env`（`<FR_HOME>/.env`）；两文件 MUST 先全部解析校验、后统一应用（任一层 bootstrap 违例则两文件均不应用）；`cwd == FR_HOME` 时家目录层 MUST NOT 重复读取；`.env` 中已设名 MUST NOT 覆盖更高层已存在的值（应用序 project → user，逐名仅在更高层未设时 materialize 进程 env）；bootstrap 专名在任何 `.env` 层拒绝（大小写不敏感）：49 个精确名 = dsh BOOTSTRAP_NAMES（app-boot index.ts:136-157）逐字（DEEPSEEK_BASE_URL 与 DEEPSEEK_SEARCH_BASE_URL 保留原名）+ 四前缀 FR_ / XDG_ / DYLD_ / BASH_FUNC_（DSH_ 品牌映射）；家目录层例外仅 HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / NO_PROXY 四键（项目层设代理名仍拒绝）；bootstrap 违例 MUST 终止启动（fail-closed）；`.env` 读错误非 ENOENT = stderr 一行警告 + 该层按空层跳过（非致命）；ENOENT = 静默空层；机制为双轨 = materialize 进程 env（unsafe set_var 启动期单线程）+ 返回不可变环境快照（层序 process > project-env > user-env 的 get / get_from 逐名来源查询，消费方后续里程碑接线）；`.env` 解析语法 MUST 对齐 Node util.parseEnv 方言（自实现，以 Node 官方源码为钉测蓝本）；home 解析 = 显式 configured > `$FR_HOME`（trim 后空白视为未设）> `~/.fly-rafter`（~ 前缀展开后归一）；dsh 单层 loadEnv 变体仅测试夹具使用，fr 不实现（负向钉）
 ## Scenarios
 
 Rule: REQ-FR-CONFIG-1 — 分层装配与按键覆盖
@@ -172,6 +172,36 @@ Rule: REQ-FR-CONFIG-5 — dump 命令即生成物
 场景: dump 命令输出来自真实装配
   当 运行 fr dump-config 与 fr dump-config-schema 时
   那么 分别输出合成后插件树与全部插件 config schema
+
+场景: dump 输出注释分层逐字同型
+  假设 bundle、profile patch、家目录 patch 与 --patch 多层修改同一行并插入新行
+  当 运行 fr dump-config 时
+  那么 输出 YAML 文本中 # == 源文件[, patched by 层…] 分隔注释按连续同源行分组，!!js 表达式逐字未求值，整篇可再 parse 且等于同参启动挂载结果
+
+场景: default-only 恢复诊断不读不解析用户层
+  假设 profile 的 fr.patch.yml 含语法损坏内容且以 --default-only 调用
+  当 运行 fr dump-config 时
+  那么 仅输出 bundle 层，损坏文件未读未解析且不报错
+
+场景: default-only 不接受 --patch
+  假设 --default-only 与 --patch 同时给出
+  当 解析调用时
+  那么 报错终止
+
+场景: x-fr 扩展键与 entry 五态
+  假设 运行 fr dump-config-schema
+  当 检查输出文档时
+  那么 $schema 为 2020-12，含 x-fr 的 profile/complete/entries/diagnostics/patchSchema 五键，entry status 为五态之一
+
+场景: complete 为假退出码 1
+  假设 装配存在 error 态 entry
+  当 运行 fr dump-config-schema 时
+  那么 diagnostics 含该条且进程退出码为 1
+
+场景: from-default-profile 以出厂模板替换
+  假设 自定义 profile 已存在且携带 from-default-profile 指向 headless
+  当 数据面装载该 profile 时
+  那么 出厂模板替换既有 profile 内容后装载（非首用初始化的绝不覆盖语义）
 
 Rule: REQ-FR-CONFIG-6 — 关键默认值
 

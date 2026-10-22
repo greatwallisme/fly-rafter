@@ -4,7 +4,9 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 12 续：dump-config / dump-config-schema 数据面（对齐 dsh ConfigSchemaDump 的 $defs + x- 扩展与 entry 五态；`fr dump-config` 合成装配树同型 diff 锚点；x- 前缀品牌命名实现期定）——dsh 真源已有（findings Session 7）；有分叉集中呈裁，无分叉则实现 + 四关。
+【2026-10-22 起强制】实现一律按七步合约流（CLAUDE.md「开发工作流」节）：任务启动 = 精化对应合同四要素（绑定真实测试选择器、异常场景 ≥ 正常场景）→ lint 0.7 → contract → lifecycle 自检循环（fail 修码不改合同，改合同须先沟通）→ guard → explain → stamp。
+CONFIG 合约七步回补已执行（Q15A/Q16A）：35 场景绑定真测试（lifecycle 35 passed / 260 skipped / 0 failed），pre-commit 守卫已装（--code . 已修正）。
+Phase 12 续（Q18-Q20A 已落地，文档与合约层全绿）：下一切片 = fr-config dump 数据面实现（collect_dump_layers + render_dump：快照算法、# == 分隔注释、!!js 不求值变体、prepare 语义）→ fr-schema 投影面（-schema 侧 $defs/x-fr/entry 五态/diagnostics）→ 四关 + lifecycle 新增绑定（基线 35 passed / 266 skipped）。dsh 真源：findings「呈 Q18-Q20」节 file:line 全证据。
 
 ## Current Phase
 Phase 12

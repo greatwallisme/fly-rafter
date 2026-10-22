@@ -10,9 +10,9 @@ Fly Rafter（飞椽，命令 `fr`）：以 Dougong 为基座的 Rust 版 agent h
 - dougong：crates.io https://crates.io/crates/dougong ，本机 `~/project/dougong`（内核设计裁决见其 `doc/research/dougong-design.md`）
 - deepseek-harness：https://github.com/deepseek-ai/deepseek-harness.git ，本机 `~/project/reference/cordis/deepseek-harness`（行为权威规格：其 `docs/architecture.md`、`docs/tool-catalog.md`、`docs/config-catalog.md`）
 
-## 当前阶段（2026-10-21）
+## 当前阶段（2026-10-22）
 
-实现未开始：仓库尚无 Cargo workspace。PRD 已定稿，合约体系（KLL 需求 + 任务合约草稿）已建成且门禁全绿。入口顺序 headless → TUI → ACP → SDK → web（PRD 第 20 节里程碑 M1-M5），等用户放行后从 M1 动工。不要在实现开始前创建 Rust 代码。
+M1 实现进行中：workspace 骨架与质量门基线已落；fr-config 分层编译进行中（合并器 compose、装载栈、cond 求值器、fr-schema 声明框架、.env 分层已提交至 `7f8948c`）。合约体系（KLL 需求 + 任务合约草稿）门禁全绿。2026-10-22 起所有实现任务必须按下方「开发工作流」七步合约流执行，此前已完成的切片按同一七步回补验证。入口顺序 headless → TUI → ACP → SDK → web（PRD 第 20 节里程碑 M1-M5）。
 
 ## 文档地图（真源优先级）
 
@@ -52,6 +52,22 @@ Rust 质量门四关（PRD 第 21 节定义，实现开始后生效；零警告�
 cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo doc
 cargo test -p <crate> <test_name>   # 运行单个测试
 ```
+
+## 开发工作流（agent-spec 七步合约流，2026-10-22 起强制）
+
+需求层三开关（`lint-knowledge` / `requirements graph` / `requirements plan`，见上文）之外，每个实现任务必须按七步合约流闭环：
+
+| 步 | 所有者 | 命令 | 要点 |
+| ---- | ---- | ---- | ---- |
+| 1 写合同 | 人 | `agent-spec init` 后手写四要素 | 异常场景 ≥ 正常场景 |
+| 2 质量门 | 机器 | `agent-spec lint <spec> --min-score 0.7` | 对合同做代码审查 |
+| 3 读合同 | agent | `agent-spec contract <spec>` | 决策、边界、完成条件三重约束 |
+| 4 自检循环 | agent | `agent-spec lifecycle <spec> --code . --format json` | fail → 读证据 → 修码 → 重跑，不许改合同 |
+| 5 守卫 | 机器 | `agent-spec guard --spec-dir specs --code .` | 全仓合同一次验证，pre-commit/CI 阻断 |
+| 6 验收 | 人 | `agent-spec explain <spec> --format markdown` | 读合同级摘要，不读 diff |
+| 7 盖章归档 | 机器 | `agent-spec stamp <spec> --dry-run` / `agent-spec archive` | Git trailer 建立合同↔提交溯源 |
+
+**第 4 步纪律**：lifecycle 失败时，义务是修代码，不是改合同——改合同让验证变绿是谄媚（sycophancy）不是修复；确需修改合同（合同本身错误或场景缺失）必须先与用户沟通裁决后才可改动。
 
 ## 架构要点（需要跨文件理解的部分）
 
