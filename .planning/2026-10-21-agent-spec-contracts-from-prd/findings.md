@@ -227,3 +227,9 @@ dsh .env 分层权威事实（app-boot/src/index.ts + util 两包，仓库 ~/pro
 - 触发条件三重叠加：Windows（`lookup_key` 仅 win32 折叠，dsh `lookupKey` 同构 index.ts:63-66）+ 同层内 + 同折叠键不同原写法。Unix 恒等无碰撞，快照其余行为与 finding 2 修复后完全一致。
 - 修复代价：`EnvLayer.values` 现为 `BTreeMap`（文件序在存储时已丢），保序需层存储改序敏感容器（indexmap 依赖或 Vec 双轨），波及 `EnvLayer` 公共字段与快照构造链。
 - 选项：22A 修（层存储保序，对齐 dsh 文件序覆盖语义）；22B 不修，PRD 19.2 登记已知偏差。
+
+### Q22 裁决落地（2026-10-22 用户裁决 22A1 indexmap 路线）
+- `EnvLayer.values` 与 `EnvSnapshot.process` 由 BTreeMap 改 `indexmap::IndexMap`——`FromIterator` 重复键语义 = JS `Map`（首现位保留、末值胜），与 dsh `new Map(Object.entries(...))`（launch-environment src/index.ts:85）逐语义同构；折叠提取为私有 `fold_keys(values, fold)` 注入式助手，碰撞路径在任意平台真实执行（`lookup_key` win32 臂仅原生 Windows 构建覆盖，与 dsh `v8 ignore` 同覆盖口径，代码注释已注明）。
+- 新增 3 钉测：`layer_keeps_file_order_and_last_duplicate_value`（层文件序 + 重复键首现位末值胜）、`fold_keys_case_collision_keeps_file_later_value_at_first_position`（Path/PATH 大写折叠碰撞文件后者胜 + 恒等折叠保序双向）、`snapshot_layer_case_variants_stay_distinct_off_windows`（非 Windows 恒等不碰撞）。`parse_env` 公共面保持 BTreeMap 零变化（9073 差分输入钉死的行为面不动）。
+- 验证：四关全绿（fmt / clippy --workspace --all-targets -D warnings / fr-config 65 + fr-schema 16 tests / doc 零警告）；CONFIG lifecycle 35 passed / 266 skipped / 0 failed 与基线一致；guard exit 0；合同零改动（CONFIG 合约仅 patch 行「插入序」钉死文本，无 env 层存储顺序条目，rg 实证）。
+- 类型泄漏裁定（M-DONT-LEAK-TYPES）：全仓消费面核实 `EnvLayer`/`EnvSnapshot` 仅 fr-config 内部使用 + lib.rs 再导出（fr 宿主 crate 未建），工作区内 crate 顺序保留即 22A1 裁决语义本体，`pub values: IndexMap` 字段文档已注明依据——接受已声明泄漏。

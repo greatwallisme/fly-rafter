@@ -18,6 +18,8 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use indexmap::IndexMap;
+
 use crate::error::Error;
 
 /// `.env` file name within a layer directory (dsh `readEnvLayer`).
@@ -232,8 +234,14 @@ fn parse_env_entries(input: &str) -> Vec<(String, String)> {
 pub struct EnvLayer {
     /// Absolute path of the `.env` file behind this layer.
     pub path: PathBuf,
-    /// All parsed entries of the layer, keys as written.
-    pub values: BTreeMap<String, String>,
+    /// All parsed entries of the layer, keys as written, in file order.
+    ///
+    /// Duplicate keys keep their first position and take the last
+    /// assignment's value — the first-position/last-value shape of a JS
+    /// object — so a case-colliding pair resolves to the file-later
+    /// spelling exactly like `new Map(Object.entries(...))` in dsh
+    /// `createLaunchEnvironmentSnapshot` (2026-10-22 Q22A1).
+    pub values: IndexMap<String, String>,
 }
 
 /// Parse one directory's `.env` without applying it (dsh `readEnvLayer`).
@@ -341,12 +349,32 @@ fn lookup_key(name: &str) -> Cow<'_, str> {
     }
 }
 
+/// Re-key one layer's entries into the folded lookup-key space.
+///
+/// Duplicate folded keys keep their first position and take the file-later
+/// value — the collect into [`IndexMap`] reproduces the JS `Map` shape of
+/// `new Map(Object.entries(...))` in dsh `createLaunchEnvironmentSnapshot`
+/// (launch-environment src/index.ts:85), so on Windows a same-layer
+/// `Path`/`PATH` collision resolves to the file-later spelling. The fold
+/// function is injected so the collision path executes in tests on every
+/// platform; the native win32 arm of [`lookup_key`] itself is covered only
+/// by native Windows builds (dsh marks the same arm `v8 ignore`).
+fn fold_keys(
+    values: impl IntoIterator<Item = (String, String)>,
+    fold: impl Fn(&str) -> Cow<'_, str>,
+) -> IndexMap<String, String> {
+    values
+        .into_iter()
+        .map(|(name, value)| (fold(&name).into_owned(), value))
+        .collect()
+}
+
 /// The frozen environment of one launch: immutable layer contents that later
 /// `chdir`, workspace switches, or resumed sessions resolve against (dsh
 /// `LaunchEnvironmentSnapshot`).
 #[derive(Debug, Clone)]
 pub struct EnvSnapshot {
-    process: BTreeMap<String, String>,
+    process: IndexMap<String, String>,
     project: Option<EnvLayer>,
     user: Option<EnvLayer>,
 }
@@ -357,26 +385,21 @@ impl EnvSnapshot {
     /// dsh folds at store time (launch-environment
     /// `createLaunchEnvironmentSnapshot`), so a query and the stored entries
     /// meet in the same folded space on platforms with case-folded
-    /// environment names.
+    /// environment names. Duplicate folded keys keep first position and take
+    /// the file-later value (see [`fold_keys`]).
     fn from_layers(
         process: BTreeMap<String, String>,
         project: Option<EnvLayer>,
         user: Option<EnvLayer>,
     ) -> Self {
-        let fold = |values: BTreeMap<String, String>| -> BTreeMap<String, String> {
-            values
-                .into_iter()
-                .map(|(name, value)| (lookup_key(&name).into_owned(), value))
-                .collect()
-        };
         Self {
-            process: fold(process),
+            process: fold_keys(process, lookup_key),
             project: project.map(|mut layer| {
-                layer.values = fold(layer.values);
+                layer.values = fold_keys(layer.values, lookup_key);
                 layer
             }),
             user: user.map(|mut layer| {
-                layer.values = fold(layer.values);
+                layer.values = fold_keys(layer.values, lookup_key);
                 layer
             }),
         }
@@ -390,7 +413,7 @@ impl EnvSnapshot {
 
     /// Layer contents in canonical order, with the file path behind
     /// non-process layers.
-    fn layer_of(&self, source: EnvSource) -> Option<(&BTreeMap<String, String>, Option<&Path>)> {
+    fn layer_of(&self, source: EnvSource) -> Option<(&IndexMap<String, String>, Option<&Path>)> {
         match source {
             EnvSource::Process => Some((&self.process, None)),
             EnvSource::ProjectEnv => self
@@ -799,14 +822,14 @@ mod tests {
         let process = MapSink::new(&[("ONLY_PROC", "p"), ("SHARED", "proc")]);
         let project = EnvLayer {
             path: PathBuf::from("/w/.env"),
-            values: BTreeMap::from([
+            values: IndexMap::from([
                 ("SHARED".to_owned(), "proj".to_owned()),
                 ("ONLY_PROJECT".to_owned(), "proj".to_owned()),
             ]),
         };
         let user = EnvLayer {
             path: PathBuf::from("/h/.env"),
-            values: BTreeMap::from([
+            values: IndexMap::from([
                 ("SHARED".to_owned(), "user".to_owned()),
                 ("ONLY_PROJECT".to_owned(), "user".to_owned()),
             ]),
@@ -1014,6 +1037,65 @@ mod tests {
                 "content {content}: {message}"
             );
         }
+    }
+
+    #[test]
+    fn layer_keeps_file_order_and_last_duplicate_value() {
+        // dsh layer values keep the JS object shape: file order, duplicate
+        // keys at their first position with the last assignment's value.
+        let project = TempLayer::new("fileorder-proj");
+        let home = TempLayer::new("fileorder-home");
+        project.write_env("B=1\nA=2\nFOO=1\nFOO=2\n");
+        let layer = read_env_layer("fr", &project.path, &home.path, &|_| {})
+            .unwrap()
+            .expect("project layer must exist");
+        assert_eq!(
+            layer.values.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["B", "A", "FOO"]
+        );
+        assert_eq!(layer.values.get("FOO").map(String::as_str), Some("2"));
+    }
+
+    #[test]
+    fn fold_keys_case_collision_keeps_file_later_value_at_first_position() {
+        // On Windows lookup_key uppercases, so `Path` and `PATH` collide;
+        // the collect keeps the first position and the file-later value (dsh
+        // createLaunchEnvironmentSnapshot, launch-environment src/index.ts:85).
+        // The fold function is injected so the collision path executes on
+        // every platform; the native win32 arm of lookup_key is covered only
+        // by native Windows builds (dsh marks the same arm `v8 ignore`).
+        let entries = IndexMap::from([
+            ("Path".to_owned(), "a".to_owned()),
+            ("PATH".to_owned(), "b".to_owned()),
+        ]);
+        let folded = fold_keys(entries.clone(), |name| Cow::Owned(name.to_uppercase()));
+        assert_eq!(
+            folded.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["PATH"]
+        );
+        assert_eq!(folded.get("PATH").map(String::as_str), Some("b"));
+        // Without folding, both spellings stay distinct, in file order.
+        let exact = fold_keys(entries, |name| Cow::Borrowed(name));
+        assert_eq!(
+            exact.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["Path", "PATH"]
+        );
+    }
+
+    #[test]
+    fn snapshot_layer_case_variants_stay_distinct_off_windows() {
+        // lookup_key is identity off Windows: the two spellings never
+        // collide and each resolves to its own value.
+        let layer = EnvLayer {
+            path: PathBuf::from("/w/.env"),
+            values: IndexMap::from([
+                ("Path".to_owned(), "a".to_owned()),
+                ("PATH".to_owned(), "b".to_owned()),
+            ]),
+        };
+        let snapshot = EnvSnapshot::from_layers(BTreeMap::new(), Some(layer), None);
+        assert_eq!(snapshot.get("Path").unwrap().value, "a");
+        assert_eq!(snapshot.get("PATH").unwrap().value, "b");
     }
 
     #[test]

@@ -23,6 +23,7 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util", "fs"] }
 serde_yaml_ng = "0.10"
 regex = "1.13"
+indexmap = "2"
 
 # Internal crates
 fr-config = { path = "crates/fr-config" }

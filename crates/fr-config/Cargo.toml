@@ -16,6 +16,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 serde_yaml_ng.workspace = true
 regex.workspace = true
+indexmap.workspace = true
 
 [dev-dependencies]
 dougong-loader.workspace = true
