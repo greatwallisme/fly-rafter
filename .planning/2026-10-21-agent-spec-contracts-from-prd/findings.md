@@ -403,3 +403,12 @@ dsh .env 分层权威事实（app-boot/src/index.ts + util 两包，仓库 ~/pro
 - 测试用例错误一次：`fr dump-config-schema --bogus` 期望内参报错但 dsh 语义 profile 缺失检查先行（action 先于 resolveBoot）——实现本就正确，用例补 --profile 后过；exact 断言定案。
 - clippy --all-targets 抓 2 处 assert_is_empty（workspace lint 表既有项）→ assert_eq!。
 - 管线 transition 复踩 REQ-NNN 占位符（req-template.md 的 id）——agent-spec 拒绝 accepted→accepted 无状态影响；后续 ID 提取应过滤 req-fr-*。
+
+## 2026-10-23 — 会话恢复：验收基线实跑 + guard 门禁面事实（新发现，呈 Q31）
+
+- 本会话实跑验收基线（HEAD 01039f6，工作树净）：四关 exit 0（fr 11 + fr-config 88 + fr-schema 28 = 127 tests，fmt/clippy 双口径/doc 全绿）；三门禁 0 errors；lifecycle CONFIG = 314 场景 55 passed / 259 skipped / 0 failed（exit 1 属 pending 基线，与上轮一致）；explain 渲染成功（Verification Summary 314/55/0/259/0，Pass Rate 17.5%）。
+- **guard 扫描面事实（双调用面当场对照实证）**：`agent-spec guard --spec-dir specs --code .`（CLAUDE.md 质量门命令 + `.git/hooks/pre-commit` 现行调用面）exit 0；`agent-spec guard --spec-dir specs/generated --code .` exit 1，逐份列出 20 份 `verification not passing: 0 failed, N skipped`。目录事实：specs/ 直下仅 generated/ 子目录、无直置 spec 文件 → specs 面扫描集为空（空转通过），specs/generated 面才真正扫描且把 skipped 计为 not passing。
+- 影响（溯源）：Session 10 观察的 "guard FAIL 20/20 verification not passing" 为 specs/generated 面（真实扫描）；此后各轮（7f8948c 评审起）记录的 "guard exit 0" 基线均为 specs 空转面；pre-commit hook 自 2026-10-22（Q16A）安装以来从未真正阻断过提交——与 Q16A「会阻断提交直至合约转绿」的已知照预期不符。1221 场景中仅 55 绑定，真实 guard 面将持续红至全部合约绑定。
+- 呈 Q31（门禁面裁决）：A = CLAUDE.md 质量门命令与 pre-commit hook 统一改 `--spec-dir specs/generated`（恢复 Q16A 阻断语义，红至合约全绑，提交期阻断已知照）；B = 报告与切片验证以逐合约 lifecycle 为准（现状已覆盖），hook 维持空转并在 PRD 19.2/决策登记该事实；C = 用户另定。
+- **Q31A 裁决落地（2026-10-23 用户裁决 A + 追加质询修正）**：CLAUDE.md 七步表第 5 步与 `.git/hooks/pre-commit` 统一改 `agent-spec guard --spec-dir specs/generated --code . --min-score 0.7`。用户质询 min-score 0.6 来源——查证为 `agent-spec install-hooks` 模板默认（= guard CLI 默认），非项目裁决；2026-10-22 装 hook 时只修 `--code src → .` 路径缺陷、未审其余参数，系我方疏漏；已按项目既定 0.7 标准（七步表第 2 步）显式钉死。实跑验证：hook exit 1 且 20 处 `verification not passing`、guard min-score 0.7 exit 1——新常态 = 实扫 20 份、阻断直至合约全绑；阻断期内提交一律 `git commit --no-verify`（标准操作，Q16A/Q31A 已知照）。
+- Phase 13 动工纪律：fr-session 是 dougong 插件 crate，实现期必用 dougong-plugin-dev 与 rust-guidelines 技能；动工前 dsh 会话域真源全读（findings 后续节落盘）。

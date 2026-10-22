@@ -63,7 +63,7 @@ cargo test -p <crate> <test_name>   # 运行单个测试
 | 2 质量门 | 机器 | `agent-spec lint <spec> --min-score 0.7` | 对合同做代码审查 |
 | 3 读合同 | agent | `agent-spec contract <spec>` | 决策、边界、完成条件三重约束 |
 | 4 自检循环 | agent | `agent-spec lifecycle <spec> --code . --format json` | fail → 读证据 → 修码 → 重跑，不许改合同 |
-| 5 守卫 | 机器 | `agent-spec guard --spec-dir specs --code .` | 全仓合同一次验证，pre-commit/CI 阻断 |
+| 5 守卫 | 机器 | `agent-spec guard --spec-dir specs/generated --code . --min-score 0.7` | 全仓合同一次验证，pre-commit/CI 阻断（守卫非递归扫描，必须直指 specs/generated；skipped 计 not passing；质量分阈值与第 2 步同为 0.7，不用工具默认 0.6） |
 | 6 验收 | 人 | `agent-spec explain <spec> --format markdown` | 读合同级摘要，不读 diff |
 | 7 盖章归档 | 机器 | `agent-spec stamp <spec> --dry-run` / `agent-spec archive` | Git trailer 建立合同↔提交溯源 |
 

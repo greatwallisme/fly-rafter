@@ -4,11 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Q30B 宿主切片落地（2026-10-23，用户裁决 B）：crates/fr 新建（bin：解析器 + dump 两子命令 + 根调用面），CONFIG 合约 +5 场景绑定 +2 重绑（complete_1 → incomplete_schema_dump_exits_one，default-only 拒 --patch → dump_arg_validation_error_family），场景 309→314。四关全绿（fr 8 + fr-config 88 + fr-schema 28 tests），lifecycle 55 passed / 259 skipped / 0 failed，guard exit 0，三门禁 0/0/0，questions 40/0 blocking；PRD 6.3 勘误 + 23 决策 27；fr-config 增 schema_lookup 再导出（依赖方向：fr 只依 fr-config）。Phase 12 整段关闭（dump CLI 侧已落，场景绑定随切片递增属常态）。
-待用户：本轮切片验收（explain 可渲染）+ 下一切片指定（默认回 PRD 20 顺序 Phase 13 fr-session v4 全量）。
+Phase 13（fr-session v4 全量）已按用户「1、2 完成后继续」指令启动。已完成：Q31A 落地（guard 门禁面 = `--spec-dir specs/generated --min-score 0.7`，CLAUDE.md 七步表 + pre-commit hook 双改并实跑验证 exit 1 实扫阻断；0.6 系工具模板默认已按项目 0.7 修正）；Q30B 轮 explain 验收材料 991 行已亲读、digest 呈报。当前动作 = dsh 会话域真源全读（Phase 13 动工前置纪律），读毕呈集中分叉裁决（Q33 起），再按七步合约流精化 SESSION 合约后写码。
 
 ## Current Phase
-Phase 12
+Phase 13（fr-session v4 全量——真源全读阶段）
 
 ## Phases
 
