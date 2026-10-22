@@ -55,8 +55,22 @@ struct DumpInvocation {
     patches: Vec<PathBuf>,
 }
 
+/// A parse result that resolves without an invocation: dsh's launcher owns
+/// `-V`/`--version` anywhere before the first app token (commander fires the
+/// version during parse), and intercepts `-h`/`--help` for its own help when
+/// no `--profile` was given (args.ts action, before the profile-required
+/// error).
+enum ParseOutcome {
+    Dump(DumpInvocation),
+    Version,
+    Help,
+}
+
 /// Value of an option: the inline `=value` part, else the next argv entry;
-/// an option at the end of argv is missing its value entirely.
+/// an option at the end of argv is missing its value entirely. The missing
+/// message is commander's own wording (`error: option '<flags>' argument
+/// missing`); the empty-value wording is dsh `resolveBoot`'s and stays with
+/// the caller.
 fn option_value(
     inline: Option<String>,
     argv: &[String],
@@ -73,8 +87,8 @@ fn option_value(
 /// Parses dump subcommand arguments with the dsh launcher's split semantics:
 /// the first token the parser does not own starts the inner arguments, and
 /// everything from there on belongs to the booted app verbatim (including
-/// its own flags and `-h`).
-fn parse_dump_args(argv: &[String], schema_mode: bool) -> Result<DumpInvocation, String> {
+/// its own flags and `-h` once a profile is named).
+fn parse_dump_args(argv: &[String], schema_mode: bool) -> Result<ParseOutcome, String> {
     let mut profile: Option<String> = None;
     let mut from_default_profile: Option<String> = None;
     let mut default_only = false;
@@ -95,7 +109,7 @@ fn parse_dump_args(argv: &[String], schema_mode: bool) -> Result<DumpInvocation,
                     inline,
                     argv,
                     &mut index,
-                    "error: --profile needs a name",
+                    "error: option '--profile <name>' argument missing",
                 )?);
             }
             "--from-default-profile" => {
@@ -103,14 +117,27 @@ fn parse_dump_args(argv: &[String], schema_mode: bool) -> Result<DumpInvocation,
                     inline,
                     argv,
                     &mut index,
-                    "error: --from-default-profile needs a name",
+                    "error: option '--from-default-profile <name>' argument missing",
                 )?);
             }
             "--patch" => {
-                let value = option_value(inline, argv, &mut index, "error: --patch needs a path")?;
+                let value = option_value(
+                    inline,
+                    argv,
+                    &mut index,
+                    "error: option '--patch <path>' argument missing",
+                )?;
                 patches.push(PathBuf::from(value));
             }
             "--default-only" if !schema_mode && inline.is_none() => default_only = true,
+            "-V" | "--version" if inline.is_none() => return Ok(ParseOutcome::Version),
+            "--" if inline.is_none() => {
+                // Commander's end-of-options literal: the marker itself is
+                // consumed, everything after belongs to the booted app
+                // (command.js parseOptions `arg === '--'`).
+                inner.extend_from_slice(&argv[index + 1..]);
+                break;
+            }
             _ => {
                 inner.extend_from_slice(&argv[index..]);
                 break;
@@ -121,6 +148,12 @@ fn parse_dump_args(argv: &[String], schema_mode: bool) -> Result<DumpInvocation,
     // Validation order mirrors dsh `resolveBoot`: the profile first, then the
     // flag values, then the inner arguments, then the default-only split.
     let Some(profile) = profile else {
+        if inner
+            .iter()
+            .any(|argument| argument == "-h" || argument == "--help")
+        {
+            return Ok(ParseOutcome::Help);
+        }
         return Err("error: --profile <name> is required".to_owned());
     };
     if profile.is_empty() {
@@ -150,17 +183,25 @@ fn parse_dump_args(argv: &[String], schema_mode: bool) -> Result<DumpInvocation,
             "error: --default-only prints the bundle layers and takes no --patch".to_owned(),
         );
     }
-    Ok(DumpInvocation {
+    Ok(ParseOutcome::Dump(DumpInvocation {
         profile,
         from_default_profile,
         default_only,
         patches,
-    })
+    }))
 }
 
 fn run_dump(argv: &[String], schema_mode: bool) -> ExitCode {
     let invocation = match parse_dump_args(argv, schema_mode) {
-        Ok(invocation) => invocation,
+        Ok(ParseOutcome::Dump(invocation)) => invocation,
+        Ok(ParseOutcome::Version) => {
+            println!("{}", env!("CARGO_PKG_VERSION"));
+            return ExitCode::SUCCESS;
+        }
+        Ok(ParseOutcome::Help) => {
+            println!("{USAGE}");
+            return ExitCode::SUCCESS;
+        }
         Err(message) => {
             eprintln!("{message}");
             return ExitCode::from(1);
@@ -191,6 +232,17 @@ fn dump(invocation: &DumpInvocation, schema_mode: bool) -> fr_config::error::Res
         &warn,
         &ctx,
     )?;
+    // dsh `prepareProfile` reports skipped bundles on every dump path
+    // (profile-boot.ts:197, profile.ts:118-123); the composition itself never
+    // is.
+    for bundle in &loaded.skipped_bundles {
+        eprintln!(
+            "fr: skipping profile bundle {}: {}",
+            serde_json::to_string(bundle.name.as_str())
+                .expect("serde_json cannot fail to serialize a string"),
+            bundle.reason
+        );
+    }
     // M1 ships a single entry, so the dump's entry bundle layer is headless
     // (decision 27); the entry selection face arrives with M2 entries.
     let layers = collect_dump_layers(

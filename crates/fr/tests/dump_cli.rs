@@ -101,8 +101,9 @@ fn incomplete_schema_dump_exits_one() {
     .unwrap_or_else(|error| panic!("write failed: {error}"));
     let run = run(&["dump-config-schema", "--profile", "headless"], &home);
     assert_eq!(run.status, 1);
-    // stdout remains exactly one JSON document; the diagnostic goes to
-    // stderr with the path-less `fr: <level>: <message>` spelling (decision 25).
+    // stdout remains exactly one JSON document; stderr carries the prepare-time
+    // skipped-bundle report (dsh reportSkippedBundles) and then the schema
+    // diagnostic with the path-less `fr: <level>: <message>` spelling (decision 25).
     let document: serde_json::Value =
         serde_json::from_str(run.stdout.strip_suffix('\n').expect("trailing newline"))
             .unwrap_or_else(|error| panic!("stdout is not one JSON document: {error}"));
@@ -112,7 +113,8 @@ fn incomplete_schema_dump_exits_one() {
     );
     assert_eq!(
         run.stderr,
-        "fr: error: Selected profile bundle \"missing-bundle\" could not be loaded; repair or remove its bundle selection.\n"
+        "fr: skipping profile bundle \"missing-bundle\": not a built-in bundle name\n\
+         fr: error: Selected profile bundle \"missing-bundle\" could not be loaded; repair or remove its bundle selection.\n"
     );
 }
 
@@ -163,7 +165,7 @@ fn dump_rejects_app_arguments_and_unknown_flags() {
 #[test]
 fn dump_arg_validation_error_family() {
     let home = TempHome::new("arg-errors");
-    let cases: [(&[&str], &str); 7] = [
+    let cases: [(&[&str], &str); 10] = [
         (&["dump-config"], "error: --profile <name> is required\n"),
         (
             &["dump-config-schema"],
@@ -200,6 +202,20 @@ fn dump_arg_validation_error_family() {
                 "x.yml",
             ],
             "error: --default-only prints the bundle layers and takes no --patch\n",
+        ),
+        // An option at the end of argv with no value takes commander's own
+        // wording, distinct from the empty-value family above.
+        (
+            &["dump-config", "--profile"],
+            "error: option '--profile <name>' argument missing\n",
+        ),
+        (
+            &["dump-config", "--profile", "headless", "--patch"],
+            "error: option '--patch <path>' argument missing\n",
+        ),
+        (
+            &["dump-config", "--from-default-profile"],
+            "error: option '--from-default-profile <name>' argument missing\n",
         ),
     ];
     for (argv, expected) in cases {
@@ -282,4 +298,89 @@ fn root_dispatch_version_help_and_unknown_modes() {
     let unknown = run(&["headless"], &home);
     assert_eq!(unknown.status, 1);
     assert!(unknown.stderr.starts_with("error: expected a mode"));
+}
+
+#[test]
+fn subcommand_version_help_interception() {
+    let home = TempHome::new("subcommand-face");
+    // The launcher owns -V/--version anywhere before the first app token
+    // (commander fires the version during parse, even mid-flag region).
+    let version = run(&["dump-config", "-V"], &home);
+    assert_eq!(version.status, 0);
+    assert_eq!(version.stdout, concat!(env!("CARGO_PKG_VERSION"), "\n"));
+    assert_eq!(version.stderr, "");
+    let version_long = run(&["dump-config-schema", "--version"], &home);
+    assert_eq!(version_long.status, 0);
+    assert_eq!(
+        version_long.stdout,
+        concat!(env!("CARGO_PKG_VERSION"), "\n")
+    );
+    // With no profile to hand it to, -h/--help prints the launcher's own
+    // help (dsh args.ts intercepts before the profile-required error).
+    let help = run(&["dump-config", "-h"], &home);
+    assert_eq!(help.status, 0);
+    assert!(help.stdout.contains("Usage:"));
+    assert_eq!(help.stderr, "");
+    let help_long = run(&["dump-config-schema", "--help"], &home);
+    assert_eq!(help_long.status, 0);
+    assert!(help_long.stdout.contains("Usage:"));
+    // But with a profile named, -h is an app argument like any other.
+    let owned = run(&["dump-config", "--profile", "headless", "-h"], &home);
+    assert_eq!(owned.status, 1);
+    assert_eq!(
+        owned.stderr,
+        "error: config dumps take no app arguments, got \"-h\"\n"
+    );
+}
+
+#[test]
+fn end_of_options_marker_is_consumed() {
+    let home = TempHome::new("end-of-options");
+    let init = run(&["dump-config", "--profile", "headless"], &home);
+    assert_eq!(init.status, 0, "stderr: {}", init.stderr);
+    // A bare `--` is commander's end-of-options literal: it is consumed, so
+    // the dump proceeds where the pre-fix parser rejected it as an app argument.
+    let bare = run(&["dump-config", "--profile", "headless", "--"], &home);
+    assert_eq!(bare.status, 0, "stderr: {}", bare.stderr);
+    assert!(
+        bare.stdout.contains("name: fr-agent-loop"),
+        "stdout: {}",
+        bare.stdout
+    );
+    // With app arguments after the marker, the got-list carries those
+    // arguments without the marker itself.
+    let with_args = run(
+        &["dump-config", "--profile", "headless", "--", "--bogus"],
+        &home,
+    );
+    assert_eq!(with_args.status, 1);
+    assert_eq!(
+        with_args.stderr,
+        "error: config dumps take no app arguments, got \"--bogus\"\n"
+    );
+}
+
+#[test]
+fn yaml_dump_reports_skipped_bundle() {
+    let home = TempHome::new("yaml-skipped");
+    let profile_dir = home.path().join("profiles").join("headless");
+    fs::create_dir_all(&profile_dir).unwrap_or_else(|error| panic!("mkdir failed: {error}"));
+    fs::write(
+        profile_dir.join("profile.yml"),
+        "bundles: [missing-bundle]\n",
+    )
+    .unwrap_or_else(|error| panic!("write failed: {error}"));
+    // The YAML dump prints the prepare-time skipped-bundle report to stderr
+    // and still dumps the composed tree (dsh runDumpConfig / reportSkippedBundles).
+    let run = run(&["dump-config", "--profile", "headless"], &home);
+    assert_eq!(run.status, 0, "stderr: {}", run.stderr);
+    assert_eq!(
+        run.stderr,
+        "fr: skipping profile bundle \"missing-bundle\": not a built-in bundle name\n"
+    );
+    assert!(
+        run.stdout.contains("name: fr-agent-loop"),
+        "stdout: {}",
+        run.stdout
+    );
 }
