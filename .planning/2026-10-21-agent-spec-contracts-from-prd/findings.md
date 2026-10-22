@@ -340,3 +340,43 @@ dsh .env 分层权威事实（app-boot/src/index.ts + util 两包，仓库 ~/pro
 - 测试自纠五件：hook 拦 unreachable! 改先验证后 push / 独立 tests.rs 文件不被 hook 识别为测试改回仓库惯例内联 mod tests / yaml-json 双 Value 域混用 72 错误逐一归域 / 空字符串 patch 夹具非法改 `[]` / clippy 13 项（const fn as_str×3、collapsible_if×5、let-chains（edition 2024）、usize 排序键去 i64 cast、needless_borrow、map_or→is_some_and/is_none_or、assert_is_empty、doc 段落与私有链接）。事故自纠：胶水函数曾插在 render_dump 文档注释与函数之间切断文档关联（clippy missing_docs 抓获）——重定位到注释块之前。
 - M1 不可达态：partial/unsupported 结构性不可达（描述符 fail-closed 构造 + to_json_schema 全投影），类型保留（x-fr 面钉五态），PRD 19.2 条 13 载明；schema 态经 schema_of callback 注入钉测（Q10A 框架先行）。
 - 下一步：宿主 CLI 期把 dump-config-schema 接到 fr 二进制（stdout 单份 JSON+\n、diagnostics 逐条 stderr、complete 假退 1——宿主 crate 未建，属 M1 宿主切片）；或按计划推进下一 crate 切片。
+
+## 2026-10-23 — /code-review high --fix（commit 9eddb40 fr-schema 投影面切片；后台代理评审+修复，本会话独立复验）
+
+### 评审结论（6 findings：2 修复提交 7850a55，4 呈报/记录）
+
+- **finding 1（已修）**：$defs 与 patch 规则输出序偏离 dsh 插入序——BTreeMap 使 $defs 字典序打印、patch 规则按 id 序，dsh JS Map 为首现序（钉住文件 apps/cli/tests/expected/dump-config-schema.json 本会话实证 defs 序 loaderExpression→entryMetadata→entryList→patchList→unknownConfig→includeConfig→includePatch→config0→config1→entry→patch）。修复：definitions 改 serde_json::Map（preserve_order 插入序）；targets 改 OrderedTargets（Vec 复现 JS Map 语义：set 原位覆盖、remove 保序收紧——serde_json::Map::remove 在 preserve_order 下为 swap_remove 会重排幸存键）；+3 顺序钉测（基骨架序 / configN 追加序 / patch 规则 first-set 序 + clear 保序）。
+- **finding 4（已修）**：walk_rows 返回 HashSet<usize>（contains O(1)），index_targets 文档明示 valid 仅 collectable 层消费；纯成本/可读性，无输出差异。
+- **finding 2（呈 Q27，待裁决）**：configN 投影为裸 to_json_schema，缺 dsh projector 值位包裹（projector.ts:90 nullable / :100-121 expressions 值位 anyOf [原始, #/$defs/loaderExpression] / :447 应用于 configN 投影，本会话核实）——raw 行 `!!js` 表达式以字符串存在时 dumped schema 判该行 invalid 而 boot 求值成功（dump 严于 boot）。修则变更 fr-schema 公共投影语义。
+- **finding 3（呈 Q29，待裁决）**：project_definitions 按插件名缓存投影（HashMap<String,String>）；同名异 schema 静默复用首个投影 → ambiguity warning 与 complete 三条件之「一名多 schema」成死码。受支持输入（schema_of 纯注册表查找，同名必同 schema）不受影响，防御性加固。
+- **finding 5（呈 Q28，待裁决）**：合约场景「complete 为假退出码 1」绑定 error_entry_sets_diagnostics_and_incomplete，该测试只断言 SchemaDump.complete==false——退出码半边无宿主 CLI 不可验证（宿主 crate 未建）；绑定绿但 pinned 行为未验。
+- **finding 6（呈报确认）**：workspace serde_json preserve_order 随 9eddb40 落地（全局 serde_json::Map 序列化字典序→插入序），系 x-fr/$defs 对齐机制本体；与 Q26B 待呈报两项（x-fr 五键序 {profile, complete, entries, diagnostics, patchSchema}，dump.rs:458-469 与 dsh 钉住文件 x-cordis 键序逐位一致；品牌映射字符串清单见上节 Q26B 落地记录）合并呈用户确认。
+
+### 门禁复验（本会话独立复跑，非转述子代理；2026-10-23）
+
+- fmt --check / clippy -- -D warnings / cargo doc exit 0；cargo test 88+27 全过 0 fail。
+- lifecycle（CONFIG 合约，--format json）：308 场景 48 passed / 260 skipped（全 pending 选择器 Skip）/ 0 failed——与 9eddb40 基线逐位一致；exit 1 属 skipped 基线。guard exit 0。
+- 工具性自纠一件：lifecycle --format json 输出 JSON 后带附加行，json.load 抛 Extra data——改 json.JSONDecoder().raw_decode 解析成功；首轮临时文件在解析失败分支仍被 rm 误删，重跑补齐计数。
+
+## 2026-10-23 — Q27A/Q28A/Q29A 裁决落地（评审轮呈问闭环）
+
+### 裁决与实现
+- **Q27A（configN 投影全脸）**：`to_json_schema` 重构为单一全投影面（对应 dsh 单一 projector）——`project_core` 每节点 nullable（required → 附加 `not:{type:'null'}`，非必需 → type 并 'null'；`Property.required` ↔ dsh `meta.required`，根默认非必需 = dsh 未声明缺省，projector.ts:90-97/426）+ `wrap_value_positions` 值位包裹（properties 值/items/additionalProperties 递归；注解 [title, description, default, $comment, x-fr] 按 dsh 列序前提；anyOf [内核, `#/$defs/loaderExpression`]，projector.ts:100-122/447）。dsh 钉住文件 config0 形态（根 `type:["object","null"]` + 嵌套 `{default, anyOf:[{type:[..,'null'],minimum,maximum}, ref]}`）当场逐位核符。dsh 的 typeless/boolean-core nullable 分支与 propertyNames/prefixItems/anyOf/not 包裹分支在 fr 受限面不可构造（PRD 6.3 子集 fail-closed），函数文档注明不移植；projector.ts:450 第二遍包裹仅作用于 projector 内部递归定义（fr M1 无递归 schema）不涉。
+- **Q29A（同名分裂活化）**：`project_definitions` 缓存键 =（插件名，`&Schema` 指针地址——dsh 描述符节点身份的 fr 等价）；同名异 schema 分裂 config0/config1 按发现序，既有 name_choices / entry_rules anyOf 并集 / ambiguity 警告 / complete 门自此由死码活化（评审 finding 3）；+1 钉测 `ambiguous_name_splits_projections_and_warns`。
+- **Q28A（退出码场景解绑）**：bind-config-tests.py 对改 `pending_req_fr_config_complete_1`（重生成天然回 pending，脚本幂等保持）；`error_entry_sets_diagnostics_and_incomplete` 测试保留（error 态面仍由其钉）。
+- 呈确认三项 D1-D3 未否决按成立（preserve_order / x-fr 五键序 / 品牌映射清单），随决策 26 记录。
+
+### 合同层（七步流 1-2）
+- PRD 6.3 to_json_schema 投影全脸条款；**19.2 补条 13——发现决策 25 原引用「19.2 条 13」悬空：Q26B 会话只写引用未落条目，本轮补记**（文档体裁剪：includeConfig/includePatch 与 names 表 builtin 常量不载、tree 类型保留 M1 不产出、acceptsMissing/native 元数据折叠后置）；23 决策 26（三项裁决 + D1-D3 + validate 侧显式 null 接受口径留待 fr boot 校验落地时对齐——本轮仅投影面，dsh Ajv 面行为）。
+- intake CONFIG-5：「注册表命中投影 configN」Then 扩投影全脸 + 新场景「同名异 schema 投影分裂告警」，306→309；绑定 48→48（+1 分裂绑定，−1 complete_1 解绑）。
+- 管线全序列重跑：import → accepted 20/20 → draft-specs → refine 20 → depends 清理 → 绑定重放 → 三门禁 0/0/0 → questions 39 total 0 blocking → CONFIG lint 仅 advisory（open-question 提示，非门禁）。
+
+### 门禁（本会话实跑）
+- 四关全绿：fmt / clippy --workspace --all-targets -D warnings / cargo test 88+28 全过 0 fail / cargo doc。
+- lifecycle（CONFIG）：309 场景 48 passed / 261 skipped / 0 failed；guard exit 0；stamp dry-run 48/309 0 failed 一致。
+
+### 自纠
+- 首轮测试期望漏写 model 位被前提的 default 注解——实际输出与 dsh 钉住形态一致，期望错；修正后过。
+- clippy --all-targets 抓 7850a55 遗留三处（文档首段过长 / `nth % 2` → `is_multiple_of` / 测试内嵌 fn rule_id 提至 tests mod 层）——前轮项目门 `clippy -- -D warnings` 不含 --all-targets 漏检测试代码；本轮起双口径并跑。
+- code-quality hook 拦 nullable 中 unreachable!——改 type_name 由构造臂传入的全函数，无占位类构造。
+- 管线 transition 首轮误用文件名且 rg 缺 -I 致 ID 污染全败——改 frontmatter id 纯提取后 20/20 过。

@@ -4,9 +4,9 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-【2026-10-22 起强制】实现一律按七步合约流（CLAUDE.md「开发工作流」节）：任务启动 = 精化对应合同四要素（绑定真实测试选择器、异常场景 ≥ 正常场景）→ lint 0.7 → contract → lifecycle 自检循环（fail 修码不改合同，改合同须先沟通）→ guard → explain → stamp。
-fr-config dump 数据面已完成（Q23A/Q24A，2026-10-22）：dump.rs 新模块 + stack.rs prepare 语义（fr.yml 根文件/user_layer 门/from-default staging 替换），四关全绿，lifecycle 38 passed / 263 skipped / 0 failed，guard exit 0。
-下一切片 = fr-schema 投影面（dump-config-schema 侧：$schema 2020-12 + x-fr 五键 {profile, complete, entries, diagnostics, patchSchema:'#/$defs/patchList'} + entry 五态 schema/partial/absent/unsupported/error + diagnostics stderr 逐条 + complete 假退 1；复用 collect_dump_layers；D3 = Session 7 真源，findings「Phase 12 续 Session 7」节）→ 绑 x-fr 五键 / complete 假退 1 / dump 来自真实装配 → 四关 + lifecycle + 呈报。
+Q27A/Q28A/Q29A 裁决落地（2026-10-23）：to_json_schema 单一全投影面（每节点 nullable + 值位 loaderExpression 包裹，dsh 钉住形态逐位核符）；同名异 schema 分裂活化 ambiguity/complete 门（+1 钉测 +1 场景，309）；complete_1 场景退回 pending。四关全绿（88+28 tests），lifecycle 48 passed / 261 skipped / 0 failed，guard exit 0，stamp 一致；PRD 6.3 / 19.2 补条 13（Q26B 悬空引用补记）/ 23 决策 26；管线三门禁 0/0/0，questions 0 blocking。
+待用户：本轮合同验收（explain 可渲染）+ 下一切片指定。
+下一切片候选（待用户指定或确认）：按 PRD 20 M1 顺序推进 fr-session（v4 全量）或 M1 宿主切片（fr 二进制 + dump CLI 流面：stdout JSON/\n、diagnostics stderr、complete 假退 1——届时重绑 complete_1 场景）。
 
 ## Current Phase
 Phase 12
