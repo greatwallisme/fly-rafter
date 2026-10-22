@@ -11,7 +11,8 @@ use serde_json::{Map, Value};
 /// The M1 face covers the value shapes the assembly defaults require
 /// (PRD 6.4). Declarations outside the face cannot be constructed, so an
 /// unsupported declaration fails at compile time rather than at validation
-/// time (fail-closed).
+/// time (fail-closed). Defaults are typed per variant, so a default that
+/// violates its own declaration is likewise unconstructible.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Schema {
     /// UTF-8 string; a non-empty `candidates` list restricts to enumeration
@@ -20,7 +21,7 @@ pub enum Schema {
         /// Allowed values; empty means any string.
         candidates: Vec<String>,
         /// Declared default, projected to the `default` annotation.
-        default: Option<Value>,
+        default: Option<String>,
         /// Projected to the `description` annotation.
         description: Option<String>,
     },
@@ -31,7 +32,7 @@ pub enum Schema {
         /// Inclusive upper bound.
         max: Option<i64>,
         /// Declared default, projected to the `default` annotation.
-        default: Option<Value>,
+        default: Option<i64>,
         /// Projected to the `description` annotation.
         description: Option<String>,
     },
@@ -42,7 +43,7 @@ pub enum Schema {
         /// Inclusive upper bound.
         max: Option<f64>,
         /// Declared default, projected to the `default` annotation.
-        default: Option<Value>,
+        default: Option<f64>,
         /// Projected to the `description` annotation.
         description: Option<String>,
     },
@@ -122,11 +123,20 @@ fn validate_value(schema: &Schema, value: &Value, path: &str, out: &mut Vec<Viol
             }
         }
         Schema::Integer { min, max, .. } => {
-            let Some(number) = value.as_i64() else {
+            // JSON Schema 2020-12 counts any zero-fraction numeric value as
+            // an integer (`1.0` included), so acceptance runs in the f64
+            // domain like the dsh runtime; the declared bounds widen
+            // accordingly instead of rejecting integral floats the projected
+            // schema would accept.
+            let Some(number) = value.as_f64() else {
                 push(out, path, "expected integer");
                 return;
             };
-            check_i64_range(out, path, number, *min, *max);
+            if number.fract() != 0.0 {
+                push(out, path, "expected integer");
+                return;
+            }
+            check_f64_range(out, path, number, (*min).map(widen), (*max).map(widen));
         }
         Schema::Number { min, max, .. } => {
             let Some(number) = value.as_f64() else {
@@ -196,23 +206,17 @@ fn validate_value(schema: &Schema, value: &Value, path: &str, out: &mut Vec<Viol
     }
 }
 
-fn check_i64_range(
-    out: &mut Vec<Violation>,
-    path: &str,
-    number: i64,
-    min: Option<i64>,
-    max: Option<i64>,
-) {
-    if let Some(min) = min
-        && number < min
-    {
-        push(out, path, "below minimum");
-    }
-    if let Some(max) = max
-        && number > max
-    {
-        push(out, path, "above maximum");
-    }
+/// Widens an inclusive `i64` bound to the f64 validation domain.
+///
+/// The precision loss at the `i64` extremes is intentional: the dsh runtime
+/// evaluates every number as a double, so the widened bound classifies
+/// borderline values exactly as the mirrored behavior does.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "validation domain mirrors the dsh double runtime"
+)]
+const fn widen(bound: i64) -> f64 {
+    bound as f64
 }
 
 fn check_f64_range(
@@ -260,12 +264,15 @@ pub fn to_json_schema(schema: &Schema) -> Value {
             default,
             description,
         } => {
-            let mut object = Map::new();
-            object.insert("type".into(), Value::from("string"));
+            let mut object = type_object("string");
             if !candidates.is_empty() {
                 object.insert("enum".into(), Value::from(candidates.clone()));
             }
-            insert_annotations(&mut object, default.as_ref(), description.as_deref());
+            insert_annotations(
+                &mut object,
+                default.clone().map(Value::String),
+                description.as_deref(),
+            );
             Value::Object(object)
         }
         Schema::Integer {
@@ -274,10 +281,13 @@ pub fn to_json_schema(schema: &Schema) -> Value {
             default,
             description,
         } => {
-            let mut object = Map::new();
-            object.insert("type".into(), Value::from("integer"));
+            let mut object = type_object("integer");
             insert_i64_bounds(&mut object, *min, *max);
-            insert_annotations(&mut object, default.as_ref(), description.as_deref());
+            insert_annotations(
+                &mut object,
+                (*default).map(Value::from),
+                description.as_deref(),
+            );
             Value::Object(object)
         }
         Schema::Number {
@@ -286,22 +296,25 @@ pub fn to_json_schema(schema: &Schema) -> Value {
             default,
             description,
         } => {
-            let mut object = Map::new();
-            object.insert("type".into(), Value::from("number"));
+            let mut object = type_object("number");
             insert_f64_bounds(&mut object, *min, *max);
-            insert_annotations(&mut object, default.as_ref(), description.as_deref());
+            insert_annotations(
+                &mut object,
+                (*default).map(Value::from),
+                description.as_deref(),
+            );
             Value::Object(object)
         }
         Schema::Boolean {
             default,
             description,
         } => {
-            let mut object = Map::new();
-            object.insert("type".into(), Value::from("boolean"));
-            if let Some(default) = default {
-                object.insert("default".into(), Value::from(*default));
-            }
-            insert_annotations(&mut object, None, description.as_deref());
+            let mut object = type_object("boolean");
+            insert_annotations(
+                &mut object,
+                (*default).map(Value::from),
+                description.as_deref(),
+            );
             Value::Object(object)
         }
         Schema::Object {
@@ -309,16 +322,8 @@ pub fn to_json_schema(schema: &Schema) -> Value {
             additional_properties,
             description,
         } => {
-            let mut property_map = Map::new();
-            let mut required = Vec::new();
-            for property in properties {
-                property_map.insert(property.name.clone(), to_json_schema(&property.schema));
-                if property.required {
-                    required.push(Value::from(property.name.clone()));
-                }
-            }
-            let mut object = Map::new();
-            object.insert("type".into(), Value::from("object"));
+            let (property_map, required) = project_properties(properties);
+            let mut object = type_object("object");
             object.insert("properties".into(), Value::Object(property_map));
             if !required.is_empty() {
                 object.insert("required".into(), Value::from(required));
@@ -331,8 +336,7 @@ pub fn to_json_schema(schema: &Schema) -> Value {
             Value::Object(object)
         }
         Schema::Array { items, description } => {
-            let mut object = Map::new();
-            object.insert("type".into(), Value::from("array"));
+            let mut object = type_object("array");
             object.insert("items".into(), to_json_schema(items));
             insert_annotations(&mut object, None, description.as_deref());
             Value::Object(object)
@@ -341,13 +345,32 @@ pub fn to_json_schema(schema: &Schema) -> Value {
             values,
             description,
         } => {
-            let mut object = Map::new();
-            object.insert("type".into(), Value::from("object"));
+            let mut object = type_object("object");
             object.insert("additionalProperties".into(), to_json_schema(values));
             insert_annotations(&mut object, None, description.as_deref());
             Value::Object(object)
         }
     }
+}
+
+/// Creates the `{"type": <name>}` skeleton every projection shares.
+fn type_object(type_name: &str) -> Map<String, Value> {
+    let mut object = Map::new();
+    object.insert("type".into(), Value::from(type_name));
+    object
+}
+
+/// Projects declared properties and the `required` list in declaration order.
+fn project_properties(properties: &[Property]) -> (Map<String, Value>, Vec<Value>) {
+    let mut property_map = Map::new();
+    let mut required = Vec::new();
+    for property in properties {
+        property_map.insert(property.name.clone(), to_json_schema(&property.schema));
+        if property.required {
+            required.push(Value::from(property.name.clone()));
+        }
+    }
+    (property_map, required)
 }
 
 fn insert_i64_bounds(object: &mut Map<String, Value>, min: Option<i64>, max: Option<i64>) {
@@ -370,11 +393,11 @@ fn insert_f64_bounds(object: &mut Map<String, Value>, min: Option<f64>, max: Opt
 
 fn insert_annotations(
     object: &mut Map<String, Value>,
-    default: Option<&Value>,
+    default: Option<Value>,
     description: Option<&str>,
 ) {
     if let Some(default) = default {
-        object.insert("default".into(), default.clone());
+        object.insert("default".into(), default);
     }
     if let Some(description) = description {
         object.insert("description".into(), Value::from(description));
@@ -426,6 +449,23 @@ mod tests {
             validate(&schema, &json!(1.5))[0].message,
             "expected integer"
         );
+    }
+
+    #[test]
+    fn integer_matches_json_schema_zero_fraction_semantics() {
+        let schema = Schema::Integer {
+            min: None,
+            max: None,
+            default: None,
+            description: None,
+        };
+        assert_eq!(validate(&schema, &json!(1.0)), Vec::new());
+        assert_eq!(
+            validate(&schema, &json!(9_223_372_036_854_775_808_u64)),
+            Vec::new()
+        );
+        let violations = validate(&schema, &json!(1.5));
+        assert_eq!(violations[0].message, "expected integer");
     }
 
     #[test]
@@ -549,7 +589,7 @@ mod tests {
     fn projection_string_with_enum_and_annotations() {
         let schema = Schema::String {
             candidates: vec!["ask".into(), "never".into()],
-            default: Some(json!("ask")),
+            default: Some("ask".to_string()),
             description: Some("approval policy".into()),
         };
         assert_eq!(
@@ -568,7 +608,7 @@ mod tests {
         let integer = Schema::Integer {
             min: Some(0),
             max: Some(600_000),
-            default: Some(json!(60_000)),
+            default: Some(60_000),
             description: None,
         };
         assert_eq!(
@@ -639,7 +679,7 @@ mod tests {
                     required: true,
                     schema: Schema::String {
                         candidates: vec!["deepseek-flash".into()],
-                        default: Some(json!("deepseek-flash")),
+                        default: Some("deepseek-flash".to_string()),
                         description: None,
                     },
                 },

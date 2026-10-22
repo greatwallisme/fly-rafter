@@ -96,3 +96,11 @@
 - 实现：新 crate `crates/fr-schema`（schema.rs 描述符七变体 + validate 全违例收集 + to_json_schema 2020-12 关键词面 + registry lookup 空表起步；15+1 tests）；fr-config `compile_to_loader_doc<'s>` 挂接 schema_of 校验槽（信任边界后校验、违例 format_config_violations 进 failures 不阻塞、查无跳过），2 钉测（violation 不阻塞 + absent 跳过）。
 - 排障：长 Rust 代码经 heredoc 内嵌 python/Edit 大段文本反复损坏（两次乱码 + 一次误插 mod tests 外 + 23 决策重号）→ git checkout patch.rs/stack.rs 整体回退后改「Write/小 heredoc 分块（≤25 行）+ 极短 python 拼接」重做，全部落地；显式生命周期 `<'s>` 解 trait object 返回位 HRTB 亚型检查失败；clippy 修 8 项（use_self/needless_pass_by_value/str_as_str/needless_borrow/assert_is_empty/if_then_some_else_none/format_push_string/E0560 测试字面量错位）。
 - 终态：四关全绿（fmt / clippy --workspace --all-targets -D warnings / 42+15 tests / doc -D warnings），工作树待用户评审提交；Next Step → .env 分层（CONFIG-13）。
+
+## Session 8 — 2026-10-22（代码评审 b2f3ff0：fr-schema + fr-config schema 槽）
+
+- 后台 /code-review 三度因 GLM-5.3-FALSH API 400 失败 → 本会话直接执行（subagent 0/2，通道修复前不再重试后台代理）。
+- 基线核实：b2f3ff0 四关 exit 0 + 合约三门禁 0 errors（场景 1215）复跑确认；dsh 引证 types.ts:7-26/:42 补核通过；挂接点次序（disabled→resolve→信任边界→schema 槽，patch.rs:426-457）核实。
+- 修复 R1（中）：fr-schema Integer 校验对齐 JSON Schema 2020-12 零小数语义（f64 域判整 + const fn widen 界宽 + expect 理由化豁免），新增钉测 3 点；修复 R2（低）：default 类型化（Option<String>/Option<i64>/Option<f64>），违例默认值类型层不可构造。
+- 连带 clippy 4 项清零（unreadable_literal / wrapper fn / too_many_lines → type_object+project_properties 提取 / missing_const_for_fn）。
+- 终态：四关全绿（fmt / clippy --workspace --all-targets -D warnings / 42+16 tests / doc -D warnings），schema.rs 单文件 +97/-57 待用户评审；Next Step → .env 分层（CONFIG-13）。

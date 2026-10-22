@@ -90,3 +90,17 @@ dsh config-schema 真源（app-boot/src/config-schema/ + apps/cli/src/dump-confi
 - 实现：新 crate `crates/fr-schema`（Cargo.toml + lib.rs + schema.rs + registry.rs）：`Schema` 描述符七变体（String{candidates,default,description}/Integer/Number（含 min/max）/Boolean/Object{properties,additional_properties,description}/Array{items}/Dict{values}；子集外声明不可构造——fail-closed）、`Property`、`Violation{path,message}`（点路径 + `[i]` 数组、根为空串）、`validate`（全违例收集、additional_properties=false 拒未知键、必填缺失）、`to_json_schema`（2020-12 关键词面：type/enum/minimum/maximum/properties/required/items/additionalProperties/default/description）、registry `lookup`（PLUGIN_SCHEMAS 静态表，M1 为空表 + 空名永缺测试钉）。fr-schema tests 15 + 1。
 - fr-config 挂接：`compile_to_loader_doc<'s>` 增第 4 参 `schema_of: &dyn Fn(&str) -> Option<&'s Schema>`（显式生命周期——省略形式在 trait object 返回位触发 HRTB 亚型检查失败 `one type is more general than the other`）；信任边界后校验，违例行 `format_config_violations`（`path (message)`、根 `<root>`）进 failures 不阻塞，查无 schema 跳过；新增钉测 schema_violation_fails_row_without_blocking / absent_schema_skips_validation。
 - 排障（Session 7 工具面）：长 Rust 代码经 bash heredoc 内嵌 python 三引号或 Edit 大段 old/new 反复损坏（乱码 token 混入）——两次重做后改用「Write/小 heredoc 分块写片段文件（≤25 行/块）+ 极短 python 拼接」可靠完成；一次误插到 mod tests 闭括号外、一次 23 决策重号，均 git checkout patch.rs/stack.rs 后重做恢复。clippy 修 7 项：use_self（枚举内 Box<Self>）、needless_pass_by_value（path &str 化）、str_as_str、needless_borrow、assert_is_empty（assert_eq!(v, Vec::new())）、if_then_some_else_none（match 化）、E0560 测试字面量错位。
+
+## 2026-10-22 — 代码评审 b2f3ff0（Session 8，/code-review high --fix 不限数；后台代理三度因 GLM-5.3-FALSH API 400 失败，本会话执行，subagent 0/2）
+
+基线核实：四关 exit 0（fmt / clippy --workspace --all-targets -D warnings / 42+15 tests / doc -D warnings）——Session 7 排障记录中「clippy 余 1 错」在提交前已解决；合约三门禁复跑全绿（lint 0 errors、advisory 1062 条、graph/plan exit 0，场景 1215）。dsh 引证补核通过：config-schema/types.ts:7-26（ConfigJsonSchemaObject 关键词面）与 :42（entry status 五态含 absent）。挂接点次序核实：patch.rs:426 disabled 过滤 → resolve → 信任边界 :438 → schema 槽 :447-457 → 产物；违例行 fail-closed 排除不阻塞其余行、absent 跳过，两钉测齐。
+
+修复 2 项（fr-schema/src/schema.rs 单文件，+97/-57）：
+
+- R1（中，语义漂移）：Integer 校验原用 as_i64()，零小数部分浮点（如 1.0）被拒——与自身投影的 JSON Schema 2020-12 关键词面矛盾（2020-12 明确零小数部分数值即 integer，dsh e2e 的 Ajv2020 亦然），Q7A「单一真源不漂移」在语义层被破坏；超大 u64 整数同理误拒。修：接受检测改 f64 域（as_f64 + fract()==0 判整），界宽经 const fn widen（#[expect clippy::cast_precision_loss reason=对齐 dsh double 运行时]）放宽后走 check_f64_range；新增钉测 integer_matches_json_schema_zero_fraction_semantics（1.0 / 2^63 u64 / 1.5 三点）。
+- R2（低，构造不变量）：default: Option<Value> 无类型约束，声明层可构造「默认值违反自身声明」的描述符（如 candidates 外 string default），削弱提交信息宣称的「子集外/违例声明不可构造 fail-closed」；修：String/Integer/Number 的 default 分别改 Option<String>/Option<i64>/Option<f64>（Boolean 已是 Option<bool> 先例），投影经 map(Value::from)/map(Value::String)，违例默认值在类型层不可构造；3 处测试字面量同步，patch.rs fixture（default: None）不受影响。
+- 连带 clippy 清零 4 项（新代码引入）：unreadable_literal（2^63 测试字面量加 _ 分隔）、Option→Option 包装 fn 形态（widen_bound 改值域 const fn widen i64→f64 + 调用点 .map(widen)）、too_many_lines（to_json_schema 107/100 → 提取 type_object / project_properties 两投影 helper）、missing_const_for_fn（widen 加 const）。
+
+核实无缺口 2 项：激活期链接副本再校验场景（pending_req_fr_config_fail_closed）按决策 20 属插件 crate 落地期、pending 选择器合规非缺陷；patch.rs format_config_violations 的 let _ = write!（String fmt::Write 不可能失败）带注释合规。
+
+终态：四关复跑 exit 0（fmt / clippy / 42+16 tests / doc -D warnings）；工作树 schema.rs 单文件改动待用户评审；合约三门禁不受影响（未触需求/合约文件）。
