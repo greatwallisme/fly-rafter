@@ -13,6 +13,7 @@ use crate::error::{Error, Result};
 use crate::source::PathResolver;
 use regex::Regex;
 use serde_json::Value;
+use std::fmt::Write as _;
 
 /// One row of a `fr.patch.yml` document: an entry definition/override, or an
 /// `insert` group appending new root-level rows.
@@ -404,16 +405,21 @@ pub struct CompileOutcome {
 /// Disabled rows are excluded. Each row's plugin name is resolved to a
 /// dylib/wasm artifact via `resolver` (PRD 6.2 rule; the `builtin` source
 /// kind is never emitted) and validated against the trust boundary via
-/// `is_first_party`; failed rows land in [`CompileOutcome::failures`].
+/// `is_first_party`. When `schema_of` declares a config schema for the row's
+/// plugin (PRD 6.3), the row's config is validated against it; rows whose
+/// plugin has no declaration are skipped (the dsh `absent` semantics,
+/// config-schema/types.ts:42). Failed rows land in
+/// [`CompileOutcome::failures`].
 ///
 /// # Errors
 ///
 /// Returns [`Error::PatchParse`] if serialization fails, which cannot happen
 /// for values built from validated rows but is kept for totality.
-pub fn compile_to_loader_doc(
+pub fn compile_to_loader_doc<'s>(
     lines: &[FlatRow],
     resolver: &PathResolver,
     is_first_party: &dyn Fn(&str) -> bool,
+    schema_of: &dyn Fn(&str) -> Option<&'s fr_schema::Schema>,
 ) -> Result<CompileOutcome> {
     let mut plugins = Vec::new();
     let mut failures = Vec::new();
@@ -438,6 +444,17 @@ pub fn compile_to_loader_doc(
             });
             continue;
         }
+        if let Some(schema) = schema_of(&line.name) {
+            let violations = fr_schema::validate(schema, &line.config);
+            if !violations.is_empty() {
+                failures.push(CompileFailure {
+                    id: line.id.clone(),
+                    name: line.name.clone(),
+                    reason: format_config_violations(&violations),
+                });
+                continue;
+            }
+        }
         plugins.push(serde_json::json!({
             "name": line.id,
             "source": { "kind": spec.kind.as_str(), "path": spec.path.display().to_string() },
@@ -448,6 +465,22 @@ pub fn compile_to_loader_doc(
     let doc = serde_json::json!({ "plugins": plugins });
     let doc = serde_json::to_string(&doc).map_err(|e| Error::PatchParse(e.to_string()))?;
     Ok(CompileOutcome { doc, failures })
+}
+
+/// Renders schema violations as the compile failure reason (PRD 6.3): each
+/// violation becomes `path (message)` with the root shown as `<root>`.
+fn format_config_violations(violations: &[fr_schema::Violation]) -> String {
+    let mut reason = String::from("config schema violations:");
+    for violation in violations {
+        let path = if violation.path.is_empty() {
+            "<root>"
+        } else {
+            &violation.path
+        };
+        // `String`'s `fmt::Write` impl is infallible; the Result is always Ok.
+        let _ = write!(reason, " {path} ({});", violation.message);
+    }
+    reason
 }
 
 #[cfg(test)]
@@ -610,9 +643,13 @@ mod tests {
         let lines = parse_patch_lines(SAMPLE, &neutral_ctx())
             .unwrap_or_else(|e| panic!("parse failed: {e}"));
         let composed = compose(&[lines]);
-        let outcome =
-            compile_to_loader_doc(&composed.rows, &temp.resolver(), &first_party_is_fr_prefix)
-                .unwrap_or_else(|e| panic!("compile failed: {e}"));
+        let outcome = compile_to_loader_doc(
+            &composed.rows,
+            &temp.resolver(),
+            &first_party_is_fr_prefix,
+            &no_schemas,
+        )
+        .unwrap_or_else(|e| panic!("compile failed: {e}"));
         assert!(
             outcome.failures.is_empty(),
             "unexpected failures: {:?}",
@@ -642,9 +679,13 @@ mod tests {
         let lines = parse_patch_lines(SAMPLE, &neutral_ctx())
             .unwrap_or_else(|e| panic!("parse failed: {e}"));
         let composed = compose(&[lines]);
-        let outcome =
-            compile_to_loader_doc(&composed.rows, &temp.resolver(), &first_party_is_fr_prefix)
-                .unwrap_or_else(|e| panic!("compile failed: {e}"));
+        let outcome = compile_to_loader_doc(
+            &composed.rows,
+            &temp.resolver(),
+            &first_party_is_fr_prefix,
+            &no_schemas,
+        )
+        .unwrap_or_else(|e| panic!("compile failed: {e}"));
         // Contract test against the real kernel loader: the compiled document
         // must be accepted by dougong-loader's parser.
         dougong_loader::Config::parse(&outcome.doc)
@@ -661,6 +702,7 @@ mod tests {
             &compose(&[lines]).rows,
             &temp.resolver(),
             &first_party_is_fr_prefix,
+            &no_schemas,
         )
         .unwrap_or_else(|e| panic!("compile failed: {e}"));
         assert_eq!(outcome.failures.len(), 1, "{:?}", outcome.failures);
@@ -684,6 +726,7 @@ mod tests {
             &compose(&[lines]).rows,
             &temp.resolver(),
             &first_party_is_fr_prefix,
+            &no_schemas,
         )
         .unwrap_or_else(|e| panic!("compile failed: {e}"));
         assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
@@ -762,5 +805,88 @@ mod tests {
         let err =
             parse_patch_lines("id: a\n", &neutral_ctx()).expect_err("mapping doc must be rejected");
         assert!(matches!(err, Error::PatchParse(_)));
+    }
+
+    fn no_schemas(_: &str) -> Option<&'static fr_schema::Schema> {
+        None
+    }
+
+    fn plugin_schema_fixture() -> fr_schema::Schema {
+        fr_schema::Schema::Object {
+            properties: vec![fr_schema::Property {
+                name: "model".to_string(),
+                required: true,
+                schema: fr_schema::Schema::String {
+                    candidates: vec!["deepseek-flash".to_string()],
+                    default: None,
+                    description: None,
+                },
+            }],
+            additional_properties: false,
+            description: None,
+        }
+    }
+
+    #[test]
+    fn schema_violation_fails_row_without_blocking() {
+        let temp = TempArtifacts::new(
+            "schema-fail",
+            &["libfr_llm_deepseek.so", "libfr_session_persistence.so"],
+        );
+        let yaml = "- insert:\n    - id: llm\n      name: fr-llm-deepseek\n      config:\n        model: other\n    - id: session\n      name: fr-session-persistence\n";
+        let lines =
+            parse_patch_lines(yaml, &neutral_ctx()).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let composed = compose(&[lines]);
+        let schema = plugin_schema_fixture();
+        let schema_by_name = |name: &str| match name {
+            "fr-llm-deepseek" => Some(&schema),
+            _ => None,
+        };
+        let outcome = compile_to_loader_doc(
+            &composed.rows,
+            &temp.resolver(),
+            &first_party_is_fr_prefix,
+            &schema_by_name,
+        )
+        .unwrap_or_else(|e| panic!("compile failed: {e}"));
+        assert_eq!(outcome.failures.len(), 1, "{:?}", outcome.failures);
+        assert_eq!(outcome.failures[0].id, "llm");
+        assert!(
+            outcome.failures[0]
+                .reason
+                .contains("config schema violations"),
+            "{}",
+            outcome.failures[0].reason
+        );
+        assert!(
+            outcome.failures[0].reason.contains("model"),
+            "{}",
+            outcome.failures[0].reason
+        );
+        // The failing row is excluded fail-closed; the schema-less row loads
+        // normally (absent semantics, PRD 6.3).
+        let value: Value =
+            serde_json::from_str(&outcome.doc).unwrap_or_else(|e| panic!("bad json: {e}"));
+        let plugins = value["plugins"].as_array().expect("plugins array");
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0]["name"], "session");
+    }
+
+    #[test]
+    fn absent_schema_skips_validation() {
+        let temp = TempArtifacts::new("schema-absent", &["libfr_llm_deepseek.so"]);
+        let yaml = "- insert:\n    - id: llm\n      name: fr-llm-deepseek\n      config:\n        model: anything-goes\n";
+        let lines =
+            parse_patch_lines(yaml, &neutral_ctx()).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let composed = compose(&[lines]);
+        let outcome = compile_to_loader_doc(
+            &composed.rows,
+            &temp.resolver(),
+            &first_party_is_fr_prefix,
+            &no_schemas,
+        )
+        .unwrap_or_else(|e| panic!("compile failed: {e}"));
+        assert_eq!(outcome.failures.len(), 0, "{:?}", outcome.failures);
+        assert!(outcome.doc.contains("anything-goes"), "{}", outcome.doc);
     }
 }

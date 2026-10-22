@@ -239,9 +239,11 @@ fly-rafter/
 
 **实现边界（dougong 侧事实，已亲自核实源码）**：dougong loader 仅支持上述扁平 JSON 文档（`Config::parse` 只验 JSON 形状、名字唯一非空、config 为对象或 null，`dougong-loader/src/lib.rs:71-126`），reconcile 结果只取决于最终文档、与到达路径无关（`replace` + `apply`，diff 驱动 insert/update/retire；isolate 变化 = retire + re-insert）。**分层、行覆盖、YAML 在 dougong 中一概不存在**——它们全部是 fr-config 的职责，且编译产物必须是上述合法 loader 文档；`Report{inserted, updated, retired, unchanged, failures}` 与失败不阻塞其余槽的语义直接沿用内核。dougong `harness_demo.rs` 五阶段（Pending 停等 → 全量收敛 → realm 解析 → 单行 config 热换 → 删行精确 retire）是 fr-config 行为对齐的参考实现。
 
-### 6.3 配置 schema 校验（dougong 缺口，fr-config 补齐）
+### 6.3 配置 schema 校验（dougong 缺口，fr-schema 补齐）
 
-dougong 只验 JSON 形状（`require_object`）。fr-config 的 schema 真源在**宿主侧**：每个插件的配置 schema（Rust 类型 + serde + 校验函数，等价 schemastery 角色）集中声明于宿主链接的 schema 库，装配期对每行 `config` 校验，失败进入 `Report::failures` 不阻塞其他槽；插件工件在激活体顶部用同一 schema 库的链接副本对 config **再校验**（双侧校验），激活期校验失败按插件装载失败 fail-closed。`fr dump-config` 输出合成后插件树、`fr dump-config-schema` 输出全部插件 config schema（对齐 dsh 同名 CLI 能力；这两个目录文档在 fly-rafter 同样由真实装配生成并验证——承袭“文档即生成物”）。
+dougong 只验 JSON 形状（`require_object`）。fr 的 config schema 真源在**宿主侧**、以**声明式描述树为单一真源**（2026-10-22 Q7 裁决，等价 dsh schemastery 的校验+投影双重角色）：每插件的 config schema 为 fr-schema 描述符（受限子集，同构 dsh native graph 骨架 type/meta/dict/list/value；M1 面 = string/number/integer/boolean/object/array/dict，meta 注解仅 default 与 description；子集外声明在描述符层即不可构造——fail-closed）。同一声明派生两侧能力：`validate`（装配期与激活期共用）与 `to_json_schema`（JSON Schema 2020-12 关键词面，对齐 dsh `ConfigJsonSchemaObject`，config-schema/types.ts:7-26）；插件 config 的 Rust 类型 + serde 解码仅为消费便利层，非校验权威（dsh 同为单一声明源：schemastery 对象同供校验与 dump 投影）。
+
+schema 集中声明于 **fr-schema 库**（2026-10-22 Q8 裁决：独立 crate，纯声明+校验+投影、无 IO；宿主直链，插件工件静态链接同一 crate 作激活期再校验的链接副本），fr-config 依赖它做装配期校验：按插件 slug 查注册表，**查无 schema 跳过该行校验**（2026-10-22 Q9 裁决，对齐 dsh absent 标注 config-schema/types.ts:42——第三方工件宿主侧本无其 schema，不构成装载障碍）；有 schema 且校验失败 → `Report::failures` 不阻塞其他槽；插件工件在激活体顶部用链接副本对 config **再校验**（双侧校验），激活期校验失败按插件装载失败 fail-closed。`fr dump-config` 输出合成后插件树、`fr dump-config-schema` 输出合成装配的 JSON Schema 2020-12 文档（对齐 dsh `--dump-config-schema` 同名 CLI 能力；x- 扩展键品牌前缀于 fr 宿主实现期定）；这两个目录文档在 fly-rafter 同样由真实装配生成并验证——承袭“文档即生成物”。
 
 ### 6.4 关键默认值（继承自 dsh base patch，品牌名替换后）
 
@@ -628,6 +630,7 @@ fr headless [TASK] [--session-id <id>] [--json] [--help]
 6. 装配语义勘误（2026-10-22 Q1-Q3 裁决）：6.1 "按 id 整行替换"勘误为 dsh 实际的**按键覆盖**语义（id/name 匹配器、逐键覆盖、config 整键替换不深合并、未命中 id 或 name 不匹配均警告跳过、行序=首次插入序）；行模型增补 `insert`（根级插入，不做 group——base patch 未用、dougong 无组概念）；`!!js` 子集按 bundle patches 全量盘点（22 处）扩充：env `??` 默认链、相等比较、平台三元、裸 env 值、字面量、profile-context 布尔（dsh `ctx.get('profileContext')` 的 fr 等价物）；"dsh 中该语法仅用于平台门控与 env 读取"的原表述勘误；sdk-app `getBuiltinModule` 路径解析类 6 处不做（对象属桌面打包面，19.1 已裁）。依据 `vendor/include/src/index.ts:57-127`
 7. 装载文件布局勘误与裁决（2026-10-22 Q1-Q5）：6.1 家目录 patch 括号路径 `~/.fly-rafter/profiles/` 勘误为 `<FR_HOME>/fr.patch.yml`（dsh 真源为 home 根 cordis.patch.yml，profile-context.ts:78）；profile 清单定为 `<profile>/profile.yml`（`bundles:` 仅引用宿主内置命名 bundle，未知名 skipped 警告非致命——dsh 的 npm 包栈与 pnpm 机制在 fr 无对应物，插件市场已裁）；profile 模板自动初始化纳入 M1（1:1 dsh 首用 init：绝不覆盖既有文件，未知名报错）；入口默认 bundle 为嵌入 YAML 常量、与用户 patch 同一解析路径（dsh bundle 与用户 patch 同 schema，app-boot index.ts:268）；M1 默认 bundle 为最小 headless 集，完整品牌映射抽取后置。依据 `packages/boot/app-boot/src/{profile.ts,profile-context.ts,index.ts}`
 8. insert 行相对路径锚定勘误（2026-10-22 Q6，代码评审发现）：6.2「按字面路径」缺 dsh 的锚定语义——dsh 在补丁解析期把 insert 行 name 为 `./`/`../` 相对路径者锚定到补丁文件所在目录（anchorInsertedPluginNames，app-boot index.ts:550-561；覆盖行 name 为匹配器不解析）；fr 对齐实现于装载期，无此锚定则相对路径落成 CWD 相对而偏离 dsh
+9. 配置 schema 真源形态勘误（2026-10-22 Q7-Q9 裁决）：6.3 原「Rust 类型 + serde + 校验函数」措辞修正为**声明式描述树单一真源**（fr-schema 描述符等价 schemastery 校验+投影角色；Rust 类型 + serde 降为消费便利层）——对齐 dsh 单一声明源机制（schemastery 对象同供校验与 dump 投影，app-boot config-schema/types.ts）；schema 库独立为 fr-schema crate（宿主与插件工件链接同一 crate 双侧校验）；装配期查无 schema 的行跳过校验（dsh absent 标注语义，types.ts:42），第三方工件宿主侧无 schema 不构成装载障碍
 
 ### 19.3 wire 层声明
 
@@ -694,3 +697,4 @@ fr headless [TASK] [--session-id <id>] [--json] [--help]
 17. 装配合并语义对齐 dsh 源码（2026-10-22 Q1-Q3 裁决）：按键覆盖（id/name 匹配器、逐键覆盖、config 整键替换、missed warn-skip、首次插入序）；`insert` 根级插入、不做 group；`!!js` 子集 = env `??` 默认链、相等比较（`==`/`===`）、平台三元、裸 env 值读取、字面量、profile-context 布尔（含 `!` 取反）
 18. 装载文件布局（2026-10-22 Q1-Q5 裁决）：家目录 patch = `<FR_HOME>/fr.patch.yml`（对齐 dsh home 根）；profile 清单 = `<profile>/profile.yml`，bundles 仅引用宿主内置命名 bundle、未知名 skipped 非致命；profile 模板自动初始化纳入 M1（首用建清单+空白 patch，不覆盖既有；fr 模板 bundles 为空——入口默认 bundle 恒在层 1）；入口默认 bundle 为嵌入 YAML 常量走同一解析路径；M1 默认 bundle 为最小 headless 集（完整品牌映射抽取后置）
 19. insert 行相对路径锚定对齐 dsh（2026-10-22 Q6 裁决）：装载期把各文件层 insert 行 name 以 `./`/`../` 开头者锚定到补丁文件目录转绝对（词法归一，不做符号链接解析）；入口内置 bundle 全为 slug 名不受影响；覆盖行 name 不锚定；无 `./`/`../` 前缀的含分隔符 name 保持字面路径
+20. 配置 schema 框架（2026-10-22 Q7-Q10 裁决）：声明式描述树为单一真源（fr-schema：validate 与 to_json_schema 同源派生，子集外声明不可构造）；fr-schema 独立 crate，fr-config 依赖其做装配期校验（slug 查注册表、查无跳过、失败进 failures 不阻塞），插件工件静态链接做激活期再校验；dump-config-schema 产物为 JSON Schema 2020-12 文档；M1 框架以自造描述符钉测交付，真实 schema 逐插件 crate 落地时挂注册表

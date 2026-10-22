@@ -1,6 +1,6 @@
 [package]
 name = "fr-config"
-description = "Fly Rafter layered assembly configuration: fr.patch.yml parsing, compilation to dougong loader documents, plugin config schemas, .env layering"
+description = "Fly Rafter layered assembly configuration: fr.patch.yml parsing, compilation to dougong loader documents, config schema validation, .env layering"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,6 +10,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+fr-schema.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

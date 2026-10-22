@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 12 续：ConfigSchema 声明框架（宿主侧 schema 库，装配期校验进 failures，激活期插件工件内同一 schema 库链接副本双侧校验；PRD 6.3）。
+Phase 12 续：.env 分层（CONFIG-13：进程 env > 项目 .env > FR_HOME/.env，已设名不覆盖，bootstrap 专名拒绝，家目录层代理四键例外；dsh app-boot index.ts:126-260 品牌映射）——dsh 真源核实 → 有分叉则集中呈裁 → 实现 + 四关。
 
 ## Current Phase
 Phase 12
@@ -75,17 +75,17 @@ Phase 12
 范围：workspace 骨架与质量门；fr-config 分层编译（含 .env 分层与 dump-config/dump-config-schema）；fr-session v4 全量；fr-agent-loop；fr-tools 管线 + 第 17 节全部工具（subagent-acp 桥除外）；fr-approval/fr-sandbox；fr-compaction；fr-system-prompt；三 provider；fr-mcp；fr-ptc；进程内子代理 spawn/fork；fr-shell（bash seam + 作业管理，工具域依赖）；fr-headless + fr 宿主。验收：1. `fr headless "任务"` 完整 turn 周期产出 v4 会话文件；2. `--json` 事件流过 schema 校验；3. 与 dsh 同任务会话日志逐事件同型；4. 审批 fail-closed / --session-id 续用 / abort 补偿集成测试；5. dump-config 系可用；6. 质量门四关全绿。
 
 ### Phase 11: workspace 骨架与质量门基线
-- [ ] root Cargo.toml（resolver 3、edition 2024、workspace.lints 对齐 dougong、workspace deps）
-- [ ] rust-toolchain.toml（1.99.1，与 dougong 补丁级对齐）
-- [ ] fr-config 骨架（首批 crate，含最少实现过四关）
-- **Status:** in_progress
+- [x] root Cargo.toml（resolver 3、edition 2024、workspace.lints 对齐 dougong、workspace deps）
+- [x] rust-toolchain.toml（1.99.1，与 dougong 补丁级对齐）
+- [x] fr-config 骨架（首批 crate，含最少实现过四关）
+- **Status:** complete（commit `0d3e87e` 起；回填勾选 2026-10-22）
 
 ### Phase 12: fr-config 分层编译
 - [x] 2026-10-22 Q1-Q3 裁决：合并语义对齐 dsh applyEntryPatches（按键覆盖/warn-skip/首插序）；insert 根级；!!js 子集扩充（env ?? 链/相等/平台三元/裸 env/字面量/profile-context 布尔）——PRD 6.1/6.2/5/19.2/23 与 intake CONFIG-1/4/11/12 已勘误，管线全绿 1202 场景
 - [x] 补丁行模型 + 合并器 compose（dsh 语义）+ 产物解析 + 信任校验 + 编译产出 doc+failures（禁 builtin）
 - [x] cond.rs 受限表达式求值器（递归下降；!!js→!js 行锚定归一化绕 libyaml tag 丢失）
 - [x] 分层文件装载栈（项完成于 2026-10-22，Q1-Q5 裁决落地：stack.rs 11 tests，四关全绿）
-- [ ] ConfigSchema 声明框架（宿主侧 schema 库，装配期校验进 failures，激活期双侧校验）
+- [x] ConfigSchema 声明框架（2026-10-22 Q7-Q10 裁决落地：fr-schema 独立 crate 描述树单一真源 + validate/to_json_schema 双派生 + registry lookup absent 语义；fr-config compile_to_loader_doc 挂接 schema_of 校验槽，2 钉测；四关全绿 42+15 tests）
 - [ ] .env 分层（进程 env > 项目 .env > FR_HOME/.env；已设名不覆盖；专名拒绝；代理四键例外）
 - [ ] dump-config / dump-config-schema 数据面（CLI 侧在 fr 宿主）
 - [ ] 对照 REQ-FR-CONFIG 场景逐条落测试（已落 24，随切片递增）

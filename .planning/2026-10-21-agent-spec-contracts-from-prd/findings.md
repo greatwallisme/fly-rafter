@@ -65,3 +65,28 @@ dsh 装载栈权威事实（app-boot，仓库 ~/project/reference/cordis/deepsee
 - Q4A：入口 bundle = 嵌入 YAML 常量（`bundles/headless/fr.patch.yml`，include_str!，与用户 patch 同一 parse_patch_lines 路径）
 - Q5B：M1 最小 headless 默认 bundle（14 行单 insert 组；6.4 工具级默认值随 Phase 16 fr-tools-builtin config schema 落地）
 - 落地：PRD 5 处 + intake CONFIG-1 扩充 + 8 新场景（管线复跑全绿，场景 1202→1210）；fr-config stack.rs + bundle 资产，tests 26→37，四关全绿
+
+## 2026-10-22 — Phase 12 续：ConfigSchema 框架 dsh 真源核实（Session 7）
+
+基线：`2050d12`（Q6A 锚定）四关全绿 40 tests 复跑确认。
+
+dsh config-schema 真源（app-boot/src/config-schema/ + apps/cli/src/dump-config-schema.ts）：
+
+- CLI：`--dump-config-schema`（args.ts:172，help "print JSON Schema for profile entries and patches without mounting"）；`runDumpConfigSchema`（dump-config-schema.ts:25-48）：stdout 单份 `JSON.stringify(dump, null, 2)`；diagnostics 逐条 stderr（`dsh: <level>:[<path>] <message>`）；`!dump['x-cordis'].complete` → exitCode 1；收集可执行插件顶层代码但从不 apply、从不求值 `!!js`。
+- 输出形状 ConfigSchemaDump（types.ts:49-60）：JSON Schema 2020-12（$schema 固定 `https://json-schema.org/draft/2020-12/schema`；关键词子集 types.ts:7-26：$ref/$defs/type/properties/required/items/prefixItems/additionalProperties/propertyNames/anyOf/allOf/not/if/then/default/description）+ `x-cordis`{profile, complete, entries, diagnostics, patchSchema:'#/$defs/patchList'}；entry={path, id?, name?, status:'schema'|'partial'|'absent'|'unsupported'|'error', configRef?, tree?:'group'|'include'}；diagnostic={level:'warning'|'error', path?, message}。e2e（dump-config-schema.expected.e2e.ts）用 Ajv2020 验证输出合法性。
+- native graph（types.ts:63-90）：schemastery 对象 = {type, meta{role,extra,hidden,disabled,collapse,link,comment,badges,required,volatile,default,min,max,step,pattern{source,flags},description,loose}, dict?, inner?, sKey?, list?, value?, builder?}；探测 `Symbol.for('schemastery')`（native.ts:13）。
+- 机制规模：collect 249 / document 169 / projector 455（LOADER_EXPRESSION_SCHEMA：`!!js` 表达式投影为 schema）/ pattern 62 / native 16 / index 36 / types 95 ≈ 1130 行；app-boot 导出 generateConfigSchema / createConfigProjector / isNativeConfigSchema（index.ts:33-36）。
+- 插件声明模式：`static Config: z<Config> = z.object({...})`（plugin-manager/src/index.ts:209）；plugin-manager 与 vendor/include 无显式 `.validate(` —— 容器侧消费机制未核，留 Phase 13 插件 crate 动工时补核（不影响本轮框架分叉）。
+- fr 挂接点：`compile_to_loader_doc`（fr-config patch.rs:413-451）resolve → 信任边界 → [schema 校验槽待插] → `CompileFailure{id,name,reason}`。
+- 备忘：fr dump 命令实现期 `x-cordis` 品牌前缀需另裁（fr 侧 x- 前缀命名），非本轮分叉。
+
+待裁决 Q7-Q10（schema 表示法 / schema 库载体 / 注册表与查无 schema 语义 / M1 验证载体）已按集中格式呈报，见会话记录；裁决后动作序列：PRD 6.3 勘误（若 Q7A）→ intake CONFIG-3 条款核对/补场景 → 管线复跑三门禁 → fr-schema 实现 + 四关。
+
+### Q7-Q10 裁决结果与落地记录（2026-10-22，Session 7）
+
+- 用户裁决 Q7A/Q8A/Q9A/Q10A：描述树单一真源 / fr-schema 独立 crate / 查无 schema 跳过（absent）/ 框架先行自造钉测。
+- PRD 落地 3 处：6.3 重写（fr-schema 描述树真源 + 链接副本双侧校验 + absent 语义 + dump 产物 2020-12 文档、x- 前缀留宿主实现期）；19.2 条 9；23 决策 20（插入时一度与 Q6A 的条 19 重号，已修复为 19/20 顺排）。
+- intake CONFIG-3 条款重写 + Source Trace 6.3 引文同步 + 3 新场景（查无跳过 / 单源派生双能力 / 激活期再校验），场景 1212→1215；管线复跑全绿：accepted 20/20、三门禁 0 errors。
+- 实现：新 crate `crates/fr-schema`（Cargo.toml + lib.rs + schema.rs + registry.rs）：`Schema` 描述符七变体（String{candidates,default,description}/Integer/Number（含 min/max）/Boolean/Object{properties,additional_properties,description}/Array{items}/Dict{values}；子集外声明不可构造——fail-closed）、`Property`、`Violation{path,message}`（点路径 + `[i]` 数组、根为空串）、`validate`（全违例收集、additional_properties=false 拒未知键、必填缺失）、`to_json_schema`（2020-12 关键词面：type/enum/minimum/maximum/properties/required/items/additionalProperties/default/description）、registry `lookup`（PLUGIN_SCHEMAS 静态表，M1 为空表 + 空名永缺测试钉）。fr-schema tests 15 + 1。
+- fr-config 挂接：`compile_to_loader_doc<'s>` 增第 4 参 `schema_of: &dyn Fn(&str) -> Option<&'s Schema>`（显式生命周期——省略形式在 trait object 返回位触发 HRTB 亚型检查失败 `one type is more general than the other`）；信任边界后校验，违例行 `format_config_violations`（`path (message)`、根 `<root>`）进 failures 不阻塞，查无 schema 跳过；新增钉测 schema_violation_fails_row_without_blocking / absent_schema_skips_validation。
+- 排障（Session 7 工具面）：长 Rust 代码经 bash heredoc 内嵌 python 三引号或 Edit 大段 old/new 反复损坏（乱码 token 混入）——两次重做后改用「Write/小 heredoc 分块写片段文件（≤25 行/块）+ 极短 python 拼接」可靠完成；一次误插到 mod tests 闭括号外、一次 23 决策重号，均 git checkout patch.rs/stack.rs 后重做恢复。clippy 修 7 项：use_self（枚举内 Box<Self>）、needless_pass_by_value（path &str 化）、str_as_str、needless_borrow、assert_is_empty（assert_eq!(v, Vec::new())）、if_then_some_else_none（match 化）、E0560 测试字面量错位。

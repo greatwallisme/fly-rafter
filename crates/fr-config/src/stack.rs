@@ -653,11 +653,13 @@ mod tests {
                 .unwrap_or_else(|e| panic!("write {} failed: {e}", row.name));
         }
         let resolver = crate::source::PathResolver::new(vec![artifacts.clone()]);
-        let compiled =
-            crate::patch::compile_to_loader_doc(&composed.rows, &resolver, &|name: &str| {
-                name.starts_with("fr-")
-            })
-            .unwrap_or_else(|e| panic!("compile failed: {e}"));
+        let compiled = crate::patch::compile_to_loader_doc(
+            &composed.rows,
+            &resolver,
+            &|name: &str| name.starts_with("fr-"),
+            &|_| None,
+        )
+        .unwrap_or_else(|e| panic!("compile failed: {e}"));
         assert!(
             compiled.failures.is_empty(),
             "unexpected failures: {:?}",

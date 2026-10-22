@@ -573,11 +573,19 @@ name = "fr-config"
 version = "0.1.0"
 dependencies = [
  "dougong-loader",
+ "fr-schema",
  "regex",
  "serde",
  "serde_json",
  "serde_yaml_ng",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "fr-schema"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]

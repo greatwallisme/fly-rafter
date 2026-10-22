@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/fr-config",
+    "crates/fr-schema",
 ]
 
 [workspace.package]
@@ -25,6 +26,7 @@ regex = "1.13"
 
 # Internal crates
 fr-config = { path = "crates/fr-config" }
+fr-schema = { path = "crates/fr-schema" }
 
 # Lint table aligned with the dougong workspace (PRD 21): the zero-warning
 # gates (fmt / clippy -D warnings / test / doc) must stay reproducible.
