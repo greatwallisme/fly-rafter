@@ -18,7 +18,7 @@ categories = ["development-tools"]
 dougong = "0.2.0"
 dougong-loader = "0.2.0"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util", "fs"] }
 serde_yaml_ng = "0.10"

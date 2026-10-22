@@ -10,8 +10,13 @@
 
 #![forbid(unsafe_code)]
 
+pub mod dump;
 pub mod registry;
 pub mod schema;
 
+pub use dump::{
+    DiagnosticLevel, EntryStatus, SchemaDiagnostic, SchemaDump, SchemaEntry, TreeKind,
+    dump_config_schema,
+};
 pub use registry::lookup;
 pub use schema::{Property, Schema, Violation, to_json_schema, validate};

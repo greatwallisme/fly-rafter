@@ -57,6 +57,11 @@ PAIRS = [
     ("识别位外结构值位 fail-closed（flow 式）", "pending_req_fr_config", "flow_style_js_tag_is_rejected_fail_closed"),
     ("异形键结构值位真实标签 fail-closed", "pending_req_fr_config", "exotic_structural_key_js_tag_fails_closed"),
     ("dump 内容行单叹号 js 逐字且整篇再 parse 等于挂载", "pending_req_fr_config", "dump_content_js_shaped_lines_survive_round_trip"),
+    ("dump 命令输出来自真实装配", "pending_req_fr_config", "dump_config_and_schema_generated_from_real_assembly"),
+    ("x-fr 扩展键与 entry 五态", "pending_req_fr_config", "x_fr_keys_and_entry_status_vocabulary"),
+    ("complete 为假退出码 1", "pending_req_fr_config", "error_entry_sets_diagnostics_and_incomplete"),
+    ("注册表命中投影 configN", "pending_req_fr_config", "registry_hit_projects_config_defs"),
+    ("查无 schema 标注 absent", "pending_req_fr_config", "absent_entries_reference_unknown_config"),
 ]
 
 

@@ -112,6 +112,49 @@ pub fn collect_dump_layers(
     Ok(layers)
 }
 
+/// Builds the `dump-config-schema` document from real assembly (dsh
+/// `generateConfigSchema` + `runDumpConfigSchema` data plane).
+///
+/// Skipped bundles become leading error diagnostics (dsh `skippedBundles`),
+/// the layers compose from an empty base exactly once (dsh `composeEntries`
+/// = `applyEntryPatches([], layers.flat())` — the schema dump never reads
+/// the root file), and composition warnings become path-less warning
+/// diagnostics.
+pub fn collect_config_schema<'s>(
+    loaded: &LoadedProfile,
+    layers: &[DumpLayer],
+    schema_of: &dyn Fn(&str) -> Option<&'s fr_schema::Schema>,
+) -> fr_schema::SchemaDump {
+    let mut diagnostics: Vec<fr_schema::SchemaDiagnostic> = loaded
+        .skipped_bundles
+        .iter()
+        .map(|bundle| fr_schema::SchemaDiagnostic {
+            level: fr_schema::DiagnosticLevel::Error,
+            path: None,
+            message: format!(
+                "Selected profile bundle {} could not be loaded; repair or remove its bundle selection.",
+                json_quote(&bundle.name)
+            ),
+        })
+        .collect();
+    let flattened: Vec<Value> = layers
+        .iter()
+        .flat_map(|layer| layer.patches.iter().cloned())
+        .collect();
+    let mut warnings = Vec::new();
+    let rows = apply_entry_patches(&[], &flattened, &mut warnings);
+    diagnostics.extend(
+        warnings
+            .into_iter()
+            .map(|message| fr_schema::SchemaDiagnostic {
+                level: fr_schema::DiagnosticLevel::Warning,
+                path: None,
+                message,
+            }),
+    );
+    fr_schema::dump_config_schema(&loaded.name, &rows, schema_of, diagnostics)
+}
+
 /// Composes the configured entry list offline and renders it as a YAML
 /// document with source comment separators (dsh `renderConfigDump`,
 /// app-boot index.ts:635-; Q18-Q24 rulings).
@@ -1548,5 +1591,111 @@ mod tests {
         let expected: Value =
             parse_js_dialect(&base_text).unwrap_or_else(|e| panic!("base must re-parse: {e}"));
         assert_eq!(reparsed, expected, "dump == boot for any string");
+    }
+
+    fn no_schemas(_: &str) -> Option<&'static fr_schema::Schema> {
+        None
+    }
+
+    /// Creates a headless profile directory with the given manifest and
+    /// patch contents.
+    fn write_profile(home: &Path, manifest: &str, patch: &str) -> PathBuf {
+        let profile_dir = home.join("profiles").join("headless");
+        fs::create_dir_all(&profile_dir).unwrap_or_else(|e| panic!("mkdir failed: {e}"));
+        write_file(&profile_dir.join(crate::stack::MANIFEST_FILENAME), manifest);
+        write_file(&profile_dir.join(crate::stack::PATCH_FILENAME), patch);
+        profile_dir
+    }
+
+    #[test]
+    fn dump_config_and_schema_generated_from_real_assembly() {
+        // Both dump commands are products of the real assembly: the YAML
+        // dump composes the same layers the schema dump inspects, so the
+        // row count and the entry count must agree (PRD 6.3, M1 check 5).
+        let dir = TempDir::new("schema-real");
+        let home = dir.path().join("home");
+        let profile_dir = write_profile(&home, "bundles: []\n", "- id: a\n  name: ./noop.so\n");
+        let ctx = crate::cond::EvalContext::neutral();
+        let loaded = crate::stack::load_profile(&home, "headless", false, &ctx)
+            .unwrap_or_else(|e| panic!("load failed: {e}"));
+        let layers = collect_dump_layers(&home, EntryKind::Headless, &loaded, false, &[], BIN)
+            .unwrap_or_else(|e| panic!("collect failed: {e}"));
+
+        // The YAML dump half: the root file is the display base.
+        let base = profile_dir.join("fr.yml");
+        write_file(&base, "# entry list\n[]\n");
+        let yaml = render_dump(BIN, &base, &layers, &no_warnings)
+            .unwrap_or_else(|e| panic!("render failed: {e}"));
+        let parsed: Value =
+            serde_yaml_ng::from_str(&yaml).unwrap_or_else(|e| panic!("dump must re-parse: {e}"));
+        let yaml_rows = parsed
+            .as_sequence()
+            .unwrap_or_else(|| panic!("dump must be a sequence: {parsed:?}"));
+        assert!(!yaml_rows.is_empty(), "the bundle rows must appear");
+
+        // The schema half over the identical layers.
+        let dumped = collect_config_schema(&loaded, &layers, &no_schemas);
+        assert!(dumped.complete, "diagnostics: {:?}", dumped.diagnostics);
+        assert_eq!(
+            dumped.document.get("$schema"),
+            Some(&serde_json::json!(
+                "https://json-schema.org/draft/2020-12/schema"
+            ))
+        );
+        assert_eq!(
+            dumped.document.get("title"),
+            Some(&serde_json::json!(
+                "Dougong configuration for profile headless"
+            ))
+        );
+        let entries = dumped
+            .document
+            .get("x-fr")
+            .and_then(|x| x.get("entries"))
+            .and_then(serde_json::Value::as_array)
+            .unwrap_or_else(|| panic!("x-fr entries missing"));
+        assert_eq!(
+            entries.len(),
+            yaml_rows.len(),
+            "schema entries track the composed rows"
+        );
+        assert!(
+            entries.len() > 1,
+            "the M1 bundle carries several rows: {entries:?}"
+        );
+        for entry in entries {
+            assert_eq!(entry.get("status"), Some(&serde_json::json!("absent")));
+            assert_eq!(
+                entry.get("configRef"),
+                Some(&serde_json::json!("#/$defs/unknownConfig"))
+            );
+        }
+    }
+
+    #[test]
+    fn skipped_bundles_become_error_diagnostics() {
+        // dsh generateConfigSchema turns skipped bundles into leading error
+        // diagnostics, so an unknown manifest bundle breaks completeness.
+        let dir = TempDir::new("schema-skipped");
+        let home = dir.path().join("home");
+        write_profile(&home, "bundles: [missing-bundle]\n", "[]\n");
+        let ctx = crate::cond::EvalContext::neutral();
+        let loaded = crate::stack::load_profile(&home, "headless", false, &ctx)
+            .unwrap_or_else(|e| panic!("load failed: {e}"));
+        assert_eq!(loaded.skipped_bundles.len(), 1);
+        let layers = collect_dump_layers(&home, EntryKind::Headless, &loaded, false, &[], BIN)
+            .unwrap_or_else(|e| panic!("collect failed: {e}"));
+        let dumped = collect_config_schema(&loaded, &layers, &no_schemas);
+        assert!(!dumped.complete);
+        let first = dumped
+            .diagnostics
+            .first()
+            .unwrap_or_else(|| panic!("the skipped bundle must be reported"));
+        assert_eq!(first.level, fr_schema::DiagnosticLevel::Error);
+        assert_eq!(first.path, None);
+        assert_eq!(
+            first.message,
+            "Selected profile bundle \"missing-bundle\" could not be loaded; repair or remove its bundle selection."
+        );
     }
 }

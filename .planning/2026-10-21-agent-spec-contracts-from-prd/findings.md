@@ -310,3 +310,33 @@ dsh .env 分层权威事实（app-boot/src/index.ts + util 两包，仓库 ~/pro
 - clippy assigning_clones：restore 字符串改 clone_from；fmt 排版套用。
 - 门禁终态：四关全绿（fmt / clippy -D warnings / 86+16 tests / doc）；lifecycle = 43 passed / 263 skipped / 0 failed（exit 1 = 263 pending 预期，绑定 38→43）；guard exit 0；explain 306 场景 43/0/263/0；stamp dry-run 与既有一致。合约改动 = intake CONFIG-14 + PRD 19.2 条 12/决策 24 + 5 新绑定，均经 Q25B 裁决授权。
 - 下一切片（不变）：fr-schema 投影面（dump-config-schema 侧 $defs/x-fr/entry 五态/diagnostics，D3=Session 7 真源）→ 绑 x-fr 五键/complete 假退 1/来自真实装配 → 呈报。
+
+## 2026-10-22 — fr-schema 投影面真源全读（切片动工前，会话恢复后）
+
+### 事实（file:line 实证，本会话核实）
+- CLI（apps/cli/src/dump-config-schema.ts 48 行全读）：prepareProfile(profile, true, fromDefaultProfile) → collectConfigDumpLayers(loaded, **false**, patches)（与 dump-config 同收集器，非 default-only）→ generateConfigSchema → stdout 单份 `JSON.stringify(dump, null, 2)` + '\n'；生成期 stdout 重定向 stderr（trusted module 防护——fr 静态注册表无动态 import，该机制结构性缺席非偏差）；diagnostics 逐条 stderr；`!dump['x-cordis'].complete` → exitCode 1。
+- **stderr 格式勘误（转写勘误，非分叉）**：真源 `${NAME}: ${diagnostic.level}:${location} ${message}`，location = path 存在时 ` [${path}]`（**前导空格**）→ 实际 `dsh: error: [/0] msg`；无 path → `dsh: warning: msg`。findings Q18 节 / PRD:246 / intake CONFIG-5 记为 `fr: <level>:[<path>] <message>`，缺 level 冒号后空格——待修 PRD 6.3 + intake 后管线重跑。
+- composeEntries（profile.ts 尾部）= `applyEntryPatches([], structuredClone(layers.flat()), warn)`——**空基合成，schema dump 不读根文件**（dump-config 才读 fr.yml 作显示基）；fr 等价 = `apply_entry_patches(&[], &flattened, warnings)`（patch.rs 既有）。合成 warnings → warning diagnostics。
+- skippedBundles → 生成起点 **error** diagnostics：`Selected profile bundle ${JSON.stringify(packageName)} could not be loaded; repair or remove its bundle selection.`（config-schema/index.ts:31-37）；fr 对接点 = `LoadedProfile.skipped_bundles`（stack.rs:140）。
+- document.ts 169 行全读：顶层 title `Cordis configuration for profile ${profile}` / description / $comment + `$defs` 骨架 {loaderExpression, entryMetadata, entryList, patchList, unknownConfig, includeConfig, includePatch, entry, patch, configN…}；entry name 条件规则（dormant：disabled=true 行 config 免 required）+ patch id last-wins 规则（indexTargets）+ 一名多 schema ambiguity warning；complete 三条件 = 无 error diagnostics ∧ 无 partial/unsupported/error entries ∧ 无一名多 schema；diagnostics 终态按 entry path 位次稳定排序。
+- LOADER_EXPRESSION_SCHEMA（projector.ts:8-12）= `{type:'object', properties:{__jsExpr:{type:'string'}}, required:['__jsExpr'], description:'Inert representation of a YAML !!js scalar from the Cordis entry-list parser…'}`。
+- collect walk（collect.ts 249 行）：validateEntry（mapping + name/id 字面 string + group 字面 bool/null，违例 → error diagnostic + 该行 status error，不丢兄弟行）→ 缺省 absent → 查 Config → schema/unsupported → 异常 error；group/include carrier 下行子树（`${path}/config`、`${path}/include`，含 include 文件读+环检测）。fr 无 builtin 形态（PRD:33 已裁决）→ fr M1 行走为平铺，无下行面。
+- 五态可达性（fr M1）：schema=注册表命中（callback 注入钉测，compile_to_loader_doc 第 4 参同型）；absent=查无（Q9A，M1 空表常态，configRef='#/$defs/unknownConfig'）；error=坏行/投影失败；partial/unsupported 结构性不可达（描述符构造 fail-closed + to_json_schema 全投影）——状态类型保留五态（场景钉），不可达两态文档注明触发条件。
+- 依赖与实现裁量：fr-schema 保持无 IO，新增 dump 模块（行走 + 文档构造 + 类型），入参 = `&[serde_yaml_ng::Value]` 合成行 + `schema_of: &dyn Fn(&str) -> Option<&Schema>`；fr-config 薄胶泥（prepare + collect_dump_layers 复用 + 空基 compose + skipped_bundles 对接）。serde_json workspace 无 preserve_order（BTreeMap 字典序）——若裁 26A 逐字序对齐需加 preserve_order 并按 dsh 插入序构造键。
+- include/group carrier 面张力：dsh 文档 $defs 含 includeConfig/includePatch 且 names 表种子常量 cordis:group→entryList / cordis:include→includeConfig；fr 装配无 builtin → 这些描述面描述 fr 实际不存在的形态（patchSchema 校验 --patch 时文档声称接受 fr 拒绝的行）→ Q26 分叉。
+
+### Q26（文档体 $defs 骨架对齐深度，待裁决）
+- A：全骨架逐字（含 includeConfig/includePatch + names 常量 + tree 值域），品牌映射后与 dsh 文档体逐字同型；include 面描述 fr 不存在的形态，19.2 登记描述性分歧
+- B（推荐）：公共骨架全移植（顶层文案 + loaderExpression/entryMetadata/entryList/patchList/unknownConfig/entry/patch + dormant/patch-id/ambiguity/complete 全口径 + configN 投影），裁 includeConfig/includePatch 与 names 表 builtin 常量（PRD:33 无 builtin 裁决落地到文档面）；tree 字段类型保留、M1 永不产出；19.2 登记文档体 include 缺口
+- C：本切片仅 x-fr 面 + entries/diagnostics + patchList 常量，骨架后置独立切片
+
+### Q26 裁决落地（2026-10-22 用户裁决 26B）+ fr-schema 投影面切片完成
+
+- 合同层（七步流 1-3）：PRD 6.3 stderr 格式勘误（`fr: <level>: [<path>] <message>`，无 path 时 `fr: <level>: <message>`）+ 19.2 条 13（26B 文档体裁剪：includeConfig/includePatch 与 names 表 builtin 常量裁剪；tree 字段类型保留 M1 不产出；acceptsMissing 折叠后置）+ 23 决策 25；intake CONFIG-5 勘误 + 2 新场景（注册表命中投影 configN / 查无 schema 标注 absent），场景 301→306（CONFIG 内）；管线全序列重跑：import → accepted 20/20 → draft-specs → refine → depends 清理 → 绑定重放 43+5=48 → 三门禁 0 errors → questions 0 blocking → CONFIG lint Quality 100%。
+- 品牌映射字符串清单（既定映射应用，dsh→fr / Cordis→Dougong / Loader→dougong loader / Schemastery→fr-schema）：title `Dougong configuration for profile <name>`；description `Parse !!js with the Dougong entry-list YAML dialect`；loaderExpression 描述 `from the Dougong entry-list parser`；entryMetadata.id 描述 `The dougong loader generates an id…`；disabled 描述 `The dougong loader coerces…`；entry 描述 `dougong loader entry. …`；$comment `fr-schema validates a fallback…` ×2；$comment 裁掉 include 句（`Include-local patches have a separate index.`）。
+- 实现层：crates/fr-schema/src/dump.rs 新模块（walk_rows 形状校验逐字消息 / index_targets last-wins+clear 语义含 group-child 下行 / project_definitions configN 按名缓存 / entry_rules+ambiguity warning / patch_rules id 条件 / sort_diagnostics 稳定序 path-less 先 / assemble_document 26B 公共骨架 + x-fr 五键）+ fr-config collect_config_schema 胶水（skippedBundles→error diagnostics 逐字 / composeEntries 空基单次合成 / 合成 warnings→warning diagnostics）；显式生命周期 's（Session 7 同款 HRTB 先例）。
+- 测试 +15（fr-schema 11 + fr-config 2 合约绑定 + fr-schema 技术钉）；JSON/YAML 双 Value 域别名（RowValue = serde_yaml_ng）；workspace serde_json 加 preserve_order（x-fr 五键按 dsh 插入序打印；json! 宏比较与既有测试不受影响）。
+- 门禁：四关全绿（fmt / clippy --workspace --all-targets 0 / 88+27 tests / doc 0）；lifecycle 48 passed / 260 skipped / 0 failed（43+5 全部真实验证）；guard exit 0；stamp dry-run 48/308 0 failed。
+- 测试自纠五件：hook 拦 unreachable! 改先验证后 push / 独立 tests.rs 文件不被 hook 识别为测试改回仓库惯例内联 mod tests / yaml-json 双 Value 域混用 72 错误逐一归域 / 空字符串 patch 夹具非法改 `[]` / clippy 13 项（const fn as_str×3、collapsible_if×5、let-chains（edition 2024）、usize 排序键去 i64 cast、needless_borrow、map_or→is_some_and/is_none_or、assert_is_empty、doc 段落与私有链接）。事故自纠：胶水函数曾插在 render_dump 文档注释与函数之间切断文档关联（clippy missing_docs 抓获）——重定位到注释块之前。
+- M1 不可达态：partial/unsupported 结构性不可达（描述符 fail-closed 构造 + to_json_schema 全投影），类型保留（x-fr 面钉五态），PRD 19.2 条 13 载明；schema 态经 schema_of callback 注入钉测（Q10A 框架先行）。
+- 下一步：宿主 CLI 期把 dump-config-schema 接到 fr 二进制（stdout 单份 JSON+\n、diagnostics 逐条 stderr、complete 假退 1——宿主 crate 未建，属 M1 宿主切片）；或按计划推进下一 crate 切片。
