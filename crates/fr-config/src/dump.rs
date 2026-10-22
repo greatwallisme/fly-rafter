@@ -17,7 +17,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
-use crate::patch::{ensure_no_flow_style_js, normalize_js_tags};
+use crate::patch::parse_js_dialect;
 use crate::stack::{
     EntryKind, LoadedProfile, PATCH_FILENAME, anchor_base, builtin_bundle_yaml, join_lexical,
     json_quote,
@@ -141,16 +141,10 @@ pub fn render_dump(
             base_path.display()
         ))
     })?;
-    // The same normalization and flow-style rejection as every fr parse: the
-    // dialect cannot preserve a `!!js` tag in an unrecognized value position.
-    let normalized = normalize_js_tags(&content);
-    ensure_no_flow_style_js(&normalized).map_err(|e| {
-        Error::PatchParse(format!(
-            "{bin}: failed to parse config {}: {e}",
-            base_path.display()
-        ))
-    })?;
-    let doc: Value = serde_yaml_ng::from_str(&normalized).map_err(|e| {
+    // The same structure-aware `!!js` dialect parse as every fr parse: the
+    // base parses with verbatim string content and fail-closed tag
+    // positions (Q25B).
+    let doc: Value = parse_js_dialect(&content).map_err(|e| {
         Error::PatchParse(format!(
             "{bin}: failed to parse config {}: {e}",
             base_path.display()
@@ -258,20 +252,94 @@ fn flush_group(
         return Ok(());
     }
     lines.push(format!("# == {label}"));
-    let text = serde_yaml_ng::to_string(&Value::Sequence(std::mem::take(group)))
+    let group = Value::Sequence(std::mem::take(group));
+    let with_tags = serde_yaml_ng::to_string(&group)
         .map_err(|e| Error::PatchParse(format!("dump serialization failed: {e}")))?;
-    lines.push(denormalize_js_tags(text.trim_end()));
+    let without_tags = serde_yaml_ng::to_string(&strip_js_tags(&group))
+        .map_err(|e| Error::PatchParse(format!("dump serialization failed: {e}")))?;
+    lines.push(denormalize_group(
+        with_tags.trim_end(),
+        without_tags.trim_end(),
+    ));
     Ok(())
 }
 
+/// Re-renders the single-bang `!js` tags `serde_yaml_ng` emits as the `!!js`
+/// secondary-handle form the input dialect uses (Q18A), without touching
+/// tag-shaped text inside string content (Q25B): the group serializes
+/// twice, with and without its `js` tags, so every tag line is the ONLY
+/// differing line and content lines stay byte-identical.
+#[must_use]
+fn denormalize_group(with_tags: &str, without_tags: &str) -> String {
+    let tagged_lines: Vec<&str> = with_tags.lines().collect();
+    let plain_lines: Vec<&str> = without_tags.lines().collect();
+    if tagged_lines.len() != plain_lines.len() {
+        return denormalize_js_tags(with_tags);
+    }
+    let mut out = Vec::with_capacity(tagged_lines.len());
+    for (tagged, plain) in tagged_lines.iter().zip(plain_lines.iter()) {
+        if tagged == plain {
+            out.push((*tagged).to_owned());
+            continue;
+        }
+        match flip_tag_line(tagged, plain) {
+            Some(line) => out.push(line),
+            // The two serializations only ever differ by the stripped tag
+            // prefix; anything else falls back to the line-anchored flip.
+            None => return denormalize_js_tags(with_tags),
+        }
+    }
+    out.join("\n")
+}
+
+/// Grows the stripped `!js` tag prefix back to `!!js` on one differing
+/// line; `None` when the line difference is not exactly a removed `!js`
+/// tag.
+fn flip_tag_line(tagged: &str, plain: &str) -> Option<String> {
+    let mut prefix = 0;
+    for (ta, tb) in tagged.chars().zip(plain.chars()) {
+        if ta != tb {
+            break;
+        }
+        prefix += ta.len_utf8();
+    }
+    let tagged_rest = tagged.get(prefix..)?;
+    let plain_rest = plain.get(prefix..)?;
+    let after = tagged_rest.strip_prefix("!js")?;
+    // The emitter separates tag and scalar with one space, and the stripped
+    // serialization drops that space together with the tag.
+    let after = after.strip_prefix(' ').unwrap_or(after);
+    (after == plain_rest).then(|| format!("{}!{}", &tagged[..prefix], tagged_rest))
+}
+
+/// Clones the value with every `js` tag (and only those) stripped, so the
+/// tag-free serialization differs from the tagged one exactly at tag lines.
+fn strip_js_tags(value: &Value) -> Value {
+    match value {
+        Value::Tagged(tagged) if tagged.tag.to_string().trim_start_matches('!') == "js" => {
+            strip_js_tags(&tagged.value)
+        }
+        Value::Tagged(tagged) => Value::Tagged(Box::new(serde_yaml_ng::value::TaggedValue {
+            tag: tagged.tag.clone(),
+            value: strip_js_tags(&tagged.value),
+        })),
+        Value::Sequence(items) => Value::Sequence(items.iter().map(strip_js_tags).collect()),
+        Value::Mapping(map) => Value::Mapping(
+            map.iter()
+                .map(|(key, item)| (strip_js_tags(key), strip_js_tags(item)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
 /// Matches the single-bang `!js` tags `serde_yaml_ng` emits at YAML value
-/// positions; compiled once, shared by every group flush.
+/// positions; compiled once. Fallback only: [`denormalize_group`] handles
+/// the line-differential flip, and this regex rewrite stays for the
+/// defensive case where the two serializations do not line up.
 static DENORMALIZE_JS_TAG: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
 
-/// Rewrites the single-bang `!js` tags `serde_yaml_ng` emits back to the
-/// `!!js` secondary-handle form at YAML value positions, matching the input
-/// dialect verbatim; quoted content never matches (mirror of
-/// [`crate::patch::normalize_js_tags`]).
+/// Line-anchored `!js` -> `!!js` rewrite; see [`DENORMALIZE_JS_TAG`].
 #[must_use]
 fn denormalize_js_tags(yaml: &str) -> String {
     let value_position = DENORMALIZE_JS_TAG.get_or_init(|| {
@@ -340,14 +408,7 @@ fn parse_raw_patch_list(
     bin: &str,
     anchor_relative: bool,
 ) -> Result<Vec<Value>> {
-    let normalized = normalize_js_tags(content);
-    ensure_no_flow_style_js(&normalized).map_err(|e| {
-        Error::PatchParse(format!(
-            "{bin}: failed to parse {label} {}: {e}",
-            path.display()
-        ))
-    })?;
-    let doc: Value = serde_yaml_ng::from_str(&normalized).map_err(|e| {
+    let doc: Value = parse_js_dialect(content).map_err(|e| {
         Error::PatchParse(format!(
             "{bin}: failed to parse {label} {}: {e}",
             path.display()
@@ -857,7 +918,7 @@ mod tests {
     /// Parses a raw patch-list fixture into its rows (the shape the dump
     /// layers carry).
     fn raw_rows(text: &str) -> Vec<Value> {
-        match serde_yaml_ng::from_str::<Value>(&normalize_js_tags(text)) {
+        match parse_js_dialect(text) {
             Ok(Value::Sequence(rows)) => rows,
             other => panic!("fixture must parse to a sequence: {other:?}"),
         }
@@ -905,9 +966,8 @@ mod tests {
         .unwrap_or_else(|e| panic!("dump failed: {e}"));
         // Comments do not break loadability: the dump parses as one document
         // equal to what the boot composition produces.
-        let normalized = normalize_js_tags(&dump);
-        let parsed: Value = serde_yaml_ng::from_str(&normalized)
-            .unwrap_or_else(|e| panic!("dump must re-parse: {e}"));
+        let parsed: Value =
+            parse_js_dialect(&dump).unwrap_or_else(|e| panic!("dump must re-parse: {e}"));
         let rows = parsed.as_sequence().expect("sequence");
         assert_eq!(rows.len(), 3, "{parsed:?}");
         assert_eq!(rows[0]["id"], "shared");
@@ -999,9 +1059,8 @@ mod tests {
                 .unwrap_or_else(|e| panic!("poisoned: {e}")),
             vec![format!("{BIN}: [b.yml] patch: entry \"child\" not found")],
         );
-        let normalized = normalize_js_tags(&dump);
-        let parsed: Value = serde_yaml_ng::from_str(&normalized)
-            .unwrap_or_else(|e| panic!("dump must re-parse: {e}"));
+        let parsed: Value =
+            parse_js_dialect(&dump).unwrap_or_else(|e| panic!("dump must re-parse: {e}"));
         assert_eq!(
             parsed[0]["config"][0]["config"]["v"], 1,
             "the skipped layer must not change the row: {parsed:?}"
@@ -1050,9 +1109,8 @@ mod tests {
                 "{BIN}: [overlay.yml] patch: entry \"only-on-another-surface\" not found"
             )],
         );
-        let normalized = normalize_js_tags(&dump);
-        let parsed: Value = serde_yaml_ng::from_str(&normalized)
-            .unwrap_or_else(|e| panic!("dump must re-parse: {e}"));
+        let parsed: Value =
+            parse_js_dialect(&dump).unwrap_or_else(|e| panic!("dump must re-parse: {e}"));
         assert_eq!(parsed[0]["config"]["value"], "patched");
     }
 
@@ -1357,9 +1415,8 @@ mod tests {
             !dump.contains("patched by b.yml"),
             "the detached layer changed no row: {dump}"
         );
-        let normalized = normalize_js_tags(&dump);
-        let parsed: Value = serde_yaml_ng::from_str(&normalized)
-            .unwrap_or_else(|e| panic!("dump must re-parse: {e}"));
+        let parsed: Value =
+            parse_js_dialect(&dump).unwrap_or_else(|e| panic!("dump must re-parse: {e}"));
         assert_eq!(
             parsed[0]["config"][0]["name"], "new.so",
             "the new occupant stays untouched: {parsed:?}"
@@ -1449,5 +1506,47 @@ mod tests {
             file_rows[0]["insert"][0]["name"], "/tmp/patches/x.so",
             "file layers anchor to their directory: {file_rows:?}"
         );
+    }
+
+    #[test]
+    fn dump_content_js_shaped_lines_survive_round_trip() {
+        // Q25B: string content lines shaped like `key: !js v` stay
+        // single-bang while real `!!js` expression lines print double-banged,
+        // and the dump re-parses to the composed tree (dump == boot for any
+        // string).
+        let dir = TempDir::new("content-js");
+        let base = dir.path().join("base.yml");
+        write_file(
+            &base,
+            "- id: a\n  name: x.so\n  note: |\n    k: !js v\n- id: b\n  name: y.so\n  policy: !!js \"(env.FR_X ?? 'ask')\"\n",
+        );
+        let warnings: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+        let sink = |line: &str| {
+            warnings
+                .lock()
+                .unwrap_or_else(|e| panic!("poisoned: {e}"))
+                .push(line.to_owned());
+        };
+        let dump =
+            render_dump(BIN, &base, &[], &sink).unwrap_or_else(|e| panic!("dump failed: {e}"));
+        assert!(
+            dump.contains("k: !js v\n"),
+            "content line stays single-bang: {dump}"
+        );
+        assert!(
+            dump.contains("policy: !!js"),
+            "tag line prints double-bang: {dump}"
+        );
+        assert!(
+            !dump.contains("k: !!js v"),
+            "content must never flip: {dump}"
+        );
+        let reparsed: Value =
+            parse_js_dialect(&dump).unwrap_or_else(|e| panic!("dump must re-parse: {e}"));
+        let base_text =
+            std::fs::read_to_string(&base).unwrap_or_else(|e| panic!("read back failed: {e}"));
+        let expected: Value =
+            parse_js_dialect(&base_text).unwrap_or_else(|e| panic!("base must re-parse: {e}"));
+        assert_eq!(reparsed, expected, "dump == boot for any string");
     }
 }

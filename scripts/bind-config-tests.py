@@ -52,6 +52,11 @@ PAIRS = [
     ("dump 输出注释分层逐字同型", "pending_req_fr_config", "composes_layers_prints_verbatim_js_and_labels_sections"),
     ("default-only 恢复诊断不读不解析用户层", "pending_req_fr_config", "default_only_collects_bundle_layers_only_and_skips_broken_user_files"),
     ("from-default-profile 以出厂模板替换", "pending_req_fr_config", "from_default_profile_replaces_existing_profile"),
+    ("块标量字符串含 tag 形文本逐字装载", "pending_req_fr_config", "block_scalar_tag_shaped_text_mounts_verbatim"),
+    ("引号多行标量含 tag 形文本逐字装载", "pending_req_fr_config", "quoted_multiline_tag_shaped_text_mounts_verbatim"),
+    ("识别位外结构值位 fail-closed（flow 式）", "pending_req_fr_config", "flow_style_js_tag_is_rejected_fail_closed"),
+    ("异形键结构值位真实标签 fail-closed", "pending_req_fr_config", "exotic_structural_key_js_tag_fails_closed"),
+    ("dump 内容行单叹号 js 逐字且整篇再 parse 等于挂载", "pending_req_fr_config", "dump_content_js_shaped_lines_survive_round_trip"),
 ]
 
 

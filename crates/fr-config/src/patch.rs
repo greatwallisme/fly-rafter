@@ -230,27 +230,12 @@ fn row_from_value(
 /// document is rejected — fail-closed, matching dsh's throw on user patch
 /// errors).
 ///
-/// # Implementation note
-///
-/// libyaml expands the `!!js` secondary-handle tag to
-/// `tag:yaml.org,2002:js`, which `serde_yaml_ng` drops for quoted scalars;
-/// the single-bang form survives as a `Value::Tagged`. Value positions are
-/// normalized to the single-bang form line-anchored before parsing so quoted
-/// content is untouched.
-///
 /// # Panics
 ///
-/// Never at runtime: the internal regex patterns are constant and compiled
+/// Never at runtime: the internal regex pattern is constant and compiled
 /// through `expect` with a statically valid pattern.
 pub fn parse_patch_lines(yaml: &str, ctx: &EvalContext) -> Result<Vec<PatchLine>> {
-    // libyaml expands the `!!js` secondary-handle tag to
-    // `tag:yaml.org,2002:js`, which serde_yaml_ng drops for quoted scalars;
-    // the single-bang form survives as a `Value::Tagged`. Normalize value
-    // positions `!!js` -> `!js` line-anchored so quoted content is untouched.
-    let normalized = normalize_js_tags(yaml);
-    ensure_no_flow_style_js(&normalized)?;
-    let doc: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(&normalized).map_err(|e| Error::PatchParse(e.to_string()))?;
+    let doc = parse_js_dialect(yaml)?;
     let seq = doc.as_sequence().ok_or_else(|| {
         Error::PatchParse("patch document must be a YAML sequence of rows".to_owned())
     })?;
@@ -264,9 +249,14 @@ pub fn parse_patch_lines(yaml: &str, ctx: &EvalContext) -> Result<Vec<PatchLine>
     Ok(lines)
 }
 
-/// Matches `!!js` left over after normalization: value positions not covered
-/// by [`normalize_js_tags`] (flow style, exotic keys).
-static REMAINING_JS_TAG: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+/// Single-bang local tag substituted for every `!!js` occurrence the flip
+/// does not recognize: a node carrying it in the guarded parse marks a
+/// `!!js` at an unrecognized structural value position (flow style, exotic
+/// keys) — fail-closed instead of the silent tag drop `serde_yaml_ng` would
+/// otherwise perform. Occurrences inside string content are inert
+/// characters restored verbatim from the raw parse, so they never raise the
+/// guard.
+const JS_POSITION_GUARD_TAG: &str = "!fr-js-position-guard";
 
 /// Matches `!!js` at YAML value positions (after `key:` or after a list
 /// dash); compiled once, shared by every parse.
@@ -275,7 +265,7 @@ static NORMALIZE_JS_TAG: std::sync::OnceLock<Regex> = std::sync::OnceLock::new()
 /// Rewrites `!!js` tag occurrences at YAML value positions (after `key:` or
 /// after a list dash) to the single-bang form; quoted content never matches.
 #[must_use]
-pub(crate) fn normalize_js_tags(yaml: &str) -> String {
+fn normalize_js_tags(yaml: &str) -> String {
     let value_position = NORMALIZE_JS_TAG.get_or_init(|| {
         Regex::new(r"(?m)^([ \t]*(?:-[ \t]+)?[A-Za-z_][A-Za-z0-9_-]*:[ \t]+|^[ \t]*-[ \t]+)!!js")
             .expect("valid regex")
@@ -283,29 +273,137 @@ pub(crate) fn normalize_js_tags(yaml: &str) -> String {
     value_position.replace_all(yaml, "${1}!js").into_owned()
 }
 
-/// Rejects `!!js` tags left over after normalization: value positions not
-/// covered by [`normalize_js_tags`] (flow style, exotic keys). The fr parse
-/// dialect cannot preserve a tag there, so failing closed beats silently
-/// dropping it. Shared by the boot-grade and the dump raw parses.
+/// Parses one YAML document in the fr `!!js` dialect, structure-aware
+/// (2026-10-22 Q25B): `!!js` at a recognized value position (after `key: `
+/// or `- `) becomes a [`serde_yaml_ng::Value::Tagged`] expression node,
+/// string content that merely looks like a tag mounts verbatim, and a
+/// `!!js` at any other structural value position fails closed with the
+/// pinned diagnostic. `serde_yaml_ng` silently drops every `!!`-handle tag
+/// (quoted, plain, flow), so the raw text parses to the verbatim
+/// string-content truth while the flip-normalized text parses to the
+/// tag-placement truth; the substitution never changes the tree structure,
+/// and string differences are restored from the raw parse. Shared by the
+/// boot-grade and the dump raw parses.
 ///
 /// # Errors
 ///
-/// [`Error::PatchParse`] when a flow-style `!!js` value position remains.
-pub(crate) fn ensure_no_flow_style_js(normalized: &str) -> Result<()> {
-    if REMAINING_JS_TAG
-        .get_or_init(|| {
-            // Non-anchored: any remaining `key: !!js` or `- !!js` value slot.
-            Regex::new(r"(:[ \t]+|[ \t]-[ \t]+)!!js").expect("valid regex")
-        })
-        .is_match(normalized)
-    {
+/// [`Error::PatchParse`] with the underlying YAML diagnostic for malformed
+/// documents, the pinned `outside a recognized value position` diagnostic
+/// when a guard-tagged node survives, or a mapping-key diagnostic when a
+/// plain key's text contains the tag marker (key text cannot be restored in
+/// place).
+pub(crate) fn parse_js_dialect(yaml: &str) -> Result<serde_yaml_ng::Value> {
+    // Content truth: the raw parse keeps every string verbatim (its dropped
+    // `!!js` tags are re-attached from the flip parse below).
+    let raw: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(yaml).map_err(|e| Error::PatchParse(e.to_string()))?;
+    // Tag-placement truth: recognized value positions flip to the surviving
+    // single-bang form; every remaining `!!js` (unrecognized structural
+    // positions and string content alike) becomes the guard tag.
+    let guarded_text = normalize_js_tags(yaml).replace("!!js", JS_POSITION_GUARD_TAG);
+    let mut doc: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(&guarded_text).map_err(|e| Error::PatchParse(e.to_string()))?;
+    if js_position_guard_path(&doc) {
         return Err(Error::PatchParse(
             "`!!js` tag outside a recognized value position (flow style is not supported); \
              write `key: !!js \"expr\"` on its own line"
                 .to_owned(),
         ));
     }
-    Ok(())
+    if restore_verbatim_strings(&mut doc, &raw) {
+        Ok(doc)
+    } else {
+        Err(Error::PatchParse(
+            "`!!js` inside a mapping key cannot be preserved verbatim; \
+             move the key text out of the tag position"
+                .to_owned(),
+        ))
+    }
+}
+
+/// Whether any node (mapping keys included) carries the
+/// [`JS_POSITION_GUARD_TAG`] marker.
+fn js_position_guard_path(value: &serde_yaml_ng::Value) -> bool {
+    match value {
+        serde_yaml_ng::Value::Tagged(tagged) => {
+            // Parsed `Tag` displays with its `!` sigil (unlike `Tag::new`).
+            tagged.tag.to_string().trim_start_matches('!')
+                == JS_POSITION_GUARD_TAG.trim_start_matches('!')
+                || js_position_guard_path(&tagged.value)
+        }
+        serde_yaml_ng::Value::Sequence(items) => items.iter().any(js_position_guard_path),
+        serde_yaml_ng::Value::Mapping(map) => map
+            .iter()
+            .any(|(key, item)| js_position_guard_path(key) || js_position_guard_path(item)),
+        _ => false,
+    }
+}
+
+/// Restores string content the flip and guard substitution may have altered:
+/// `target` holds the tag-placement parse, `truth` the raw parse whose
+/// strings are verbatim. The two parses share one tree structure — a
+/// tag-token substitution never changes the parse shape — so every
+/// difference is textual content. Returns `false` when a mapping key text
+/// differs (keys are immutable in [`serde_yaml_ng::Mapping`], and the
+/// guarded parse already rejected the tagged-key form, so a differing plain
+/// key carries the tag marker and cannot be preserved).
+fn restore_verbatim_strings(
+    target: &mut serde_yaml_ng::Value,
+    truth: &serde_yaml_ng::Value,
+) -> bool {
+    match (target, truth) {
+        (serde_yaml_ng::Value::String(target_text), serde_yaml_ng::Value::String(truth_text)) => {
+            if target_text != truth_text {
+                target_text.clone_from(truth_text);
+            }
+            true
+        }
+        (serde_yaml_ng::Value::Tagged(tagged), serde_yaml_ng::Value::Tagged(truth_tagged)) => {
+            restore_verbatim_strings(&mut tagged.value, &truth_tagged.value)
+        }
+        // The flip parse keeps the tag the raw parse dropped (`!!js` ->
+        // single-bang survival); compare the tagged inner against the raw
+        // scalar.
+        (serde_yaml_ng::Value::Tagged(tagged), truth) => {
+            restore_verbatim_strings(&mut tagged.value, truth)
+        }
+        (
+            serde_yaml_ng::Value::Sequence(target_items),
+            serde_yaml_ng::Value::Sequence(truth_items),
+        ) => {
+            for (target_item, truth_item) in target_items.iter_mut().zip(truth_items) {
+                if !restore_verbatim_strings(target_item, truth_item) {
+                    return false;
+                }
+            }
+            true
+        }
+        (serde_yaml_ng::Value::Mapping(target_map), serde_yaml_ng::Value::Mapping(truth_map)) => {
+            if target_map.keys().ne(truth_map.keys()) {
+                return false;
+            }
+            for (target_value, truth_value) in target_map.values_mut().zip(truth_map.values()) {
+                if !restore_verbatim_strings(target_value, truth_value) {
+                    return false;
+                }
+            }
+            true
+        }
+        // Identical scalar leaves: the substitution only alters `!!js`
+        // marker text, so non-string scalars always match verbatim.
+        (
+            serde_yaml_ng::Value::Bool(_)
+            | serde_yaml_ng::Value::Number(_)
+            | serde_yaml_ng::Value::Null,
+            serde_yaml_ng::Value::Bool(_)
+            | serde_yaml_ng::Value::Number(_)
+            | serde_yaml_ng::Value::Null,
+        ) => true,
+        // A tag token never changes the parse shape; any variant mismatch is
+        // unreachable for documents that parse, and fail-closed beats
+        // guessing.
+        _ => false,
+    }
 }
 
 /// A fully resolved assembly row after composition.
@@ -773,6 +871,49 @@ mod tests {
         let yaml = "- id: bad\n  name: fr-bad\n  config: {p: !!js \"process.env.X\"}\n";
         let err =
             parse_patch_lines(yaml, &neutral_ctx()).expect_err("flow-style !!js must be rejected");
+        assert!(
+            err.to_string()
+                .contains("outside a recognized value position"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn block_scalar_tag_shaped_text_mounts_verbatim() {
+        // Q25B: tag-shaped text inside a block scalar is string content —
+        // the flip must not rewrite it into an expression.
+        let yaml = "- id: a\n  name: n\n  config:\n    note: |\n      k: !!js v\n";
+        let lines =
+            parse_patch_lines(yaml, &neutral_ctx()).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(
+            lines[0].config,
+            Some(json!({"note": "k: !!js v\n"})),
+            "block scalar content mounts verbatim"
+        );
+    }
+
+    #[test]
+    fn quoted_multiline_tag_shaped_text_mounts_verbatim() {
+        // Q25B: tag-shaped text inside a quoted multi-line scalar is string
+        // content, not a value position.
+        let yaml = "- id: a\n  name: n\n  config:\n    note: \"line1\\n  k: !!js v\"\n";
+        let lines =
+            parse_patch_lines(yaml, &neutral_ctx()).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        assert_eq!(
+            lines[0].config,
+            Some(json!({"note": "line1\n  k: !!js v"})),
+            "quoted multi-line content mounts verbatim"
+        );
+    }
+
+    #[test]
+    fn exotic_structural_key_js_tag_fails_closed() {
+        // A real `!!js` tag at a structural position the flip does not
+        // recognize (dotted key) must fail closed with the pinned diagnostic
+        // instead of silently losing the tag (19.2 条 12).
+        let yaml = "- id: a\n  name: n\n  config:\n    p.q: !!js \"env.FR_X\"\n";
+        let err = parse_patch_lines(yaml, &neutral_ctx())
+            .expect_err("unrecognized structural tag must fail");
         assert!(
             err.to_string()
                 .contains("outside a recognized value position"),

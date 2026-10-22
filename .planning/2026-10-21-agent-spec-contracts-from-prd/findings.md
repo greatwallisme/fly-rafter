@@ -284,3 +284,29 @@ dsh .env 分层权威事实（app-boot/src/index.ts + util 两包，仓库 ~/pro
 ### 门禁复验（本会话独立复跑，非转述子代理）
 - cargo fmt --check / cargo clippy --workspace --all-targets -- -D warnings / cargo doc 全绿；cargo test --workspace 82+16 passed / 0 failed。
 - lifecycle 38 passed / 263 skipped / 0 failed（exit 1 = 263 pending 预期，基线不变）；guard exit 0。合约零改动。
+
+## 2026-10-22 — Q25B 切片：!!js 方言结构感知归一化（dump==boot 对任意字符串）
+
+### 事实（本会话探针实证，crates/fr-config/tests/yaml_tag_probe.rs 已删）
+1. serde_yaml_ng 0.10 对 `!!` 二级句柄 tag **一律静默丢弃**：quoted/unquoted/flow/序列项皆然（`k: !!js "x"` → String("x")）；单叹号 `!js` 存活为 `Value::Tagged`。patch.rs 旧注释「quoted 丢弃」不全。
+2. emitter 对全拼 tag 渲染长形式 `!tag:yaml.org,2002:js` 而非 `!!js` 短形式 → 输出侧 emitter 捷径不可行。
+3. 块标量/引号多行内容含 tag 形文本 raw 解析逐字保留（内容真值可免费获得）。
+4. 解析期 `Tag` 的 Display 含 `!` 前缀（`format!("{}", tag)` 出 `!fr-js-position-guard`），与 `Tag::new` 惯例不同——比较一律 `to_string().trim_start_matches('!')`。
+5. PRD/intake 未钉死「行锚定」机制措辞（行为级钉死：!!js 逐字、flow fail-closed、dump==boot）→ 机制升级属实现内部。
+
+### 设计（Q25B 裁决落地）
+- 输入侧 = 结构感知差分解析（patch.rs:295 parse_js_dialect）：raw 解析为内容真值 + 翻转解析为标签位置真值（识别位正则不变，patch.rs:268 normalize_js_tags 降为内部助手）+ 剩余 `!!js` 换守卫 tag `!fr-js-position-guard`（patch.rs:259）检出识别位外结构值位 fail-closed（文案不变）+ restore_verbatim_strings（patch.rs:350）以 raw 为真值还原字符串内容（映射键序校验、标量恒等分支、(Tagged,Tagged)/(Tagged,标量) 双分支）。`ensure_no_flow_style_js` + REMAINING_JS_TAG 正则删除——守卫 tag 检出更精确（flow 式与异形键结构位同样拒绝，纯字符串内容不再误拒）。
+- 输出侧 = flush_group 双序列化行差分（dump.rs:273 denormalize_group + :298 flip_tag_line + :317 strip_js_tags）：A=带 `!js` tag 序列化、B=剥 js tag 序列化，行数相同前提下行差异 ⟺ js 标签行，flip_tag_line 校验差异段恰为被剥 `!js`（含 tag 后导空格折叠）后增长为 `!!js`，内容行天然逐字；异常回退旧正则（denormalize_js_tags 保留为 fallback）。
+- PRD：19.2 条 12（结构值位 fail-closed 范围，先于本条存在的行为定稿登记）+ 23 决策 24；intake 增 [REQ-FR-CONFIG-14] + Rule 五场景。
+
+### 合同层（七步流 1-3）
+- 管线全序列重跑：import → transition 20/20 accepted → draft-specs 20 → refine 20 → depends 清理 → 绑定重放+新增（38→43 对）→ 三门禁 0/0/0 → questions 39 条 0 blocking → CONFIG lint Quality 100%。
+- 事故自纠两件：①首跑 `rg '\K'` 语法错误致 transition 全空跑 + specs/generated 已删后 draft 静默零产物（proposed 状态不产草稿）——以 sed 提取 id 重跑全序列恢复，HEAD 有已提交备份无损失；②rg `\K` 属 PCRE 语法，rg 默认引擎不支持，提取字段一律 sed -n 's///p'。
+- 新增绑定 5：块标量逐字 / 引号多行逐字 / flow fail-closed（绑既有测试）/ 异形键 fail-closed / dump 内容行 round-trip。
+
+### 实现与测试（七步流 4-7）
+- 新测试 4：patch.rs:882 块标量逐字、:896 引号多行逐字、:910 异形键 fail-closed、dump.rs:1512 内容行 round-trip（全树等值断言 dump==boot）。绑定 5 场景 lifecycle 全 pass。
+- 自纠四件（首轮 23 败 → 4 败 → 全绿）：①restore 兜底分支把相同标量对（Bool/Number/Null）误判失败——补标量恒等分支；②解析期 Tag Display 含 `!`，守卫检测与 strip 比较失配——trim 后比较；③merge 缺 (Tagged,Tagged) 分支，单叹号直写文档误判键分歧——补分支；④flip_tag_line 差一空格（serde 剥 tag 连后导空格移除）——strip_prefix(' ') 折叠。
+- clippy assigning_clones：restore 字符串改 clone_from；fmt 排版套用。
+- 门禁终态：四关全绿（fmt / clippy -D warnings / 86+16 tests / doc）；lifecycle = 43 passed / 263 skipped / 0 failed（exit 1 = 263 pending 预期，绑定 38→43）；guard exit 0；explain 306 场景 43/0/263/0；stamp dry-run 与既有一致。合约改动 = intake CONFIG-14 + PRD 19.2 条 12/决策 24 + 5 新绑定，均经 Q25B 裁决授权。
+- 下一切片（不变）：fr-schema 投影面（dump-config-schema 侧 $defs/x-fr/entry 五态/diagnostics，D3=Session 7 真源）→ 绑 x-fr 五键/complete 假退 1/来自真实装配 → 呈报。

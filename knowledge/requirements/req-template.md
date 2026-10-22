@@ -2,6 +2,7 @@
 kind: requirement
 id: REQ-NNN
 title: "Requirement Title"
+status: accepted
 liveness: auto
 tags: []
 ---
