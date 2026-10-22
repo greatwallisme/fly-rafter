@@ -1,7 +1,5 @@
 //! Errors produced by configuration parsing and compilation.
 
-use std::path::PathBuf;
-
 /// Configuration domain errors.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -19,10 +17,6 @@ pub enum Error {
         /// Human-readable rule violation.
         message: String,
     },
-
-    /// The filesystem path backing a configuration artifact is invalid.
-    #[error("invalid config path: {}", .0.display())]
-    InvalidPath(PathBuf),
 }
 
 /// Convenience alias for configuration results.

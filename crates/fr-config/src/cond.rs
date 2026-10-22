@@ -195,15 +195,18 @@ impl<'a> Parser<'a> {
 
     fn parse_env_chain(&mut self) -> Result<Value, String> {
         let name = self.parse_ident("env variable name")?;
-        let found = (self.ctx.env)(&name);
+        let mut value = (self.ctx.env)(&name).map_or(Value::Null, Value::String);
         // The `?? <default>` clause is part of the expression grammar: it is
-        // consumed whether or not the lookup succeeded.
-        if self.lookahead_is("??") {
+        // consumed whether or not the lookup succeeded, and chains are allowed
+        // (left-associative, coalescing only null, matching JS semantics).
+        while self.lookahead_is("??") {
             self.eat("??");
             let default = self.parse_literal()?;
-            return Ok(found.map_or(default, Value::String));
+            if value.is_null() {
+                value = default;
+            }
         }
-        Ok(found.map_or(Value::Null, Value::String))
+        Ok(value)
     }
 
     fn parse_ident(&mut self, what: &str) -> Result<String, String> {
@@ -328,6 +331,22 @@ mod tests {
     }
 
     #[test]
+    fn env_default_chain_supports_multiple_defaults() {
+        // env.X absent: falls through both defaults; env.Y set: value kept.
+        let absent = ctx(None);
+        assert_eq!(
+            eval("env.FR_X ?? 'a' ?? 'b'", &absent).unwrap_or_else(|e| panic!("{e}")),
+            json!("a")
+        );
+        let set = ctx(Some(vec![("FR_Y", "")]));
+        assert_eq!(
+            eval("env.FR_Y ?? 'a' ?? 'b'", &set).unwrap_or_else(|e| panic!("{e}")),
+            json!(""),
+            "empty string is not nullish: default must not apply"
+        );
+    }
+
+    #[test]
     fn bare_env_read_is_null_when_absent() {
         assert_eq!(
             eval("env.FR_TOOLS_MODE", &ctx(None)).unwrap_or_else(|e| panic!("{e}")),
@@ -393,7 +412,7 @@ mod tests {
     }
 
     #[test]
-    fn literals_and_loose_equality() {
+    fn literals_and_equality() {
         let neutral = ctx(None);
         assert_eq!(
             eval("null", &neutral).unwrap_or_else(|e| panic!("{e}")),

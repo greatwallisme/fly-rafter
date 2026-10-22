@@ -109,8 +109,7 @@ fn convert_config(
 
 fn err_message(error: &Error) -> String {
     match error {
-        Error::PatchLine { message, .. } => message.clone(),
-        other => other.to_string(),
+        Error::PatchLine { message, .. } | Error::PatchParse(message) => message.clone(),
     }
 }
 
@@ -233,12 +232,32 @@ fn row_from_value(
 /// the single-bang form survives as a `Value::Tagged`. Value positions are
 /// normalized to the single-bang form line-anchored before parsing so quoted
 /// content is untouched.
+///
+/// # Panics
+///
+/// Never at runtime: the internal regex patterns are constant and compiled
+/// through `expect` with a statically valid pattern.
 pub fn parse_patch_lines(yaml: &str, ctx: &EvalContext) -> Result<Vec<PatchLine>> {
     // libyaml expands the `!!js` secondary-handle tag to
     // `tag:yaml.org,2002:js`, which serde_yaml_ng drops for quoted scalars;
     // the single-bang form survives as a `Value::Tagged`. Normalize value
     // positions `!!js` -> `!js` line-anchored so quoted content is untouched.
     let normalized = normalize_js_tags(yaml);
+    // Flow-style tags (`{p: !!js "x"}`) are outside the recognized value
+    // positions and would silently lose their tag; reject them fail-closed.
+    if REMAINING_JS_TAG
+        .get_or_init(|| {
+            // Non-anchored: any remaining `key: !!js` or `- !!js` value slot.
+            Regex::new(r"(:[ \t]+|[ \t]-[ \t]+)!!js").expect("valid regex")
+        })
+        .is_match(&normalized)
+    {
+        return Err(Error::PatchParse(
+            "`!!js` tag outside a recognized value position (flow style is not supported); \
+             use `key: !!js \"expr\"` on its own line"
+                .to_owned(),
+        ));
+    }
     let doc: serde_yaml_ng::Value =
         serde_yaml_ng::from_str(&normalized).map_err(|e| Error::PatchParse(e.to_string()))?;
     let seq = doc.as_sequence().ok_or_else(|| {
@@ -253,6 +272,10 @@ pub fn parse_patch_lines(yaml: &str, ctx: &EvalContext) -> Result<Vec<PatchLine>
     }
     Ok(lines)
 }
+
+/// Matches `!!js` left over after normalization: value positions not covered
+/// by [`normalize_js_tags`] (flow style, exotic keys).
+static REMAINING_JS_TAG: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
 
 /// Rewrites `!!js` tag occurrences at YAML value positions (after `key:` or
 /// after a list dash) to the single-bang form; quoted content never matches.
@@ -677,6 +700,20 @@ mod tests {
             lines[0].config,
             Some(json!({"policy": "ask"})),
             "neutral ctx (no env, linux): default branch"
+        );
+    }
+
+    #[test]
+    fn flow_style_js_tag_is_rejected_fail_closed() {
+        // Flow style is outside the recognized value positions; a dropped tag
+        // would silently evaluate to the raw expression string.
+        let yaml = "- id: bad\n  name: fr-bad\n  config: {p: !!js \"process.env.X\"}\n";
+        let err =
+            parse_patch_lines(yaml, &neutral_ctx()).expect_err("flow-style !!js must be rejected");
+        assert!(
+            err.to_string()
+                .contains("outside a recognized value position"),
+            "{err}"
         );
     }
 

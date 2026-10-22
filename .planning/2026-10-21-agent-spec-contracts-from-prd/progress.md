@@ -68,3 +68,4 @@
 - PRD 勘误落地：6.1 合并语义、6.2 行模型示例（定义行经 insert）、5 节 !!js 行、19.2 条 6、23 决策 17。intake：CONFIG-1/4/11/12 改写，场景 +6 改 2（覆盖行翻转/config 整换/未命中跳过/name 不匹配/自底向上/insert+首插序；子集 fail-closed 文档级拒绝）。全管线复跑全绿 1202 场景。
 - fr-config 实现：cond.rs（受限表达式求值器：递归下降、?? 链语法消费、单双引号字面量、profile-context 布尔）；patch.rs 重写（PatchLine{id,name,config,disabled,insert}、compose 按 dsh 语义、row_from_value 走行保 tag、!!js→!js 行锚定归一化——libyaml 二级句柄展开致 serde_yaml_ng 丢 quoted tag 的规避）。tests 12→24，四关全绿。
 - 排障记录：eat("?") 误吞 "??"（lookahead 修复）；serde_json 不认单引号字面量（手写扫描）；PatchLineRaw derive 路径丢 tag（整文档解 Value 后手工走行）。
+- 代码评审（/code-review high --fix，后台代理因 API 模型名 400 失败，本会话直接执行，subagent 用量 0/2）：评审对象 0d3e87e。发现 5 项并全部修复：R1（中）flow 风格 !!js 会被 libyaml 静默丢 tag 成普通字符串 → 归一化后残留检测 fail-closed + 钉测；R2 链式 ??（PRD"链"语义）→ 循环消费 + 钉测（含空串非 nullish 语义）；R3 未用变体 InvalidPath 删除；R4 regex 移入 workspace 依赖；R5 测试名名实不符更名。修复过程 clippy 收尾 3 处（must_use 误挂 static、同体 match 臂、# Panics）。终态：四关全绿 26 tests。
