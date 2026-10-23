@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 13（fr-session v4 全量）已按用户「1、2 完成后继续」指令启动。已完成：Q31A 落地（guard 门禁面 = `--spec-dir specs/generated --min-score 0.7`，CLAUDE.md 七步表 + pre-commit hook 双改并实跑验证 exit 1 实扫阻断；0.6 系工具模板默认已按项目 0.7 修正）；Q30B 轮 explain 验收材料 991 行已亲读、digest 呈报。当前动作 = dsh 会话域真源全读（Phase 13 动工前置纪律），读毕呈集中分叉裁决（Q33 起），再按七步合约流精化 SESSION 合约后写码。
+Phase 13 合同层（七步流 1-2）完成：Q34A（词表激活期声明聚合）/Q33A（plugin 通道）/Q35B（projection 后置 19.2 条 14）/Q36A（tools 投影补遗）+ E1/E2 勘误全部落地——PRD §7.1 三处 + §7.4 + 19.2 条 14 + 23 决策 28 + intake SESSION 条款 18/19/20 + 9 新场景（SESSION 102 / 全局 1249）；管线九关全绿（import 20、transition 20/20、draft 20、refine、depends、bind 重放 55/259/0、三门禁 0/0/0、questions 40/0、SESSION lint 0.7 PASS）。dougong-plugin-dev 技能核对无误述、补 descriptor 事实缺口（dougong 仓侧未提交留评审）。当前动作 = fr-session 写码（七步流 3-7）：crates/fr-session 新建（dougong 插件 dylib 形态，激活 dougong-plugin-dev + rust-guidelines）——SessionEvent 全集/物理不变量/surface/deriveMessages/ToolHistory/词表声明/plugin 通道/fork/resume，dsh 精确细节在 findings 三节。
 
 ## Current Phase
-Phase 13（fr-session v4 全量——真源全读阶段）
+Phase 13（fr-session v4 全量——合同层完成，进入实现）
 
 ## Phases
 

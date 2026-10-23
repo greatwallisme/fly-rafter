@@ -13,7 +13,7 @@ dsh 的“协议即会话日志”原则要求：模型可见即已记录，每�
 
 ## Requirements
 
-- [REQ-FR-SESSION-1] fr-session MUST 实现全部 durable SessionEvent 类型与字段，与 dsh `packages/core/session/src/types.ts` 判别联合逐字一致；公共字段 type/seq/time/data/ignorable?/surfaceOp?/sourceEventSeqs?；request/header 携带 EpochHeader（config + tools + adapterDefaults，reason: initial/resume/change/series）。
+- [REQ-FR-SESSION-1] fr-session MUST 实现全部 durable SessionEvent 类型与字段，与 dsh `packages/core/session/src/types.ts` 判别联合逐字一致；公共字段 type/seq/time/data/ignorable?/surfaceOp?/sourceEventSeqs?；request/header 携带 EpochHeader（config + tools + adapterDefaults，reason: initial/resume/change/series，startsSeries?: true）；turn/end reason MUST 为七变体：completed / aborted{reason: user|parent|hook{reason}|disposed} / error{LlmFailure} / max-tokens / blocked / interrupted（crash 孤儿 turn 由 resume 追加关闭，loop 永不 live 发出）/ forked（仅 fork seed 携带）（2026-10-23 勘误 E1）；user/message 的 data MUST 为 UserMessage 直载（无 {turn,step,message} 包裹，其余四类 surface 事件均 {turn,step,…} 包裹，勘误 E2）。
 - [REQ-FR-SESSION-2] fr-session MUST 只实现会话格式 v4；文件为 `session.v4.jsonl`（可选 zstd 压缩 `session.v4.jsonl.zstd`）；世代命名，永不改名或删除已发布文件；读到非 v4 文件 MUST 报明确错误；写路径 = 编码 → 校验 → 独占发布后继文件。
 - [REQ-FR-SESSION-3] fr-session MUST 支持 surface 与 replace-op：压缩经 `{op:'replace', startSeq, endSeq}` 重写表面，新内容引用 sourceEventSeqs，旧内容永久留存于日志。
 - [REQ-FR-SESSION-4] fr-session MUST 实现 deriveMessages：每次请求前从日志按 request/header 世代 + 表面 + 工具增删 developer/message 重建消息数组并冻结；`tool/ptc-dispatch*` 一律忽略；同输入两次重建 MUST 逐字节一致。
@@ -31,6 +31,9 @@ dsh 的“协议即会话日志”原则要求：模型可见即已记录，每�
 - [REQ-FR-SESSION-15] deriveMessages 投影 MUST：contentGeneration 变化时从该节点起整表重建，纯尾增长走增量投影；空 assistant（无内容块仅承载 max-tokens usage）MUST 投影为 null（dsh session/src/index.ts:984-1005、agent-loop/src/agent.ts:686-694）。
 - [REQ-FR-SESSION-16] request/header canonical MUST：canonicalHeader 的 tools 为空时整体省略；tool schema 以 JSON.stringify 形态做顺序敏感比较；工具增删仅当 baseline 存在且名字集合有差才追加 developer/message，headerSeq 仅 additions>0 时携带（dsh agent-loop/src/agent.ts:635-665、request-header.ts:21-52）。
 - [REQ-FR-SESSION-17] 继承切点 MUST 为最后一个 tagged session/end-seed 所在 seq：isSeeded 头必须携带继承事件数（cut），非 isSeeded 头 cut 必须为 0（dsh session-persistence-jsonl/src/format.ts:117-127）。
+- [REQ-FR-SESSION-18] 事件词表 MUST 以激活期声明聚合（2026-10-23 Q34A）：fr-session 内核类型静态 + 各插件激活期声明其拥有的持久事件类型名，fr-session 聚合为读路径已知集（语义同 dsh KNOWN_SESSION_EVENT_TYPES，known-event-types.ts:22-85）；重复声明同类型 MUST 报装配错误（fail-closed）；descriptor 自由 JSON 扩展键 MUST NOT 作为声明通道（dougong 宿主 trait 不回透 descriptor）。
+- [REQ-FR-SESSION-19] plugin 记录通道 MUST（2026-10-23 Q33A）：fr-session 提供 append-record 服务入口——ignorable:true 强制、类型名 `plugin:` 小写段语法校验（语法同 dsh types.ts:525）、data 丢失无损 JSON 校验；读回 API 等价 dsh pluginRecordOf；M1 无调用方，调用方约束入合约 Boundaries。
+- [REQ-FR-SESSION-20] tools 投影 MUST（2026-10-23 Q36A 补遗，dsh tool-history.ts）：request/header 进 headers 表，reason==='series' 或 startsSeries 或同名工具定义变更（JSON.stringify 比较）即重置基线；developer/message 的 tool-addition 经 headerSeq 解析定义追加进 updates；快照 = {tools: 基线, updates: [{messageId, additions}]}；active≠available 时 legacy 回退 updates: []。
 ## Scenarios
 
 Rule: REQ-FR-SESSION-1 — v4 事件全集与 EpochHeader
@@ -44,6 +47,21 @@ Rule: REQ-FR-SESSION-1 — v4 事件全集与 EpochHeader
   假设 同一会话经历新建、续用、配置变化与请求序列中段
   当 各情形生成 request/header 时
   那么 reason 分别为 initial、resume、change、series
+
+场景: crash 孤儿 turn 的 interrupted 关闭
+  假设 一份持久化日志的尾 turn 只有 turn/start 而无 turn/end（进程崩溃）
+  当 resume 重建该会话时
+  那么 追加合成 step/end（若 step 开）与 turn/end{kind: interrupted}，seq 连续、time 复用最后真实事件，且 loop 永不 live 发出 interrupted
+
+场景: fork seed 的 forked 关闭
+  假设 fork 边界落在源会话的开放 turn 内
+  当 构造 fork seed 时
+  那么 子会话在切点携带 tagged session/end-seed，开放 turn 以 turn/end{kind: forked} 关闭，合成 tool/result 文案取 forked CLOSER_TEXT
+
+场景: user/message 直载形态
+  假设 一条 user/message 与一条 developer/message 事件落盘
+  当 读取两事件的 data 字段时
+  那么 user/message 的 data 即 UserMessage 本体（无 {turn,step,message} 包裹），developer/message 的 data 为 {turn,step,message,headerSeq?}
 
 Rule: REQ-FR-SESSION-2 — v4 文件与写路径
 
@@ -542,6 +560,42 @@ Rule: REQ-FR-SESSION-17 — end-seed 切点
   当 计算继承切点时
   那么 切点为最后一个 tagged session/end-seed 所在 seq 且 isSeeded 头携带该继承事件数
 
+Rule: REQ-FR-SESSION-18 — 激活期声明事件词表
+
+场景: 激活期声明聚合为读路径已知集
+  假设 fr-approval 在激活期声明 approval/asked、approval/decided、approval/policy
+  当 fr-session 聚合词表并读取含这些类型的日志时
+  那么 全部类型按已知事件正常重建，与内核静态类型并集一致
+
+场景: 重复声明同类型装配失败
+  假设 两个插件在各自激活期声明了同一持久事件类型名
+  当 装配进行到第二个声明时
+  那么 报装配错误终止启动（fail-closed），词表不含冲突类型
+
+Rule: REQ-FR-SESSION-19 — plugin 记录通道
+
+场景: plugin 记录写入读取回环
+  假设 插件经 append-record 入口写入类型 plugin:example/state 的记录
+  当 读取该日志重建会话时
+  那么 记录以 ignorable:true 保留跳过、不进模型表面，读回 API 返回原样 data
+
+场景: 非 plugin: 语法类型拒绝
+  假设 append-record 收到类型名 example/state（无 plugin: 前缀）
+  当 通道校验该类型名时
+  那么 拒绝写入且日志不变（fail-closed）
+
+Rule: REQ-FR-SESSION-20 — tools 投影
+
+场景: series 重置基线弃 prefix reuse
+  假设 会话先落 baseline header 与若干 tool-addition updates，随后落 reason 为 series 的 header 且某同名工具定义已变更
+  当 tools 投影消费该 header 时
+  那么 基线重置为该 header 的 tools、updates 清空、declared 表重建
+
+场景: tool-addition 经 headerSeq 解析进 updates
+  假设 developer/message 携带 tool-addition 且 headerSeq 指向既有 request/header
+  当 tools 投影消费该事件时
+  那么 additions 从该 header 解析定义并追加进 updates，快照为 {tools: 基线, updates}
+
 ## Dependencies
 
 None.
@@ -549,6 +603,10 @@ None.
 ## Source Trace
 
 - doc/prd.md#7.1: SessionEvent 判别联合，字段与 dsh types.ts 逐字一致；durable 事件全集表
+- dsh packages/core/session/src/known-event-types.ts:22-85: 64 类型词表目录（构建期生成）；REQ-FR-SESSION-18 激活期声明为其 fr 运行期等价（Q34A）
+- dsh packages/core/session/src/tool-history.ts: tools 投影全实现（REQ-FR-SESSION-20 真源，Q36A）
+- dsh packages/core/session/src/types.ts:202-233/310-331: turn/end 七变体与 user/message 直载（E1/E2 勘误证据）
+- dsh packages/core/session/src/index.ts:492-512: appendPluginRecord/pluginRecordOf（REQ-FR-SESSION-19 真源，Q33A）
 - doc/prd.md#7.2: 只实现 v4；世代命名，永不改名/删除已发布文件；读到非 v4 报明确错误
 - doc/prd.md#7.3: surface 与 replace-op；旧内容永久留在日志
 - doc/prd.md#7.4: deriveMessages 冻结请求必须可逐字节重现——对照测试锚点

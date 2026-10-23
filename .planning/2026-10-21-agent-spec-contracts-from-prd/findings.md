@@ -412,3 +412,97 @@ dsh .env 分层权威事实（app-boot/src/index.ts + util 两包，仓库 ~/pro
 - 呈 Q31（门禁面裁决）：A = CLAUDE.md 质量门命令与 pre-commit hook 统一改 `--spec-dir specs/generated`（恢复 Q16A 阻断语义，红至合约全绑，提交期阻断已知照）；B = 报告与切片验证以逐合约 lifecycle 为准（现状已覆盖），hook 维持空转并在 PRD 19.2/决策登记该事实；C = 用户另定。
 - **Q31A 裁决落地（2026-10-23 用户裁决 A + 追加质询修正）**：CLAUDE.md 七步表第 5 步与 `.git/hooks/pre-commit` 统一改 `agent-spec guard --spec-dir specs/generated --code . --min-score 0.7`。用户质询 min-score 0.6 来源——查证为 `agent-spec install-hooks` 模板默认（= guard CLI 默认），非项目裁决；2026-10-22 装 hook 时只修 `--code src → .` 路径缺陷、未审其余参数，系我方疏漏；已按项目既定 0.7 标准（七步表第 2 步）显式钉死。实跑验证：hook exit 1 且 20 处 `verification not passing`、guard min-score 0.7 exit 1——新常态 = 实扫 20 份、阻断直至合约全绑；阻断期内提交一律 `git commit --no-verify`（标准操作，Q16A/Q31A 已知照）。
 - Phase 13 动工纪律：fr-session 是 dougong 插件 crate，实现期必用 dougong-plugin-dev 与 rust-guidelines 技能；动工前 dsh 会话域真源全读（findings 后续节落盘）。
+
+## 2026-10-23 — Phase 13 真源全读（一）：core/session src 3324 行全读完成
+
+标注约定：PRD✓ = PRD §7 已钉死且本轮逐点核实成立；新 = PRD 未载。文件均在 `~/project/reference/cordis/deepseek-harness/packages/core/session/src/`。
+
+### types.ts（562）
+- PRD✓：SessionEvent 判别联合 13 核心 type；公共字段 type/seq/time/data/ignorable?/surfaceOp?/sourceEventSeqs?（后两者仅五类 surface 类型合法，assistant/message 禁 sourceEventSeqs）。
+- 新（勘误候选 E1）：TurnEndReason 实为七变体——completed / aborted{reason: TurnEndCancelCause} / blocked / error{error: LlmFailure} / max-tokens / **interrupted**（crash-orphaned turn 由 resume 追加 closer，loop 永不 live 发出）/ **forked**（仅 fork seed 携带）。PRD §7.1 表只列五变体。aborted.reason 结构 {kind: 'user'|'parent'|'hook'{reason}|'disposed'} 未载。
+- 新（E2）：user/message 的 data = UserMessage **直接**（无 {turn,step,message} 包裹）；developer/system/assistant/tool-result 均 {turn,step,...} 包裹——wire 形状差异。
+- 新：developer/message data.headerSeq?（有 tool-addition 时必需，指向 request/header；surface.ts:368-395 全链校验：须早于本事件且为 request/header、每个 tool-addition 的 toolName 恰命中该 header 一个工具、定义须含 description string + parameters record、deferLoading 存在必须 ===true）。
+- 新：request/header data.startsSeries?: true；request/context = RequestContext{provider,model,contextWindow?,systemPromptUpdate?}（仅 route/capacity/systemPromptUpdate 模式变化时落、不参与 header 相等）；EpochHeader.system?: never（append 期拒绝，surface.ts:204）。
+- 新：append 期 snapshotJsonValue 全数据丢失无损 JSON 校验（BigInt/function/undefined/-0/非有限数/循环/稀疏数组/Map/Set/Date/类实例皆拒，违例 append 点即抛）+ append 重入拒绝。
+- 新：session/end-seed {inherited?: true}；构造器规则（index.ts:666-698）：isSeeded 头必须配 seed+inheritedEventCount；inherited>log.length 拒；fresh 子在切点无 tagged marker 自动补 {inherited:true}；restore 路径末尾非 end-seed 补 untagged {}；切点后第二 tagged marker 拒。
+- 新（Q33 候选）：plugin: 记录通道——appendPluginRecord（ignorable:true、type 语法 `plugin:` 小写段正则、仅 experimental 包可调）+ pluginRecordOf；reader 对未知 ignorable 记录保留跳过；fork/resume 带走。
+- 新（Q34 候选）：KNOWN_SESSION_EVENT_TYPES = 生成目录 64 类型（core 13 + 插件持久事件全集 approval×3/compaction×4/todo/subagent×3/hook×2/llm-retry×2/session-title×2 等），读路径拒未知非 ignorable 类型；dsh 为构建期 TS 合并，fr 需等价注册机制。
+- 新（Q35 候选）：MESSAGE_PROJECTION_EVENT_TYPES = {'image/offload'}——改变既有消息内容的插件事件必须提供纯投影解释器（SessionMessageProjection{type, project(event,ctx)->Map<seq,Message>}），缺定义读路径抛、定义注销缓存失效（surface.ts:698-711）。
+- 新（Q36 候选）：ToolHistoryProjection（tool-history.ts）——request/header 进 headers 表，reason==='series'||startsSeries||同名工具定义 stringify 变化 → 重置基线（弃 prefix reuse）；developer/message tool-addition 从 headerSeq 解析定义；snapshot={tools:基线,updates:[{messageId,additions}]}，active≠available 时 legacy 回退 updates:[]。PRD §7.4 未载 tools 投影（fr-llm toolUpdate 供方）。
+
+### request-header.ts / seq-ranges.ts / repair.ts / fork.ts
+- PRD✓ request-header：canonicalHeader（adapterDefaults 仅两标记之一 ===true 时保留；空 tools 省略）+ headerEquals（callConfigEquals+两布尔+tools JSON.stringify 顺序敏感）+ fold last-wins —— 与 §7.4 一致。
+- PRD✓ seq-ranges：encode 严格递增才折叠、run≥3→[start,end]（否则逐个原样）；decode 数字或 [start,end] 对、start<=end、maxEntries 上限、带范围整体须严格递增。
+- PRD✓+精确形态 repair：CLOSER_TEXT 四文案（interrupted/forked × started/notStarted）全量到手；openTurnClosers = recovery.results() 先行 + step/end（若开）+ turn/end{kind}，seq 自 last.seq+1 连续、time=last.time；合成 message id = `<cause>-tool-result-<callId>-<seq>`；started→error{name:ToolOutcomeUnknownError,code:TOOL_OUTCOME_UNKNOWN}+sourceEventSeqs=[callSeq]，未启动→ToolNotStartedError/TOOL_NOT_STARTED；ToolCallRecovery：pending 从 assistant/message tool-call 块注册（tool/call 仅记 callSeq），turn/start、turn/end、step/end 清空 pending，tool/result 仅 surfaceOp==='append' 且 turn/step 匹配才消账。
+- PRD✓ fork：buildForkSeed = slice(0,boundary+1)+tagged{inherited:true}@boundary+1（time=boundary 事件 time）+openTurnClosers('forked')；inheritedEventCount=boundary+1 不计 closers；store.fork 拒绝码 SESSION_NOT_FOUND/SESSION_NOT_LIVE/SESSION_ALREADY_EXISTS/INVALID_BOUNDARY。
+
+### index.ts（1453）store/append/derive
+- 新：store 生命周期 = prepare/enter/announce 三段事务（enter 先于 announce；session/created 同步 throw 可否决并回滚）；session/event 观察 feed per-listener 容错；session/flush 并行等待检查点（返回是否有监听者、全部落定后抛首个失败）——**持久化在 dsh 是插件 concern**（订阅 session/event、drain on session/flush）；fr 对接点 = fr-session 需提供等价挂点（dougong 事件监听器），另有 dsh-session-checkpoint-policy 拥有 per-request 持久化屏障（与 §7.2 fsync 语义衔接，persistence 读毕定位）。
+- 新：append 精确序 = snapshotJsonValue(data) → surfaceOp/sourceEventSeqs 元数据快照 → seq=log.length、time=Date.now() → validateSessionEventData → surfaceManager.validateNext（**先验证后入 log**，失败不部分变更）→ commit（push+失效快照+观察者）。
+- 新：deriveMessages 缓存 = contentGeneration 变化整表重建/纯尾增长只投影新节点/返回新数组但消息共享深冻结（PRD✓ §7.4 + 实现形态）；requestHeader()/requestContext()/toolHistory() 均增量折叠。
+- 新：SessionHeader 校验精确错误族（version===4/id 匹配/createdAt 非负安全整数/cwd 须绝对路径/isSeeded 必需 boolean/origin==='subagent'/delegationDepth 非负安全整数/agentPreset string；restore 加原型纯度检查）；seedLength 显式拒绝 PRD✓。
+- 新：seed 校验 = append 同不变量（信封键白名单 type/seq/time/data/surfaceOp/sourceEventSeqs/ignorable；seq===index 连续自 0；ignorable 只许 true；消息 id 非空 string+role 按 MESSAGE_ROLE_BY_TYPE+source.kind 判别（system-prompt/model+provider+model/tool+callId）+toolCallId===source.callId）。
+
+### surface.ts（712）
+- PRD✓ §7.3 全部成立：五类入表面、非表面携带即抛（例外：未知 ignorable 记录保留不透明元数据不抛）、五类缺 marker 抛（PRD 未明写反向要求）、replace 形状恰三键且双闭区间须早于当前 seq、sourceEventSeqs 非空/无重复/全更小/覆盖全部被遮蔽、assistant 禁带、tool/result 只改 content（深相等双方 content 置 null）、node-0 system 只许 system/message 单节点重写、replaceGeneration/contentGeneration 双计数。
+- 新：validate→plan→apply 三段原子折叠（validateNext 产出 pending plan，commit 时复用，失败零变更）；isAppendSurfaceEvent（人读 transcript 源）vs isReplacementSurfaceEvent（model-only）区分。
+- 新：validateSessionEventData 追加规则族——developer 角色配对、tool-change 块须 developer 角色、tool-addition 非空 toolName+禁内联 tool 定义、headerSeq 恰在有 additions 时存在、request/header 禁 header.system/空 tools/空 adapterDefaults、tool/result error 须 isError===true。
+
+### 分叉候选（persistence 读毕集中呈 Q33+）
+Q33 plugin: 记录通道 M1 范围 / Q34 KNOWN 词表注册机制 / Q35 message projection 机制预留 / Q36 ToolHistory 投影补遗 / E1 turn-end 七变体勘误 / E2 user/message 直载形态勘误。
+
+## 2026-10-23 — Phase 13 真源全读（二）：session-persistence-jsonl + session-format（核心面读毕）
+
+文件：session-persistence-jsonl/src/{format 538, index 1837, lease 135, storage 571} 全读；generation.ts(1059)/win32.ts(208)/migration-verifier/catalog-migration（fr 排除迁移链，不读）；zstd.ts(156) 帧结构经 index.ts 调用面掌握；session-format/{filename, json} + v3-to-v4/validation.ts 全读（relationships 385 行细项留实现期）。
+
+### 物理布局与命名（PRD✓+精确形态）
+- PRD✓：`session.v4.jsonl`（正则 `^session(?:\.v([1-9][0-9]*))?\.jsonl$`，v0 无 .vN；zstd 加 `.zstd` 后缀）；世代命名永不改名；读到非 v4 → SessionFormatUnsupportedError（"upgrade the harness" 文案族，filename 版本 vs header storedVersion 不一致报错）。
+- 目录：`<root>/<projectKey(cwd)|_no-cwd>/<encodeSegment(id)>/`；projectKey = 分隔符折叠 '-' + 安全字符字面 + `~XXXX` 转义 + `--<slug≤251>--` 包装 + 'root' 回退；encodeSegment = UTF-16 码元单射（安全集 [A-Za-z0-9._-] 字面、'.'/'..' 特判、余者 ~XXXX 大写十六进制、拒空串）；session.lock 与日志同目录。
+- 错误词汇：SessionAlreadyExistsError / SessionAlreadyOwnedError / SessionPersistenceNotFoundError / SessionPersistenceCorruptionError（`corrupt session log: …(raw log: <path>)`）/ SessionFormatUnsupportedError / SessionReadOnlyError / SessionHandleClosedError；身份校验 = header id+cwd 反推路径须与实际一致（realpath 容大小写别名）。
+
+### 物理不变量（PRD✓ §7.2 逐条核实 + 精确形态）
+- materialize POSIX：mkdir root(0700)→fsync 根父→mkdir project→fsync root→mkdir dir→fsync project→拒既有日志→tmp=`<final>.<12hex随机>.tmp` open 'wx' 0600 写+fsync+close→**link(tmp,final)**（EEXIST 互斥，禁 rename）→fsync dir→尽力 rm tmp（失败仅吞）。
+- appendLines：open 'a'→记 before size→write→sync；失败 = close+truncate 回滚 before+fsync 再重抛（回滚失败 AggregateError）。
+- zstd 帧：header 行独立一帧、每个 append 批独立一帧（materialize 含事件 = headerFrame+eventFrame；空 = 仅 headerFrame；首帧必须恰一行 header）；读 = scanZstdFrames→逐帧解码（500ms 让出）→撕裂末帧：完整 JSONL 记录可解出则 recoveredTail（写路径先 truncate(tornStart) 再重写），纯字节残片无完整记录则只 truncate。
+- 写租约 lease.ts：`session.lock`（目录内）+ POSIX 非阻塞 flock（EAGAIN/EWOULDBLOCK→SessionAlreadyOwnedError）+ **锁后 inode 复验**（锁的 inode ≠ 路径现 inode 则重开重锁，3 次后报争用）；**锁文件永不删除**（保 inode 稳定供复验）；无过期（ deliberate——不让瘫痪写者被剥夺）；Windows = 路径派生命名内核信号量（无锁文件）；内核随描述符关闭/进程死亡释放。
+- 读路径修复：torn tail 首次 append 前先 truncate+fsync（warn "recovered from a torn tail"）；句柄单调读视图（observedLength 只增，日志变短即抛）。
+
+### 句柄/存储运行时（storage.ts 全读）
+- LIVE_WRITE_BATCH_MAX_DELAY_MS=200（路由 live 事件批窗口）；句柄 per-handle promise 链串行；append 先验证+快照再入链；flush 对空会话 materialize header-only（显式 flush 的空会话存活）；close = 循环 drain 至空→锁释放→记账释放（失败聚合）。
+- Tracker：单写者/id（claimWrite/SessionAlreadyOwnedError）+ created-unmaterialized pending 集（内存 revision `memory:<name>:<n>`）+ flushAll + install（session/event→enqueueLive、session/flush→drain+flush、session/disposed→close）——**持久化在 dsh 是订阅 core/session 事件的插件**，fr 对接 = fr-session 经 dougong 监听器等价接线。
+- 惰性物化：create 后进程内立即可见、磁盘工件在首次 append/flush、崩溃前从未存在（无文件足迹）。
+
+### v4 校验层（session-format + v3-to-v4/validation）
+- HeaderLine 物理首行：必选六键 type:'session'/version/id/createdAt/isSeeded/delegationDepth（逻辑头 delegationDepth 缺省写 0）+ 可选 cwd/parentSession/origin/agentPreset，键白名单严格；retired 字段 sandboxMode/approvalPolicy 拒。
+- v4 artifact 校验（fr 读路径须镜像）：header 形状（assertReleasedV4Header）→ inheritedEventCount ≤ 事件数、unseeded 须 0 → 逐事件：未知类型须 ignorable（否则 unsupported 拒）、seq 稠密 ===index、retired 语法/system 字段/tool-result 角色/fork-result 校验 → 最后 tagged end-seed 的 index 须 ===inheritedEventCount（seeded）或不存在（unseeded）→ assertReleasedV4Relationships（developer 数据/消息来源/delivery 所有权/subagent catalog 子 id 去重/生命周期关系——细项实现期读 relationships.ts:385）。
+- 增量扫描 SessionLogScanner：header 恰一行 0x0A 结尾、撕裂尾 = 无换行末记录忽略、recoverable 模式吞首个坏行（后见 turn/end 即抛）、committedBytes = 安全 append 偏移。
+
+### 新分叉/补遗候选（集中呈 Q33-Q39 + E1/E2）
+- Q33 plugin: 记录通道 M1 范围（dsh core 机制，仅 experimental 域调用；fr M1 无调用方）
+- Q34 KNOWN 事件词表注册机制（dsh 构建期生成 64 类型目录 vs fr 运行时注册面）
+- Q35 message projection 机制（image/offload 解释器）M1 预留与否
+- Q36 ToolHistory 投影 PRD §7.4 补遗 + fr-session 交付（请求组装必需件）
+- Q37 zstd 载体（Rust zstd crate + checksum 帧对齐 dsh）——推定项可否决
+- Q38 后端 Config 默认（compression 默认 zstd 对齐 dsh DEFAULT_COMPRESSION；listConcurrency 属 JS 调度产物，fr tokio 形态取舍）
+- 推定 D 项（未否决成立）：物理细节逐字——projectKey/encodeSegment/`_no-cwd`/session.lock/tmp 命名/12hex/错误文案族/单调读视图/200ms 批窗/惰性物化
+- E1（勘误）§7.1 turn/end 七变体（interrupted/forked 缺）+ aborted reason 结构；E2（勘误）user/message data 直载无 {turn,step} 包裹
+- 后续切片分叉登记（本轮不问）：dsh-session-checkpoint-policy 的 per-request 持久化屏障归属（fr-agent-loop/宿主切片定）
+
+### Q33-Q38 + E1/E2 裁决记录（2026-10-23，用户裁决：Q33A / Q35B / Q36A；Q37/Q38 及物理推定项未否决成立）
+- **Q33A**：M1 实现 plugin: 记录通道——fr-session 服务提供 append-record 入口（ignorable:true 强制 + `plugin:` 小写段语法校验 + pluginRecordOf 等价读回），M1 无调用方；dsh 的 verify-plugin-record-callers repo 门禁由 SESSION 合约 Boundaries 约束调用方等价。
+- **Q35B**：message projection 机制（image/offload 解释器）M1 不预留；SESSION 合约登记，Phase 17 需要时加。语义自洽：M1 无写入方故日志不含 image/offload；若读旧日志遇之，按 dsh 同语义"已知类型缺解释器"抛错（缺 projection 定义抛错）。
+- **Q36A**：PRD §7.4 补遗 ToolHistory 投影（header 基线 + tool-addition updates + series 重置）+ intake SESSION 场景 + fr-session 交付 ToolHistoryProjection 等价物（fr-llm toolUpdate 差异表供方、请求组装必需件）。
+- **Q37/Q38/物理推定项**：未否决成立——Rust zstd crate + checksum 帧对齐；compression 默认 zstd、listConcurrency 以 tokio 信号量等价默认 3；projectKey/encodeSegment/_no-cwd/session.lock+inode 复验+锁文件永不删/tmp 12hex/错误文案族/单调读视图/200ms 批窗/惰性物化逐字对齐。
+- **E1/E2**：勘误候选待确认（turn/end 七变体 + aborted reason 结构；user/message data 直载）——随 Q34 选型一并确认后落 PRD §7.1。
+- **Q34 重新详析（用户要求细化 + 一切皆插件约束）**：dsh 词表门语义（未知非 ignorable 类型拒重建/ignorable 保留跳过）PRD 已钉；分歧仅在 fr 全集来源。构建期聚合结构上不可能（Rust 无声明合并 + 插件为独立 cdylib 仅经动态通道交互，fr-session 编译期不可见其他插件类型）；"fr-session 写死 64 类型静态表"方案违反一切皆插件（中央化他插件知识，卸载/换版本即假）。候选：A（推荐）激活期声明——各插件 apply 期间调 fr-session 声明方法（dougong 五步契约第 2 步本是一切注册发生地），代码真值无漂移、随 LIFO 撤销收窄、零内核改动；重复声明同类型 = 装配错误 fail-closed。B descriptor 声明——descriptor 已有 listen 事件名声明先例，但 schema 由 dougong-abi 拥有且严格拒未知字段，扩展须改内核 ABI，fr 单侧不可落地。C 装配配置声明——fr.patch.yml 行 config 携带，人工可编辑与代码真值漂移风险最大且 dsh 机制本体为代码派生，不推荐。
+
+### Q34 二轮详析前的事故自纠与 dougong 源码事实修正（2026-10-23）
+- **事故**：`rg -rn "" -m1` 复踩 -r 陷阱（CLAUDE.md 明载 + 2026-10-22 已两次留档"rg 一律不带 -r"），输出全文逐字符替换显示；仅显示失真未改文件。属明知禁令仍复踩，已记 progress。
+- **B 方案关键陈述失真自纠**：上轮"descriptor schema 严格拒未知字段、须改内核 ABI"未回源码核实（凭 skill 摘要 pitfall）。本轮读 `~/project/dougong/crates/dougong-dylib/src/lib.rs:511-551` 实证：descriptor 解析为自由 `serde_json::Value`，宿主**逐键抽取** provide/inject/listen（:512/:523/:534），**未知键天然忽略**——B 不需要改 descriptor schema；但 `DynPlugin::descriptor()`（:138）当前**私有**，宿主拿不到 descriptor Value，B 需内核加透出访问（极小）。用户已明示：dougong 可升级（其为维护者，0.2.0 期）。
+
+### Q34 三轮：A/B 多维权衡 + 用户终裁 Q34A + 技能核对与修正（2026-10-23）
+- 用户终裁 **Q34A**（激活期声明）。内核补充事实：宿主侧 `Plugin` trait（dougong/src/plugin.rs:62）仅暴露 name/inject/apply——descriptor 只在装载期被 dougong-dylib 内部消费、从不回透宿主；A 方案零内核依赖成立，B 方案确需内核加透出（此前成本分析最终无误）。
+- **dougong-plugin-dev 技能核对结论**：SKILL.md 与 references 全部可检陈述与源码相符（ABI_VERSION 2 ✓、listen 语义 ✓、buffer 协议 ✓、激活期注册 ✓、teardown-only ✓）——**无误述**；我方"严格拒未知字段"系自己过度引申非技能内容错误。但技能有一处**文档缺口**导致误读：descriptor 节未说明未知键待遇与宿主回读面。已修正 `references/dylib-plugin.md`（descriptor 节补三句：自由 JSON 逐键抽取/未知键今日忽略/自定义键是惰性数据不作扩展通道，扩展走 apply 激活期注册）。技能目录是指向 dougong 仓的符号链接，一次编辑两份生效；**dougong 仓侧改动未提交**（留用户评审）。
+- 落地批次：PRD §7.1 三处（词表机制 + plugin 通道 / turn/end 七变体 E1 / user/message 直载 E2）+ §7.4 tools 投影补遗（Q36A）+ 19.2 条 14（Q35B）+ 23 决策 28；intake SESSION-1 扩写 + 新增条款 18/19/20 + 9 新场景（SESSION 93→102，全局 1240→1249）+ Source Trace 四行 dsh 证据。
+- 管线全序列重跑：import 20 ✓ → transition 20/20（**新坑**：sed 提取 frontmatter id 为大写 REQ-FR-*，case 模式写小写 req-fr-* 静默零匹配——transition 全空跑、draft 零产物；改正后 20/20）→ draft-specs 20 ✓ → refine ✓ → depends 清理 ✓ → bind 重放 ✓（CONFIG lifecycle 55 passed / 259 skipped / 0 failed 基线不变）→ 三门禁 0/0/0 → questions 40/0 blocking → SESSION lint min-score 0.7 PASS（仅 pending 选择器 open-question advisory，草稿态预期）。
+- 自纠两件：intake 编辑曾混入垃圾标题行"## Scenarios 追加占位不存在"（当轮发现即除）；场景计数三连错（生成稿为裸 `Scenario: ` 行，非 `场景:` 亦非 `### Scenario: `，计数模式改为 `^Scenario: ` 后数字落定）。

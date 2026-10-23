@@ -276,15 +276,15 @@ schema 集中声明于 **fr-schema 库**（2026-10-22 Q8 裁决：独立 crate�
 
 ### 7.1 SessionEvent（判别联合，字段与 dsh `packages/core/session/src/types.ts` 逐字一致）
 
-公共字段：`type`、`seq`、`time`、`data`、`ignorable?`、`surfaceOp?`、`sourceEventSeqs?`。
+公共字段：`type`、`seq`、`time`、`data`、`ignorable?`、`surfaceOp?`、`sourceEventSeqs?`。事件词表机制（2026-10-23 Q34A 裁决；dsh 为构建期生成 64 类型目录 KNOWN_SESSION_EVENT_TYPES，known-event-types.ts:22-85，读路径拒未知非 ignorable 类型）：fr-session 内核类型静态 + 各插件于激活期声明其拥有的持久事件类型名（dougong 五步契约第 2 步注册点），fr-session 聚合为读路径已知集，重复声明同类型 = 装配错误 fail-closed；descriptor 自由 JSON 键不作为声明通道（dougong-dylib lib.rs:511-551 未知键忽略、宿主 trait 不回透 descriptor，一切皆插件下知识不中央化）。plugin 记录通道（2026-10-23 Q33A 裁决；dsh appendPluginRecord/pluginRecordOf，core/session/src/index.ts:492-512）：fr-session 提供 append-record 服务入口（ignorable:true 强制、`plugin:` 小写段语法校验、types.ts:525 语法正则），读回 API 等价 pluginRecordOf；M1 无调用方，调用方约束入 SESSION 合约 Boundaries。
 
 durable 事件全集：
 
 | type | data 要点 |
 |---|---|
-| `turn/start` / `turn/end` | end 携带 reason：`completed / max-tokens / aborted / error / blocked` |
+| `turn/start` / `turn/end` | end 携带 reason 七变体（2026-10-23 勘误 E1，dsh types.ts:202-233）：`completed` / `aborted`（reason: `{kind: user\|parent\|hook{reason}\|disposed}`）/ `error`（LlmFailure）/ `max-tokens` / `blocked` / `interrupted`（crash 孤儿 turn 由 resume 追加 closer 关闭，loop 永不 live 发出）/ `forked`（仅 fork seed 携带） |
 | `step/start` / `step/end` | |
-| `user/message` / `developer/message` / `system/message` | 完整消息；system/message 承载提示词 surface 节点流 |
+| `user/message` / `developer/message` / `system/message` | 完整消息；user/message 的 data 为 UserMessage **直载**（无 `{turn,step,message}` 包裹；developer/system/assistant/tool-result 四类均 `{turn,step,…}` 包裹，2026-10-23 勘误 E2，dsh types.ts:310-331）；system/message 承载提示词 surface 节点流 |
 | `assistant/message` | 内嵌完整带时间戳原始 stream + usage + interrupted 标记 |
 | `assistant/attempt` | 失败/重试尝试（不进模型历史） |
 | `tool/call` | name + **原始未解析 arguments JSON 字符串** + callId |
@@ -315,7 +315,7 @@ surface 硬约束（dsh surface.ts）：仅 system/developer/user/assistant mess
 ### 7.4 deriveMessages
 
 每次请求前从日志投影消息数组并 deepFreeze：按 request/header 世代 + 表面 + 工具增删（developer/message）重建；`tool/ptc-dispatch*` 一律忽略（子调用不进模型历史）。**冻结请求必须可逐字节重现**——这是对照测试的锚点。
-投影细则：空 assistant（承载 max-tokens usage）投影为 null；缓存按 contentGeneration 变化整表重建、纯尾增长只投影新节点（dsh session/src/index.ts:984-1005）。request/header canonical 形态：空 tools 省略字段；adapterDefaults 仅在 reasoningEffort/maxTokens 之一显式为 true 时保留；相等比较对 tool schema 用 JSON.stringify（顺序敏感）——顺序不同即视为 change 落新 header（dsh request-header.ts:21-52）。
+投影细则：空 assistant（承载 max-tokens usage）投影为 null；缓存按 contentGeneration 变化整表重建、纯尾增长只投影新节点（dsh session/src/index.ts:984-1005）。request/header canonical 形态：空 tools 省略字段；adapterDefaults 仅在 reasoningEffort/maxTokens 之一显式为 true 时保留；相等比较对 tool schema 用 JSON.stringify（顺序敏感）——顺序不同即视为 change 落新 header（dsh request-header.ts:21-52）。tools 投影（2026-10-23 Q36A 补遗；dsh tool-history.ts 全实现，PRD 原未载）：request/header 进 headers 表，`reason==='series'` 或 `startsSeries` 或同名工具定义变更（JSON.stringify 比较）即重置基线（弃 prefix reuse）；developer/message 的 tool-addition 经 headerSeq 解析定义并追加进 updates；快照 = `{tools: 基线, updates: [{messageId, additions}]}`，active≠available 时 legacy 回退 `updates: []`；fr-session 交付等价实现（fr-llm toolUpdate 能力差异表的供方、请求组装必需件）。
 
 ### 7.5 fork
 
@@ -643,6 +643,7 @@ fr headless [TASK] [--session-id <id>] [--json] [--help]
 11. dump 三态与品牌定名（2026-10-22 Q18-Q20 裁决）：x- 扩展键定名 `x-fr`（对齐 dsh `x-cordis`）；`fr dump-config` 输出为 YAML 带分层注释逐字节同型（`# ==` 分隔、`!!js` 逐字不求值、前缀快照单次 applyEntryPatches 算法）；`--default-only` 恢复诊断纳入（对齐 dsh `--dump-default-config`，仅 bundle 层、不读不解析用户层、禁 `--patch`）；`from-default-profile` 出厂模板替换纳入（对齐 dsh `--from-default-profile`，dump 与 boot 共用，CLI 旗标宿主期落地）；三 dump 态互斥且拒收 app 位置参数。依据 `apps/cli/src/{args,dump-config,dump-config-schema}.ts`、`packages/boot/app-boot/src/index.ts:635-`、`packages/boot/app-boot/tests/config-dump.spec.ts`
 12. `!!js` 方言结构值位 fail-closed 范围（2026-10-22 Q25B 定稿，行为先于本条存在）：识别值位（行首 `key: `/`- ` 前缀后）之外的结构值位（flow 式 `{p: !!js x}`、异形键 `a.b: !!js v`）fr 拒绝整个文档（错误含 "outside a recognized value position"），dsh 的 js-yaml 自定义 type 在任意值位接受——该偏差自 Q3A 子集定稿起存在，Q25B 重申保留（静默丢标签求字面量比拒绝更危险）；字符串值内容中 tag 形文本不是结构值位，Q25B 起逐字装载、不拒绝也不翻转（块标量、引号多行、普通多行标量同理）
 13. dump-config-schema 文档体裁剪（2026-10-22 Q26B 裁决，条目由 2026-10-23 评审轮补记——决策 25 原引用悬空）：`$defs` 不载 includeConfig/includePatch 与 names 表 builtin 常量（fr 装配无 builtin 形态，PRD 4），include/group carrier 面裁剪；entry 的 `tree` 字段类型保留、M1 不产出；acceptsMissing/x-cordis native 元数据折叠后置（投影面 nullable + 值位包裹已随 Q27A 落地，见决策 26）
+14. message projection 机制后置（2026-10-23 Q35B 裁决）：dsh core/session 为改变既有消息内容的插件事件设纯解释器接口（SessionMessageProjection，MESSAGE_PROJECTION_EVENT_TYPES = {'image/offload'}，缺定义读路径抛错，surface.ts:529-531）；fr M1 不预留该机制（M1 无写入方），Phase 17 随 image/offload 消费方补加；此前 fr 读路径遇 image/offload 日志按 dsh 同语义报错（已知类型缺解释器），M1 正常不可达
 
 ### 19.3 wire 层声明
 
@@ -718,3 +719,4 @@ fr headless [TASK] [--session-id <id>] [--json] [--help]
 26. dump 投影全脸与评审轮三项裁决（2026-10-23 Q27A/Q28A/Q29A）：configN 投影 = `to_json_schema` 全投影（每节点 null 接受 + 根与嵌套值位 `#/$defs/loaderExpression` anyOf 包裹；dsh projector.ts:90-97/100-122/426/447 实证，钉住文件 config0 形态逐位核符）；同名异 schema 投影按（名，声明身份 = `&Schema` 指针对应 dsh 节点身份）分裂为独立 configN，ambiguity 警告与 complete 门自此活化为真代码路径；「complete 为假退出码 1」场景退回 `pending_req_fr_config_complete_1`，宿主 CLI 切片落地时重绑（原绑定不含退出码验证，属虚假绑定）；呈确认三项未否决按成立——serde_json `preserve_order`（wire 对齐机制本体）、x-fr 五键序 `{profile, complete, entries, diagnostics, patchSchema}`、品牌映射字符串清单（决策 25 节所列）。validate 侧对显式 null 的接受口径（dsh Ajv 面行为）留待 fr boot 校验落地时对齐，本轮仅投影面。
 
 27. dump CLI 流面（2026-10-23 Q30B 宿主切片裁决）：fr 启动器为子命令形态（`fr dump-config` / `fr dump-config-schema`），对齐 dsh apps/cli/src/args.ts 行为语义——子命令自首个无法识别参数起为 app 内参并整体拒收（`error: config dumps take no app arguments, got <逐参数 JSON 串列>`，`-h` 同罪）；参数校验错误族五文案逐字、均退出码 1；`--default-only` 旗标仅属 dump-config（对 dsh `--dump-default-config` 旗标名做 kebab 映射，互斥文案同步映射）；dsh 三旗标互斥报错在子命令形态无可触达调用、不移植；dsh dump 期 stdout→stderr 重定向（trusted module 防护）在 fr 静态注册表下结构性缺席（同决策 25 口径，非偏差）；dump-config 致命错误以单行 stderr 诊断 + 退出码 1 终止（dsh 未捕获 throw 的等价，消息为错误三连）；根调用 `-V/--version`（版本，exit 0）/ `-h/--help`（用法，exit 0）/ 其余（用法错误，exit 1）为 fr 自有 launcher 面；M1 期 dump 的入口包层恒为 headless（EntryKind 单变体），入口扩展（M2+）时再引入入口选择面。
+28. 会话事件词表与记录通道（2026-10-23 Q33A/Q34A/Q35B/Q36A + 勘误 E1/E2，Phase 13 真源全读后裁决）：事件词表 = 激活期声明聚合（Q34A）——fr-session 内核类型静态 + 各插件 apply 期声明自有持久事件类型，聚合为读路径已知集，重复声明装配错误；descriptor 扩展键与装配配置两路否决（前者宿主 trait 不回透 descriptor、后者人工漂移风险）；plugin 记录通道 M1 实现（Q33A，ignorable 强制 + `plugin:` 语法 + 读回 API，M1 无调用方）；message projection 机制后置（Q35B，19.2 条 14）；ToolHistory 投影补遗 §7.4 并由 fr-session 交付（Q36A）；§7.1 勘误二处——turn/end reason 七变体（补 interrupted/forked + aborted 结构化 reason）与 user/message data 直载（E1/E2，dsh types.ts:202-233/310-331 源码实证，未否决按成立）。
