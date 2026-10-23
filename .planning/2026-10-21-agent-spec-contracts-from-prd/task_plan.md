@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 13 实现切片 B 完成：fr-wire event.rs 会话信封（手工 serde 单源 type/data、14+Unknown 变体、信封键序对齐 dsh writer、未知信封键拒、SurfaceOp 自定义 serde、头族）+ 10 钉测（fr-wire 26 总）。四关全绿。下一切片 = fr-session crate 本体切片 C（信封校验/surface 折叠双计数/deriveMessages/ToolHistory/词表声明聚合/plugin 记录通道/持久化物理层与写租约）——dsh 精确语义全在 findings 三节真源记录。
+Phase 13 实现切片 C 完成：crates/fr-session 本体首批——admission（信封/消息/工具数据校验）+ surface（折叠全硬约束 + 双计数，14 钉测）+ tool_history（Q36A 投影，2 测）+ 共享夹具。校验分层修正（数据校验属 seed 边界，折叠仅元数据/developer-header/改写检查）。四关全绿（workspace 169 tests）。下一切片 D = Session 增量壳（append/derived 缓存/request_header 折叠）+ 词表声明聚合（Q34A）+ plugin: 通道（Q33A）+ 持久化物理层（format/lease/zstd/scan/restore 侧 reserved-raw 准入）+ dougong 插件壳接线。
 
 ## Current Phase
-Phase 13（fr-session v4 全量——切片 B（event.rs 信封）完成）
+Phase 13（fr-session v4 全量——切片 C（admission/surface/tool_history）完成）
 
 ## Phases
 

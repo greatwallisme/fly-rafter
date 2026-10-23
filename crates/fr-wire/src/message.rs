@@ -171,6 +171,74 @@ pub enum Message {
     Other(RawObject),
 }
 
+impl KnownMessage {
+    /// The wire `role` tag of this message.
+    #[must_use]
+    pub const fn role_name(&self) -> &'static str {
+        match self {
+            Self::System { .. } => "system",
+            Self::User { .. } => "user",
+            Self::Assistant { .. } => "assistant",
+            Self::Developer { .. } => "developer",
+            Self::Tool { .. } => "tool",
+        }
+    }
+
+    /// The message's stable identity.
+    #[must_use]
+    pub const fn id(&self) -> &MessageId {
+        match self {
+            Self::System { id, .. }
+            | Self::User { id, .. }
+            | Self::Assistant { id, .. }
+            | Self::Developer { id, .. }
+            | Self::Tool { id, .. } => id,
+        }
+    }
+
+    /// The exact model-facing blocks.
+    #[must_use]
+    pub fn content(&self) -> &[ContentBlock] {
+        match self {
+            Self::System { content, .. }
+            | Self::User { content, .. }
+            | Self::Assistant { content, .. }
+            | Self::Developer { content, .. }
+            | Self::Tool { content, .. } => content,
+        }
+    }
+
+    /// The producer source.
+    #[must_use]
+    pub const fn source(&self) -> &MessageSource {
+        match self {
+            Self::System { source, .. }
+            | Self::User { source, .. }
+            | Self::Assistant { source, .. }
+            | Self::Developer { source, .. }
+            | Self::Tool { source, .. } => source,
+        }
+    }
+
+    /// The tool-call identity of a tool-role message, if this is one.
+    #[must_use]
+    pub const fn tool_call_id(&self) -> Option<&ToolCallId> {
+        match self {
+            Self::Tool { tool_call_id, .. } => Some(tool_call_id),
+            _ => None,
+        }
+    }
+
+    /// Whether the tool invocation failed; `None` off the tool role.
+    #[must_use]
+    pub const fn is_error(&self) -> Option<bool> {
+        match self {
+            Self::Tool { is_error, .. } => Some(is_error.is_some()),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

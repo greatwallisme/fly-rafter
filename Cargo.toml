@@ -5,6 +5,7 @@ members = [
     "crates/fr-config",
     "crates/fr-schema",
     "crates/fr-wire",
+    "crates/fr-session",
 ]
 
 [workspace.package]
@@ -32,6 +33,7 @@ indexmap = "2"
 fr-config = { path = "crates/fr-config" }
 fr-schema = { path = "crates/fr-schema" }
 fr-wire = { path = "crates/fr-wire" }
+fr-session = { path = "crates/fr-session" }
 
 # Lint table aligned with the dougong workspace (PRD 21): the zero-warning
 # gates (fmt / clippy -D warnings / test / doc) must stay reproducible.

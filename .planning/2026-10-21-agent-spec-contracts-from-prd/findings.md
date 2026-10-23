@@ -527,4 +527,15 @@ Q33 plugin: 记录通道 M1 范围 / Q34 KNOWN 词表注册机制 / Q35 message 
 - 设计要点：14 个 `*Data` 具名结构体（避免 untagged 内联枚举的字段形状歧义碰撞——如 step/start 与 assistant/attempt 字段子集关系）；SessionEventData 不派生 serde（手工单源）；Eq 全量可派生即派生，三个 untagged Other 回退（ContentBlock/MessageSource/FinishReason/TurnEndReason）以 `#[expect(clippy::derive_partial_eq_without_eq, reason=…)]` 带因豁免。
 - clippy 自纠：doc_markdown 批量（--fix）、Eq 逐类型、match 臂合并（StepStart|StepEnd）、redundant clone ×3、文档段过长拆段；测试断言改为 `json["key"]` 直接比较与 `expect_err`（避 assertions_on_result_states）。
 - 四关全绿：fmt / clippy 双口径 -D warnings / workspace test（fr-wire 26）/ doc 零警告。
-- 待续切片 C：fr-session crate 本体（信封校验/surface 折叠双计数/deriveMessages/ToolHistory/词表声明/plugin 通道/持久化物理层与租约）——dsh 精确语义在 findings 三节真源记录。
+- 待续切片 C：fr-session crate 本体（信封校验/surface 折叠双计数/deriveMessages/ToolHistory/词表/plugin 通道/持久化）——dsh 精确语义在 findings 三节真源记录。
+
+## 2026-10-23 — Phase 13 实现切片 C：fr-session 本体首批（admission + surface + tool_history）
+
+- crate 新建 `crates/fr-session`（deps fr-wire/serde_json/thiserror；本轮 rlib 纯逻辑，cdylib 目标与 dougong-abi 壳留 plugin 接线切片——PRD 4.3 dylib 工件形态不变，先立语义内核）。workspace members/内部依赖接线。
+- **admission.rs**（append/restore 数据校验）：角色↔事件类型配对（MESSAGE_ROLE_BY_TYPE 等价）、id 非空、source.kind 判别（system-prompt/model+provider+model 非空/tool+callId 双向一致 toolCallId===source.callId）、developer 角色配对、tool-change 块仅 developer、tool-addition 非空 toolName + headerSeq 恰在有 additions 时存在、tool/result error 须 isError===true。Message::Other（未知角色）在校验面拒绝。未知角色来源字段经 fr-wire flatten 保留。restore 侧 reserved-raw 原文检查（header.system/seedLength/retired 头字段/raw tool 内联键）留持久化扫描边界（切片 C4）——fr-wire 类型化构造使 append 侧结构性 fail-closed。
+- **surface.rs**（折叠与硬约束，14 钉测）：eligibility 五类、marker 必带/非表面禁带（未知 ignorable 保留无效果——dsh surfaceOpOf 早返回语义）、replace 界早于当前 seq、sourceEventSeqs 非空/无重复/全更小/覆盖全部被遮蔽、assistant 禁带、tool/result 改写恰单节点+仅 content（可比形态 = 全字段 content 置 Null 后 Value 深比较）、node-0 system 单节点 system 重写保护、developer headerSeq 全链（早于 + request/header + 恰命中一工具定义）、双计数（replace_generation/content_generation 仅 replace 递增）、seq 连续性、plan→apply 两段（先验证后变更）。**校验分层修正**：surface 折叠不跑 validate_event_data（dsh 中数据校验属 seed 边界、折叠仅元数据/developer-header/改写检查）——首轮次序偏差由测试逮住后修正。
+- **tool_history.rs**（Q36A）：request/header 进 headers 表 + series 重置（reason==='series'||startsSeries||同名工具 JSON.stringify 漂移）；developer/message tool-addition 经 headerSeq 解析定义（缺失 panic，dsh 文案逐字 + # Panics 节）；快照 {tools,updates}；active≠available legacy 回退 updates:[]。
+- 夹具：`tests_support.rs`（cfg(test) pub(crate)）共享 seq/header_tool/developer_addition。
+- 四关全绿：fmt / clippy 双口径 -D warnings / workspace test 169（127+26+16）/ doc 零警告。
+- clippy 自纠清单：Eq 全量可派生即派生（4 处）、const fn 访问器化（fr-wire KnownMessage 五访问器，content 因 Vec deref 非 const 除外）、needless_borrow、collapsible_if→let-else、assertions_on_result_states→expect_err/unwrap_err、identical match 臂合并、redundant clone ×3、cast usize→try_from+MAX、空函数删除（validate_attempt_fields/settlement 两轮纠缠后净删）。
+- 待续切片 D：Session 增量壳（append/derived 缓存/请求头折叠）+ 词表声明聚合 + plugin: 通道 + 持久化物理层（format/lease/zstd/scan/restore 侧 reserved-raw 准入）+ dougong 插件壳。
