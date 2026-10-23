@@ -169,7 +169,7 @@ fn assert_source_event_references(
 }
 
 /// One validated transition awaiting application to the fold state.
-enum SurfacePlan {
+pub(crate) enum SurfacePlan {
     Append,
     Replace {
         start: SessionSeq,
@@ -181,7 +181,7 @@ enum SurfacePlan {
 }
 
 /// Plans one event against the current fold state without mutating it.
-fn plan_event(
+pub(crate) fn plan_event(
     state: &SurfaceFoldResult,
     event: &SessionEvent,
     events: &[SessionEvent],
@@ -232,7 +232,7 @@ fn plan_event(
 }
 
 /// Applies one plan to the fold state, recording a replacement when one occurred.
-fn apply_plan(
+pub(crate) fn apply_plan(
     state: &mut SurfaceFoldResult,
     event: &SessionEvent,
     plan: Option<SurfacePlan>,

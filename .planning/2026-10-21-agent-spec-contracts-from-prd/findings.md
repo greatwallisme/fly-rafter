@@ -539,3 +539,13 @@ Q33 plugin: 记录通道 M1 范围 / Q34 KNOWN 词表注册机制 / Q35 message 
 - 四关全绿：fmt / clippy 双口径 -D warnings / workspace test 169（127+26+16）/ doc 零警告。
 - clippy 自纠清单：Eq 全量可派生即派生（4 处）、const fn 访问器化（fr-wire KnownMessage 五访问器，content 因 Vec deref 非 const 除外）、needless_borrow、collapsible_if→let-else、assertions_on_result_states→expect_err/unwrap_err、identical match 臂合并、redundant clone ×3、cast usize→try_from+MAX、空函数删除（validate_attempt_fields/settlement 两轮纠缠后净删）。
 - 待续切片 D：Session 增量壳（append/derived 缓存/请求头折叠）+ 词表声明聚合 + plugin: 通道 + 持久化物理层（format/lease/zstd/scan/restore 侧 reserved-raw 准入）+ dougong 插件壳。
+
+## 2026-10-23 — Phase 13 实现切片 D：Session 增量壳 + 词表聚合 + plugin 通道
+
+- **session.rs**（Session 增量壳）：new/from_seed（种子连续性 + admission + 折叠）；append_surface/append_log_only/append_record 三入口（eligibility 运行时对账 + plan→apply 先验证后变更）；derive_messages 缓存语义钉死（contentGeneration 变化全表重建 projecting 列表、纯尾增长只投影新节点；空 assistant/system/developer → 不投影；返回 &Message 借用共享）；request_header 增量折叠 + canonical（空 adapterDefaults（双标记全缺）/空 tools 折叠为 None）；append 时钟为显式 time 参数（host 注入缝）；&mut self 结构性杜绝 dsh append 重入。
+- **vocabulary.rs**（Q34A）：EventVocabulary::core（14 静态）+ declare（重复声明装配错误，消息 `session event type "x" is already declared`）+ knows；refuse_unknown_required（读路径门：未知非 ignorable 类型拒重建，dsh validation.ts 消息逐字 `format v4 contains unknown event type "x" at seq N`）。
+- **admission.rs 补**：is_plugin_record_type（Q33A 语法：`plugin:` + `/` 分段 [a-z0-9] 首 + [a-z0-9._-]*，手写无 regex）。
+- 钉测 9（session 7 + vocabulary 内嵌于 session 测试）：节点/日志分野、派生缓存尾增长与空投影、replace 双计数后重建、header 折叠 canonical、plugin 记录保留与语法拒、词表重复声明拒 + 读路径拒、seed 连续性拒。
+- 事故自纠：分块 heredoc 两处 impl 未闭合 + 测试夹具垃圾行一次（"marker on log-only" 用例在类型化构造层不可实现——dsh 该检查属 restore 原文边界，删测留 C4）。
+- 四关全绿：fmt / clippy 双口径 -D warnings / workspace test 178 / doc 零警告。
+- 待续切片 E：fork/repair（buildForkSeed + ToolCallRecovery + openTurnClosers）+ 持久化物理层（format/scan/materialize/append/lease/zstd/restore 侧 reserved-raw 准入）+ dougong 插件壳（cdylib + descriptor + apply 词表声明服务）。

@@ -9,15 +9,19 @@
 
 pub mod admission;
 pub mod error;
+pub mod session;
+pub mod surface;
+pub mod tool_history;
+pub mod vocabulary;
+
 #[cfg(test)]
 pub(crate) mod tests_support;
 
-pub mod surface;
-pub mod tool_history;
-
-pub use admission::validate_event_data;
-pub use error::AdmissionError;
+pub use admission::{is_plugin_record_type, validate_event_data};
+pub use error::{AdmissionError, SessionError};
+pub use session::{Session, SurfaceIntent, canonical_header};
 pub use surface::{SurfaceFoldResult, SurfaceReplacement, fold_surface};
 pub use tool_history::ToolHistoryProjection;
+pub use vocabulary::{EventVocabulary, refuse_unknown_required};
 
 // Rust guideline compliant 2026-10-23

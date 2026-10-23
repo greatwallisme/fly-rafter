@@ -17,3 +17,14 @@ impl AdmissionError {
         }
     }
 }
+
+/// Top-level session operation error.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SessionError {
+    /// An admission check rejected the event.
+    #[error("{0}")]
+    Admission(#[from] AdmissionError),
+    /// Any other session invariant violation, message verbatim.
+    #[error("{0}")]
+    Other(String),
+}

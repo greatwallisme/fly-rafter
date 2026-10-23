@@ -207,3 +207,28 @@ fn validate_tool_result(
     }
     Ok(())
 }
+
+/// Whether one event type name follows the plugin-record grammar.
+///
+/// The grammar: `plugin:` followed by slash-separated segments of lowercase
+/// letters, digits, `.`, `_`, and `-`, each starting with a letter or digit
+/// (dsh types.ts:525).
+#[must_use]
+pub fn is_plugin_record_type(type_name: &str) -> bool {
+    let Some(rest) = type_name.strip_prefix("plugin:") else {
+        return false;
+    };
+    if rest.is_empty() {
+        return false;
+    }
+    rest.split('/').all(|segment| {
+        let mut chars = segment.chars();
+        match chars.next() {
+            Some(first) if first.is_ascii_lowercase() || first.is_ascii_digit() => {}
+            _ => return false,
+        }
+        chars.all(|c| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '_' || c == '-'
+        })
+    })
+}
