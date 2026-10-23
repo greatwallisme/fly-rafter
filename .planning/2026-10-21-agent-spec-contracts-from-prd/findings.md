@@ -593,3 +593,30 @@ Q33 plugin: 记录通道 M1 范围 / Q34 KNOWN 词表注册机制 / Q35 message 
 - 钉测 +1：delivery_ownership_pins_session_binding_and_payload（own 接受 / foreign session 拒 / throughSeq 不早于拒 / 空 id 拒 / 异代 sessionFormatVersion 忽略 / 未声明类型走词表门）。自纠一件：夹具缺 sessionFormatVersion: 4（缺省即 0 代被 dsh 语义忽略，foreign 场景须显式 v4）。
 - 门禁：四关复跑全绿（workspace 225 tests，clippy 0，doc 0）+ 三门禁 0 errors。
 - **Q41A**：下一切片 = fr-session store 服务接线（Tracker/句柄/live 200ms 批窗/flushAll/list 发现面），Phase 13 完整闭环。
+
+## 2026-10-23 — Phase 13 切片 F 真源全读（三）：persistence 运行时面（storage.ts 571 + handle.ts 117 + store.fork）
+
+### storage.ts（句柄/追踪器/路由全文）
+- LIVE_WRITE_BATCH_MAX_DELAY_MS=200；JsonlHandleStorage 接口（persistBatch/persistHeader/truncateTornTail/resolveCurrentLog/readStoredLog/hasPendingSession/acquireWriteLease/releaseHandle——fr 切片 E 物理层即此接缝的实现体）。
+- StorageHandleState：cursor（stored next-seq）/materialized/tornTruncateTo/recoveredTail/inheritedEventCount/primed（write-open 的已验证前缀，供读直至首 append）。
+- JsonlSessionHandle：per-handle promise 链串行（enqueueChain 吞错续链 / run 先 assertOpen 再链内再 assertOpen）；close 幂等不可取消 + 循环 drainLive 至缓冲空 + await chain + lease 释放 + releaseHandle，drain/释放双失败聚合（`session "<id>": close failed to drain and to release its write lock`）。
+- read：closed 拒先于参数校验（SessionHandleClosedError）；offset/length safe-integer TypeError 文案逐字；primed（write 读 primed / read 读 primed 后遇 resolveCurrentLog 存在则弃 primed 重扫）；未物化 write → 空 detached；否则 resolveCurrentLog → readCurrent（单调视图：source.events.length < observedLength → `session "<id>": stored log shrank below a previously observed prefix (N < M)`）→ 无文件且 hasPending → 空 detached → 否则 NotFound。
+- append：materializeAppendBatch 先于入链（校验值=持久值）；persistContiguous：ReadOnly 拒 → 空批短路 → ensureLease（create 句柄首次物化写前取锁，物化失败仍持锁至 close）→ assertContiguous（`append seq mismatch for "<id>": expected N at index I, got K`）→ tornTruncateTo 先修（truncate+清态，失败留态重试）→ recoveredTail 重写（>0 才写）→ persistBatch → materialized=true/cursor+=n/primed 清/observedLength=cursor。
+- flush：ReadOnly 拒（`flush` op 名）；已物化短路；ensureLease + persistHeader（空会话显式 flush 存活）。
+- live 路由：enqueueLive（structuredClone 入缓冲 + 闲时 arm 200ms 定时；drainPaused 时不再 arm）；drainLive 单飞（finally 清 draining）；drainBuffered（清定时器 + 清 drainPaused + while 循环链内 splice 全量批，失败 batch 前插回 + drainPaused=true + 抛）。
+- JsonlBackendTracker：registerCreated（writers.has → SessionAlreadyExistsError；占位 null + pending 集 + revision `memory:<name>:<n>`）；claimWrite（SessionAlreadyOwnedError）；releaseClaim/pendingOf/hasPending/pendingEntries/materialized（物化后清 pending）；adopt（openHandles + write 绑 writers）；release（close 时 openHandles 删 + write 删 claim + 未物化删 pending = 从未存在）；flushAll（遍历 writers，drainLive+flush，SessionHandleClosedError 视为已 flush 跳过，余错误聚合 `<name> flush failed`）；install（effect：teardown 先注册后 LIFO——先关全部 openHandles 聚合 `<name> dispose failed`，再订阅 session/event→writers.get(id)?.enqueueLive（后台失败 warn `session-persistence: background write for session "<id>" failed (buffered events retained): ...`）、session/flush→drainLive+flush、session/disposed→close（失败仅 warn））。
+
+### handle.ts seam（契约面全文）
+- SessionAccess = 'read' | 'write'；SessionHandleReadResult {eventState, events}；SessionHandle 四操作（read(offset,length)/append/flush/close）+ AsyncDispose。
+- 新鲜度承诺：append/flush 解析后同后端任何 handle/stat/list 后续读取至少见该前缀；并发读只承诺有效连续前缀；handle 读永不回退（单调）；撕裂尾永不返回。
+- append best-effort：解析=接受+有序+本实例可见；仅 flush 承诺崩溃存活（fr 物理层 append 即 fsync，flush = materialize-if-needed——dsh jsonl 同形）。
+
+### core/session store.fork（拒绝码族）
+- SessionForkErrorCode：SESSION_NOT_FOUND（源 id 不在 live store）/ SESSION_NOT_LIVE（对象非 live 实例——fr 无对象身份语义，等价=store 中无该 id 的 live 会话）/ SESSION_ALREADY_EXISTS（子 id 已占）/ INVALID_BOUNDARY（非负安全整数 + < events.length + events[boundary].seq === boundary 三查，文案 `fork boundary for session "<id>" must be a non-negative safe integer, got ...` / `fork boundary N does not exist in session "<id>" (last seq: M|none)` / `fork boundary N does not match a contiguous event seq in session "<id>"`）。
+- fork 流：子 id 查重 → resolve 源 → snapshotEvents → boundary 解析（缺省=末事件 seq；空会话+缺省 → 无种子）→ buildForkSeed → create(child, {seed, inheritedEventCount=resolved+1|0, meta:{cwd 透传, parentSession, isSeeded:true}})。
+- store 生命周期（前轮已录）：prepare/enter/announce 三段事务、session/created 同步 throw 可否决回滚、session/event feed per-listener 容错、session/flush 并行等待抛首错。
+
+### 切片 F 范围确认（Q41A 授权文字）
+- 本切片 = 持久化运行时：JsonlSessionHandle + Tracker + live 路由 200ms + flushAll + stat/list 发现面 + create/open 流（findLog/ensureRootEncoding/legacy 拒）。
+- SessionStore 内存层（prepare/enter/announce/fork/resume + 拒绝码）= 后续切片（依赖本切片句柄面）；ctx 事件（session/event|flush|disposed）在 fr = dougong 事件监听器（fr-session 服务内自持 event bus 或经内核事件——接线分叉留实现期呈报）。
+- contract 层动作：bind-session-tests.py（CONFIG 模式）建立 + 切片 E 已交付测试绑定 SESSION 既有场景（v4 回环/非 v4 拒/zstd 回环/写路径校验失败不发布/fork 场景族）。

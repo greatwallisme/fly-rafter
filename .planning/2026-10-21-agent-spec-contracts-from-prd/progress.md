@@ -218,3 +218,12 @@
 - 需求层三门禁复跑：lint-knowledge 0 errors / graph exit 0 / plan exit 0。
 - SESSION lifecycle 基线：102 场景 0 passed / 0 failed / 102 skipped（pending 选择器预期态）；lint min-score 0.7 PASS（仅 open-question advisory）。
 - 待用户：切片 E 验收 + Q39/Q40 裁决；提交随后落库（guard 阻断期 --no-verify 惯例）。
+
+## 2026-10-23 — 用户裁决 Q39A/Q40B/Q41A + 切片 E 验收
+
+- 用户裁决：Q39 A（Windows 写租约 M1 POSIX-only + 19.2 登记 + 编译门）/ Q40 B（否决 omit 推荐案：delivery 检查逐字移植，1:1 优先于知识归属）/ Q41 A（下一切片 = store 服务接线）。
+- Q40B 落地：validateDeliveryAccepted + catalogFact 逐字移植 + assertReleasedV4Relationships 前奏族（developer/全量 message-sources/delivery 所有权/catalog 去重）补入 restore 门——顺带补漏移的全量 message-sources 检查；+1 钉测（delivery 六态）；夹具自纠一件（sessionFormatVersion 缺省 0 代被忽略）。
+- Q39A 落地：PRD 19.2 条 15 + persist/mod.rs cfg(windows) compile_error 编译门。
+- PRD 23 决策 29；四关复跑全绿（225 tests / clippy 0 / doc 0）+ 三门禁 0 errors；提交 d2e15e0。
+- 切片 F 真源全读（三）完成：storage.ts 571 行全文（handle 链/close 循环 drain/read 单调/live 路由 200ms/tracker 全语义）+ handle.ts seam 117 行全文 + store.fork 拒绝码族与 fork 流；findings 三节落盘。
+- 切片 F 范围钉死（Q41A 授权文字）：持久化运行时（handle/tracker/live 路由/flushAll/stat/list/create/open 流）；SessionStore 内存层 = 后续切片；contract 层动作 = bind-session-tests.py + 切片 E 测试绑定 SESSION 既有场景。
