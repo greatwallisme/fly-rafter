@@ -2,6 +2,7 @@
 //! `validateSessionEventData`, `assertMessageEventShape`, and the seed
 //! contiguity contract).
 
+#![forbid(unsafe_code)]
 use crate::error::AdmissionError;
 use fr_wire::content::ContentBlock;
 use fr_wire::content::KnownContentBlock;

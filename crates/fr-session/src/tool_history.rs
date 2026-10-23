@@ -2,6 +2,7 @@
 //! folds committed headers and developer messages into the baseline plus
 //! resolved updates that request assembly consumes.
 
+#![forbid(unsafe_code)]
 use std::collections::HashMap;
 
 use fr_wire::call_config::{ToolHistory, ToolSchema};

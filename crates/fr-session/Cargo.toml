@@ -9,10 +9,26 @@ keywords.workspace = true
 categories.workspace = true
 description = "Fly Rafter session log: admission, surface, derivations"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 fr-wire = { workspace = true }
+indexmap = { workspace = true }
+libc = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+zstd = { workspace = true }
+zstd-safe = { workspace = true }
+
+# Kernel family edge for the C-ABI dylib artifact (PRD 4.3): the plugin
+# shell links only dougong-abi across the kernel boundary.
+dougong-abi = { workspace = true }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+dougong = { workspace = true }
+dougong-dylib = { workspace = true }
+tokio = { workspace = true }

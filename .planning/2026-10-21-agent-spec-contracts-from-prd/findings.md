@@ -549,3 +549,39 @@ Q33 plugin: 记录通道 M1 范围 / Q34 KNOWN 词表注册机制 / Q35 message 
 - 事故自纠：分块 heredoc 两处 impl 未闭合 + 测试夹具垃圾行一次（"marker on log-only" 用例在类型化构造层不可实现——dsh 该检查属 restore 原文边界，删测留 C4）。
 - 四关全绿：fmt / clippy 双口径 -D warnings / workspace test 178 / doc 零警告。
 - 待续切片 E：fork/repair（buildForkSeed + ToolCallRecovery + openTurnClosers）+ 持久化物理层（format/scan/materialize/append/lease/zstd/restore 侧 reserved-raw 准入）+ dougong 插件壳（cdylib + descriptor + apply 词表声明服务）。
+
+## 2026-10-23 — Phase 13 实现切片 E：fork/repair + 持久化物理层 + dougong 插件壳
+
+### 真源复读补遗（切片动工时，file:line 实证）
+- repair.ts 全文：CLOSER_TEXT 四文案（interrupted/forked × started/notStarted）+ TOOL_NOT_STARTED/TOOL_OUTCOME_UNKNOWN；ToolCallRecovery.observe（turn/start|end、step/end 清 pending；assistant/message tool-call 块注册；tool/call 记 callSeq；tool/result 仅 surfaceOp==='append' 且 turn/step 匹配消账）；results() 消息 id `<cause>-tool-result-<callId>-<seq>` + 插入序；openTurnClosers = results 先行 + step/end（若开）+ turn/end{kind}，seq 自 last.seq+closers+1、time=last.time。
+- fork.ts 全文：buildForkSeed = slice(0,boundary+1) + tagged end-seed@boundary+1（time=boundary 事件 time）+ concat forked closers；inheritedEventCount = end-seed 所在 seq（= boundary+1）。
+- format.ts 全文：HeaderLine 六必需四可选键 + isHeaderLine 全守卫；assertNoRetiredHeaderFields（sandboxMode/approvalPolicy）；refuseForeignFormatVersion（先于形状检查，sessionFormatVersionRefusal 双向文案）；encodeSegment/projectKey（UTF-16 码元，astral 逐码元 ~XXXX）；SessionLogScanner（recoverable 首坏行吞、见 turn/end 即抛、admission 双类错误恒抛不吞、committedBytes 只进好行、撕裂尾 finish 忽略）。
+- session-format v1-to-v2 codec：物理头键序（type, version, id, createdAt, [cwd], [parentSession], isSeeded, [origin], delegationDepth, [agentPreset]——v4 spread 原位覆盖 version）；信封 exactKeys + released v2 row 错误族 + seq gap 消息；seq-ranges 编解码全语义（run≥3 折叠、非严格递增原样返回）。
+- v3-to-v4 全族：assertReleasedV4Header（五必需+四可选逻辑头）；assertV4RowAdmission（developer-data/source-row/retired-syntax/system-fields/tool-result/fork-result；ignorable developer/message 无词表时延后）；restoreReleasedV4Artifact（词表门 `format v4 contains unknown event type...` + 稠密 + cut/marker 对齐）；relationships 385 行状态机（turn/step 序、tool 生命周期、notStartedRepair 引用 interrupted notStarted 文案逐字、protected head、PTC dispatch 配对、compaction/retry/title/command 全分支）；**dsh 无尾平衡检查**（open tail = 崩溃恢复前缀合法）。
+- catalog generated.ts：restoreCurrent = restoreReleasedV4Artifact(KNOWN) → Session.fromRestore——jsonl 读路径未知类型拒消息 = validation.ts 文案（切片 D refuse_unknown_required 消息选择正确）；storage-contract "newer harness" 文案在 jsonl 面死码（跨后端防御层），但其 request/header reason==='fallback' 拒绝 + adopt Corruption 包装可达（已移植，fallback 拒绝内联于 scanner.finish 原始行层——typed 枚举反序列化会在其前失败）。
+- index.ts 物理段：materializePosix（mkdir 0700 逐级 + syncDir 逐级 + rejectExistingLog + tmp 12hex wx 0600 + link 发布 EEXIST→AlreadyExists + syncDir + 尽力 rm tmp）；appendLines（before size + write+fsync + 失败 truncate 回滚 + 回滚失败聚合文案）；repair（truncate+offset + fsync）；encodingMismatch/legacyLayout/rejectOppositeArtifact 文案逐字（opposite artifact 也用 encodingMismatch）。
+- zstd.ts：帧扫描逐字节（magic 0xFD2FB528 LE / 描述符保留位 0x18 / blockType 3 拒 / RLE / checksum 4B / maxFrames / tornStart）；压缩 checksum 帧（唯一非默认参数）；撕裂前缀 = 流式解码出已刷盘 plaintext（Node ZSTD_e_flush 等价）。
+- lease.ts：POSIX flock 非阻塞 + 锁后 inode/dev 复验（3 次）+ 锁文件永不删 + 无过期；win32 = 路径派生命名信号量（fr 未移植，Q39）。
+
+### 实现落盘（crates/fr-session/**）
+- **closer_text.rs**：scripts/extract-session-texts.py 自 dsh repair.ts 抽取生成（CLOSER_TEXT 四文案 + 两 code），禁手抄纪律落地；repair 与 relationships 共用单一真源。
+- **repair.rs**：OpenTurnCloseCause（id_prefix/closer_text/turn_end_kind 三映射）+ ToolCallRecovery（IndexMap 保插入序）+ open_turn_closers + interrupted_turn_closers；SessionSeq::new Result 传播对齐 dsh SessionSeq() throw。
+- **fork.rs**：build_fork_seed（越界 → SessionSeqRangeError；tagged end-seed time 复用切点事件）。
+- **persist/**（八模块）：error（PersistError 五变体 + session_format_version_refusal）/filename（世代名 + 解析表 + 路径装配）/paths（encodeSegment/projectKey 逐字——astral 按 UTF-16 码元 ~D83D~DE00 与 dsh 逐字同型）/header_line（to_header_line serde_json Map 逐键插入序 + is_header_line 全守卫（null=present 拒）+ parse_header_record）/framing（seq-ranges + decode_event released v2 错误族 + 安全整数域含负 time）/v4_checks（行准入族 + assert_released_v4_header + restore_released_v4_artifact + relationships 状态机全分支；RELATIONSHIP_TYPES ∩ 词表参数化）/zstd（帧扫描 + compress/decompress checksum 帧 + 撕裂前缀 DCtx 流式）/lease（flock + inode 复验 + 锁文件永不删 + Drop 幂等）/io（create_dir_all_mode + sync_dir + materialize 全链 + append 回滚 + repair + encode_materialization 双帧）/read（SessionLogScanner recoverable/strict + 逐行号 + zstd 前缀读 + torn 分类 + 身份校验 + same_file realpath + resolve_generation_in_directory + read_stored_log 全链 + fallback 拒内联 finish 原始行层 + Session::from_seed 会话级采纳）。
+- **plugin_shell.rs**：dougong-abi v2 导出表（name/descriptor/setup/call/on_event/on_next/teardown）+ descriptor（provide ["fr-session"]、inject []、listen {}）+ dispatch 纯函数（METHOD_DECLARE_EVENT_TYPES=0 declare、METHOD_DESCRIBE=1 describe）+ 词表 State（宿主按实例串行化，无锁）。
+- **tests/plugin_shell_e2e.rs**：真实 cdylib 工件装载 E2E（cargo build 定位 libfr_session.so → dougong_dylib::load → consumer plugin 经 Invoker 声明 compaction 两类型 → 重复声明 fail-closed → describe knownTypes 14+2=16）——Q34A 激活期声明机制全链走通。
+- crate 形态：crate-type ["cdylib","rlib"]；deps + dougong-abi/libc/zstd/zstd-safe；dev-deps + dougong/dougong-dylib/tokio；workspace deps 补 dougong-abi/dougong-dylib/libc/zstd/zstd-safe。测试 71（repair 6 + fork 3 + persist 面全套 + shell 3 + E2E 1）。
+
+### 实现语义发现（钉测逮捕，记录在案）
+- **relationships tool() 初版判定错误**：写成 `!started && !repair → throw`——dsh 语义是仅 `!started` 时要求 exact repair（started 的正常 result 直删）；测试（full chain tool/call 后正常 result）逮捕，修实现。
+- fold_surface 对五类缺 surfaceOp 抛 'replacement start must be a non-negative safe integer'——relationships 层实质要求五类必带 marker（真实日志恒带；与 session 层 validateNext 的 marker 必带互为表里）。
+- restore 门 cut-vs-marker 比较在 scanner 路径恒真（cut 由 marker 派生）；分歧场景 = cut 独立到达的 artifact/迁移面（测试以 cut=1 vs marker=2 钉死）。
+- serde_json Value 相等：1（整数）≠ 1.0（浮点），JS isDeepStrictEqual 视为相等——影响 PTC dispatch 与 compaction shadowedSeqs 深比较的病态手改文件角落；dsh 侧 JSON.parse 往返后同样折叠，接受（记 19.2 候选附注，不单独呈报）。
+- dsh scanner 层序：admission 双类错误恒抛（recoverable 不吞）、JSON parse 失败可吞、framing/seq-gap 按策略吞 + turn/end 升级；finish 无 issue 终检（recoverable 吞后 = committed 前缀 + tornTruncateTo，写路径截断）——全部逐条复刻。
+- `-0` 语义：serde_json 解析 "-0" 归一 0（as_u64 Some(0)）——dsh isHeaderLine 显式拒 -0 的角落依赖 serde 数字归一，接受（createdAt: -0 病态输入，JSON 往返后即 0）。
+
+### 遗留与呈报项（切片末集中呈）
+- Q39 Windows 写租约：dsh 双实现（POSIX flock + win32 命名信号量 win32.ts 208 行）；fr M1 已实现 POSIX 侧，win32 侧未移植（本机 Linux 无法验证）——呈 A（M1 POSIX-only + 19.2 登记 + cfg(windows) 明示不支持的编译门）/B（立即移植 win32 信号量，不可测）。
+- Q40 dsh 插件命名空间知识：relationships 的 validateDeliveryAccepted（'session-log-deepseek/delivery-accepted' 专检）与 title-llm 源 kind 字面 'dsh-session-title-llm'——前者 fr 侧结构性 omit（一切皆插件：他插件命名空间知识不入 fr-session 核心；DELIVERY_CHECK_OMITTED 文档化），后者逐字保留（M1 词表不含 session/title-llm-request，路径不可达；fr-session-title 插件落地时随 19.2 裁决品牌映射）——呈 19.2 登记确认。
+- 存储运行时（Tracker/live 路由 200ms 批窗/句柄 promise 链/flushAll/memo LRU/list 发现面）不在本切片——属 store 服务接线切片（fr-agent-loop 宿主集成期）。
+- SESSION 合约测试绑定：切片 C/D/E 均按既有模式交付钉测、选择器留 pending（绑定基础设施 bind-session-tests.py 属独立切片，同 CONFIG 模式）。

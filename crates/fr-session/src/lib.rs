@@ -5,10 +5,13 @@
 //! Wire shapes live in `fr-wire`; this crate owns every behavioral
 //! invariant the dsh session package enforces on typed events.
 
-#![forbid(unsafe_code)]
-
 pub mod admission;
+pub mod closer_text;
 pub mod error;
+pub mod fork;
+pub mod persist;
+pub mod plugin_shell;
+pub mod repair;
 pub mod session;
 pub mod surface;
 pub mod tool_history;

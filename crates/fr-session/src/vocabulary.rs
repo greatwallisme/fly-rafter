@@ -2,6 +2,7 @@
 //! aggregated at activation time (PRD 7.1, 2026-10-23 Q34A ruling), and the
 //! read-path refusal of unknown required events.
 
+#![forbid(unsafe_code)]
 use std::collections::HashSet;
 
 use crate::error::SessionError;
@@ -65,6 +66,12 @@ impl EventVocabulary {
     #[must_use]
     pub fn knows(&self, name: &str) -> bool {
         self.known.contains(name)
+    }
+
+    /// How many types the installation currently knows.
+    #[must_use]
+    pub fn known_count(&self) -> usize {
+        self.known.len()
     }
 }
 

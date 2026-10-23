@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 13 实现切片 D 完成：Session 增量壳（append_surface/append_log_only/append_record 三入口、derive_messages 缓存钉语义、request_header 折叠 canonical、from_seed 种子契约）+ vocabulary 词表聚合与读路径拒（Q34A）+ plugin: 语法校验（Q33A）+ 9 钉测（workspace 178 tests，四关全绿）。下一切片 E = fork/repair（buildForkSeed/ToolCallRecovery/openTurnClosers）+ 持久化物理层（format/scan/materialize/append/lease/zstd/restore 侧 reserved-raw 准入）+ dougong 插件壳（cdylib + apply 词表声明服务）。
+Phase 13 切片 E 完成（fork/repair + 持久化物理层 + cdylib 插件壳 + E2E；workspace 224 测试四关全绿）。呈用户：切片验收 + Q39（Windows 写租约：A POSIX-only 登记 / B 移植信号量）+ Q40（dsh 插件命名空间知识：delivery-accepted omit 与 title-llm 字面 19.2 登记确认）。下一切片候选 = fr-session store 服务接线（Tracker/句柄/live 批窗/flush）或 fr-agent-loop（Q41 待裁）。
 
 ## Current Phase
-Phase 13（fr-session v4 全量——切片 D（Session 壳/词表/通道）完成）
+Phase 13（fr-session v4 全量——切片 E 完成，待验收）
 
 ## Phases
 
@@ -93,10 +93,10 @@ Phase 13（fr-session v4 全量——切片 D（Session 壳/词表/通道）完�
 
 ### Phase 13: fr-session v4 全量
 - [ ] SessionEvent 全集（判别联合、dsh types.ts 逐字字段、五扩展 log-only）
-- [ ] 持久化物理不变量（wx+0600+fsync → link+unlink 发布 → 目录 fsync → append truncate 回滚 → zstd 撕裂尾恢复 → 写租约）与世代/版本校验
+- [x] 持久化物理不变量（wx+0600+fsync → link+unlink 发布 → 目录 fsync → append truncate 回滚 → zstd 撕裂尾恢复 → 写租约 POSIX 侧）与世代/版本校验（切片 E）
 - [ ] surface/replace-op 硬约束全集（五类入表面、双闭区间、sourceEventSeqs 校验、折叠编码、双计数）
 - [ ] deriveMessages 投影（不可变请求投影）+ canonical request/header（空 tools 省略、adapterDefaults 条件保留、顺序敏感相等比较）
-- [ ] fork（sourceEventSeqs 前缀派生）+ resume 四拒门禁
+- [x] fork（sourceEventSeqs 前缀派生；build_fork_seed + forked closers 已落）+ resume 四拒门禁（store 服务切片）
 - [ ] 对照 REQ-FR-SESSION 场景逐条落测试
 - Foundation Note: 本 crate 是管线咽喉：fr-agent-loop/fr-headless 依赖其 deriveMessages/surface 语义，语义字段逐字对齐 dsh types.ts
 - **Status:** pending

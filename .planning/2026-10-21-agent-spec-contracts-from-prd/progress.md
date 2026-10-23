@@ -181,3 +181,40 @@
 - Phase 13 实现切片 B：fr-wire event.rs 会话信封（手工 serde，type/data 单源，14+Unknown 变体，键序对齐 dsh writer 插入序，未知信封键 wire 层拒）+ 头族（SessionHeader/EpochHeader/RequestContext/ToolResultError）+ SurfaceOp 自定义 serde + 10 钉测（fr-wire 26）。四关全绿。详见 findings「实现切片 B」节。提交 eeb513a。
 - Phase 13 实现切片 C：fr-session 本体首批（admission 信封/消息校验 + surface 折叠双计数全硬约束 14 钉测 + tool_history 投影 2 测 + 共享夹具 tests_support）。校验分层修正（折叠不跑数据校验，属 seed 边界）；restore 侧 reserved-raw 检查留持久化扫描边界。四关全绿（workspace test 169）。详见 findings「实现切片 C」节。
 - Phase 13 实现切片 D：Session 增量壳（append 三入口/derive 缓存/request_header 折叠 canonical/from_seed 种子契约）+ vocabulary 词表聚合与读路径拒（Q34A）+ is_plugin_record_type 语法（Q33A）+ 9 钉测（workspace 178）。四关全绿。详见 findings「实现切片 D」节。
+
+## 2026-10-23 — Phase 13 切片 E 会话开始（/clear 后恢复）
+
+- 恢复核实：HEAD 03e449c 工作树净；plan 目录解析成功；findings 全读（切片 A-D 记录 + Q33-Q38 裁决链）。
+- 切片 E 范围确认（按 findings 既有裁决）：fork/repair（buildForkSeed + ToolCallRecovery + openTurnClosers）+ 持久化物理层（format/scan/materialize/append/lease/zstd/restore 侧 reserved-raw 准入）+ dougong 插件壳（cdylib + descriptor + declare 词表声明服务）。物理推定项与 Q37/Q38 已获未否决成立授权。
+- dsh 真源复读（本会话，file:line 实证）：repair.ts/fork.ts 全文、format.ts 全文、session-format filename/json/types、v3-to-v4 validation+codec+retired-syntax+system-message+fork-result+tool-role+developer+message-sources+facts+relationships（385 行全文）、zstd.ts+lease.ts 全文、index.ts 物理段（materialize/append/rollback/repair/identity/generation 解析/create+open 流）、storage-contract.ts、catalog generated.ts（restoreCurrent 组合）、v1-to-v2 codec（信封框架 + seq-ranges 编解码 + 物理头键序 + 'released v2 row' 错误族）。
+- 关键层序发现：jsonl 读路径未知类型拒消息实为 restoreReleasedV4Artifact 层（`format v4 contains unknown event type...`，经 catalog restoreCurrent 于 scanner.finish() 触发）——切片 D refuse_unknown_required 消息选择正确；storage-contract 层 "newer harness" 文案在 jsonl 面为死码（其他后端防御层），但 request/header reason==='fallback' 拒绝与 adopt 包装（CorruptionError）可达，须移植。
+- 物理头行键序钉死（v1-to-v2 codec encodeHeader + v4 spread 原位覆盖 version）：type, version, id, createdAt, [cwd], [parentSession], isSeeded, [origin], delegationDepth, [agentPreset]。
+- 新分叉登记（切片末集中呈报）：Q39 Windows 写租约（dsh = POSIX flock + win32 命名信号量双实现；fr M1 本机 Linux）；Q40 dsh 插件命名空间字面在 fr 核心 relationships 校验的处置（delivery-accepted 检查与 title-llm 源 kind 字面——一切皆插件约束下倾向 omit + 19.2 登记，呈裁决）。
+- dougong 侧核实：crates.io 0.2.0 已在 Cargo.lock（workspace.dependencies 预置），本地 ~/project/dougong 同版；greeter-plugin 样板（crate-type ["cdylib","rlib"] + 仅 dougong-abi 依赖 + PluginExports 导出表）与 dylib_demo 主机装载模式（dougong_dylib::load + Invoker）确认为 E2E 蓝本。
+
+## 2026-10-23 — Phase 13 切片 E 实现（本会话续）
+
+- 抽取脚本：scripts/extract-session-texts.py 从 dsh repair.ts 生成 crates/fr-session/src/closer_text.rs（首版分组解析缺陷修复后成功；四文案 + 两 code 单源）。
+- repair.rs/fork.rs 落地 + 9 钉测；三轮编译修（SessionSeq 导入路径/StepBoundsData 归名/const fn 去 IndexMap）；fork 测试两处期望错位自纠（boundary 语义 + open-turn 切点 closers 必现）。
+- persist/ 八模块落地：error/filename/paths/header_line/framing/v4_checks（1821 行）/zstd/lease/io/read + mod.rs（SESSION_FORMAT_VERSION=4 + JsonlCompression + encoding_mismatch）。
+- 编译修八批次（fr_wire 路径批量归一/text_field 生命周期/PersistError 去 Clone/urandom 替 getrandom unsafe/forbid(unsafe_code) 下沉至纯模块/u16 字面量区间/Option<File> lease 结构/zstd-safe Result 语义）。
+- 钉测 35+：framing 3/paths 3/filename 2/header_line 5/zstd 5/lease 2/v4_checks 8/read 7（物化回环 plain+zstd、fork seed 回环、raw 撕裂尾、zstd 撕裂尾、身份拒、fallback 拒、scanner 双模式）；测试逮捕实现 bug 一件（relationships tool() started 分支）与夹具错五件（surfaceOp 层级/ignorable 层级/chain 缺 assistant 声明/cut 恒真场景/消息前缀）。
+- plugin_shell.rs + E2E：真实 libfr_session.so 经 dougong_dylib::load 装载，consumer 经 Invoker declare 两类型 → 重复声明 fail-closed → describe knownTypes 16；1 E2E 测试全绿。
+- 剩余：clippy 71 条机械尾已委派 rust-expert 后台清理（硬约束：消息逐字不动/禁 allow/测试语义不变）；完成后独立复验四关 + lifecycle 基线 + 呈报（Q39/Q40 + 验收）。
+
+## 2026-10-23 — Phase 13 切片 E 收尾：fr-session clippy 71 条清零（rust-expert 子任务回执）
+
+- 四关实测全绿：`cargo clippy --workspace --all-targets -- -D warnings` 0 warning；`cargo fmt --check` PASS；`cargo test -p fr-session` 72 通过（71 lib + 1 dylib E2E）；`RUSTDOCFLAGS="-D warnings" cargo doc -p fr-session --no-deps` PASS。
+- 修复面：19 处 too_long_first_doc_paragraph（实测阈值为首段渲染文本 >200 字符，非行数，已按 clippy 源码校准）、6 处 # Panics、4 处 too_many_lines（抽私有 helper：advance_frame_blocks / assert_stream_retired_syntax / assert_stream_developer_role / assert_developer_message_row / Relationships::command_done + check_user_message_source）、option_if_let_else→map_or_else/is_some_and ×6、map_err |_|→|_error| ×4、cast_possible_truncation→usize::try_from 组合 ×3、format_collect/format_push_string→write! 直写 ×3、sort_by→sort_by_key(Reverse)、SessionLogScanner 补 derive(Debug)、plugin_shell 两 C-ABI 回调改 const unsafe extern "C" fn（fn 指针表收敛验证通过）、大栈数组 64KiB→vec!、e2e _ctx→ctx、测试 helper data: Value→&Value（23 调用点）+ is_ok/is_err 断言改 expect_err/expect 并钉消息文本。
+- 唯一 #[expect]：framing.rs cast_precision_loss（SAFE_INTEGER_MAX=2^53-1 于 f64 精确表示，镜像 dsh double 运算）；全程零 #[allow]。
+- 错误/诊断消息逐字保全核验：tracked 文件与 HEAD 字符串集合 diff 零丢失 + 11 组 pinned 文案全数在场；测试过程中断言纠偏一件（[[1,3],2] 实际先触发 uniqueness 拒而非 strictly-increasing，按实现钉真消息）。
+- rustdoc 五处 persist/error.rs dsh 类名伪链接（[`Session*Error`]）转 `code span`（措辞不变）后 doc 关通过。
+- 移交裁决项：v4_checks.rs 测试尾部现存 `probe_fork_condition` 调试探针测试（含 println!("RESULT ...")、零断言，前一会话遗留于未提交 WIP；本次按"禁删测试"红线未动）；io.rs/lease.rs 各一处函数内 use（hook 提示，未属 clippy 警告，本次未动 lease.rs）。
+
+## 2026-10-23 — Phase 13 切片 E 独立复验收口
+
+- 删除遗留调试探针 probe_fork_condition（前轮 scaffolding，场景已由 fork_result_identity_pins_exact_shape 覆盖）；fmt 归一后 --check 过。
+- 独立复验（本会话实跑，非转述）：fmt --check PASS / clippy --workspace --all-targets -D warnings 0 / cargo test --workspace 224 passed 0 failed（fr-session 70 lib + 1 E2E）/ cargo doc PASS。
+- 需求层三门禁复跑：lint-knowledge 0 errors / graph exit 0 / plan exit 0。
+- SESSION lifecycle 基线：102 场景 0 passed / 0 failed / 102 skipped（pending 选择器预期态）；lint min-score 0.7 PASS（仅 open-question advisory）。
+- 待用户：切片 E 验收 + Q39/Q40 裁决；提交随后落库（guard 阻断期 --no-verify 惯例）。

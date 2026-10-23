@@ -1,6 +1,7 @@
 //! The ordered surface over message-producing events: eligibility, replace-op
 //! hard constraints, and the dual generation counters (dsh surface.ts).
 
+#![forbid(unsafe_code)]
 use crate::error::AdmissionError;
 use fr_wire::content::{ContentBlock, KnownContentBlock};
 use fr_wire::event::event_type;

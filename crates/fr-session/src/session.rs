@@ -6,6 +6,7 @@
 //! every mutation. The event timestamp is an explicit parameter (the clock
 //! seam; the host supplies wall time).
 
+#![forbid(unsafe_code)]
 use crate::admission::{is_plugin_record_type, validate_event_data};
 use crate::error::SessionError;
 use crate::surface::{SurfaceFoldResult, apply_plan, plan_event};
