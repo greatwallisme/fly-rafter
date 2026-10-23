@@ -71,7 +71,23 @@ impl Session {
         header: fr_wire::event::SessionHeader,
         seed: Vec<SessionEvent>,
     ) -> Result<Self, SessionError> {
+        Self::from_seed_parts(header, seed, 0)
+    }
+
+    /// Like [`Self::from_seed`], also recording the fork-inherited prefix
+    /// length (dsh `inheritedEventCount`: the tagged end-seed seq of a fork
+    /// seed; zero for fresh or fully-restored sessions).
+    ///
+    /// # Errors
+    ///
+    /// Same contract as [`Self::from_seed`].
+    pub fn from_seed_parts(
+        header: fr_wire::event::SessionHeader,
+        seed: Vec<SessionEvent>,
+        inherited_event_count: u64,
+    ) -> Result<Self, SessionError> {
         let mut session = Self::new(header);
+        session.inherited_event_count = inherited_event_count;
         for event in seed {
             session.append_seed_event(event)?;
         }

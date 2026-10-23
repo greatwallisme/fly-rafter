@@ -656,3 +656,81 @@ Q33 plugin: 记录通道 M1 范围 / Q34 KNOWN 词表注册机制 / Q35 message 
 - 本切片 = 持久化运行时：JsonlSessionHandle + Tracker + live 路由 200ms + flushAll + stat/list 发现面 + create/open 流（findLog/ensureRootEncoding/legacy 拒）。
 - SessionStore 内存层（prepare/enter/announce/fork/resume + 拒绝码）= 后续切片（依赖本切片句柄面）；ctx 事件（session/event|flush|disposed）在 fr = dougong 事件监听器（fr-session 服务内自持 event bus 或经内核事件——接线分叉留实现期呈报）。
 - contract 层动作：bind-session-tests.py（CONFIG 模式）建立 + 切片 E 已交付测试绑定 SESSION 既有场景（v4 回环/非 v4 拒/zstd 回环/写路径校验失败不发布/fork 场景族）。
+
+## 2026-10-23 — 切片 G 真源全读：store 四事件精确语义 + dougong 接线面事实（呈 Q43）
+
+恢复基线：HEAD b77bac4（切片 F 已提交），工作树净。本轮为 SessionStore 内存层切片（切片 G）前置真源读；文件均在 `~/project/reference/cordis/deepseek-harness/packages/core/session/src/index.ts`（dsh）与 `~/project/dougong/crates/`（dougong）。
+
+### dsh store 四事件语义（核心发现：不经内核派发模式，调用全部手工）
+- **监听者解析与调用分离**：`collectSessionCallbacks = [...ctx.events.dispatch('emit', args)]`（index.ts:394-396）仅向 cordis 取监听者快照（含 scope 过滤，carrier = scopeTarget(session, scopeOf(ctx)) :1212）；四事件的调用全部手工实现，**不用任何 cordis 派发模式**。
+- **session/created**（announce :1265-1293）：守卫 not live（`session "X" is not live in this store` :1338-1345）与重复（announced||announcing 双态拒 `session "X" was already announced` :1267-1269，含监听者内重入）；**mark-before-emit**（:1273 announced=true 先置——回滚仍配对 disposal 边，监听者不能递归造第二生命周期边）；**同步 throw 故意传播 = 否决**（:1279-1283），async 返回 promise 的 rejection 只 warn（`session "X": session/created listener rejected: ...` :1286）；否决回滚机制 = create 的生成器 effect 先 yield detach 再 announce（:1111-1122），throw 时 effect 释放已 yield 的 disposer → detach → emitDisposed（announced 已 true，配对边成立）；finally announcing=false + detachRequested 延迟兑现（:1289-1292）。
+- **session/event**（Session.commit :876-897）：回调快照采集**先于 log.push**；逐监听者 containment（invokeContainedSessionObservers :398-416）：同步 throw → warn `session "X": session/event listener threw: ...`、async rejection → warn `... listener rejected: ...`、feed 继续；append 重入守卫（publicationEntry :862-868 `session append cannot reenter while another append is being published`）；detachRequested 于 append 展开后兑现（:891-895）。
+- **session/disposed**（emitDisposed :1296-1304）：detachEntered（:1247-1256；stale capability 守卫 store.get(id)!==entry → no-op）删除 store+attachments 后**announced 才发**（含发布回滚；prepared 未 enter 或未 announce 的丢弃不发）；整段 try/catch warn `session "X": session/disposed dispatch threw: ...` + 逐监听者 containment。
+- **session/flush**（store.flush :1319-1336）：**唯一 flush 入口**（"one owner and one spelling"；调用方 = checkpoint policy per-request 屏障 / goal-round-driver idle 检查点 / teardown 排干 / 读存储前自 flush 的消费方 :1307-1313）；快照 → Promise.allSettled（同步 throw 转 Promise.reject 保真 rejection 值）→ **全部落定后**抛注册序首个 rejected（:1333-1334）→ 返回 `callbacks.length > 0`（是否有持久化监听者参与）。
+- **事务三段**：prepare（:1143-1186）id 缺省 mint `session-<n>` 计数器、重复 id throw `session "X" already exists`、meta 校验（lossless-JSON record + cwd 绝对路径）、header 构造（createdAt = meta.createdAt ?? Date.now()）；enter（:1210-1244）**authoritative collision boundary**（prepare 与 enter 间可插任意工作，重复再查 :1215 + attachments.has 拒 `session "X" is already attached to a store`）、返回单发 detach（entered 幂等；announcing/appending 中延迟为 detachRequested）；resume = prepare(id, {seed, eventState, inheritedEventCount, meta}) 同管道（Session.fromRestore）。
+
+### dougong 接线面事实（源码实证）
+- 五派发模式全 tokio async（events.rs:216-351）：emit = 每监听者 spawn、失败仅 log_error 永不传播（:216-237）；parallel = 并发全等待、失败聚合为一个 Error::aggregate（:244-273，非 dsh 的 allSettled 首败 + participated 返回）；serial/bail = 顺序、Err 传播、非 null 值 bail（:280-313）；waterfall = 续链、丢 Next 否决（:321-351）。监听者 = 注册 fiber 的 effect（register_listener :428-474，LIFO 撤销）。
+- **无「只取快照不派发」公共面**：EventStore/begin_dispatch/Dispatch.entries 均 crate 内私有（events.rs:131-213）——插件侧无法复刻 dsh 的 resolve-then-manual-invoke 形态。
+- **dylib ABI v2 纯被动拉取**（dougong-abi lib.rs:199-262）：导出表 {abi_version, name, descriptor, setup, call, on_event, on_next, teardown}，call/on_event/on_next 全部 host→plugin；**插件无对外服务调用、无 emit、无运行时监听注册**（监听 = descriptor listen 静态声明 → 宿主 ctx.on_dispatch 桥 dougong-dylib:450）；descriptor inject 仅进内核声明检查（DynPlugin::inject dougong-dylib:354-355），无消费通路；in-process 插件才有 ctx.emit/on 全 API（context.rs:479-554）。per-instance 锁串行化（ABI 文档 :229-231）。
+- scope 面存在（scope.rs ScopeNode 链 + on_global + matching filter），M2+ 子代理隔离用，M1 单 realm 无过滤效果。
+
+### M1 消费方盘点（dsh 监听者实证）
+- 本 crate：persistence tracker（session/event→enqueueLive、session/flush→drain+flush、session/disposed→close——storage.ts install）；切片 F tracker 已有对应方法面，缺的只是 store→tracker 接线。
+- 跨插件（Phase 15-18）：agent-loop（agent.ts:334 stopRecovery、runtime-context.ts:134、index.ts:481 session/disposed checkReleased）→ fr-agent-loop；compaction-basic:184 → fr-compaction；terminal-bash:53 → fr-shell；agent-instructions:326 → fr-system-prompt 域；headless json-stream → fr-headless `--json` 事件流（M1 验收第 2 条需要明确投递面）。
+
+### 架构预告登记（非本问裁决项）
+Phase 15 fr-agent-loop 为 dylib，需在循环内消费 llm/tools/session 服务——当前 ABI 无对外调用通路，与 Q43 同根。裁 B 则 ABI 升级设计应一并覆盖「对外调用 + emit」两通路；裁 A/C 则 Phase 15 动工前需就消费通路单独呈报。
+
+### Q43（ctx 事件接线形态）——裁决记录待补
+- A（推荐）：内部精确总线（dsh 四语义逐字同步落地于 SessionStore）+ tracker 同 crate 直订 + fr-session 服务增事件出站面（per-session 单调 cursor + drain），宿主事件泵拉取后经内核 Context emit 镜像投递 `session/event|created|flush|disposed`（载荷 {sessionId, event} JSON），Phase 15-18 插件经 descriptor listen 接收。零 dougong 改动；跨插件投递为异步镜像（持久化正确性全在 in-crate 同步路径，跨插件监听者本属 advisory）。
+- B：内部总线同 A；内核投递经 dougong ABI 升级直发（v3 对外通路：host 上下文 vtable 或 call CPS 化）。免宿主轮询；代价 = ABI 破坏性升级 + 全插件重编译 + 设计周期；agent-loop 消费通路可一并解决。
+- C：M1 纯内部总线不设投递面，Phase 15-18 各自解决。偏离 dsh 架构位置（事件总线是跨插件解耦本体），--json 流返工风险最高，不推荐。
+
+## 2026-10-23 — agent-loop 出站消费问题详析 + Q44 登记（用户明示：不能延后，全系统影响）
+
+### 规范级互斥（三处现行文字 vs ABI 事实）
+- dougong-abi v2 纯被动拉取（lib.rs:233-262：call/on_event/on_next 全 host→plugin；无 import/vtable/回调表 → 插件无法发起服务调用、emit、运行时注册监听；inject 仅声明检查 dougong-dylib:354-355）；dylib 无 fiber 体——激活 = 宿主驱动 setup/descriptor，不存在插件侧异步任务体。
+- PRD 4.3（:112-121）第一方全 dylib × PRD 8.1（:336）「每会话一个循环插件 fiber，置于该会话 realm；循环实现仅存在于 fr-agent-loop 工件，宿主代码不含循环逻辑」× 上述 ABI 事实 = **「循环插件 fiber」在 ABI v2 下不可存在**。PRD 4.5（:130）「Invoker 消费统一经 ctx.require」是 in-process API，预设消费者持 Context——dylib 没有。须 PRD 修订/19.2 登记 + 裁决执行。
+
+### 循环的结构需求（dsh agent-loop + PRD Phase 15 清单）
+- 长时不归控制流：inbox claim → turn/start → step 循环（deriveMessages 组装 → llm 流式 generate → 流结算 → append assistant/message → 工具提案 → 分组调度执行（exclusive 屏障/parallel 池；pre-execute waterfall 交 approval）→ append tool/result → 无 tool-call 终止）→ turn/end；状态机三相位、abort 两级补偿、steer/inject/followup 于 step 边界入 inbox。
+- 每 turn 出站调用面：llm（流式）、system-prompt 组装、session（append/derive/flush）、tools execute（扇出全部工具插件 + approval + sandbox）、compaction（shadow llm + replace-op）、approval/llm-retry 的 session append。中断入站：steer mid-turn、abort mid-stream。
+
+### 传染性盘点（不止 agent-loop）
+除叶子提供者（provider/工具实现）外几乎全体插件都是消费者：fr-tools（工具插件 + approval + sandbox）、fr-approval（session append）、fr-compaction（llm + session）、fr-headless（agent + session 事件流）、llm-retry/todo/title（session append）。**出站通路 = 全系统血管系统**；agent-loop 只是要求最高的消费者。dsh 原生具备（进程内 TS）。
+
+### 决定性单点事实：per-instance 锁
+「宿主经 per-instance 锁串行化共享同一 handle 的一切外来调用」（dougong-abi:229-231）→ 循环若占住一次 call() 跑完整 turn，steer/abort 将被锁阻塞至 turn 结束——**朴素阻塞模型被锁死：任何方案下循环不能占住单个 call()**。
+
+### 机制三族（Q44 呈报，与 Q43 同轮集中裁决）
+- 44-A 宿主驱动 CPS 状态机：call 返回 DEFERRED + 挂起出站请求，宿主解析后经 on_next 类通路投回（D14 事件 CPS 模式移植到 call——call 契约扩展，ABI 小改）。零线程；宿主持有步进交错点（steer/abort 天然）；代价 = 循环逻辑手工状态机化（Phase 15 全清单控制流显式 continuation 化），每 await 点 2 次 FFI+JSON。
+- 44-B 插件自持线程 + 宿主织物中继（推荐）：call(START) 起自有 OS 线程跑自然阻塞控制流（Q42A' 同款风格）；出站（请求+事件）入队，eventfd 唤醒宿主泵（fd 经 INIT 调用载荷传递，走现有 ABI 零改动）；宿主织物 = RPC fabric：请求信封（fr-wire）、按声明 inject 权限校验、回复经 call(POST) 投回、有界解析池（防叶子长调用——如 bash 工具秒级 call——阻塞泵）。通用规则 = orchestrator 插件=线程+队列，leaf=被动；steer/abort = 入站队列 = 任意队列读取点。代价 = 宿主织物复杂度、每边泵往返延迟、PRD「fiber」措辞 19.2 登记。
+- 44-C ABI v3 一等公民对外通路：host vtable 或 call CPS 全面升级。架构最正；代价 = vtable SAFETY 契约新立 + 重入语义（call 内 require 回自身）+ per-instance 锁重设计 + 全工件重编译 + M1 排期与 dougong 设计周期耦合。
+
+### 与 Q43 的关系
+Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，与 44-A/B/C 全兼容且可独立先行；Q43-B（emit 直发）预设 44-C。事件四语义在全部方案下均留在 fr-session 内部注册表（Q43 §0 结论不变）。
+
+### 用户指令（2026-10-23）
+「这个不能再议 这个对系统有很大影响」——Q43.1 原「Phase 15 前再议」选项撤回；织物裁决（Q44）升格为 now-decision，与 Q43 同轮集中呈报。
+
+### Q44 衍生产物：dougong 升级需求文档（2026-10-23，用户追加两条件后成稿）
+- 用户指令链：「按你推荐的来是否还要修改dougong」（答：推荐组合零内核改动）→「如果使用44c方案 需要干什么」→「先对dougong的升级生成详细的修改需求文档 requirements.md」→「务必给我完整需求，我不接受改完后你又要增加需求」→「必须详细到清空上下文仍能理解不误解不丢失」。
+- 产出：`~/project/dougong/doc/requirements.md`（444 行，§1-§9）。结构 = 背景（现状/缺口/锁语义）+ 目标/非目标 + 功能需求六域 A-F（vtable 契约/require/emit/版本迁移/测试矩阵 11 条/文档）+ §4 冷读者自足入口（术语表/fr 缺口叙事/三路径对照/入口×出站交互矩阵）+ §5 设计分叉 D-V3-1..5（含接口草图 + 宿主 require 五步规定动作）+ §6 文件级实施分解 + §7 fr 衔接 + §8 风险 + §9 变更控制（推导方法五条 + 后补需求一律 v3.1 独立提案）。
+- 分析期实质修正一处：重入策略原「全禁令案」会禁掉合法 service→service 链（fr 审批 ask 处理器内 require session 落账）——改为「同线程重入环检测」（b'）为倾向案，A→B→A 回环转确定性错误非死锁。
+- 补全期新钉事实：再激活语义（plugin.rs:66-67，vtable 必须 per-activation 构造失效）；setup 期 require 合法性 = Q34A 激活期声明的 dylib 完成件（B5/G5）；emit 载荷必须 JSON 而 require 载荷不透明的显式非对称（C2/B6）；内核本体预计零改动（桥全走公共面 ctx.get + events::emit，5.2）。
+- 待裁决：D-V3-1（vtable 传递）/D-V3-3（重入策略）/D-V3-4（执行器）/D-V3-5（错误模型）——维护者裁决后冻结定稿；fr 侧 44-B 先行 vs 等 v3 的排期问题仍开放（文档 §4.2/§7 两轨并存）。
+
+### dougong requirements.md v2 重构（2026-10-23，用户三连纠正后定稿待裁）
+- 用户纠正三连：①「重要备注写在很远的另外一处」→ 全文重构为**主题集中**原则：一个主题一个自足块（接口草图入 2.1、重入三案+死锁事实+实现五步入 2.2、触点清单入 2.4、矩阵入 2.0），零跨节追读；②排除清单被读成路线图 → 唯一决定声明；③「M2+ 大概率需要 = 违反一次性提明确」→ **第 9 项事件作用域过滤升格结构性排除**：作用域/隔离语义归应用层（会话服务自持注册表+发射策略承载隔离，与四事件手工调用同原理），内核事件道为广播道；fr M2+ 子代理隔离由应用层满足——**此决定取代本 findings 早前「M2+ 如需 scoped 投递属独立内核提案」的表述**。九项全部结构性排除，文档无条件项。
+- 产出：`~/project/dougong/doc/requirements.md` v2（342 行，§1 背景/术语/目标 → §2 功能需求 A/B/C/D 四块全部内联 → §3 测试矩阵 11 场景 → §4 待裁决 D-V3-1/3/4/5 → §5 范围外九项绝对 → §6 文档同步 → §7 风险与变更控制）。
+- 待裁决：D-V3-1（vtable 传递，倾向 setup 携带）/ D-V3-3（重入，倾向 b' 同线程环检测）/ D-V3-4（执行器，实现期基准）/ D-V3-5（错误模型，倾向状态码+详情）。fr 侧 44-B 先行 vs 等 v3 排期问题仍开放。
+
+## 2026-10-23 — Phase 13 切片 G 落地：SessionStore 内存层（fr-session 129 tests，四关全绿）
+
+- **实现落点**：`crates/fr-session/src/store.rs`（~950 行含 10 钉测）+ session.rs 两处小增（`header()` 访问器原已存在、`from_seed_parts(header, seed, inherited_event_count)` 承载 dsh `inheritedEventCount`——fork cut 持久化字段此前只有私有 0 值）。lib.rs 导出 SessionStore/DetachHandle/SessionMeta/SubscriberId。
+- **dsh 语义逐字落地**（core/session index.ts:1018-1345，本会话真源全读节为准）：prepare（`session-<n>` 计数 mint 跳活、重复 `session "X" already exists`、cwd 绝对路径校验——文案取 JSDoc 描述措辞 `meta.cwd must be an absolute path`，dsh 未捕获运行时原文已注明）；enter（authoritative collision 二查 + 单发 DetachHandle）；create 三段事务（announce 否决 → detach 回滚 → announced 已 mark → 配对 disposal 边，index.ts:1111-1122）；announce（mark-before-emit :1273、announcing 窗口、`was already announced` 双态拒、created 监听者 Err 传播 = 否决）；event/disposed feed（快照先于提交、逐监听者 containment、warn 文案 `session "X": session/event listener threw: …` / `session/disposed listener threw: …`）；flush（唯一入口、全落定后抛**注册序首个**失败、返回 participated，:1319-1336）；fork（拒绝族全文：`fork boundary N does not exist in session "X" (last seq: M|none)` / `does not match a contiguous event seq`、子头 cwd 透传 + parentSession + isSeeded、inherited=boundary+1、空源缺省=无种子、SESSION_ALREADY_EXISTS 文案同 create）；deferred detach（announcing/appending 窗口内置 detachRequested，提交展开后兑现 :891-895）。
+- **结构决定**：监听者注册表四列表（created/event/flush/disposed，注册序即 flush 首败序）；监听签名同步闭包（tracker 形状）——dsh async-rejection warn 分支（`listener rejected:`）无同步对应物，结构性缺席已记录；`attachments` 对象身份表无 Rust 对应（move 语义）→ 双重 attach 抛错结构性不可达；append 重入抛错在 &mut 下不可达，保留防御性检查与逐字文案；fork 边界非整数/负数臂在 u64 类型下不可达。clock 与 warn 均注入缝（测试确定性）。
+- **门禁（实跑）**：四关全绿（workspace 286 tests / fmt PASS / clippy --workspace --all-targets -D warnings 0 / doc 0）；lifecycle SESSION = 75 passed / 0 failed / 27 skipped 基线逐位保持；guard 后台运行（阻断期 20 合约未过预期）。
+- **clippy 尾修 8 条真修零 allow**：AnnounceState 三态枚举替换 4-bool（struct_excessive_bools）、SessionStore 手写 Debug（missing-debug-implementations）、fork 早退分支重构消 redundant_clone + single-match、flush let-chain + map_or、模块文档首段拆分。
+- **余项（切片 H）**：plugin 服务面（create/append/flush/fork/resume/restore 方法号 + fr-wire 载荷）+ tracker 装配（store.subscribe ↔ tracker.enqueue/close）+ 出站 drain 面（Q43-A，宿主泵中继）+ bind-session-tests.py 绑定基础设施。27 skipped 场景中 agent-loop/prompt/title/approval/ptc 依赖项属 Phase 15-18。

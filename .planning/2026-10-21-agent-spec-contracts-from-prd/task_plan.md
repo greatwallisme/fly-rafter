@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-切片 F（持久化运行时）已落地（Q42A'：同步 actor worker + 有界并行 list + Condvar 调度线程；19 钉测含 10 并发句柄/大会话库极端测，逮捕并修复 mkdir 并发竞态真 bug；四关全绿 275 tests，lifecycle 75/0/27 基线保持，guard 20 合约未过=阻断期预期）。待用户验收；验收后进入 SessionStore 内存层切片与 ctx 事件接线形态呈报（携 dougong 源码证据）。
+切片 F（持久化运行时）已落地（Q42A'：同步 actor worker + 有界并行 list + Condvar 调度线程；19 钉测含 10 并发句柄/大会话库极端测，逮捕并修复 mkdir 并发竞态真 bug；四关全绿 275 tests，lifecycle 75/0/27 基线保持，guard 20 合约未过=阻断期预期）。切片 G（SessionStore 内存层）已落地：四关全绿 286 tests，lifecycle SESSION 75/0/27 基线保持，guard 阻断期预期。余项：切片 H（plugin 服务面 + tracker 装配 + Q43-A drain 面 + bind-session-tests.py）；dougong requirements.md §4 四分叉（D-V3-1/3/4/5）与 fr 排期（44-B 先行 vs 等 v3）待用户裁决。
 
 ## Current Phase
 Phase 13（fr-session v4 全量——切片 F（持久化运行时）进行中）
@@ -92,14 +92,14 @@ Phase 13（fr-session v4 全量——切片 F（持久化运行时）进行中�
 - **Status:** complete
 
 ### Phase 13: fr-session v4 全量
-- [ ] SessionEvent 全集（判别联合、dsh types.ts 逐字字段、五扩展 log-only）
+- [x] SessionEvent 全集（判别联合、dsh types.ts 逐字字段、五扩展 log-only）——fr-wire 切片 A/B 落地
 - [x] 持久化物理不变量（wx+0600+fsync → link+unlink 发布 → 目录 fsync → append truncate 回滚 → zstd 撕裂尾恢复 → 写租约 POSIX 侧）与世代/版本校验（切片 E）
 - [x] 持久化运行时（切片 F，Q42A'：handle actor worker/tracker/live 200ms 路由/flushAll/stat/list/create/open 流/有界并行 list/版本门/legacy 拒——19 钉测含 10 并发句柄与大会话库极端测）
-- [ ] surface/replace-op 硬约束全集（五类入表面、双闭区间、sourceEventSeqs 校验、折叠编码、双计数）
-- [ ] deriveMessages 投影（不可变请求投影）+ canonical request/header（空 tools 省略、adapterDefaults 条件保留、顺序敏感相等比较）
-- [x] fork（sourceEventSeqs 前缀派生；build_fork_seed + forked closers 已落）+ resume 四拒门禁（store 服务切片）
-- [ ] SessionStore 内存层（prepare/enter/announce/fork/resume 拒绝码族）+ ctx 事件接线（步 3 呈报 dougong 监听器形态）
-- [ ] 对照 REQ-FR-SESSION 场景逐条落测试（75 passed / 27 skipped，余项依赖后续切片）
+- [x] surface/replace-op 硬约束全集（五类入表面、双闭区间、sourceEventSeqs 校验、折叠编码、双计数）——切片 C 落地
+- [x] deriveMessages 投影（不可变请求投影）+ canonical request/header（空 tools 省略、adapterDefaults 条件保留、顺序敏感相等比较）——切片 D 落地
+- [x] fork（sourceEventSeqs 前缀派生；build_fork_seed + forked closers 已落）+ store 侧 restore 原语（切片 G）；host 层 resume 四拒门禁在 Phase 18（PRD:323）
+- [x] SessionStore 内存层（prepare/enter/announce/fork/restore/flush 检查点/四 feed/拒绝码族，切片 G 落地）；跨插件接线面 = 切片 H（plugin 服务面 + tracker 装配 + Q43-A drain 面）
+- [ ] 对照 REQ-FR-SESSION 场景逐条落测试（75 passed / 27 skipped 维持；bind-session-tests.py 绑定基础设施属切片 H）
 - Foundation Note: 本 crate 是管线咽喉：fr-agent-loop/fr-headless 依赖其 deriveMessages/surface 语义，语义字段逐字对齐 dsh types.ts；日志内 turn 编号 1 起（findings 切片 F 节登记）
 - **Status:** in_progress
 

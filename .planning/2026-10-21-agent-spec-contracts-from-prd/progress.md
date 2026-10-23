@@ -255,3 +255,23 @@
 - 测试逮捕真 bug：create_dir_all_mode 并发 mkdir 竞态 EEXIST 上抛（10 并发句柄钉测必现）——修复为 mkdir -p 容忍语义，5× 稳定。
 - 门禁（实跑）：四关全绿（275 tests / clippy 0 / fmt PASS / doc 0）；lifecycle 75/0/27 基线保持；guard --spec-dir specs/generated --min-score 0.7 后台运行中（阻断期预期）。
 - 待用户：切片 F 验收；提交（guard 阻断期 --no-verify 惯例）。
+
+## 2026-10-23 — 切片 G 真源全读 + Q43 呈报（会话恢复后）
+
+- 恢复确认：HEAD b77bac4（切片 F 已提交），工作树净。本轮 = SessionStore 内存层切片（G）前置真源读 + ctx 接线分叉呈报。
+- dsh store 精读（index.ts:380-416/862-897/1095-1345）：核心发现 = 四事件不经内核派发模式，内核仅供监听者快照解析（collectSessionCallbacks :394-396），调用全部手工——created 顺序循环同步 throw 否决（mark-before-emit :1273 + create 生成器 effect 先 yield detach :1111-1122 实现回滚配对 disposal 边）、event/disposed 逐监听者 containment（threw/rejected 双 warn 文案 :398-416）、flush allSettled 全落定后抛注册序首败 + 返回 participated（:1319-1336）。prepare/enter/announce 三段事务细节全录 findings（authoritative collision boundary :1215、detachRequested 延迟兑现、stale capability 守卫 :1252）。
+- dougong 接线面事实：五模式全 tokio async（emit 容错/parallel 聚合/serial-bail 传播/waterfall 续链，events.rs:216-351）；无快照解析公共面（EventStore/begin_dispatch 私有 :131-213）；dylib ABI v2 纯被动拉取（无对外调用/emit/运行时监听注册，dougong-abi lib.rs:199-262；inject 仅声明检查 dougong-dylib:354）。
+- M1 消费方盘点：in-crate tracker + Phase 15-18 跨插件（agent-loop agent.ts:334/runtime-context.ts:134/index.ts:481、compaction-basic:184、terminal-bash:53、agent-instructions:326、headless json-stream）。
+- Q43 集中呈报（A 内部精确总线+宿主泵内核中继（推荐）/ B 内部总线+ABI 升级直发 / C 纯内部总线）：待裁决后动码。架构预告已登记：Phase 15 agent-loop dylib 对外消费通路与 ABI 升级同根。
+- 自纠两件：Edit old_string 转写失真一次（改用唯一锚点子串重做）；一次 Edit 路径笔误（改 Bash heredoc 追加 progress）。
+
+## 2026-10-23 — dougong requirements.md v2 重构定稿待裁（会话后段）
+- 用户三连纠正落地：主题集中（备注随条目内联，零跨节追读）/ 排除清单唯一决定声明 / 可预见需求现在定——第 9 项事件作用域过滤升格结构性排除（应用层所有权原理），九项全部绝对排除、文档无条件项。
+- 产出：~/project/dougong/doc/requirements.md v2，342 行 §1-§7。教训入 memory（exclusion-list-rules）。
+- 待用户：§4 四分叉裁决（D-V3-1/3/4/5）；fr 排期（44-B 先行 vs 等 v3）另案。
+
+## 2026-10-23 — 切片 G 实现：SessionStore 内存层落地
+- 实现：store.rs ~950 行（prepare/enter/announce/create/detach/append×3 feed/flush/fork + 四列表监听者注册表 + DetachHandle 世代守卫）；session.rs 增 from_seed_parts（inheritedEventCount）。10 钉测全过（129 fr-session tests）。
+- 排障：EventListener 类型漏 `>`（heredoc 手误两处，sed+python 修）；session.rs header() 重复（源文件本有，删我加的副本）；unsubscribe 四表异构类型数组编译错（拆四个 retain）；finish_announce/detach 的 announcing→AnnounceState 枚举迁移漏一处 finish_append（编译逮住）；clippy 8 警告全数真修（AnnounceState 枚举化/手写 Debug/fork 早退重构消 clone/let-chain/map_or/文档首段拆分），零 allow。
+- 门禁：四关全绿 286 tests；lifecycle SESSION 75/0/27 基线保持；guard 后台（阻断期预期）。
+- 待用户：切片 G 验收 + 提交（--no-verify 惯例）；下一切片 H = plugin 服务面 + tracker 装配 + drain 面 + 绑定基础设施。
