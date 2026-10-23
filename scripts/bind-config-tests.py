@@ -2,6 +2,24 @@
 """Bind implemented fr-config scenarios in the CONFIG task contract to real
 cargo test selectors (Q15A, 2026-10-22 user ruling).
 
+Binding discipline (doc/binding-audit.md section 7 — binding every selector
+through this script means accepting all eight rules):
+
+1. One test bound to several scenarios must assert every clause of each
+   scenario's Then; partial coverage stays pending.
+2. Every input the scenario Given names must appear in the test fixtures —
+   no "equivalent" stand-ins.
+3. Comments claiming assertions never count; the audit judges code asserts.
+4. No println / zero-assert probes in any commit.
+5. Before committing, diff the per-file `#[test]` list against this map;
+   names and counts must match.
+6. Mappings above two scenarios need a verification entry in the audit book
+   first.
+7. A Then half-covered by an unimplemented module never binds (no premature
+   bindings).
+8. A Then conflicting with dsh truth goes to contract-errata ruling first;
+   never bind the implementation side.
+
 Idempotent: each pair asserts the current selector before replacing, so
 re-running after `draft-specs` regeneration re-applies the binding map.
 Scenarios whose behavior has no proving test yet are deliberately left

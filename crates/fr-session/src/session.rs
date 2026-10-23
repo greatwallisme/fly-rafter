@@ -430,6 +430,11 @@ mod tests {
             .unwrap_or_else(|e| panic!("u2: {e}"));
         let second = session.derive_messages();
         assert_eq!(second.len(), 2);
+        // Same state again: the cached projection replays identically.
+        let snapshot: Vec<Message> = second.iter().map(|message| (*message).clone()).collect();
+        let again = session.derive_messages();
+        let again_owned: Vec<Message> = again.iter().map(|message| (*message).clone()).collect();
+        assert_eq!(again_owned, snapshot);
     }
 
     #[test]
@@ -547,6 +552,8 @@ mod tests {
             }
             _ => panic!("record stays unknown"),
         }
+        // Plugin records never join the ordered surface.
+        assert_eq!(session.surface_nodes(), []);
         let err = session
             .append_record(2, "example/state", serde_json::json!({}))
             .expect_err("bad grammar");
@@ -617,5 +624,1005 @@ mod tests {
         }
         let err = Session::from_seed(header(), gapped).expect_err("gap");
         assert!(err.to_string().contains("seed must be contiguous from 0"));
+    }
+
+    use fr_wire::event::{
+        AssistantAttemptData, AssistantMessageData, DeveloperMessageData, EndSeedData,
+        RequestContextData, RequestContextHolder, StepBoundsData, SystemMessageData, ToolCallData,
+        ToolResultData, TurnEndData, TurnEndReason, TurnEndReasonKind,
+    };
+    use fr_wire::ids::ToolCallId;
+
+    /// Shared disk harness for the 回环 facet: materialize one event as its
+    /// own session log, read it back through the stored-log gate, and
+    /// require deep equality plus a byte-identical wire row.
+    struct TempLog(std::path::PathBuf);
+
+    impl TempLog {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "fr-session-type-{tag}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |duration| duration.as_nanos())
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            Self(dir)
+        }
+
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempLog {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn round_trips_on_disk(
+        tag: &str,
+        seeded: bool,
+        inherited: u64,
+        events: &[SessionEvent],
+        pinned: usize,
+    ) {
+        let root = TempLog::new(tag);
+        let id = fr_wire::ids::SessionId::new("disk-round-trip");
+        let mut meta = header();
+        meta.id = id.clone();
+        meta.is_seeded = seeded;
+        let compression = crate::persist::JsonlCompression::None;
+        crate::persist::io::materialize(root.path(), &meta, inherited, events, compression)
+            .unwrap_or_else(|error| panic!("materialize: {error}"));
+        let path =
+            crate::persist::filename::log_path(root.path(), None, &id, compression).expect("path");
+        let outcome = crate::persist::read::read_stored_log(
+            root.path(),
+            &path,
+            &id,
+            compression,
+            EventVocabulary::core(),
+        )
+        .unwrap_or_else(|error| panic!("read: {error}"));
+        assert_eq!(outcome.events, events);
+        let raw = std::fs::read(&path).expect("raw bytes");
+        let text = String::from_utf8(raw).expect("utf-8 log");
+        let row = text.lines().nth(pinned + 1).expect("event row");
+        assert_eq!(
+            row,
+            serde_json::to_string(&events[pinned]).unwrap_or_default(),
+            "wire row must be byte-identical"
+        );
+    }
+
+    /// The minimal legal carrier the scenario Given describes: a session
+    /// containing the pinned event. Lifecycle-bound types need their
+    /// turn/step brackets; the carrier selects the shape.
+    fn bracketed(event: SessionEvent, carrier: Carrier) {
+        let tag = event.event_type().replace('/', "-");
+        let mut events: Vec<SessionEvent> = Vec::new();
+        let push = |events: &mut Vec<SessionEvent>, seq_value: u64, data: SessionEventData| {
+            events.push(SessionEvent {
+                seq: seq(seq_value),
+                time: i64::try_from(seq_value + 1).expect("seq fits i64"),
+                data,
+                ignorable: None,
+                surface_op: None,
+                source_event_seqs: None,
+            });
+        };
+        match carrier {
+            Carrier::Bare => events.push(event),
+            Carrier::Turn | Carrier::StepOpen => {
+                push(
+                    &mut events,
+                    0,
+                    SessionEventData::TurnStart(TurnStartData { turn: 1 }),
+                );
+                events.push(event);
+            }
+            Carrier::Step => {
+                push(
+                    &mut events,
+                    0,
+                    SessionEventData::TurnStart(TurnStartData { turn: 1 }),
+                );
+                push(
+                    &mut events,
+                    1,
+                    SessionEventData::StepStart(StepBoundsData { turn: 1, step: 1 }),
+                );
+                events.push(event);
+            }
+            Carrier::Full | Carrier::ToolCall | Carrier::ToolResult => {
+                push(
+                    &mut events,
+                    0,
+                    SessionEventData::TurnStart(TurnStartData { turn: 1 }),
+                );
+                push(
+                    &mut events,
+                    1,
+                    SessionEventData::StepStart(StepBoundsData { turn: 1, step: 1 }),
+                );
+                if carrier != Carrier::Full {
+                    events.push(advertised_assistant(2, 1, 1, "c-1"));
+                }
+                if carrier == Carrier::ToolCall {
+                    events.push(event);
+                    events.push(settling_tool_result(4, 1, 1, "c-1"));
+                } else if carrier == Carrier::ToolResult {
+                    events.push(simple_tool_call(3, 1, 1, "c-1"));
+                    events.push(event);
+                } else {
+                    events.push(event);
+                }
+                let step_seq: u64 = if carrier == Carrier::Full { 3 } else { 5 };
+                push(
+                    &mut events,
+                    step_seq,
+                    SessionEventData::StepEnd(StepBoundsData { turn: 1, step: 1 }),
+                );
+                push(
+                    &mut events,
+                    step_seq + 1,
+                    SessionEventData::TurnEnd(TurnEndData {
+                        turn: 1,
+                        reason: TurnEndReason::Known(TurnEndReasonKind::Completed),
+                    }),
+                );
+            }
+        }
+        let pinned = match carrier {
+            Carrier::Bare => 0,
+            Carrier::Turn | Carrier::StepOpen => 1,
+            Carrier::Step | Carrier::Full => 2,
+            Carrier::ToolCall => 3,
+            Carrier::ToolResult => 4,
+        };
+        // The pinned fixture lands at its chain slot; renumber it so the
+        // carrier stays contiguous.
+        events[pinned].seq = seq(pinned as u64);
+        round_trips_on_disk(&tag, false, 0, &events, pinned);
+    }
+
+    /// Carrier shapes for [`bracketed`]: `Bare` (self-bracketing types),
+    /// `Turn` (open-turn tail), `StepOpen` (open-step tail), `Step` (closed
+    /// step inside an open turn), `Full` (closed turn), and the two full
+    /// tool-lifecycle chains.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Carrier {
+        Bare,
+        Turn,
+        StepOpen,
+        Step,
+        Full,
+        ToolCall,
+        ToolResult,
+    }
+
+    /// The dsh 键序锚点 facet: the wire data object's key set equals exactly
+    /// the field set the dsh `SessionEventMap` declares for the type
+    /// (camelCase preserved; optional fields absent in the fixture stay
+    /// absent).
+    fn assert_dsh_data_keys(event: &SessionEvent, expected: &[&str]) {
+        let value =
+            serde_json::to_value(event).unwrap_or_else(|error| panic!("serialize: {error}"));
+        assert_eq!(
+            value.get("type").and_then(serde_json::Value::as_str),
+            Some(event.event_type())
+        );
+        let data = value
+            .get("data")
+            .and_then(serde_json::Value::as_object)
+            .expect("data object");
+        let mut actual: Vec<&str> = data.keys().map(String::as_str).collect();
+        actual.sort_unstable();
+        let mut expected: Vec<&str> = expected.to_vec();
+        expected.sort_unstable();
+        assert_eq!(actual, expected, "wire data keys of {}", event.event_type());
+    }
+
+    /// Both surface-attribution directions for one log-only type: a
+    /// surfaceOp marker is refused and the log-only append stays off the
+    /// fold.
+    fn assert_log_only_role(data: &SessionEventData) {
+        let mut session = Session::new(header());
+        let refused = session
+            .append_surface(1, data.clone(), append_intent())
+            .expect_err("surface on log-only type");
+        assert!(
+            refused
+                .to_string()
+                .contains("is not surface-eligible and cannot carry surfaceOp")
+        );
+        session
+            .append_log_only(1, data.clone())
+            .unwrap_or_else(|error| panic!("log-only: {error}"));
+        assert_eq!(session.surface_nodes(), []);
+    }
+
+    /// Both surface-attribution directions for one surface-eligible type: a
+    /// log-only append is refused and the surface append joins the fold.
+    fn assert_surface_role(data: &SessionEventData) {
+        let mut session = Session::new(header());
+        let refused = session
+            .append_log_only(1, data.clone())
+            .expect_err("log-only on surface type");
+        assert!(
+            refused
+                .to_string()
+                .contains("is surface-eligible and requires a surfaceOp marker")
+        );
+        session
+            .append_surface(1, data.clone(), append_intent())
+            .unwrap_or_else(|error| panic!("surface: {error}"));
+        assert_eq!(session.surface_nodes(), &[seq(0)]);
+    }
+
+    /// An assistant message advertising the tool call `call_id` (the
+    /// lifecycle anchor the relationships gate demands behind tool/call and
+    /// tool/result events).
+    fn advertised_assistant(seq_value: u64, turn: u64, step: u64, call_id: &str) -> SessionEvent {
+        SessionEvent {
+            seq: seq(seq_value),
+            time: i64::try_from(seq_value + 1).expect("seq fits i64"),
+            data: SessionEventData::AssistantMessage(AssistantMessageData {
+                turn,
+                step,
+                message: Message::Known(KnownMessage::Assistant {
+                    id: MessageId::new(format!("a-{seq_value}")),
+                    content: vec![ContentBlock::Known(KnownContentBlock::ToolCall {
+                        id: ToolCallId::new(call_id),
+                        name: "bash".to_owned(),
+                        arguments: "{}".to_owned(),
+                    })],
+                    source: MessageSource::Known(KnownMessageSource::Model {
+                        provider: "deepseek-official".to_owned(),
+                        model: "deepseek-chat".to_owned(),
+                        replay_state: None,
+                        extra: RawObject::new(),
+                    }),
+                }),
+                stream: Vec::new(),
+                usage: None,
+                interrupted: None,
+            }),
+            ignorable: None,
+            surface_op: Some(SurfaceOp::Append(AppendOp)),
+            source_event_seqs: None,
+        }
+    }
+
+    /// The plain `tool/call` companion (the demand side of the lifecycle).
+    fn simple_tool_call(seq_value: u64, turn: u64, step: u64, call_id: &str) -> SessionEvent {
+        SessionEvent {
+            seq: seq(seq_value),
+            time: i64::try_from(seq_value + 1).expect("seq fits i64"),
+            data: SessionEventData::ToolCall(ToolCallData {
+                turn,
+                step,
+                call_id: ToolCallId::new(call_id),
+                name: "bash".to_owned(),
+                arguments: "{}".to_owned(),
+            }),
+            ignorable: None,
+            surface_op: None,
+            source_event_seqs: None,
+        }
+    }
+
+    /// The plain settling `tool/result` companion (the answer side).
+    fn settling_tool_result(seq_value: u64, turn: u64, step: u64, call_id: &str) -> SessionEvent {
+        SessionEvent {
+            seq: seq(seq_value),
+            time: i64::try_from(seq_value + 1).expect("seq fits i64"),
+            data: SessionEventData::ToolResult(ToolResultData {
+                turn,
+                step,
+                message: Message::Known(KnownMessage::Tool {
+                    id: MessageId::new(format!("r-{seq_value}")),
+                    content: vec![ContentBlock::Known(KnownContentBlock::Text {
+                        text: "ok".to_owned(),
+                    })],
+                    source: MessageSource::Known(KnownMessageSource::Tool {
+                        call_id: ToolCallId::new(call_id),
+                        extra: RawObject::new(),
+                    }),
+                    tool_call_id: ToolCallId::new(call_id),
+                    is_error: None,
+                }),
+                error: None,
+                meta: None,
+            }),
+            ignorable: None,
+            surface_op: Some(SurfaceOp::Append(AppendOp)),
+            source_event_seqs: None,
+        }
+    }
+
+    /// One bare event with only its data and surface marker set (the seq
+    /// and time slots are assigned by the chain builders).
+    fn simple_event(data: SessionEventData, surface: bool) -> SessionEvent {
+        SessionEvent {
+            seq: seq(0),
+            time: 1,
+            data,
+            ignorable: None,
+            surface_op: surface.then_some(SurfaceOp::Append(AppendOp)),
+            source_event_seqs: None,
+        }
+    }
+
+    fn pinned_event(data: SessionEventData, surface: bool) -> SessionEvent {
+        SessionEvent {
+            seq: seq(0),
+            time: 1,
+            data,
+            ignorable: None,
+            surface_op: surface.then_some(SurfaceOp::Append(AppendOp)),
+            source_event_seqs: None,
+        }
+    }
+
+    /// Admission + dsh field anchor + both surface directions + file-level
+    /// round trip for `turn/start` (dsh `SessionEventMap['turn/start']`:
+    /// exactly `{ turn }`).
+    #[test]
+    fn turn_start_round_trips() {
+        let data = SessionEventData::TurnStart(TurnStartData { turn: 1 });
+        let event = pinned_event(data, false);
+        assert_eq!(event.event_type(), "turn/start");
+        crate::admission::validate_event_data(&event)
+            .unwrap_or_else(|error| panic!("admission: {error}"));
+        assert_dsh_data_keys(&event, &["turn"]);
+        assert_log_only_role(&event.data);
+        bracketed(event, Carrier::Bare);
+    }
+
+    /// `turn/end` (dsh: exactly `{ turn, reason }`).
+    #[test]
+    fn turn_end_round_trips() {
+        let data = SessionEventData::TurnEnd(TurnEndData {
+            turn: 1,
+            reason: TurnEndReason::Known(TurnEndReasonKind::Completed),
+        });
+        let event = pinned_event(data, false);
+        assert_eq!(event.event_type(), "turn/end");
+        crate::admission::validate_event_data(&event)
+            .unwrap_or_else(|error| panic!("admission: {error}"));
+        assert_dsh_data_keys(&event, &["turn", "reason"]);
+        assert_log_only_role(&event.data);
+        bracketed(event, Carrier::Turn);
+    }
+
+    /// `step/start` (dsh: exactly `{ turn, step }`).
+    #[test]
+    fn step_start_round_trips() {
+        let data = SessionEventData::StepStart(StepBoundsData { turn: 1, step: 1 });
+        let event = pinned_event(data, false);
+        assert_eq!(event.event_type(), "step/start");
+        crate::admission::validate_event_data(&event)
+            .unwrap_or_else(|error| panic!("admission: {error}"));
+        assert_dsh_data_keys(&event, &["turn", "step"]);
+        assert_log_only_role(&event.data);
+        bracketed(event, Carrier::StepOpen);
+    }
+
+    /// `step/end` (dsh: exactly `{ turn, step }`).
+    #[test]
+    fn step_end_round_trips() {
+        let data = SessionEventData::StepEnd(StepBoundsData { turn: 1, step: 1 });
+        let event = pinned_event(data, false);
+        assert_eq!(event.event_type(), "step/end");
+        crate::admission::validate_event_data(&event)
+            .unwrap_or_else(|error| panic!("admission: {error}"));
+        assert_dsh_data_keys(&event, &["turn", "step"]);
+        assert_log_only_role(&event.data);
+        bracketed(event, Carrier::Step);
+    }
+
+    /// `user/message` (dsh: the data IS the `UserMessage` object — no
+    /// turn/step wrapper).
+    #[test]
+    fn user_message_round_trips() {
+        let data = user_data("hello");
+        let event = pinned_event(data, true);
+        assert_eq!(event.event_type(), "user/message");
+        crate::admission::validate_event_data(&event)
+            .unwrap_or_else(|error| panic!("admission: {error}"));
+        assert_dsh_data_keys(&event, &["role", "id", "content", "source"]);
+        assert_surface_role(&event.data);
+        bracketed(event, Carrier::Full);
+    }
+
+    /// `developer/message` (dsh: `{ turn, step, message, headerSeq? }`; the
+    /// fixture carries no additions, so `headerSeq` stays absent).
+    #[test]
+    fn developer_message_round_trips() {
+        let data = SessionEventData::DeveloperMessage(DeveloperMessageData {
+            turn: 1,
+            step: 1,
+            message: Message::Known(KnownMessage::Developer {
+                id: MessageId::new("d-1"),
+                content: vec![],
+                source: MessageSource::Other(
+                    serde_json::json!({"kind": "agent"})
+                        .as_object()
+                        .cloned()
+                        .expect("object"),
+                ),
+            }),
+            header_seq: None,
+        });
+        let event = pinned_event(data, true);
+        assert_eq!(event.event_type(), "developer/message");
+        crate::admission::validate_event_data(&event)
+            .unwrap_or_else(|error| panic!("admission: {error}"));
+        assert_dsh_data_keys(&event, &["turn", "step", "message"]);
+        assert_surface_role(&event.data);
+        bracketed(event, Carrier::Full);
+    }
+
+    /// `system/message` (dsh: exactly `{ turn, step, message }`).
+    #[test]
+    fn system_message_round_trips() {
+        let data = SessionEventData::SystemMessage(SystemMessageData {
+            turn: 1,
+            step: 1,
+            message: Message::Known(KnownMessage::System {
+                id: MessageId::new("s-1"),
+                content: vec![ContentBlock::Known(KnownContentBlock::Text {
+                    text: "prompt".to_owned(),
+                })],
+                source: MessageSource::Known(KnownMessageSource::SystemPrompt {
+                    extra: RawObject::new(),
+                }),
+            }),
+        });
+        let event = pinned_event(data, true);
+        assert_eq!(event.event_type(), "system/message");
+        crate::admission::validate_event_data(&event)
+            .unwrap_or_else(|error| panic!("admission: {error}"));
+        assert_dsh_data_keys(&event, &["turn", "step", "message"]);
+        assert_surface_role(&event.data);
+        bracketed(event, Carrier::Full);
+    }
+
+    /// `assistant/message` (dsh: `{ turn, step, message, stream, usage?,
+    /// interrupted? }`; the fixture carries neither optional field).
+    #[test]
+    fn assistant_message_round_trips() {
+        let data = SessionEventData::AssistantMessage(AssistantMessageData {
+            turn: 1,
+            step: 1,
+            message: Message::Known(KnownMessage::Assistant {
+                id: MessageId::new("a-1"),
+                content: vec![ContentBlock::Known(KnownContentBlock::Text {
+                    text: "reply".to_owned(),
+                })],
+                source: MessageSource::Known(KnownMessageSource::Model {
+                    provider: "deepseek-official".to_owned(),
+                    model: "deepseek-chat".to_owned(),
+                    replay_state: None,
+                    extra: RawObject::new(),
+                }),
+            }),
+            stream: Vec::new(),
+            usage: None,
+            interrupted: None,
+        });
+        let event = pinned_event(data, true);
+        assert_eq!(event.event_type(), "assistant/message");
+        crate::admission::validate_event_data(&event)
+            .unwrap_or_else(|error| panic!("admission: {error}"));
+        assert_dsh_data_keys(&event, &["turn", "step", "message", "stream"]);
+        assert_surface_role(&event.data);
+        bracketed(event, Carrier::Full);
+    }
+
+    /// `assistant/attempt` (dsh: exactly `{ turn, step, stream }`).
+    #[test]
+    fn assistant_attempt_round_trips() {
+        let data = SessionEventData::AssistantAttempt(AssistantAttemptData {
+            turn: 1,
+            step: 1,
+            stream: Vec::new(),
+        });
+        let event = pinned_event(data, false);
+        assert_eq!(event.event_type(), "assistant/attempt");
+        crate::admission::validate_event_data(&event)
+            .unwrap_or_else(|error| panic!("admission: {error}"));
+        assert_dsh_data_keys(&event, &["turn", "step", "stream"]);
+        assert_log_only_role(&event.data);
+        bracketed(event, Carrier::Full);
+    }
+
+    /// `tool/call` (dsh: exactly `{ turn, step, callId, name, arguments }`).
+    #[test]
+    fn tool_call_round_trips() {
+        let data = SessionEventData::ToolCall(ToolCallData {
+            turn: 1,
+            step: 1,
+            call_id: ToolCallId::new("c-1"),
+            name: "bash".to_owned(),
+            arguments: "{}".to_owned(),
+        });
+        let event = pinned_event(data, false);
+        assert_eq!(event.event_type(), "tool/call");
+        crate::admission::validate_event_data(&event)
+            .unwrap_or_else(|error| panic!("admission: {error}"));
+        assert_dsh_data_keys(&event, &["turn", "step", "callId", "name", "arguments"]);
+        assert_log_only_role(&event.data);
+        bracketed(event, Carrier::ToolCall);
+    }
+
+    /// `tool/result` (dsh: `{ turn, step, message, error?, meta? }`; the
+    /// fixture carries neither optional field).
+    #[test]
+    fn tool_result_round_trips() {
+        let data = SessionEventData::ToolResult(ToolResultData {
+            turn: 1,
+            step: 1,
+            message: Message::Known(KnownMessage::Tool {
+                id: MessageId::new("r-1"),
+                content: vec![ContentBlock::Known(KnownContentBlock::Text {
+                    text: "ok".to_owned(),
+                })],
+                source: MessageSource::Known(KnownMessageSource::Tool {
+                    call_id: ToolCallId::new("c-1"),
+                    extra: RawObject::new(),
+                }),
+                tool_call_id: ToolCallId::new("c-1"),
+                is_error: None,
+            }),
+            error: None,
+            meta: None,
+        });
+        let event = pinned_event(data, true);
+        assert_eq!(event.event_type(), "tool/result");
+        crate::admission::validate_event_data(&event)
+            .unwrap_or_else(|error| panic!("admission: {error}"));
+        assert_dsh_data_keys(&event, &["turn", "step", "message"]);
+        assert_surface_role(&event.data);
+        bracketed(event, Carrier::ToolResult);
+    }
+
+    /// `request/header` (dsh: `{ header, reason, startsSeries? }`; the
+    /// fixture carries no series marker).
+    #[test]
+    fn request_header_round_trips() {
+        let data = SessionEventData::RequestHeader(RequestHeaderData {
+            header: EpochHeader {
+                config: CallConfig {
+                    provider: "deepseek-official".to_owned(),
+                    model: "deepseek-chat".to_owned(),
+                    controls: CallControls::default(),
+                },
+                adapter_defaults: None,
+                tools: None,
+            },
+            reason: RequestHeaderReason::Initial,
+            starts_series: None,
+        });
+        let event = pinned_event(data, false);
+        assert_eq!(event.event_type(), "request/header");
+        crate::admission::validate_event_data(&event)
+            .unwrap_or_else(|error| panic!("admission: {error}"));
+        assert_dsh_data_keys(&event, &["header", "reason"]);
+        assert_log_only_role(&event.data);
+        bracketed(event, Carrier::Full);
+    }
+
+    /// `request/context` (dsh: the data is the `RequestContext` snapshot —
+    /// exactly `{ context }` wrapping `{ provider, model, contextWindow?,
+    /// systemPromptUpdate? }`).
+    #[test]
+    fn request_context_round_trips() {
+        let data = SessionEventData::RequestContext(RequestContextHolder {
+            context: RequestContextData {
+                provider: "deepseek-official".to_owned(),
+                model: "deepseek-chat".to_owned(),
+                context_window: None,
+                system_prompt_update: None,
+            },
+        });
+        let event = pinned_event(data, false);
+        assert_eq!(event.event_type(), "request/context");
+        crate::admission::validate_event_data(&event)
+            .unwrap_or_else(|error| panic!("admission: {error}"));
+        assert_dsh_data_keys(&event, &["context"]);
+        let value = serde_json::to_value(&event).unwrap_or_default();
+        let context = value
+            .pointer("/data/context")
+            .and_then(serde_json::Value::as_object)
+            .expect("context object");
+        let mut keys: Vec<&str> = context.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["model", "provider"]);
+        assert_log_only_role(&event.data);
+        bracketed(event, Carrier::Full);
+    }
+
+    /// `session/end-seed` (dsh: exactly `{ inherited?: true }`).
+    #[test]
+    fn session_end_seed_round_trips() {
+        let data = SessionEventData::SessionEndSeed(EndSeedData {
+            inherited: Some(TrueOnly),
+        });
+        let event = pinned_event(data, false);
+        assert_eq!(event.event_type(), "session/end-seed");
+        crate::admission::validate_event_data(&event)
+            .unwrap_or_else(|error| panic!("admission: {error}"));
+        assert_dsh_data_keys(&event, &["inherited"]);
+        assert_log_only_role(&event.data);
+        // The tagged marker demands a seeded log whose inherited count
+        // covers it (marker at seq 0 -> exactly one inherited event).
+        // The tagged marker demands a seeded log whose inherited count
+        // covers it (marker at seq 0 -> exactly one inherited event).
+        round_trips_on_disk("session-end-seed", true, 1, &[event], 0);
+    }
+
+    /// The five content blocks dsh admits in every role: the block axis
+    /// shared by the role x block matrix (`tool-addition`/`tool-removal`
+    /// are developer-only and ride the developer arm separately).
+    fn universal_blocks() -> Vec<ContentBlock> {
+        use fr_wire::content::{FileAttachmentRef, ImageAttachmentRef, ImageMediaType};
+        vec![
+            ContentBlock::Known(KnownContentBlock::Text {
+                text: "t".to_owned(),
+            }),
+            ContentBlock::Known(KnownContentBlock::Reasoning {
+                text: "r".to_owned(),
+            }),
+            ContentBlock::Known(KnownContentBlock::Image {
+                attachment: ImageAttachmentRef {
+                    attachment_id: fr_wire::ids::AttachmentId::new("att-1"),
+                    media_type: ImageMediaType::Png,
+                    bytes: 1,
+                    width: 1,
+                    height: 1,
+                    name: None,
+                    original_dimensions: None,
+                },
+                offloaded: None,
+            }),
+            ContentBlock::Known(KnownContentBlock::File {
+                attachment: FileAttachmentRef {
+                    attachment_id: fr_wire::ids::AttachmentId::new("att-2"),
+                    name: "a.bin".to_owned(),
+                    bytes: 1,
+                },
+            }),
+            ContentBlock::Known(KnownContentBlock::ToolCall {
+                id: ToolCallId::new("call-x"),
+                name: "bash".to_owned(),
+                arguments: "{}".to_owned(),
+            }),
+        ]
+    }
+
+    /// The two developer-only tool-change blocks (dsh refuses them in every
+    /// other role's content).
+    fn tool_change_blocks() -> Vec<ContentBlock> {
+        vec![
+            ContentBlock::Known(KnownContentBlock::ToolAddition {
+                tool_name: "bash".to_owned(),
+            }),
+            ContentBlock::Known(KnownContentBlock::ToolRemoval {
+                tool_name: "bash".to_owned(),
+            }),
+        ]
+    }
+
+    /// The full legal chain for the role x block matrix: brackets, a
+    /// request/header carrying the `bash` schema the developer additions
+    /// reference, and the five role messages each carrying their blocks.
+    fn role_block_chain() -> Vec<SessionEvent> {
+        let mut events: Vec<SessionEvent> = Vec::new();
+        let mut push = |seq_value: u64, data: SessionEventData, surface: bool| {
+            events.push(simple_event_at(seq_value, data, surface));
+        };
+        push(
+            0,
+            SessionEventData::TurnStart(TurnStartData { turn: 1 }),
+            false,
+        );
+        push(1, header_with_bash_schema(), false);
+        push(
+            2,
+            SessionEventData::StepStart(StepBoundsData { turn: 1, step: 1 }),
+            false,
+        );
+        push(3, system_message_data(), true);
+        push(4, developer_message_data(), true);
+        push(5, user_message_data_matrix(), true);
+        push(6, assistant_message_data_matrix(), true);
+        push(
+            7,
+            SessionEventData::ToolCall(ToolCallData {
+                turn: 1,
+                step: 1,
+                call_id: ToolCallId::new("call-x"),
+                name: "bash".to_owned(),
+                arguments: "{}".to_owned(),
+            }),
+            false,
+        );
+        push(8, tool_result_message_data(), true);
+        push(
+            9,
+            SessionEventData::StepEnd(StepBoundsData { turn: 1, step: 1 }),
+            false,
+        );
+        push(
+            10,
+            SessionEventData::TurnEnd(TurnEndData {
+                turn: 1,
+                reason: TurnEndReason::Known(TurnEndReasonKind::Completed),
+            }),
+            false,
+        );
+        events
+    }
+
+    fn simple_event_at(seq_value: u64, data: SessionEventData, surface: bool) -> SessionEvent {
+        let mut event = simple_event(data, surface);
+        event.seq = seq(seq_value);
+        event.time = i64::try_from(seq_value + 1).expect("seq fits i64");
+        event
+    }
+
+    fn header_with_bash_schema() -> SessionEventData {
+        SessionEventData::RequestHeader(RequestHeaderData {
+            header: EpochHeader {
+                config: CallConfig {
+                    provider: "deepseek-official".to_owned(),
+                    model: "deepseek-chat".to_owned(),
+                    controls: CallControls::default(),
+                },
+                adapter_defaults: None,
+                tools: Some(vec![fr_wire::call_config::ToolSchema {
+                    defer_loading: None,
+                    name: "bash".to_owned(),
+                    description: "d".to_owned(),
+                    parameters: serde_json::json!({"type": "object"})
+                        .as_object()
+                        .cloned()
+                        .expect("object"),
+                }]),
+            },
+            reason: RequestHeaderReason::Initial,
+            starts_series: None,
+        })
+    }
+
+    fn system_message_data() -> SessionEventData {
+        SessionEventData::SystemMessage(SystemMessageData {
+            turn: 1,
+            step: 1,
+            message: Message::Known(KnownMessage::System {
+                id: MessageId::new("sys-1"),
+                content: universal_blocks(),
+                source: MessageSource::Known(KnownMessageSource::SystemPrompt {
+                    extra: RawObject::new(),
+                }),
+            }),
+        })
+    }
+
+    fn developer_message_data() -> SessionEventData {
+        let mut content = universal_blocks();
+        content.extend(tool_change_blocks());
+        SessionEventData::DeveloperMessage(DeveloperMessageData {
+            turn: 1,
+            step: 1,
+            message: Message::Known(KnownMessage::Developer {
+                id: MessageId::new("dev-1"),
+                content,
+                source: MessageSource::Other(
+                    serde_json::json!({"kind": "agent"})
+                        .as_object()
+                        .cloned()
+                        .expect("object"),
+                ),
+            }),
+            header_seq: Some(seq(1)),
+        })
+    }
+
+    fn user_message_data_matrix() -> SessionEventData {
+        SessionEventData::UserMessage(Message::Known(KnownMessage::User {
+            id: MessageId::new("usr-1"),
+            content: universal_blocks(),
+            source: MessageSource::Known(KnownMessageSource::User {
+                extra: RawObject::new(),
+            }),
+        }))
+    }
+
+    fn assistant_message_data_matrix() -> SessionEventData {
+        SessionEventData::AssistantMessage(AssistantMessageData {
+            turn: 1,
+            step: 1,
+            message: Message::Known(KnownMessage::Assistant {
+                id: MessageId::new("asst-1"),
+                content: universal_blocks(),
+                source: MessageSource::Known(KnownMessageSource::Model {
+                    provider: "deepseek-official".to_owned(),
+                    model: "deepseek-chat".to_owned(),
+                    replay_state: None,
+                    extra: RawObject::new(),
+                }),
+            }),
+            stream: Vec::new(),
+            usage: None,
+            interrupted: None,
+        })
+    }
+
+    fn tool_result_message_data() -> SessionEventData {
+        SessionEventData::ToolResult(ToolResultData {
+            turn: 1,
+            step: 1,
+            message: Message::Known(KnownMessage::Tool {
+                id: MessageId::new("tool-1"),
+                content: universal_blocks(),
+                source: MessageSource::Known(KnownMessageSource::Tool {
+                    call_id: ToolCallId::new("call-x"),
+                    extra: RawObject::new(),
+                }),
+                tool_call_id: ToolCallId::new("call-x"),
+                is_error: None,
+            }),
+            error: None,
+            meta: None,
+        })
+    }
+
+    /// The role x block matrix at file level: all five roles carry the
+    /// universal blocks (the developer arm additionally both tool-change
+    /// blocks), and the stored log restores every role tag and block type
+    /// verbatim while a misplace tool-change refuses.
+    #[test]
+    fn roles_and_blocks_round_trip() {
+        const UNIVERSAL_TYPES: [&str; 5] = ["text", "reasoning", "image", "file", "tool-call"];
+        const DEVELOPER_TYPES: [&str; 7] = [
+            "text",
+            "reasoning",
+            "image",
+            "file",
+            "tool-call",
+            "tool-addition",
+            "tool-removal",
+        ];
+        let events = role_block_chain();
+        let root = TempLog::new("roles-blocks");
+        let id = fr_wire::ids::SessionId::new("roles-blocks");
+        let mut meta = header();
+        meta.id = id.clone();
+        let compression = crate::persist::JsonlCompression::None;
+        crate::persist::io::materialize(root.path(), &meta, 0, &events, compression)
+            .unwrap_or_else(|error| panic!("materialize: {error}"));
+        let path =
+            crate::persist::filename::log_path(root.path(), None, &id, compression).expect("path");
+        let outcome = crate::persist::read::read_stored_log(
+            root.path(),
+            &path,
+            &id,
+            compression,
+            EventVocabulary::core(),
+        )
+        .unwrap_or_else(|error| panic!("read: {error}"));
+        assert_eq!(outcome.events, events);
+        // Every role message restored its block types in order: 5 roles x
+        // 5 universal blocks, and the developer arm additionally carries
+        // both tool-change blocks (27 legal role x block instances).
+        for event in &outcome.events {
+            let Some(message) = role_message(event) else {
+                continue;
+            };
+            let Message::Known(known) = message else {
+                panic!("known role");
+            };
+            let types: Vec<String> = known
+                .content()
+                .iter()
+                .map(|block| {
+                    serde_json::to_value(block)
+                        .unwrap_or_default()
+                        .get("type")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned()
+                })
+                .collect();
+            if known.role_name() == "developer" {
+                assert_eq!(types, DEVELOPER_TYPES, "developer blocks");
+            } else {
+                assert_eq!(types, UNIVERSAL_TYPES, "role {}", known.role_name());
+            }
+        }
+        // The placement rule is part of the matrix: a tool-change block
+        // outside a developer message refuses at the stored-log gate.
+        let mut smuggled = events;
+        let SessionEventData::UserMessage(message) = &mut smuggled[5].data else {
+            panic!("user row");
+        };
+        if let Message::Known(KnownMessage::User { content, .. }) = message {
+            content.push(ContentBlock::Known(KnownContentBlock::ToolAddition {
+                tool_name: "bash".to_owned(),
+            }));
+        }
+        let smuggled_root = TempLog::new("roles-blocks-refusal");
+        crate::persist::io::materialize(smuggled_root.path(), &meta, 0, &smuggled, compression)
+            .unwrap_or_else(|error| panic!("materialize smuggled: {error}"));
+        let smuggled_path =
+            crate::persist::filename::log_path(smuggled_root.path(), None, &id, compression)
+                .expect("smuggled path");
+        let smuggled_error = crate::persist::read::read_stored_log(
+            smuggled_root.path(),
+            &smuggled_path,
+            &id,
+            compression,
+            EventVocabulary::core(),
+        )
+        .expect_err("tool-addition outside developer refuses");
+        assert!(
+            smuggled_error
+                .message()
+                .contains("tool-addition requires developer role")
+        );
+    }
+
+    /// The message payload of a message-producing event, or `None` for the
+    /// non-message rows of the chain.
+    fn role_message(event: &SessionEvent) -> Option<&Message> {
+        match &event.data {
+            SessionEventData::UserMessage(message)
+            | SessionEventData::SystemMessage(fr_wire::event::SystemMessageData {
+                message, ..
+            })
+            | SessionEventData::DeveloperMessage(fr_wire::event::DeveloperMessageData {
+                message,
+                ..
+            })
+            | SessionEventData::AssistantMessage(fr_wire::event::AssistantMessageData {
+                message,
+                ..
+            })
+            | SessionEventData::ToolResult(fr_wire::event::ToolResultData { message, .. }) => {
+                Some(message)
+            }
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn ptc_subcall_records_stay_out_of_derived_messages() {
+        // tool/ptc-dispatch* are plugin-owned log-only records (PRD 7.4):
+        // deriveMessages excludes both the start marker and the settled
+        // record.
+        use fr_wire::event::UnknownEventData;
+        let mut session = Session::new(header());
+        for (time, type_name) in [(1, "tool/ptc-dispatch-start"), (2, "tool/ptc-dispatch")] {
+            session
+                .append_log_only(
+                    time,
+                    SessionEventData::Unknown(UnknownEventData {
+                        type_name: type_name.to_owned(),
+                        data: RawObject::new(),
+                    }),
+                )
+                .unwrap_or_else(|error| panic!("log-only {type_name}: {error}"));
+        }
+        let messages = session.derive_messages();
+        assert!(
+            messages.is_empty(),
+            "no ptc subcall message may project: {messages:?}"
+        );
     }
 }

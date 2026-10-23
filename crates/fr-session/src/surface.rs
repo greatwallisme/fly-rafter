@@ -540,7 +540,10 @@ mod tests {
     }
 
     #[test]
-    fn replace_missing_coverage_is_rejected() {
+    fn illegal_replace_is_rejected() {
+        // Both refusals the illegal-replace scenario names: a replacement
+        // must cite every shadowed surface node, and assistant messages
+        // embed their stream so they never carry source seqs.
         let mut replacement = tool_result(2, "c-1", "compacted");
         replacement.surface_op = Some(SurfaceOp::Replace(ReplaceOp {
             op: ReplaceTag,
@@ -554,10 +557,7 @@ mod tests {
             err.message
                 .contains("must include every shadowed surface node")
         );
-    }
 
-    #[test]
-    fn assistant_message_forbids_source_event_seqs() {
         let mut assistant = append_user(0, "x");
         assistant.data = SessionEventData::AssistantMessage(AssistantMessageData {
             turn: 0,

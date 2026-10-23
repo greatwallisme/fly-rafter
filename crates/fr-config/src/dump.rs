@@ -1608,7 +1608,7 @@ mod tests {
     }
 
     #[test]
-    fn dump_config_and_schema_generated_from_real_assembly() {
+    fn composed_layers_agree_between_dump_and_schema_projection() {
         // Both dump commands are products of the real assembly: the YAML
         // dump composes the same layers the schema dump inspects, so the
         // row count and the entry count must agree (PRD 6.3, M1 check 5).

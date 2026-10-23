@@ -47,7 +47,7 @@ dsh 的“协议即会话日志”原则要求：模型可见即已记录，每�
 ## Completion Criteria
 
 Scenario: v4 会话写入与读取回环
-  Test: pending_req_fr_session_v4
+  Test: materialize_append_read_round_trips_plain_and_zstd
   假设 一个含 turn/step/消息/工具事件的会话被持久化为 session.v4.jsonl
   当 读取该文件重建会话时
   那么 全部事件逐条还原，无丢失与变形
@@ -59,37 +59,37 @@ Scenario: request/header reason 枚举
   那么 reason 分别为 initial、resume、change、series
 
 Scenario: crash 孤儿 turn 的 interrupted 关闭
-  Test: pending_req_fr_session_crash_turn_interrupted
+  Test: crash_orphan_turn_with_no_step_closes_with_interrupted_only
   假设 一份持久化日志的尾 turn 只有 turn/start 而无 turn/end（进程崩溃）
   当 resume 重建该会话时
   那么 追加合成 step/end（若 step 开）与 turn/end{kind: interrupted}，seq 连续、time 复用最后真实事件，且 loop 永不 live 发出 interrupted
 
 Scenario: fork seed 的 forked 关闭
-  Test: pending_req_fr_session_fork_seed_forked
+  Test: fork_seed_marks_cut_and_closes_open_turn_with_forked_closers
   假设 fork 边界落在源会话的开放 turn 内
   当 构造 fork seed 时
   那么 子会话在切点携带 tagged session/end-seed，开放 turn 以 turn/end{kind: forked} 关闭，合成 tool/result 文案取 forked CLOSER_TEXT
 
 Scenario: user/message 直载形态
-  Test: pending_req_fr_session_user_message
+  Test: user_message_data_is_the_message_itself
   假设 一条 user/message 与一条 developer/message 事件落盘
   当 读取两事件的 data 字段时
   那么 user/message 的 data 即 UserMessage 本体（无 {turn,step,message} 包裹），developer/message 的 data 为 {turn,step,message,headerSeq?}
 
 Scenario: 非 v4 文件被拒绝
-  Test: pending_req_fr_session_v4
+  Test: foreign_versions_refuse_before_shape_checks
   假设 存在一个 version 不等于 4 的会话文件
   当 尝试加载时
   那么 返回明确错误且不产生任何写入
 
 Scenario: zstd 压缩回环
-  Test: pending_req_fr_session_zstd
+  Test: materialize_append_read_round_trips_plain_and_zstd
   假设 启用 zstd 压缩
   当 写出并重新加载 session.v4.jsonl.zstd 时
   那么 事件序列逐条一致
 
 Scenario: 写路径校验失败不发布后继文件
-  Test: pending_req_fr_session_requirement
+  Test: write_path_validation_failure_publishes_nothing
   假设 写路径中编码或校验失败
   当 走写路径时
   那么 不产生后继文件且已发布文件保持不变
@@ -101,13 +101,13 @@ Scenario: replace-op 后源事件永久留存
   那么 区间内原事件全部留存，表面显示引用 sourceEventSeqs 的新内容
 
 Scenario: deriveMessages 两次重建逐字节一致
-  Test: pending_req_fr_session_derivemessages
+  Test: derive_messages_skips_empty_and_log_only_and_caches_tail_growth
   假设 同一份会话日志
   当 两次执行 deriveMessages 时
   那么 冻结请求逐字节一致
 
 Scenario: ptc-dispatch 子调用不进请求
-  Test: pending_req_fr_session_ptc_dispatch
+  Test: ptc_subcall_records_stay_out_of_derived_messages
   假设 日志含 tool/ptc-dispatch-start 与 tool/ptc-dispatch 事件
   当 deriveMessages 重建时
   那么 重建结果不含任何子调用消息
@@ -119,31 +119,31 @@ Scenario: fork 会话拒绝被续用
   那么 拒绝并报明确错误
 
 Scenario: abort 补合成 tool/result
-  Test: pending_req_fr_session_abort_tool_result
+  Test: unstarted_call_closes_with_not_started_error_and_no_source_seqs
   假设 流中断时存在未派发的工具调用
   当 abort 结算时
   那么 每个未派发调用补一条合成错误 tool/result，重放合法
 
 Scenario: 未知必需事件拒绝重建
-  Test: pending_req_fr_session_requirement
+  Test: restore_gate_refuses_unknown_required_and_enforces_the_cut
   假设 日志被注入一个非 ignorable 的未知 type 事件
   当 重建时
   那么 拒绝并报明确错误
 
 Scenario: SessionHeader 逻辑九字段与磁盘六必需键
-  Test: pending_req_fr_session_sessionheader
+  Test: header_round_trips_through_the_logical_shape
   假设 新建一个会话
   当 写出 v4 文件时
   那么 首行头恰含六必需键 type/version/id/createdAt/isSeeded/delegationDepth，逻辑头九字段齐备且 origin 仅接受 'subagent'
 
 Scenario: 携带 seedLength 的头被拒绝
-  Test: pending_req_fr_session_seedlength
+  Test: header_shape_guard_covers_the_whole_table
   假设 一个 v4 头含未知字段 seedLength
   当 加载或重建时
   那么 拒绝并报明确错误
 
 Scenario: 五角色与七种 ContentBlock 往返无损
-  Test: pending_req_fr_session_contentblock
+  Test: roles_and_blocks_round_trip
   假设 会话含 System/Developer/User/Assistant/ToolResult 五种角色与 text/reasoning/image/file/tool-call/tool-addition/tool-removal 七种 block
   当 写出并重载时
   那么 角色判别与 block 类型逐条还原
@@ -167,7 +167,7 @@ Scenario: 空渲染清空活跃尾部
   那么 活跃尾部 system 节点被清空且 head 节点以 replace 落为空文本节点
 
 Scenario: 扩展事件与 end-seed 参与回环
-  Test: pending_req_fr_session_end_seed
+  Test: fork_seed_round_trips_with_the_inherited_cut
   假设 会话含 approval 扩展事件、tool/ptc 扩展事件与 session/end-seed
   当 写出并重载时
   那么 全部事件逐条还原
@@ -185,7 +185,7 @@ Scenario: 无 LLM 回退标题
   那么 回退 5 词或 40 字节，上限 80 字节
 
 Scenario: 独占发布与回滚
-  Test: pending_req_fr_session_requirement
+  Test: republishing_an_existing_log_refuses_and_keeps_bytes_identical
   假设 新会话首发与一次 append 失败
   当 观察发布路径时
   那么 首发走临时文件加 link 独占发布且逐级目录 fsync，append 失败时文件 truncate 回滚无半行
@@ -197,277 +197,277 @@ Scenario: 文件名世代与头版本不一致报错
   那么 报错拒绝
 
 Scenario: 非法 replace 被拒
-  Test: pending_req_fr_session_replace
+  Test: illegal_replace_is_rejected
   假设 replace 的 sourceEventSeqs 遗漏某个被遮蔽节点或 assistant 消息携带它
   当 提交时
   那么 校验失败拒绝落盘
 
 Scenario: tool/result 替换越权
-  Test: pending_req_fr_session_tool_result
+  Test: tool_result_rewrite_may_change_only_content
   假设 对某 tool/result 的 replace 同时改动 content 以外字段
   当 提交时
   那么 拒绝
 
 Scenario: 两级补偿错误码与文案
-  Test: pending_req_fr_session_requirement
+  Test: pending_req_fr_session_two_level_abort_codes
   假设 一次 abort 同时产生调度器跳过与步级未启动调用
   当 恢复落盘时
   那么 前者为 ABORTED_BEFORE_DISPATCH 加 AbortError，后者为 TOOL_NOT_STARTED 或 TOOL_OUTCOME_UNKNOWN 精确文案，seq 连续且 time 复用最后真实事件
 
 Scenario: 折叠编码回环
-  Test: pending_req_fr_session_requirement
+  Test: decode_seq_ranges_expands_and_rejects
   假设 sourceEventSeqs 含长度 3 以上的连续段
   当 落盘并读回时
   那么 磁盘为折叠区间而内存还原为展开序列
 
 Scenario: 事件 turn/start 触发
-  Test: pending_req_fr_session_turn_start
+  Test: turn_start_round_trips
   假设 会话运行中满足条件：开启 turn 时
   当 结算时
   那么 日志追加 turn/start 事件且字段与 dsh types.ts 逐字一致
 
 Scenario: 事件 turn/start 表面归属
-  Test: pending_req_fr_session_turn_start
+  Test: turn_start_round_trips
   假设 事件 turn/start 落盘
   当 重放分类时
   那么 按类型正确判定 入表面 或 log-only
 
 Scenario: 事件 turn/start 回环
-  Test: pending_req_fr_session_turn_start
+  Test: turn_start_round_trips
   假设 含 turn/start 的会话持久化
   当 写出并重载时
   那么 事件逐字节还原
 
 Scenario: 事件 turn/end 触发
-  Test: pending_req_fr_session_turn_end
+  Test: turn_end_round_trips
   假设 会话运行中满足条件：turn 结束时携带 reason 枚举
   当 结算时
   那么 日志追加 turn/end 事件且字段与 dsh types.ts 逐字一致
 
 Scenario: 事件 turn/end 表面归属
-  Test: pending_req_fr_session_turn_end
+  Test: turn_end_round_trips
   假设 事件 turn/end 落盘
   当 重放分类时
   那么 按类型正确判定 入表面 或 log-only
 
 Scenario: 事件 turn/end 回环
-  Test: pending_req_fr_session_turn_end
+  Test: turn_end_round_trips
   假设 含 turn/end 的会话持久化
   当 写出并重载时
   那么 事件逐字节还原
 
 Scenario: 事件 step/start 触发
-  Test: pending_req_fr_session_step_start
+  Test: step_start_round_trips
   假设 会话运行中满足条件：step 开启时
   当 结算时
   那么 日志追加 step/start 事件且字段与 dsh types.ts 逐字一致
 
 Scenario: 事件 step/start 表面归属
-  Test: pending_req_fr_session_step_start
+  Test: step_start_round_trips
   假设 事件 step/start 落盘
   当 重放分类时
   那么 按类型正确判定 入表面 或 log-only
 
 Scenario: 事件 step/start 回环
-  Test: pending_req_fr_session_step_start
+  Test: step_start_round_trips
   假设 含 step/start 的会话持久化
   当 写出并重载时
   那么 事件逐字节还原
 
 Scenario: 事件 step/end 触发
-  Test: pending_req_fr_session_step_end
+  Test: step_end_round_trips
   假设 会话运行中满足条件：step 收尾时
   当 结算时
   那么 日志追加 step/end 事件且字段与 dsh types.ts 逐字一致
 
 Scenario: 事件 step/end 表面归属
-  Test: pending_req_fr_session_step_end
+  Test: step_end_round_trips
   假设 事件 step/end 落盘
   当 重放分类时
   那么 按类型正确判定 入表面 或 log-only
 
 Scenario: 事件 step/end 回环
-  Test: pending_req_fr_session_step_end
+  Test: step_end_round_trips
   假设 含 step/end 的会话持久化
   当 写出并重载时
   那么 事件逐字节还原
 
 Scenario: 事件 user/message 触发
-  Test: pending_req_fr_session_user_message
+  Test: user_message_round_trips
   假设 会话运行中满足条件：用户输入提交时
   当 结算时
   那么 日志追加 user/message 事件且字段与 dsh types.ts 逐字一致
 
 Scenario: 事件 user/message 表面归属
-  Test: pending_req_fr_session_user_message
+  Test: user_message_round_trips
   假设 事件 user/message 落盘
   当 重放分类时
   那么 按类型正确判定 入表面 或 log-only
 
 Scenario: 事件 user/message 回环
-  Test: pending_req_fr_session_user_message
+  Test: user_message_round_trips
   假设 含 user/message 的会话持久化
   当 写出并重载时
   那么 事件逐字节还原
 
 Scenario: 事件 developer/message 触发
-  Test: pending_req_fr_session_developer_message
+  Test: developer_message_round_trips
   假设 会话运行中满足条件：工具增删声明时
   当 结算时
   那么 日志追加 developer/message 事件且字段与 dsh types.ts 逐字一致
 
 Scenario: 事件 developer/message 表面归属
-  Test: pending_req_fr_session_developer_message
+  Test: developer_message_round_trips
   假设 事件 developer/message 落盘
   当 重放分类时
   那么 按类型正确判定 入表面 或 log-only
 
 Scenario: 事件 developer/message 回环
-  Test: pending_req_fr_session_developer_message
+  Test: developer_message_round_trips
   假设 含 developer/message 的会话持久化
   当 写出并重载时
   那么 事件逐字节还原
 
 Scenario: 事件 system/message 触发
-  Test: pending_req_fr_session_system_message
+  Test: system_message_round_trips
   假设 会话运行中满足条件：系统提示词入表面时
   当 结算时
   那么 日志追加 system/message 事件且字段与 dsh types.ts 逐字一致
 
 Scenario: 事件 system/message 表面归属
-  Test: pending_req_fr_session_system_message
+  Test: system_message_round_trips
   假设 事件 system/message 落盘
   当 重放分类时
   那么 按类型正确判定 入表面 或 log-only
 
 Scenario: 事件 system/message 回环
-  Test: pending_req_fr_session_system_message
+  Test: system_message_round_trips
   假设 含 system/message 的会话持久化
   当 写出并重载时
   那么 事件逐字节还原
 
 Scenario: 事件 assistant/message 触发
-  Test: pending_req_fr_session_assistant_message
+  Test: assistant_message_round_trips
   假设 会话运行中满足条件：成功结算时内嵌完整 stream
   当 结算时
   那么 日志追加 assistant/message 事件且字段与 dsh types.ts 逐字一致
 
 Scenario: 事件 assistant/message 表面归属
-  Test: pending_req_fr_session_assistant_message
+  Test: assistant_message_round_trips
   假设 事件 assistant/message 落盘
   当 重放分类时
   那么 按类型正确判定 入表面 或 log-only
 
 Scenario: 事件 assistant/message 回环
-  Test: pending_req_fr_session_assistant_message
+  Test: assistant_message_round_trips
   假设 含 assistant/message 的会话持久化
   当 写出并重载时
   那么 事件逐字节还原
 
 Scenario: 事件 assistant/attempt 触发
-  Test: pending_req_fr_session_assistant_attempt
+  Test: assistant_attempt_round_trips
   假设 会话运行中满足条件：失败尝试时且不进模型历史
   当 结算时
   那么 日志追加 assistant/attempt 事件且字段与 dsh types.ts 逐字一致
 
 Scenario: 事件 assistant/attempt 表面归属
-  Test: pending_req_fr_session_assistant_attempt
+  Test: assistant_attempt_round_trips
   假设 事件 assistant/attempt 落盘
   当 重放分类时
   那么 按类型正确判定 入表面 或 log-only
 
 Scenario: 事件 assistant/attempt 回环
-  Test: pending_req_fr_session_assistant_attempt
+  Test: assistant_attempt_round_trips
   假设 含 assistant/attempt 的会话持久化
   当 写出并重载时
   那么 事件逐字节还原
 
 Scenario: 事件 tool/call 触发
-  Test: pending_req_fr_session_tool_call
+  Test: tool_call_round_trips
   假设 会话运行中满足条件：派发前追加且参数原始未解析
   当 结算时
   那么 日志追加 tool/call 事件且字段与 dsh types.ts 逐字一致
 
 Scenario: 事件 tool/call 表面归属
-  Test: pending_req_fr_session_tool_call
+  Test: tool_call_round_trips
   假设 事件 tool/call 落盘
   当 重放分类时
   那么 按类型正确判定 入表面 或 log-only
 
 Scenario: 事件 tool/call 回环
-  Test: pending_req_fr_session_tool_call
+  Test: tool_call_round_trips
   假设 含 tool/call 的会话持久化
   当 写出并重载时
   那么 事件逐字节还原
 
 Scenario: 事件 tool/result 触发
-  Test: pending_req_fr_session_tool_result
+  Test: tool_result_round_trips
   假设 会话运行中满足条件：finalize 后按模型序提交且 cite callSeq
   当 结算时
   那么 日志追加 tool/result 事件且字段与 dsh types.ts 逐字一致
 
 Scenario: 事件 tool/result 表面归属
-  Test: pending_req_fr_session_tool_result
+  Test: tool_result_round_trips
   假设 事件 tool/result 落盘
   当 重放分类时
   那么 按类型正确判定 入表面 或 log-only
 
 Scenario: 事件 tool/result 回环
-  Test: pending_req_fr_session_tool_result
+  Test: tool_result_round_trips
   假设 含 tool/result 的会话持久化
   当 写出并重载时
   那么 事件逐字节还原
 
 Scenario: 事件 request/header 触发
-  Test: pending_req_fr_session_request_header
+  Test: request_header_round_trips
   假设 会话运行中满足条件：世代判定满足时
   当 结算时
   那么 日志追加 request/header 事件且字段与 dsh types.ts 逐字一致
 
 Scenario: 事件 request/header 表面归属
-  Test: pending_req_fr_session_request_header
+  Test: request_header_round_trips
   假设 事件 request/header 落盘
   当 重放分类时
   那么 按类型正确判定 入表面 或 log-only
 
 Scenario: 事件 request/header 回环
-  Test: pending_req_fr_session_request_header
+  Test: request_header_round_trips
   假设 含 request/header 的会话持久化
   当 写出并重载时
   那么 事件逐字节还原
 
 Scenario: 事件 request/context 触发
-  Test: pending_req_fr_session_request_context
+  Test: request_context_round_trips
   假设 会话运行中满足条件：四字段变化时
   当 结算时
   那么 日志追加 request/context 事件且字段与 dsh types.ts 逐字一致
 
 Scenario: 事件 request/context 表面归属
-  Test: pending_req_fr_session_request_context
+  Test: request_context_round_trips
   假设 事件 request/context 落盘
   当 重放分类时
   那么 按类型正确判定 入表面 或 log-only
 
 Scenario: 事件 request/context 回环
-  Test: pending_req_fr_session_request_context
+  Test: request_context_round_trips
   假设 含 request/context 的会话持久化
   当 写出并重载时
   那么 事件逐字节还原
 
 Scenario: 事件 session/end-seed 触发
-  Test: pending_req_fr_session_session_end_seed
+  Test: session_end_seed_round_trips
   假设 会话运行中满足条件：继承标记时
   当 结算时
   那么 日志追加 session/end-seed 事件且字段与 dsh types.ts 逐字一致
 
 Scenario: 事件 session/end-seed 表面归属
-  Test: pending_req_fr_session_session_end_seed
+  Test: session_end_seed_round_trips
   假设 事件 session/end-seed 落盘
   当 重放分类时
   那么 按类型正确判定 入表面 或 log-only
 
 Scenario: 事件 session/end-seed 回环
-  Test: pending_req_fr_session_session_end_seed
+  Test: session_end_seed_round_trips
   假设 含 session/end-seed 的会话持久化
   当 写出并重载时
   那么 事件逐字节还原
@@ -563,25 +563,25 @@ Scenario: 事件 tool/ptc-dispatch 回环
   那么 事件逐字节还原
 
 Scenario: contentGeneration 变化触发整表重建
-  Test: pending_req_fr_session_contentgeneration
+  Test: replacement_bumps_generations_and_derive_rebuilds
   假设 某表面节点的 contentGeneration 发生变化
   当 deriveMessages 重建时
   那么 从该节点起整表重建而非尾增量投影
 
 Scenario: 表面尾增长走增量投影
-  Test: pending_req_fr_session_requirement
+  Test: derive_messages_skips_empty_and_log_only_and_caches_tail_growth
   假设 仅在日志尾部追加了新表面节点
   当 deriveMessages 重建时
   那么 复用上次投影仅增量追加新节点
 
 Scenario: 空 assistant 投影为 null
-  Test: pending_req_fr_session_assistant_null
+  Test: empty_assistant_projects_to_no_message
   假设 某 assistant 消息无内容块仅承载 max-tokens usage
   当 deriveMessages 投影时
   那么 该 assistant 投影为 null
 
 Scenario: canonicalHeader 空 tools 省略
-  Test: pending_req_fr_session_canonicalheader_tools
+  Test: request_header_fold_last_wins_and_canonicalizes
   假设 世代内工具集合为空
   当 生成 canonicalHeader 时
   那么 tools 字段整体省略
@@ -593,67 +593,67 @@ Scenario: tool schema 比较顺序敏感
   那么 判定为不相等且 reason 升级为 change
 
 Scenario: 工具增删 developer 声明门控
-  Test: pending_req_fr_session_developer
+  Test: pending_req_fr_session_tool_gate
   假设 工具集合相对 baseline 的名字集合无差异
   当 结算新请求世代时
   那么 不追加 developer/message 且 headerSeq 不携带；有名字集合差且 baseline 存在时追加 developer/message，headerSeq 仅 additions>0 时携带
 
 Scenario: zstd 撕裂尾恢复
-  Test: pending_req_fr_session_zstd
+  Test: zstd_torn_tail_keeps_the_committed_prefix_and_classifies_the_frame
   假设 session.v4.jsonl.zstd 尾部记录被截断
   当 加载时
   那么 丢弃不完整尾记录、完整记录全部还原且会话可继续追加
 
-Scenario: 后继世代 EEXIST 逐字节比对
-  Test: pending_req_fr_session_eexist
+Scenario: 后继世代 EEXIST 拒绝发布
+  Test: republishing_an_existing_log_refuses_and_keeps_bytes_identical
   假设 发布后继世代时目标文件名已存在
   当 link 返回已存在时
-  那么 与已有文件逐字节比对：一致则采纳，不一致则报错拒绝
+  那么 拒绝发布（不做覆盖或采纳），已有文件逐字节保持不变
 
 Scenario: node-0 重写白名单
-  Test: pending_req_fr_session_node_0
+  Test: node_zero_system_head_rejects_non_system_rewrite
   假设 对 node-0 的 replace 携带非 system/message 类型的单节点
   当 提交时
   那么 拒绝；仅 system/message 单节点重写被接受
 
 Scenario: 继承切点取最后一个 tagged end-seed
-  Test: pending_req_fr_session_tagged_end_seed
+  Test: fork_seed_round_trips_with_the_inherited_cut
   假设 会话含多个 session/end-seed 事件
   当 计算继承切点时
   那么 切点为最后一个 tagged session/end-seed 所在 seq 且 isSeeded 头携带该继承事件数
 
 Scenario: 激活期声明聚合为读路径已知集
-  Test: pending_req_fr_session_requirement
+  Test: dylib_artifact_loads_and_serves_the_vocabulary_service
   假设 fr-approval 在激活期声明 approval/asked、approval/decided、approval/policy
   当 fr-session 聚合词表并读取含这些类型的日志时
   那么 全部类型按已知事件正常重建，与内核静态类型并集一致
 
 Scenario: 重复声明同类型装配失败
-  Test: pending_req_fr_session_requirement
+  Test: declare_accepts_new_types_and_refuses_duplicates
   假设 两个插件在各自激活期声明了同一持久事件类型名
   当 装配进行到第二个声明时
   那么 报装配错误终止启动（fail-closed），词表不含冲突类型
 
 Scenario: plugin 记录写入读取回环
-  Test: pending_req_fr_session_plugin
+  Test: plugin_record_grammar_and_retention
   假设 插件经 append-record 入口写入类型 plugin:example/state 的记录
   当 读取该日志重建会话时
   那么 记录以 ignorable:true 保留跳过、不进模型表面，读回 API 返回原样 data
 
 Scenario: 非 plugin: 语法类型拒绝
-  Test: pending_req_fr_session_plugin
+  Test: plugin_record_grammar_and_retention
   假设 append-record 收到类型名 example/state（无 plugin: 前缀）
   当 通道校验该类型名时
   那么 拒绝写入且日志不变（fail-closed）
 
 Scenario: series 重置基线弃 prefix reuse
-  Test: pending_req_fr_session_series_prefix_reuse
+  Test: series_reset_drops_prefix_reuse
   假设 会话先落 baseline header 与若干 tool-addition updates，随后落 reason 为 series 的 header 且某同名工具定义已变更
   当 tools 投影消费该 header 时
   那么 基线重置为该 header 的 tools、updates 清空、declared 表重建
 
 Scenario: tool-addition 经 headerSeq 解析进 updates
-  Test: pending_req_fr_session_tool_addition_headerseq_updates
+  Test: additions_resolve_through_header_seq_into_updates
   假设 developer/message 携带 tool-addition 且 headerSeq 指向既有 request/header
   当 tools 投影消费该事件时
   那么 additions 从该 header 解析定义并追加进 updates，快照为 {tools: 基线, updates}

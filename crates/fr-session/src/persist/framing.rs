@@ -211,10 +211,12 @@ pub fn decode_event(value: &mut Value, row_index: usize) -> Result<FramedRow, St
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use super::{decode_event, decode_seq_ranges, encode_seq_ranges};
-    use fr_wire::ids::SessionSeq;
+    use fr_wire::content::{ContentBlock, KnownContentBlock, RawObject};
+    use fr_wire::event::{AppendOp, ReplaceOp, ReplaceTag, SurfaceOp};
+    use fr_wire::ids::{MessageId, SessionSeq};
+    use fr_wire::message::{KnownMessage, KnownMessageSource, Message, MessageSource};
+    use serde_json::json;
 
     fn seqs(values: &[u64]) -> Vec<SessionSeq> {
         values
@@ -266,6 +268,119 @@ mod tests {
         let error = decode_seq_ranges(&json!([[1, 2, 3]]), 10)
             .expect_err("range longer than a pair refuses");
         assert!(error.contains("range must be a [start, end] pair"));
+
+        // The fold is the physical boundary's shape: a three-node surface
+        // replacement writes the folded [start, end] pair to disk and reads
+        // back as the expanded sequence.
+        let root = std::env::temp_dir().join(format!(
+            "fr-session-framing-fold-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |duration| duration.as_nanos())
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("temp dir");
+        let id = fr_wire::ids::SessionId::new("fold");
+        let meta = fr_wire::event::SessionHeader {
+            version: crate::persist::SESSION_FORMAT_VERSION,
+            id: id.clone(),
+            created_at: 1,
+            cwd: None,
+            parent_session: None,
+            is_seeded: false,
+            origin: None,
+            delegation_depth: None,
+            agent_preset: None,
+        };
+        let compression = crate::persist::JsonlCompression::None;
+        let events = fold_fixture_chain();
+        crate::persist::io::materialize(&root, &meta, 0, &events, compression)
+            .expect("materialize fold chain");
+        let path =
+            crate::persist::filename::log_path(&root, None, &id, compression).expect("log path");
+        // The replaced row's physical encoding is the folded pair.
+        let raw = std::fs::read_to_string(&path).expect("raw log");
+        let replaced_row = raw
+            .lines()
+            .nth(4)
+            .expect("replacement row")
+            .parse::<serde_json::Value>()
+            .expect("row json");
+        assert_eq!(
+            replaced_row.get("sourceEventSeqs"),
+            Some(&json!([[0, 2]])),
+            "disk folds the three-node run into one [start, end] pair"
+        );
+        // Reading back expands it to the full sequence.
+        let scan = crate::persist::read::scan_log(
+            raw.as_bytes(),
+            crate::persist::read::Recovery::Strict,
+            crate::EventVocabulary::core(),
+        )
+        .expect("scan folded log");
+        assert_eq!(
+            scan.events[3].source_event_seqs,
+            Some(vec![
+                fr_wire::ids::SessionSeq::new(0).expect("seq"),
+                fr_wire::ids::SessionSeq::new(1).expect("seq"),
+                fr_wire::ids::SessionSeq::new(2).expect("seq")
+            ])
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The minimal legal carrier for the file-level fold check: three user
+    /// nodes and a replacement citing all three (a foldable run), inside a
+    /// closed turn.
+    fn fold_fixture_chain() -> Vec<fr_wire::event::SessionEvent> {
+        let event = |seq_value: u64, data| fr_wire::event::SessionEvent {
+            seq: SessionSeq::new(seq_value).expect("seq"),
+            time: 1_000 + i64::try_from(seq_value).expect("seq fits i64"),
+            data,
+            ignorable: None,
+            surface_op: None,
+            source_event_seqs: None,
+        };
+        let user = |seq_value: u64, text: &str| {
+            let mut event = event(
+                seq_value,
+                fr_wire::event::SessionEventData::UserMessage(Message::Known(KnownMessage::User {
+                    id: MessageId::new(format!("u-{seq_value}")),
+                    content: vec![ContentBlock::Known(KnownContentBlock::Text {
+                        text: text.to_owned(),
+                    })],
+                    source: MessageSource::Known(KnownMessageSource::User {
+                        extra: RawObject::new(),
+                    }),
+                })),
+            );
+            event.surface_op = Some(SurfaceOp::Append(AppendOp));
+            event
+        };
+        let mut replacement = event(
+            3,
+            fr_wire::event::SessionEventData::UserMessage(Message::Known(KnownMessage::User {
+                id: MessageId::new("u-c"),
+                content: vec![ContentBlock::Known(KnownContentBlock::Text {
+                    text: "compacted".to_owned(),
+                })],
+                source: MessageSource::Known(KnownMessageSource::User {
+                    extra: RawObject::new(),
+                }),
+            })),
+        );
+        replacement.surface_op = Some(SurfaceOp::Replace(ReplaceOp {
+            op: ReplaceTag,
+            start_seq: SessionSeq::new(0).expect("seq"),
+            end_seq: SessionSeq::new(2).expect("seq"),
+        }));
+        replacement.source_event_seqs = Some(vec![
+            SessionSeq::new(0).expect("seq"),
+            SessionSeq::new(1).expect("seq"),
+            SessionSeq::new(2).expect("seq"),
+        ]);
+        vec![user(0, "a"), user(1, "b"), user(2, "c"), replacement]
     }
 
     #[test]

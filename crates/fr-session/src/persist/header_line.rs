@@ -421,6 +421,9 @@ mod tests {
         assert!(!is_header_line(&with("origin", json!("other"))));
         assert!(is_header_line(&with("origin", json!("subagent"))));
         assert!(!is_header_line(&with("extra", json!(1))));
+        // seedLength is not part of the whitelist: a header carrying it
+        // refuses (PRD 7.2 explicit refusal).
+        assert!(!is_header_line(&with("seedLength", json!(4))));
         assert!(!is_header_line(&json!({"createdAt": 1.5})));
         assert!(!is_header_line(&json!({"createdAt": -1})));
     }

@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-切片 E 已验收（用户确认）+ Q39A/Q40B/Q41A 落地（d2e15e0）。切片 F（Q41A：持久化运行时）真源全读完成，动工顺序 = contract 层（bind-session-tests.py + SESSION 场景绑定）→ handle/tracker/live 路由实现 → create/open/stat/list 发现面 → ctx 事件接线形态呈报。
+F1-F20 修复清单全部落地（lifecycle 75 passed / 0 failed / 27 skipped，四关全绿）。待用户验收；其后继续切片 F 实现（handle/tracker/live 路由 → create/open/stat/list 发现面 → ctx 事件接线形态呈报）。
 
 ## Current Phase
 Phase 13（fr-session v4 全量——切片 F（持久化运行时）进行中）

@@ -97,6 +97,23 @@ impl DiagnosticLevel {
     }
 }
 
+/// Renders one schema diagnostic as its stderr line: `fr: <level>:
+/// [<path>] <message>`, with the bracketed location omitted when the
+/// diagnostic carries no path (dsh `runDumpConfigSchema`).
+#[must_use]
+pub fn schema_diagnostic_line(diagnostic: &SchemaDiagnostic) -> String {
+    let location = diagnostic
+        .path
+        .as_ref()
+        .map_or(String::new(), |path| format!(" [{path}]"));
+    format!(
+        "fr: {}:{} {}",
+        diagnostic.level.as_str(),
+        location,
+        diagnostic.message
+    )
+}
+
 /// One discovered entry inside the `x-fr` block (dsh `ConfigSchemaEntry`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaEntry {
@@ -866,13 +883,37 @@ fn diagnostic_value(diagnostic: &SchemaDiagnostic) -> Value {
 
 #[cfg(test)]
 mod tests {
+
     //! Tests for the config-schema dump face (PRD 6.3, Q26B public skeleton).
 
     use super::{
         Collected, DiagnosticLevel, EntryStatus, RowValue, SchemaDiagnostic, SchemaDump,
         SchemaEntry, TreeKind, diagnostic_value, dump_config_schema, entry_value, js_truthy,
-        json_name, literal_string, patch_rule,
+        json_name, literal_string, patch_rule, schema_diagnostic_line,
     };
+
+    #[test]
+    fn diagnostic_lines_use_the_bracket_form_exactly_when_a_path_exists() {
+        let positioned = schema_diagnostic_line(&crate::dump::SchemaDiagnostic {
+            level: DiagnosticLevel::Error,
+            path: Some("/0".to_owned()),
+            message: "each entry must be a mapping with a literal plugin name".to_owned(),
+        });
+        assert_eq!(
+            positioned,
+            "fr: error: [/0] each entry must be a mapping with a literal plugin name"
+        );
+        let pathless = schema_diagnostic_line(&crate::dump::SchemaDiagnostic {
+            level: DiagnosticLevel::Error,
+            path: None,
+            message: "Selected profile bundle \"x\" could not be loaded".to_owned(),
+        });
+        assert_eq!(
+            pathless,
+            "fr: error: Selected profile bundle \"x\" could not be loaded"
+        );
+    }
+
     use crate::{Schema, to_json_schema};
     use serde_json::Value;
 

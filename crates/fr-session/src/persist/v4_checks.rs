@@ -2466,17 +2466,17 @@ mod tests {
             &json!({"turn": 1, "step": 1, "message": {"role": "developer"}}),
         );
         // Core vocabulary knows developer/message: admission applies fully
-        // and the malformed slot refuses.
-        assert!(assert_v4_row_admission(&deferred, &known()).is_err());
+        // and the malformed slot refuses with its structural message.
+        let error = assert_v4_row_admission(&deferred, &known()).expect_err("malformed slot");
+        assert!(
+            error
+                .message()
+                .contains("developer message requires id, role, content"),
+            "got: {}",
+            error.message()
+        );
         // Without the declaration, an ignorable developer row defers.
-        let mut stripped = EventVocabulary::core();
-        stripped.declare(&[]).expect("noop");
-        let reduced = {
-            let mut reduced = EventVocabulary::core();
-            let unknown = EventVocabulary::default();
-            let _ = (unknown, &mut reduced);
-            EventVocabulary::default()
-        };
+        let reduced = EventVocabulary::default();
         assert_v4_row_admission(&deferred, &reduced)
             .expect("ignorable unknown developer row defers");
         let plugin_row = json!({

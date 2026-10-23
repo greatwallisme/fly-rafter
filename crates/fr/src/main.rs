@@ -275,16 +275,7 @@ fn dump_schema(loaded: &LoadedProfile, layers: &[DumpLayer]) -> fr_config::error
     )
     .map_err(|error| fr_config::Error::Io(format!("failed to write stdout: {error}")))?;
     for diagnostic in &dumped.diagnostics {
-        let location = diagnostic
-            .path
-            .as_ref()
-            .map_or(String::new(), |path| format!(" [{path}]"));
-        eprintln!(
-            "fr: {}:{} {}",
-            diagnostic.level.as_str(),
-            location,
-            diagnostic.message
-        );
+        eprintln!("{}", fr_config::schema_diagnostic_line(diagnostic));
     }
     Ok(if dumped.complete {
         ExitCode::SUCCESS

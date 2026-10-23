@@ -54,17 +54,33 @@ fn run(args: &[&str], home: &TempHome) -> Run {
 }
 
 #[test]
-fn dump_config_writes_composed_yaml_to_stdout() {
+fn dump_config_and_schema_generated_from_real_assembly() {
+    // Both dump commands are products of the same real assembly: the YAML
+    // dump composes the bundle tree, the schema dump projects it (PRD 6.3,
+    // M1 check 5).
     let home = TempHome::new("dump-happy");
-    let run = run(&["dump-config", "--profile", "headless"], &home);
-    assert_eq!(run.status, 0, "stderr: {}", run.stderr);
-    assert!(run.stderr.is_empty(), "stderr: {}", run.stderr);
+    let yaml = run(&["dump-config", "--profile", "headless"], &home);
+    assert_eq!(yaml.status, 0, "stderr: {}", yaml.stderr);
+    assert!(yaml.stderr.is_empty(), "stderr: {}", yaml.stderr);
     assert!(
-        run.stdout.contains("name: fr-agent-loop"),
+        yaml.stdout.contains("name: fr-agent-loop"),
         "stdout: {}",
-        run.stdout
+        yaml.stdout
     );
-    assert!(run.stdout.ends_with('\n'), "stdout: {}", run.stdout);
+    assert!(yaml.stdout.ends_with('\n'), "stdout: {}", yaml.stdout);
+    let schema = run(&["dump-config-schema", "--profile", "headless"], &home);
+    assert_eq!(schema.status, 0, "stderr: {}", schema.stderr);
+    let document: serde_json::Value =
+        serde_json::from_str(schema.stdout.strip_suffix('\n').expect("trailing newline"))
+            .unwrap_or_else(|error| panic!("schema stdout is one JSON document: {error}"));
+    assert_eq!(
+        document.pointer("/x-fr/complete"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert!(
+        document.get("$defs").is_some(),
+        "the schema carries the $defs projections"
+    );
 }
 
 #[test]

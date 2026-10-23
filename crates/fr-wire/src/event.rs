@@ -800,16 +800,62 @@ mod tests {
     }
 
     #[test]
+    fn developer_message_data_wraps_turn_step_and_optional_header_seq() {
+        // E2 (PRD 7.1): developer/message data carries the {turn, step, message,
+        // headerSeq?} wrapper the user/message payload deliberately lacks.
+        let wrapped = serde_json::json!({
+            "type": "developer/message",
+            "seq": 3,
+            "time": 10,
+            "data": {
+                "turn": 1,
+                "step": 2,
+                "headerSeq": 1,
+                "message": {
+                    "id": "d1",
+                    "role": "developer",
+                    "content": [],
+                    "source": {"kind": "agent"}
+                }
+            }
+        });
+        let event: SessionEvent = serde_json::from_value(wrapped.clone()).expect("developer event");
+        let SessionEventData::DeveloperMessage(data) = &event.data else {
+            panic!("developer payload");
+        };
+        assert_eq!((data.turn, data.step), (1, 2));
+        assert_eq!(data.header_seq.map(crate::SessionSeq::get), Some(1));
+        let text = serde_json::to_string(&event).expect("serialize");
+        let parsed: serde_json::Value = serde_json::from_str(&text).expect("reparse");
+        assert_eq!(parsed, wrapped);
+    }
+
+    #[test]
     fn user_message_data_is_the_message_itself() {
         let event = envelope(SessionEventData::UserMessage(user_message()));
         let json = serde_json::to_value(&event).unwrap_or_else(|_| serde_json::Value::Null);
         let data = json.get("data").unwrap_or_else(|| panic!("data present"));
         assert_eq!(data["role"], serde_json::json!("user"));
-        assert!(data.get("turn").is_none());
+        // The erratum's contrast arm: the user payload has no turn wrapper,
+        // while every other surface event keeps one.
+        assert!(data.get("step").is_none());
         assert_eq!(json["type"], serde_json::json!("user/message"));
         let back: SessionEvent =
             serde_json::from_value(json).unwrap_or_else(|_| panic!("round trip"));
         assert_eq!(back, event);
+
+        // The developer payload keeps the {turn, step, message} wrapper.
+        let developer = envelope(SessionEventData::DeveloperMessage(DeveloperMessageData {
+            turn: 1,
+            step: 2,
+            message: user_message(),
+            header_seq: None,
+        }));
+        let json = serde_json::to_value(&developer).unwrap_or_else(|_| serde_json::Value::Null);
+        let data = json.get("data").unwrap_or_else(|| panic!("data present"));
+        assert_eq!(data["turn"], serde_json::json!(1));
+        assert_eq!(data["step"], serde_json::json!(2));
+        assert_eq!(data["message"]["role"], serde_json::json!("user"));
     }
 
     #[test]

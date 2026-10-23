@@ -126,6 +126,8 @@ mod tests {
 
     #[test]
     fn fork_seed_marks_cut_and_closes_open_turn_with_forked_closers() {
+        use crate::closer_text::{FORKED_NOT_STARTED, TOOL_NOT_STARTED};
+        use fr_wire::content::{ContentBlock, KnownContentBlock, TrueOnly};
         let source = vec![
             turn_start(0, 1),
             step_start(1, 1, 1),
@@ -149,6 +151,23 @@ mod tests {
         assert_eq!(seed[4].seq.get(), 4);
         assert_eq!(result.turn, 1);
         assert_eq!(result.step, 1);
+        // The synthetic result carries the extracted forked not-started
+        // wording verbatim (dsh repair.ts CLOSER_TEXT).
+        let Message::Known(KnownMessage::Tool {
+            content, is_error, ..
+        }) = &result.message
+        else {
+            panic!("tool-role message");
+        };
+        let Some(ContentBlock::Known(KnownContentBlock::Text { text })) = content.first() else {
+            panic!("one text block");
+        };
+        assert_eq!(text.as_str(), FORKED_NOT_STARTED);
+        assert_eq!(
+            result.error.as_ref().map(|error| error.code.as_str()),
+            Some(TOOL_NOT_STARTED)
+        );
+        assert_eq!(*is_error, Some(TrueOnly));
         let SessionEventData::StepEnd(bounds) = &seed[5].data else {
             panic!("step/end second");
         };

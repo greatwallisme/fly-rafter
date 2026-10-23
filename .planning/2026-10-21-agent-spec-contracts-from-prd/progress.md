@@ -227,3 +227,12 @@
 - PRD 23 决策 29；四关复跑全绿（225 tests / clippy 0 / doc 0）+ 三门禁 0 errors；提交 d2e15e0。
 - 切片 F 真源全读（三）完成：storage.ts 571 行全文（handle 链/close 循环 drain/read 单调/live 路由 200ms/tracker 全语义）+ handle.ts seam 117 行全文 + store.fork 拒绝码族与 fork 流；findings 三节落盘。
 - 切片 F 范围钉死（Q41A 授权文字）：持久化运行时（handle/tracker/live 路由/flushAll/stat/list/create/open 流）；SessionStore 内存层 = 后续切片；contract 层动作 = bind-session-tests.py + 切片 E 测试绑定 SESSION 既有场景。
+
+## 2026-10-23 — 用户令当日修完 F1-F20（审计簿修复清单全部落地）
+
+- F1 矩阵定罪执行：42 场景矩阵测试删除，拆 14 个短名 per-type 测试（turn_start_round_trips 等，覆盖面入 doc 注释不进函数名——用户两度痛斥超长函数名后的硬规矩，已存 memory）；每测含 admission + dsh 字段集锚点 + 双向表面归属（反向拒绝是真实断言）+ 文件级写读回环（走真实 materialize/读门，落盘行逐字节比对）。42 场景 1:1 重绑，spec 中矩阵选择器归零。
+- 夹具自纠四件（皆真发现）：孤立生命周期事件被恢复门拒（turn/end 无开放 turn 等）→ 夹具改最小合法载具；tool/call|result 需完整 advertise→call→result 链；FullCall 载具漏带 assistant surfaceOp；dsh 真值发现 tool-addition/tool-removal 仅 developer 合法 → F9 测试改为 27 合法组合 + 越权拒绝臂，如实登记。
+- F2 RLIMIT_FSIZE 注入（新集成测试 append_rollback.rs；进程级 limit 与并行测试互扰，独立二进制隔离）：EFBIG 上抛 + committed 字节复原。F3 重绑、F4 深相等、F5 approval/ptc 记录、F6 surface 空断言、F10 合并拒绝测试、F12 文件级折叠 [[0,2]]、F14 撕裂后续写、F18 forked 文案、F19 -start 记录、F20 from_seed 重放、弱断言钉死文案。
+- F7 两份 bind 脚本写入 §七八条纪律头；F11/F13 撤回 [019][067] 为 pending（Then 含未实现 agent-loop 半边）；F15 按 A 案执行（场景改 dsh 拒发语义——依据常设 1:1 规则，B 案违 1:1 需 19.2，已在审计簿 F15 行留用户改裁口）；F16 CLI 两 dump 测试 + fr-config 单测改名；F17 schema_diagnostic_line 抽取 + 双形态单测 + main.rs 接线（fr 经 fr-config 再导出，无直接 fr-schema 依赖）。
+- 门禁复跑（本会话实跑）：fmt PASS / clippy workspace 0 警告 0 错误（clippy 全数真修：SAFETY 注释、raw 指针、items_after_statements、too_many_lines 真拆 8 个 helper，零 allow 压制）/ cargo test --workspace 254 passed 0 failed / cargo doc 0 / KLL 三门禁 0 errors / SESSION lifecycle **75 passed 0 failed 27 skipped**（基线 0/102）。
+- 审计簿同步：§二总量更新为真证 130 / 前置撤回 2；§三/§四逐行改判 + 证据；§九 F1-F20 全勾 + 每项验证证据。

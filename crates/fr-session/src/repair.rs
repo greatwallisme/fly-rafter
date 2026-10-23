@@ -465,6 +465,27 @@ mod tests {
     }
 
     #[test]
+    fn crash_orphan_turn_with_no_step_closes_with_interrupted_only() {
+        // The scenario shape: the tail holds only turn/start (process died
+        // right after opening the turn). No open step, no pending calls: the
+        // sole closer is turn/end{interrupted} at the next seq, reusing the
+        // last real event's time.
+        let log = vec![turn_start(0, 1)];
+        let closers = interrupted_turn_closers(&log).expect("closers");
+        assert_eq!(closers.len(), 1);
+        assert_eq!(closers[0].seq.get(), 1);
+        assert_eq!(closers[0].time, log[0].time);
+        let SessionEventData::TurnEnd(end) = &closers[0].data else {
+            panic!("turn/end closer");
+        };
+        assert_eq!(end.turn, 1);
+        assert_eq!(
+            end.reason,
+            TurnEndReason::Known(TurnEndReasonKind::Interrupted)
+        );
+    }
+
+    #[test]
     fn unstarted_call_closes_with_not_started_error_and_no_source_seqs() {
         let log = vec![
             turn_start(0, 1),
@@ -516,6 +537,23 @@ mod tests {
             TurnEndReason::Known(TurnEndReasonKind::Interrupted)
         );
         assert_eq!(closers[2].seq.get(), 5);
+        // The repaired log replays legally: the synthetic closers pass the
+        // same constructor validation a resume would run.
+        let mut replayed = log;
+        replayed.extend(closers.clone());
+        let header = fr_wire::event::SessionHeader {
+            version: 4,
+            id: fr_wire::ids::SessionId::new("repair-replay"),
+            created_at: 1,
+            cwd: None,
+            parent_session: None,
+            is_seeded: false,
+            origin: None,
+            delegation_depth: None,
+            agent_preset: None,
+        };
+        crate::session::Session::from_seed(header, replayed)
+            .unwrap_or_else(|error| panic!("replay: {error}"));
     }
 
     #[test]

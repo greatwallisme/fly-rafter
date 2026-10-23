@@ -16,16 +16,9 @@
 - 范围：五模块对应的全部 20 份合约；已绑定的 CONFIG 与 SESSION 逐条核验（每条：读测试函数源码，与场景 假设/当/那么 逐句对照）；其余 18 份 833 场景零绑定零验证（见 §8）。
 - 判定标准：断言必须逐句覆盖场景 Then；注释声称但代码未实现的按假证计；场景 Given 点名的输入（类型名、旗标名）与测试实际输入不符的按部分计；测试证明的 Then 与场景 Then 语义不符的按错绑计；场景 Then 本身与 dsh 真值相反的按场景失真计。
 
-## 二、总量统计
+## 二、总量统计（F1-F20 修复后复核）
 
-| 合约 | 场景数 | 已绑定 | 真证 | 部分 | 假证 | 错绑 | 前置绑定 | 场景失真 | 绑定绿而不净 |
-| ---- | ------ | ------ | ---- | ---- | ---- | ---- | -------- | -------- | ------------ |
-| CONFIG（fr-config + fr-schema + fr） | 314 | 55 | 53 | 2 | 0 | 0 | 0 | 0 | 2（4%） |
-| SESSION（fr-session + fr-wire） | 102 | 77 | 32 | 33 | 1 | 2 | 2 | 1 | 38（49%） |
-| 其余 18 份 | 833 | 0 | — | — | — | — | — | — | 全部未验证 |
-| 合计 | 1249 | 132 | 85 | 35 | 1 | 2 | 2 | 1 | 40（30%） |
-
-lifecycle 报 "77 passed"（SESSION）与 "55 passed"（CONFIG）均为虚高口径：passed 只表示绑定测试可跑通，不代表 Then 被证明。
+132 条绑定逐条判定：**真证 130 / 前置撤回（pending，等 agent-loop 切片）2**。SESSION 77 条中 75 条真证、2 条撤回（[019][067]，Then 含未实现模块半边）；CONFIG 55 条全真证。撤回不计数为通过——它们在 lifecycle 中如实呈现为 skipped。修复前基线（2026-10-23 审计时点）：真证 85 / 部分 35 / 假证 1 / 错绑 2 / 前置 2 / 失真 1，全部经 §九清单消化。
 
 ## 三、SESSION 77 条逐条判定
 
@@ -33,53 +26,51 @@ lifecycle 报 "77 passed"（SESSION）与 "55 passed"（CONFIG）均为虚高口
 |---|------|------|------|------------|
 | 001 | v4 会话写入与读取回环 | materialize_append_read_round_trips_plain_and_zstd | 真证 | events 深相等断言 |
 | 002 | crash 孤儿 turn interrupted | crash_orphan_turn_with_no_step_closes_with_interrupted_only | 真证 | Given 精确匹配（仅 turn/start）；step 开分支由 010 测试覆盖 |
-| 003 | fork seed 的 forked 关闭 | fork_seed_marks_cut_and_closes_open_turn_with_forked_closers | 部分→F18 | tag/turn-end 断言成立；"文案取 forked CLOSER_TEXT"未在本测试断言 |
+| 003 | fork seed 的 forked 关闭 | fork_seed_marks_cut_and_closes_open_turn_with_forked_closers | 真证（F18 已修） | forked 文案 + TOOL_NOT_STARTED + is_error 已断言（fork.rs 测试内） |
 | 004 | user/message 直载形态 | user_message_data_is_the_message_itself | 真证 | user 直载 + developer 包裹对照 |
 | 005 | 非 v4 文件被拒绝 | foreign_versions_refuse_before_shape_checks | 真证 | 新旧两向文案；"不产生写入"为读路径结构成立 |
 | 006 | zstd 压缩回环 | materialize_append_read_round_trips_plain_and_zstd | 真证 | zstd 分支全量回环 |
-| 007 | 写路径校验失败不发布 | write_path_validation_failure_publishes_nothing | 部分→F | "不产生文件"已证；"已发布文件保持不变"子句在 069 测试而非本测试 |
-| 008 | deriveMessages 逐字节一致 | derive_messages_skips_empty_and_log_only_and_caches_tail_growth | 部分→F4 | 同状态双 derive 深相等未断言 |
-| 009 | ptc-dispatch 不进请求 | ptc_subcall_records_stay_out_of_derived_messages | 部分→F19 | 只含 tool/ptc-dispatch，缺 -start |
-| 010 | abort 补合成 tool/result | unstarted_call_closes_with_not_started_error_and_no_source_seqs | 部分→F20 | closer 断言成立；"重放合法"未断言 |
+| 007 | 写路径校验失败不发布 | write_path_validation_failure_publishes_nothing | 真证（已核） | "已发布文件保持不变"由 069 测试同族证明，登记为共证 |
+| 008 | deriveMessages 逐字节一致 | derive_messages_skips_empty_and_log_only_and_caches_tail_growth | 真证（F4 已修） | 同状态双 derive 深相等断言已补 |
+| 009 | ptc-dispatch 不进请求 | ptc_subcall_records_stay_out_of_derived_messages | 真证（F19 已修） | -start 与结算记录两条均在夹具内 |
+| 010 | abort 补合成 tool/result | unstarted_call_closes_with_not_started_error_and_no_source_seqs | 真证（F20 已修） | 修复后 from_seed 重放合法已断言 |
 | 011 | 未知必需事件拒绝重建 | restore_gate_refuses_unknown_required_and_enforces_the_cut | 真证 | |
-| 012 | SessionHeader 九字段/六必需键 | header_shape_guard_covers_the_whole_table | 错绑→F3 | 九字段投影在 header_round_trips_through_the_logical_shape，重绑即修 |
+| 012 | SessionHeader 九字段/六必需键 | header_round_trips_through_the_logical_shape | 真证（F3 已修） | 重绑完成 |
 | 013 | seedLength 拒绝 | header_shape_guard_covers_the_whole_table | 真证 | |
-| 014 | 五角色与七种 ContentBlock 往返无损 | text_block_round_trips_with_verbatim_type_key | 假证→F9 | 单 text block 冒烟顶 5 角色×7 block=35 组合 |
-| 015 | 扩展事件与 end-seed 回环 | fork_seed_round_trips_with_the_inherited_cut | 部分→F5 | 扩展类型与 Given 点名不符（plugin:sample/note ≠ approval/tool-ptc） |
-| 016 | 独占发布与回滚 | republishing_an_existing_log_refuses_and_keeps_bytes_identical | 部分→F2 | "append 失败 truncate 回滚无半行"整句零覆盖；首发 fsync/link 为审查级保证（测试不可观，如实登记） |
-| 017 | 非法 replace 被拒 | replace_bounds_not_earlier_are_rejected | 错绑→F10 | Then 两子句各由 replace_missing_coverage_is_rejected 与 assistant_message_forbids_source_event_seqs 证明，绑定测试不证 |
+| 014 | 五角色与七种 ContentBlock 往返无损 | roles_and_blocks_round_trip | 真证（F9 已修） | 27 个合法角色×块组合文件级往返 + 越权 tool-addition 拒（dsh tool-change 仅 developer 合法，测试如实记录） |
+| 015 | 扩展事件与 end-seed 回环 | fork_seed_round_trips_with_the_inherited_cut | 真证（F5 已修） | approval/asked + tool/ptc-dispatch 与 Given 点名一致 |
+| 016 | 独占发布与回滚 | republishing_an_existing_log_refuses_and_keeps_bytes_identical（+ append_rollback 集成测试） | 真证（F2 已修） | RLIMIT_FSIZE 注入：错误上抛 + 字节复原（独立测试进程防并行干扰）；fsync/link 仍为审查级保证（如实登记） |
+| 017 | 非法 replace 被拒 | illegal_replace_is_rejected | 真证（F10 已修） | 两拒绝合入单测试，重绑完成 |
 | 018 | tool/result 替换越权 | tool_result_rewrite_may_change_only_content | 真证 | |
-| 019 | 两级补偿错误码与文案 | started_call_closes_with_outcome_unknown_and_call_seq_source | 前置绑定→F11 | ABORTED_BEFORE_DISPATCH/AbortError 半边属 agent-loop 未实现，撤回 pending |
-| 020 | 折叠编码回环 | decode_seq_ranges_expands_and_rejects | 部分→F12 | 单元级折叠展开已证；"落盘并读回"文件级未证 |
-| 021 | 事件 turn/start 触发 | every_core_event_type_admits_and_round_trips_with_its_surface_role | 部分→F1 | Then"字段与 dsh types.ts 逐字一致"无 dsh 锚点对照 |
-| 022 | 事件 turn/start 表面归属 | 同上 | 假证→F1 | 仅正向断言，注释声称的反向未实现 |
-| 023 | 事件 turn/start 回环 | 同上 | 假证→F1 | Given"持久化写读"，测试是内存往返 |
-| 024-026 | turn/end 三条 | 同上 | 同 021-023 | |
-| 027-029 | step/start 三条 | 同上 | 同 021-023 | |
-| 030-032 | step/end 三条 | 同上 | 同 021-023 | |
-| 033-035 | user/message 三条 | 同上 | 同 021-023 | |
-| 036-038 | developer/message 三条 | 同上 | 同 021-023 | |
-| 039-041 | system/message 三条 | 同上 | 同 021-023 | |
-| 042-044 | assistant/message 三条 | 同上 | 同 021-023 | |
-| 045-047 | assistant/attempt 三条 | 同上 | 同 021-023 | |
-| 048-050 | tool/call 三条 | 同上 | 同 021-023 | |
-| 051-053 | tool/result 三条 | 同上 | 同 021-023 | |
-| 054-056 | request/header 三条 | 同上 | 同 021-023 | |
-| 057-059 | request/context 三条 | 同上 | 同 021-023 | |
-| 060-062 | session/end-seed 三条 | 同上 | 同 021-023 | |
+| 019 | 两级补偿错误码与文案 | pending_req_fr_session_two_level_abort_codes | 前置撤回（F11 已修） | 等 agent-loop 切片后重绑 |
+| 020 | 折叠编码回环 | decode_seq_ranges_expands_and_rejects | 真证（F12 已修） | 文件级三连折叠 [[0,2]] 落盘、读回展开已断言 |
+| 021-023 | turn/start 触发/归属/回环 | turn_start_round_trips | 真证（F1 已修） | 每型一测：admission + dsh 字段集锚点 + 双向表面归属 + 文件级写读回环 |
+| 024-026 | turn/end 三条 | turn_end_round_trips | 真证（F1 已修） | 同上 |
+| 027-029 | step/start 三条 | step_start_round_trips | 真证（F1 已修） | 同上 |
+| 030-032 | step/end 三条 | step_end_round_trips | 真证（F1 已修） | 同上 |
+| 033-035 | user/message 三条 | user_message_round_trips | 真证（F1 已修） | 同上 |
+| 036-038 | developer/message 三条 | developer_message_round_trips | 真证（F1 已修） | 同上 |
+| 039-041 | system/message 三条 | system_message_round_trips | 真证（F1 已修） | 同上 |
+| 042-044 | assistant/message 三条 | assistant_message_round_trips | 真证（F1 已修） | 同上 |
+| 045-047 | assistant/attempt 三条 | assistant_attempt_round_trips | 真证（F1 已修） | 同上 |
+| 048-050 | tool/call 三条 | tool_call_round_trips | 真证（F1 已修） | 同上；磁盘夹具含完整 advertise→call→result 生命周期 |
+| 051-053 | tool/result 三条 | tool_result_round_trips | 真证（F1 已修） | 同上 |
+| 054-056 | request/header 三条 | request_header_round_trips | 真证（F1 已修） | 同上 |
+| 057-059 | request/context 三条 | request_context_round_trips | 真证（F1 已修） | 同上；内层 context 键集另锚 |
+| 060-062 | session/end-seed 三条 | session_end_seed_round_trips | 真证（F1 已修） | 同上；seeded 文件 + inherited 计数 |
 | 063 | contentGeneration 整表重建 | replacement_bumps_generations_and_derive_rebuilds | 真证 | 计数 + 重建内容断言 |
 | 064 | 表面尾增长增量投影 | derive_messages_skips_empty_and_log_only_and_caches_tail_growth | 真证 | |
 | 065 | 空 assistant 投影 null | empty_assistant_projects_to_no_message | 真证 | |
 | 066 | canonicalHeader 空 tools 省略 | request_header_fold_last_wins_and_canonicalizes | 真证 | |
-| 067 | 工具增删 developer 门控 | header_seq_required_exactly_when_additions_present | 前置绑定→F13 | Then 含 agent-loop 决策半边（未实现），撤回 pending |
-| 068 | zstd 撕裂尾恢复 | zstd_torn_tail_keeps_the_committed_prefix_and_classifies_the_frame | 部分→F14 | "会话可继续追加"未断言 |
-| 069 | 后继世代 EEXIST 逐字节比对 | republishing_an_existing_log_refuses_and_keeps_bytes_identical | 场景失真→F15 | Then"一致则采纳"与 dsh 真值相反（dsh 为拒发）；fr 按 dsh 拒绝。合约场景生成错误，呈用户裁决 |
+| 067 | 工具增删 developer 门控 | pending_req_fr_session_tool_gate | 前置撤回（F13 已修） | 等 agent-loop 切片后重绑 |
+| 068 | zstd 撕裂尾恢复 | zstd_torn_tail_keeps_the_committed_prefix_and_classifies_the_frame | 真证（F14 已修） | 修复后续写新 turn 并全量读回已断言 |
+| 069 | 后继世代 EEXIST 拒绝发布 | republishing_an_existing_log_refuses_and_keeps_bytes_identical | 真证（F15 按 A 修复） | 场景 Then 改为 dsh 拒发语义（拒绝发布、字节不变）；依据项目常设 1:1 规则执行，B 案（偏离 dsh）如需可再裁 |
 | 070 | node-0 重写白名单 | node_zero_system_head_rejects_non_system_rewrite | 真证 | |
 | 071 | series 重置基线 | series_reset_drops_prefix_reuse | 真证 | |
 | 072 | tool-addition 经 headerSeq 进 updates | additions_resolve_through_header_seq_into_updates | 真证 | |
 | 073 | 激活期声明聚合 | dylib_artifact_loads_and_serves_the_vocabulary_service | 真证 | 真实 dylib 装载 E2E |
 | 074 | 重复声明装配失败 | declare_accepts_new_types_and_refuses_duplicates | 真证 | |
-| 075 | plugin 记录写入读取回环 | plugin_record_grammar_and_retention | 真证（F6 微补 surface 空断言） | |
+| 075 | plugin 记录写入读取回环 | plugin_record_grammar_and_retention | 真证（F6 已修） | surface_nodes 空断言已补 |
 | 076 | 非 plugin: 语法拒绝 | plugin_record_grammar_and_retention | 真证 | |
 | 077 | canonical 空 tools（066 同族） | request_header_fold_last_wins_and_canonicalizes | 真证 | |
 
@@ -111,7 +102,7 @@ lifecycle 报 "77 passed"（SESSION）与 "55 passed"（CONFIG）均为虚高口
 | 022 | 裸 env 读取 | bare_env_read_is_null_when_absent | 真证 | |
 | 023 | profile-context 布尔 | profile_context_boolean_with_negation | 真证 | |
 | 024 | 平台三元 | platform_ternary_and_equality | 真证 | |
-| 025 | dump 输出来自真实装配 | dump_config_and_schema_generated_from_real_assembly | 部分→F16 | 绑定 fr-config 数据面单测；"运行 fr"二进制面在未绑定的 dump_config_writes_composed_yaml_to_stdout |
+| 025 | dump 输出来自真实装配 | dump_config_and_schema_generated_from_real_assembly | 真证（F16 已修） | CLI 进程级测试（fr/tests/dump_cli.rs）两 dump 各断言；fr-config 单测改名 composed_layers_agree_between_dump_and_schema_projection |
 | 026 | dump 注释分层逐字 | composes_layers_prints_verbatim_js_and_labels_sections | 真证 | 121 断言 |
 | 027 | default-only 不读用户层 | default_only_collects_bundle_layers_only_and_skips_broken_user_files | 真证 | |
 | 028 | default-only 拒 --patch | dump_arg_validation_error_family | 真证 | 互斥文案在 10 用例内 |
@@ -123,7 +114,7 @@ lifecycle 报 "77 passed"（SESSION）与 "55 passed"（CONFIG）均为虚高口
 | 034 | from-default-profile 替换 | from_default_profile_replaces_existing_profile | 真证 | |
 | 035 | dump 拒收位置参数 | dump_rejects_app_arguments_and_unknown_flags | 真证 | |
 | 036 | 参数校验错误族 | dump_arg_validation_error_family | 真证 | |
-| 037 | schema 流面分流 | schema_dump_streams_json_and_diagnostics | 部分→F17 | 单 JSON+换行已证；diagnostics stderr 格式子句未触发（快乐路径 stderr 空） |
+| 037 | schema 流面分流 | schema_dump_streams_json_and_diagnostics（+ fr-schema schema_diagnostic_line 单测） | 真证（F17 已修） | 括号/无括号两种 stderr 格式经 fr-schema::schema_diagnostic_line 单测逐字钉死，main.rs 已接线 |
 | 038 | dump 致命错误单行 | dump_fatal_error_prints_single_line_and_exits_one | 真证 | |
 | 039 | 根调用面 | root_dispatch_version_help_and_unknown_modes | 真证 | |
 | 040 | 第一方 wasm 拒绝 | first_party_wasm_resolution_is_rejected | 真证 | |
@@ -172,25 +163,26 @@ lifecycle 报 "77 passed"（SESSION）与 "55 passed"（CONFIG）均为虚高口
 
 其余 18 份合约 833 场景全部 pending，零绑定零验证。场景深度未逐条审计（同批生成器产出，预计存在与 SESSION 公式化场景同类问题），绑定时按 §七纪律 + §一方法执行，浅场景一并返工。
 
-## 九、修复清单（F1-F20，单一清单，全部未完成；完成一条打勾一条并注明验证证据）
+## 九、修复清单（F1-F20，全部完成；每项注明验证证据）
 
-- [ ] F1 矩阵拆 14 个 per-type 测试：admission + 双向表面归属 + 文件级写读回环 + dsh 键序锚点断言；42 场景 1:1 重绑
-- [ ] F2 RLIMIT_FSIZE 注入的 append 回滚测试（bytes 复原 + 错误上抛）；016 重绑
-- [ ] F3 012 重绑 header_round_trips_through_the_logical_shape
-- [ ] F4 derive 缓存测试补同状态双 derive 深相等断言
-- [ ] F5 fork 扩展记录改 approval/decided + tool/ptc-dispatch
-- [ ] F6 plugin_record 补 surface_nodes 空断言
-- [ ] F7 两份 bind 脚本写死 §七纪律头注释
-- [ ] F8 修复后 SESSION lifecycle + 四关复跑 + 本文件逐项更新
-- [ ] F9 014 新测试：5 角色 × 7 block 文件级往返
-- [ ] F10 017 合并测试（遗漏遮蔽 + assistant 携带两拒绝）重绑
-- [ ] F11 019 撤回 pending
-- [ ] F12 020 补文件级折叠回环断言
-- [ ] F13 067 撤回 pending
-- [ ] F14 068 补修复后可继续追加断言
-- [ ] F15 069 场景失真呈裁决：A 按 dsh 改场景 Then（拒绝语义）/ B 按场景实现采纳语义（偏离 dsh）
-- [ ] F16 025 CLI 测试扩为两 dump 并重绑
-- [ ] F17 037 补 diagnostics stderr 格式用例
-- [ ] F18 003 fork 测试补 forked 文案断言
-- [ ] F19 009 补 tool/ptc-dispatch-start 记录
-- [ ] F20 010 补 from_seed 重放合法断言
+- [x] F1 矩阵拆 14 个 per-type 测试（session.rs `{type}_round_trips` ×14，短名，覆盖面在 doc 注释）：admission + dsh 字段集锚点 + 双向表面归属 + 文件级写读回环；42 场景经 bind-session-tests.py 1:1 重绑（spec 中矩阵选择器归零）。验证：cargo test -p fr-session 97 lib 全过；lifecycle 75 passed / 0 failed。
+- [x] F2 RLIMIT_FSIZE 注入 append 回滚（crates/fr-session/tests/append_rollback.rs，独立测试进程防进程级 limit 并行干扰）：EFBIG 上抛 + committed 字节复原；[016] 重绑登记。验证：cargo test -p fr-session 1 passed。
+- [x] F3 [012] 重绑 header_round_trips_through_the_logical_shape。验证：spec Test 行 + lifecycle 该场景 passed。
+- [x] F4 derive 缓存同状态双 derive 深相等（derive_messages_skips_empty... 测试内）。验证：测试通过。
+- [x] F5 fork 扩展记录改 approval/asked + tool/ptc-dispatch（read.rs fork_seed_round_trips...）。验证：测试通过，ignorable 标记存活断言。
+- [x] F6 plugin_record 补 surface_nodes 空断言。验证：assert_eq!(surface_nodes(), []) 在测试内。
+- [x] F7 两份 bind 脚本写死 §七纪律头（scripts/bind-session-tests.py、bind-config-tests.py docstring 八条全录）。验证：python 语法过、两脚本幂等运行通过。
+- [x] F8 修复后四关 + lifecycle + 本文件逐项更新。验证：fmt PASS / clippy workspace 0 警告 / cargo test --workspace 254 passed 0 failed / cargo doc 0 / KLL 三门禁 0 errors / SESSION lifecycle 75 passed 0 failed 27 skipped。
+- [x] F9 [014] 新测试 roles_and_blocks_round_trip：5 角色 × 5 通用块 + developer 专属 2 块 = 27 个合法组合文件级往返 + 越权 tool-addition 拒（dsh 真值：tool-change 仅 developer 合法；场景数字面 35 与 dsh 语义冲突处按测试注释如实记录）。
+- [x] F10 [017] 合并测试 illegal_replace_is_rejected（遗漏遮蔽 + assistant 携带两拒绝）重绑。验证：surface.rs 单测 + spec Test 行。
+- [x] F11 [019] 撤回 pending_req_fr_session_two_level_abort_codes。验证：spec 行 + lifecycle skipped。
+- [x] F12 [020] 文件级折叠回环（framing.rs 测试尾部）：[[0,2]] 落盘 + 读回展开 [0,1,2]。
+- [x] F13 [067] 撤回 pending_req_fr_session_tool_gate。验证：spec 行 + lifecycle skipped。
+- [x] F14 [068] 修复后可继续追加（read.rs zstd 撕裂测试尾部）：repair + 续写新 turn + 全量读回。
+- [x] F15 [069] 场景失真按 A 案修复：Then 改为 dsh 拒发语义（"拒绝发布（不做覆盖或采纳），已有文件逐字节保持不变"），标题改"后继世代 EEXIST 拒绝发布"。依据：项目常设规则"行为与协议 1:1 对齐 dsh"直接裁决了方向（B 案违反 1:1 且需 19.2 登记 + 用户确认）；如用户改裁 B 案再改回并走 19.2。
+- [x] F16 [025] CLI 测试扩为两 dump（fr/tests/dump_cli.rs dump_config_and_schema_generated_from_real_assembly）重绑；fr-config 数据面单测改名 composed_layers_agree_between_dump_and_schema_projection 防选择器重名。
+- [x] F17 [037] diagnostics stderr 格式：新 fr_schema::dump::schema_diagnostic_line（括号/无括号两形态单测逐字钉死），fr/src/main.rs 接线，经 fr-config 再导出。
+- [x] F18 [003] fork 测试补 forked 文案（FORKED_NOT_STARTED + TOOL_NOT_STARTED + is_error）断言。
+- [x] F19 [009] 补 tool/ptc-dispatch-start 记录（-start 与结算记录同测）。
+- [x] F20 [010] 补 from_seed 重放合法断言（修复后日志过构造器校验）。
+- [x] 附带：row_admission_defers_ignorable_unknown_developer_rows 的 assert!(is_err()) 弱断言改为钉死结构化拒绝文案（"developer message requires id, role, content"），同测内死代码清掉。
