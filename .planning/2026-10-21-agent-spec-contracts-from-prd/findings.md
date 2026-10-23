@@ -585,3 +585,11 @@ Q33 plugin: 记录通道 M1 范围 / Q34 KNOWN 词表注册机制 / Q35 message 
 - Q40 dsh 插件命名空间知识：relationships 的 validateDeliveryAccepted（'session-log-deepseek/delivery-accepted' 专检）与 title-llm 源 kind 字面 'dsh-session-title-llm'——前者 fr 侧结构性 omit（一切皆插件：他插件命名空间知识不入 fr-session 核心；DELIVERY_CHECK_OMITTED 文档化），后者逐字保留（M1 词表不含 session/title-llm-request，路径不可达；fr-session-title 插件落地时随 19.2 裁决品牌映射）——呈 19.2 登记确认。
 - 存储运行时（Tracker/live 路由 200ms 批窗/句柄 promise 链/flushAll/memo LRU/list 发现面）不在本切片——属 store 服务接线切片（fr-agent-loop 宿主集成期）。
 - SESSION 合约测试绑定：切片 C/D/E 均按既有模式交付钉测、选择器留 pending（绑定基础设施 bind-session-tests.py 属独立切片，同 CONFIG 模式）。
+
+## 2026-10-23 — Q39A/Q40B 裁决落地 + Q41A 切片定向
+
+- **Q39A**：PRD 19.2 条 15（Windows 写租约后置：M1 仅 POSIX flock 侧；win32 命名信号量随 M1 平台门逐字移植）+ persist/mod.rs `#[cfg(windows)] compile_error!` 明示编译门（fail-closed，非静默缺位）。
+- **Q40B（否决推荐 A）**：恢复校验器知识范围按 1:1 优先——`validateDeliveryAccepted`（session-log-deepseek/delivery-accepted）逐字移植 + `catalogFact`（facts.ts:67-86 真值表）移植 + assertReleasedV4Relationships 前奏族（developer data + 全量 message-sources + delivery 所有权 + catalog 子 id 去重）补入 restore_released_v4_artifact——**顺带补上此前漏移的全量 assertV4MessageSources 检查**（此前只有行准入的 plugin-kind 变体）；title-llm 字面维持逐字。PRD 23 决策 29 载明（1:1 优先于知识归属，类型经词表声明后激活，与 dsh KNOWN 集同构）。
+- 钉测 +1：delivery_ownership_pins_session_binding_and_payload（own 接受 / foreign session 拒 / throughSeq 不早于拒 / 空 id 拒 / 异代 sessionFormatVersion 忽略 / 未声明类型走词表门）。自纠一件：夹具缺 sessionFormatVersion: 4（缺省即 0 代被 dsh 语义忽略，foreign 场景须显式 v4）。
+- 门禁：四关复跑全绿（workspace 225 tests，clippy 0，doc 0）+ 三门禁 0 errors。
+- **Q41A**：下一切片 = fr-session store 服务接线（Tracker/句柄/live 200ms 批窗/flushAll/list 发现面），Phase 13 完整闭环。

@@ -8,6 +8,14 @@
 //! concatenated-frame container; [`lease`] arbitrates single-writer access;
 //! [`io`] materializes and appends; [`read`] decodes stored logs.
 
+// Q39A (PRD 19.2 item 15 / decision 29): the persistence physical layer is
+// POSIX-only in M1 — the dsh win32 lease semaphore and durable-publish path
+// port verbatim with the M1 platform gate, never silently absent.
+#[cfg(windows)]
+compile_error!(
+    "fr-session persistence is POSIX-only in M1; the win32 lease and publish paths land with the M1 platform gate (PRD 19.2 item 15)"
+);
+
 pub mod error;
 pub mod filename;
 pub mod framing;

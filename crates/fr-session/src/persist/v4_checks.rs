@@ -1970,14 +1970,57 @@ pub fn assert_v4_lifecycle_relationships(
 }
 
 /// Validates delivery generation and active-generation coordinates before
-/// evaluating ownership (dsh `validateDeliveryAccepted`).
+/// evaluating ownership (dsh `validateDeliveryAccepted`, verbatim port per
+/// PRD decision 29 / Q40B).
 ///
-/// The dsh check targets the dsh-log-delivery plugin's event namespace
-/// (`session-log-deepseek/delivery-accepted`); that namespace is plugin
-/// knowledge fr-session does not centralize (PRD 4.3), so fr declares the
-/// branch structurally absent for foreign plugin events and this function
-/// exists to document the seam. Registered for the 19.2 deviation log.
-pub const DELIVERY_CHECK_OMITTED: () = ();
+/// Returns the active delivery's nonempty session id, or `None` for other
+/// events and generations.
+///
+/// # Errors
+///
+/// Returns the dsh refusal for malformed delivery payload shapes.
+pub fn validate_delivery_accepted(
+    row: &Value,
+    current_version: u64,
+) -> Result<Option<String>, V4CheckError> {
+    if row.get("type").and_then(Value::as_str) != Some("session-log-deepseek/delivery-accepted") {
+        return Ok(None);
+    }
+    let data = row
+        .get("data")
+        .cloned()
+        .ok_or_else(|| format_error("delivery-accepted data must be an object"))?;
+    if !is_object(&data) {
+        return Err(format_error("delivery-accepted data must be an object"));
+    }
+    let raw_version = data.get("sessionFormatVersion").cloned();
+    let version = match raw_version {
+        Some(value) => count(&value, "delivery sessionFormatVersion")?,
+        None => 0,
+    };
+    if version != current_version {
+        return Ok(None);
+    }
+    let through_seq = count(
+        data.get("throughSeq").unwrap_or(&Value::Null),
+        "delivery throughSeq",
+    )?;
+    let seq = count(
+        row.get("seq").unwrap_or(&Value::Null),
+        "delivery throughSeq",
+    )?;
+    if through_seq >= seq {
+        return Err(format_error("delivery throughSeq must precede its marker"));
+    }
+    let id = data.get("sessionId").cloned().unwrap_or(Value::Null);
+    let id = match id.as_str() {
+        Some(id) if !id.is_empty() => id.to_owned(),
+        _ => {
+            return Err(format_error("delivery requires a nonempty Session id"));
+        }
+    };
+    Ok(Some(id))
+}
 
 /// Validates inheritance, vocabulary, native message admission, and the
 /// generation-owned relationships of one detached v4 artifact
@@ -2054,7 +2097,91 @@ pub fn restore_released_v4_artifact(
             "format v4 unseeded Session contains an inherited end-seed marker",
         ));
     }
+    // assertReleasedV4Relationships prologue: developer data, full message
+    // sources, delivery ownership, and the child-catalog dedup.
+    let header_id = header.get("id").and_then(Value::as_str).unwrap_or_default();
+    let parent_session = header.get("parentSession").and_then(Value::as_str);
+    let mut catalog_children = std::collections::HashSet::new();
+    for (index, event) in events.iter().enumerate() {
+        let index = index as u64;
+        let kind = event
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if !known.knows(kind) {
+            continue;
+        }
+        assert_v4_developer_data(event)?;
+        assert_v4_message_sources(event)?;
+        let delivery_id =
+            validate_delivery_accepted(event, crate::persist::SESSION_FORMAT_VERSION)?;
+        if let Some(delivery_id) = delivery_id {
+            let inherited_marker = parent_session.is_some() && index < inherited_event_count;
+            if !inherited_marker && delivery_id != header_id {
+                return Err(format_error(
+                    "current-generation delivery marker names the wrong Session",
+                ));
+            }
+        }
+        if kind == "subagent/catalog" && index >= inherited_event_count {
+            let fact = catalog_fact(
+                event.get("data").cloned().unwrap_or(Value::Null),
+                "subagent/catalog",
+            )?;
+            let child_id = fact
+                .get("childId")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            if !catalog_children.insert(child_id.clone()) {
+                return Err(format_error(format!("duplicate catalog child {child_id}")));
+            }
+        }
+    }
     assert_v4_lifecycle_relationships(events, known)
+}
+
+/// Validates the historical fields used for catalog membership without
+/// interpreting extensions (dsh `catalogFact`, facts.ts:67-86).
+///
+/// # Errors
+///
+/// Returns the dsh refusal for an unsupported catalog fact.
+fn catalog_fact(value: Value, subject: &str) -> Result<Value, V4CheckError> {
+    let refuse = || {
+        Err(format_error(format!(
+            "{subject} requires a supported versioned catalog fact"
+        )))
+    };
+    let Some(object) = value.as_object() else {
+        return refuse();
+    };
+    let version = object.get("version").and_then(Value::as_u64);
+    let mode = object.get("mode").and_then(Value::as_str);
+    let valid = matches!(
+        (version, mode),
+        (Some(0), Some("continuable" | "one-shot"))
+            | (Some(1), Some("continuable" | "one-shot" | "unknown"))
+            | (Some(2), Some("external"))
+    );
+    if !valid || object.get("childId").and_then(Value::as_str).is_none() {
+        return refuse();
+    }
+    // `mode: continuable` requires a string label, and an optional label
+    // must be a string whenever present.
+    if mode == Some("continuable") && object.get("label").and_then(Value::as_str).is_none() {
+        return refuse();
+    }
+    if let Some(label) = object.get("label")
+        && label.as_str().is_none()
+    {
+        return refuse();
+    }
+    count(
+        object.get("childCreatedAt").unwrap_or(&Value::Null),
+        "catalog child creation time",
+    )?;
+    Ok(value)
 }
 
 #[cfg(test)]
@@ -2527,6 +2654,87 @@ mod tests {
 
         // Typed envelopes of the chain re-admit (fixture soundness check).
         let _ = envelope(0, "turn/start", &json!({"turn": 1}));
+    }
+
+    #[test]
+    fn delivery_ownership_pins_session_binding_and_payload() {
+        // Q40B (PRD decision 29): the delivery check is a verbatim port and
+        // activates once the owning plugin declares the type.
+        let mut delivery_known = known();
+        delivery_known
+            .declare(&["session-log-deepseek/delivery-accepted".to_owned()])
+            .expect("declare delivery type");
+        let delivery_row = |seq: u64, session_id: &str, through: u64| {
+            json!({
+                "type": "session-log-deepseek/delivery-accepted", "seq": seq, "time": 1_000,
+                "data": {"sessionId": session_id, "throughSeq": through, "sessionFormatVersion": 4}
+            })
+        };
+
+        // A current-generation marker naming its own session accepts.
+        let own = vec![turn_start(0, 1), delivery_row(1, "s-1", 0)];
+        restore_released_v4_artifact(&header(false, 0, 2), 0, &own, &delivery_known)
+            .expect("own marker");
+
+        // A current-generation marker naming a foreign session refuses.
+        let foreign = vec![turn_start(0, 1), delivery_row(1, "other", 0)];
+        let error =
+            restore_released_v4_artifact(&header(false, 0, 2), 0, &foreign, &delivery_known)
+                .expect_err("foreign marker");
+        assert!(
+            error
+                .message()
+                .contains("current-generation delivery marker names the wrong Session")
+        );
+
+        // throughSeq at its own seq refuses.
+        let backwards = vec![turn_start(0, 1), delivery_row(1, "s-1", 1)];
+        let error =
+            restore_released_v4_artifact(&header(false, 0, 2), 0, &backwards, &delivery_known)
+                .expect_err("throughSeq not earlier");
+        assert!(
+            error
+                .message()
+                .contains("delivery throughSeq must precede its marker")
+        );
+
+        // An empty session id refuses.
+        let empty = vec![turn_start(0, 1), delivery_row(1, "", 0)];
+        let error = restore_released_v4_artifact(&header(false, 0, 2), 0, &empty, &delivery_known)
+            .expect_err("empty id");
+        assert!(
+            error
+                .message()
+                .contains("delivery requires a nonempty Session id")
+        );
+
+        // A foreign delivery generation is ignored (sessionFormatVersion
+        // defaults to 0 and never matches v4).
+        let foreign_generation = vec![
+            turn_start(0, 1),
+            json!({
+                "type": "session-log-deepseek/delivery-accepted", "seq": 1, "time": 1_000,
+                "data": {"sessionId": "other", "throughSeq": 0, "sessionFormatVersion": 3}
+            }),
+        ];
+        restore_released_v4_artifact(
+            &header(false, 0, 2),
+            0,
+            &foreign_generation,
+            &delivery_known,
+        )
+        .expect("foreign generation ignored");
+
+        // Without the plugin declaration the type is unknown-and-required:
+        // the vocabulary gate refuses before the delivery check applies.
+        let undeclared = vec![turn_start(0, 1), delivery_row(1, "other", 0)];
+        let error = restore_released_v4_artifact(&header(false, 0, 2), 0, &undeclared, &known())
+            .expect_err("undeclared type");
+        assert!(
+            error
+                .message()
+                .contains("format v4 contains unknown event type")
+        );
     }
 
     #[test]
