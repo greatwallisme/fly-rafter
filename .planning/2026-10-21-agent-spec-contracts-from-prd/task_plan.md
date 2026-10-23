@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 13 合同层（七步流 1-2）完成：Q34A（词表激活期声明聚合）/Q33A（plugin 通道）/Q35B（projection 后置 19.2 条 14）/Q36A（tools 投影补遗）+ E1/E2 勘误全部落地——PRD §7.1 三处 + §7.4 + 19.2 条 14 + 23 决策 28 + intake SESSION 条款 18/19/20 + 9 新场景（SESSION 102 / 全局 1249）；管线九关全绿（import 20、transition 20/20、draft 20、refine、depends、bind 重放 55/259/0、三门禁 0/0/0、questions 40/0、SESSION lint 0.7 PASS）。dougong-plugin-dev 技能核对无误述、补 descriptor 事实缺口（dougong 仓侧未提交留评审）。当前动作 = fr-session 写码（七步流 3-7）：crates/fr-session 新建（dougong 插件 dylib 形态，激活 dougong-plugin-dev + rust-guidelines）——SessionEvent 全集/物理不变量/surface/deriveMessages/ToolHistory/词表声明/plugin 通道/fork/resume，dsh 精确细节在 findings 三节。
+Phase 13 实现切片 A 完成：crates/fr-wire 会话域首批（ids/content/message/call_config/stream，16 钉测；merge-extensible 双轨 + flatten extras + TrueOnly + safe-integer 域）；四关全绿（143 tests）。dsh-llm 全类型面 + attachment refs 真源已读。下一切片 = event.rs（SessionEvent 信封手工 serde：type 与 data 单源、14 变体、未知事件保留 + SessionHeader/EpochHeader/SurfaceOp）→ fr-session crate（信封校验/surface/deriveMessages/ToolHistory/词表声明/plugin 通道/持久化物理层）。
 
 ## Current Phase
-Phase 13（fr-session v4 全量——合同层完成，进入实现）
+Phase 13（fr-session v4 全量——切片 A（fr-wire 首批）完成）
 
 ## Phases
 

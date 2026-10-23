@@ -506,3 +506,15 @@ Q33 plugin: 记录通道 M1 范围 / Q34 KNOWN 词表注册机制 / Q35 message 
 - 落地批次：PRD §7.1 三处（词表机制 + plugin 通道 / turn/end 七变体 E1 / user/message 直载 E2）+ §7.4 tools 投影补遗（Q36A）+ 19.2 条 14（Q35B）+ 23 决策 28；intake SESSION-1 扩写 + 新增条款 18/19/20 + 9 新场景（SESSION 93→102，全局 1240→1249）+ Source Trace 四行 dsh 证据。
 - 管线全序列重跑：import 20 ✓ → transition 20/20（**新坑**：sed 提取 frontmatter id 为大写 REQ-FR-*，case 模式写小写 req-fr-* 静默零匹配——transition 全空跑、draft 零产物；改正后 20/20）→ draft-specs 20 ✓ → refine ✓ → depends 清理 ✓ → bind 重放 ✓（CONFIG lifecycle 55 passed / 259 skipped / 0 failed 基线不变）→ 三门禁 0/0/0 → questions 40/0 blocking → SESSION lint min-score 0.7 PASS（仅 pending 选择器 open-question advisory，草稿态预期）。
 - 自纠两件：intake 编辑曾混入垃圾标题行"## Scenarios 追加占位不存在"（当轮发现即除）；场景计数三连错（生成稿为裸 `Scenario: ` 行，非 `场景:` 亦非 `### Scenario: `，计数模式改为 `^Scenario: ` 后数字落定）。
+
+## 2026-10-23 — Phase 13 实现切片 A：fr-wire 会话域 wire 形状库（首批落地）
+
+- crate 新建 `crates/fr-wire`（workspace members/内部依赖/共享元数据；workspace.package 补 description）。定位 = PRD 4.4/4.5：纯 serde 形状库，各插件工件链接副本、载荷 JSON 字节跨界；会话 wire 类型单源于此。
+- 类型真源全读：dsh-llm {types 571, message 307, call-config 96, brand 76, content 492（行为层，类型在 types）, assistant-stream 记录段} + dsh-attachment types（Image/FileAttachmentRef + ImageMediaType 四值）。
+- 核心设计定案：**全部 merge-extensible union（ContentBlock/Message/MessageSource/FinishReason/StreamChunk）= 已知变体强类型 + `Other(RawObject)` 原样保留回放**（未知 kind/type/role 绝不拒绝亦不变形）；已知来源/消息以 `#[serde(flatten)] extra: RawObject` 保留生产者扩展字段；`TrueOnly` 标记类型只接受字面 `true`（offloaded/isError/deferLoading/startsSeries 族）；SessionSeq/SessionLogOffset = u64 ≤ 2^53−1（SAFE_INTEGER_MAX 对齐 dsh safe-integer 域）。
+- 模块面：ids（7 个 opaque id 宏 + 2 个 seq newtype）/ content（7 内容块 + attachment refs）/ message（5 角色 + 4 来源 + 别名族）/ call_config（Failure/TokenUsage/FinishReason/ReplayEnvelope/ToolSchema/ToolHistory/CallControls/CallConfig(flat controls)/AdapterDefaults/SystemPromptUpdate/ToolUpdate）/ stream（StreamChunk 七种 + AssistantStreamRecord 四种打包形）。
+- 测试 16：wire 键逐字钉（toolName/toolCallId/isError/argumentsDelta/time0/replayState）+ 未知变体保留回环 + TrueOnly 拒 false + safe-integer 域。
+- 事故（重大，两起 Write 工具生成损坏）：大段枚举 Rust 经 Write 两次产出乱码——一次错误路径（/home/crate0.sol，权限拒未落盘）、一次 message.rs 乱码落盘；按 Session 7 既有教训改分块 heredoc（≤40 行/块）+ 每块乱码扫描重建；后续一次 python 批量 `Some(Some(`→`Some(` 吞掉 assert 尾括号三处，逐点修复。
+- serde 知识点（4 测试失败根因）：**枚举级 `rename_all` 只作用于变体名，不级联变体字段**——全部带字段变体逐一补 `#[serde(rename_all = "camelCase")]`（27 处）；另 event 联合（type 字段与 data 单源、未知事件保留）将用手工 serde 实现（下一切片 event.rs）。
+- 四关全绿：fmt / clippy 双口径 -D warnings / test 143（127+16）/ doc 零警告。
+- 待续切片：event.rs（SessionEvent 信封手工 serde + SessionHeader/EpochHeader/SurfaceOp/EventData 14 变体）→ fr-session crate（信封校验/surface/deriveMessages/ToolHistory/词表/plugin 通道/持久化）。

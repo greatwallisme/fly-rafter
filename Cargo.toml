@@ -4,10 +4,12 @@ members = [
     "crates/fr",
     "crates/fr-config",
     "crates/fr-schema",
+    "crates/fr-wire",
 ]
 
 [workspace.package]
 version = "0.1.0"
+description = "Fly Rafter wire shape library"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/greatwallisme/fly-rafter"
@@ -29,6 +31,7 @@ indexmap = "2"
 # Internal crates
 fr-config = { path = "crates/fr-config" }
 fr-schema = { path = "crates/fr-schema" }
+fr-wire = { path = "crates/fr-wire" }
 
 # Lint table aligned with the dougong workspace (PRD 21): the zero-warning
 # gates (fmt / clippy -D warnings / test / doc) must stay reproducible.
