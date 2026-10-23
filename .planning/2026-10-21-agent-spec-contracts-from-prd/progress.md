@@ -236,3 +236,9 @@
 - F7 两份 bind 脚本写入 §七八条纪律头；F11/F13 撤回 [019][067] 为 pending（Then 含未实现 agent-loop 半边）；F15 按 A 案执行（场景改 dsh 拒发语义——依据常设 1:1 规则，B 案违 1:1 需 19.2，已在审计簿 F15 行留用户改裁口）；F16 CLI 两 dump 测试 + fr-config 单测改名；F17 schema_diagnostic_line 抽取 + 双形态单测 + main.rs 接线（fr 经 fr-config 再导出，无直接 fr-schema 依赖）。
 - 门禁复跑（本会话实跑）：fmt PASS / clippy workspace 0 警告 0 错误（clippy 全数真修：SAFETY 注释、raw 指针、items_after_statements、too_many_lines 真拆 8 个 helper，零 allow 压制）/ cargo test --workspace 254 passed 0 failed / cargo doc 0 / KLL 三门禁 0 errors / SESSION lifecycle **75 passed 0 failed 27 skipped**（基线 0/102）。
 - 审计簿同步：§二总量更新为真证 130 / 前置撤回 2；§三/§四逐行改判 + 证据；§九 F1-F20 全勾 + 每项验证证据。
+
+## 2026-10-23 — F15 终裁 B 案落地（用户："可以 修改 PRD 19.2"）
+
+- 用户裁决 B：[069] 场景保持「一致则采纳」原文；实现偏离 dsh 拒发语义——materialize 前置守卫与 link EEXIST 竞态回退两处逐字节比对，一致采纳（幂等 no-op 零写入）、不一致拒绝（"divergent log already exists"）。reject_existing_log 守卫随之删除。
+- 登记：PRD 19.2 条 16 + 决策 30（本 PRD 首条经用户批准的行为性 1:1 偏差）；审计簿 F15 行与 [069]/[016] 行同步；钉测改名 republishing_identical_log_adopts_and_divergent_refuses（两臂断言），[016][069] 均重绑（旧名进 AUTHORISED_OUTGOING）。
+- 门禁复跑（实跑）：fmt PASS / clippy workspace 0（is_ok_and 修一处）/ test --workspace 254 passed 0 failed / doc 0 / lifecycle 75 passed 0 failed 27 skipped。

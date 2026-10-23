@@ -13,7 +13,6 @@ use std::path::{Path, PathBuf};
 
 use super::{JsonlCompression, PersistError};
 use fr_wire::event::{SessionEvent, SessionHeader};
-use fr_wire::ids::SessionId;
 
 /// `mkdir -p` with the dsh recursive-mode semantics: every directory the
 /// call creates gets `mode`; existing entries are left alone.
@@ -102,20 +101,6 @@ pub(super) fn write_synced_temp_file(
 /// first write of a session the backend believes is new (dsh
 /// `rejectExistingLog`; the create path guards first, so this is a TOCTOU
 /// backstop).
-fn reject_existing_log(
-    dir: &Path,
-    compression: JsonlCompression,
-    id: &SessionId,
-) -> Result<(), PersistError> {
-    if super::read::resolve_generation_in_directory(dir, compression)?.is_some() {
-        return Err(PersistError::Corruption(format!(
-            "refusing to materialize \"{}\": a log already exists on disk (open it instead)",
-            id.as_str()
-        )));
-    }
-    Ok(())
-}
-
 /// The dsh `rejectOppositeArtifact` guard: a session directory already
 /// holding the other physical encoding's log refuses materialization before
 /// anything is written.
@@ -207,12 +192,25 @@ pub fn materialize(
     sync_dir(root)?;
     create_dir_all_mode(&dir, 0o700)?;
     sync_dir(&project)?;
-    reject_existing_log(&dir, compression, &meta.id)?;
-    reject_opposite_artifact(&dir, compression)?;
     let header_line =
         super::header_line::to_header_line(meta, meta.is_seeded.then_some(inherited_event_count))?;
     let content =
         encode_materialization(format!("{header_line}\n").as_bytes(), events, compression)?;
+    // PRD 19.2 条 16 (deliberate deviation from dsh's outright refusal): an
+    // existing log is adopted only when the pending bytes are identical —
+    // a republish of the same content is a no-op — and refuses otherwise.
+    if let Some(existing) = super::read::resolve_generation_in_directory(&dir, compression)? {
+        if existing.source_path == final_path
+            && std::fs::read(&existing.source_path)?.as_slice() == content.as_slice()
+        {
+            return Ok(());
+        }
+        return Err(PersistError::Corruption(format!(
+            "refusing to materialize \"{}\": a divergent log already exists on disk (open it instead)",
+            meta.id.as_str()
+        )));
+    }
+    reject_opposite_artifact(&dir, compression)?;
     let tmp = write_synced_temp_file(&final_path, &content)?;
     // Publish via link(), NOT rename(): link fails with EEXIST if the final
     // path already exists, so two processes materializing the same id
@@ -224,6 +222,11 @@ pub fn materialize(
         // Remove an unpublished temp on failure.
         let _ = std::fs::remove_file(&tmp);
         if error.kind() == std::io::ErrorKind::AlreadyExists {
+            // The race backstop applies the same 19.2 条 16 rule: a
+            // concurrent publisher of byte-identical content is adopted.
+            if std::fs::read(&final_path).is_ok_and(|bytes| bytes == content) {
+                return Ok(());
+            }
             return Err(PersistError::AlreadyExists(format!(
                 "session \"{}\" already exists",
                 meta.id.as_str()

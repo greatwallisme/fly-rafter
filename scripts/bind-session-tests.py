@@ -44,8 +44,8 @@ PAIRS = [
     ("user/message 直载形态", "user_message_data_is_the_message_itself"),
     ("非 v4 文件被拒绝", "foreign_versions_refuse_before_shape_checks"),
     ("写路径校验失败不发布后继文件", "write_path_validation_failure_publishes_nothing"),
-    ("独占发布与回滚", "republishing_an_existing_log_refuses_and_keeps_bytes_identical"),
-    ("后继世代 EEXIST 拒绝发布", "republishing_an_existing_log_refuses_and_keeps_bytes_identical"),
+    ("独占发布与回滚", "republishing_identical_log_adopts_and_divergent_refuses"),
+    ("后继世代 EEXIST 逐字节比对", "republishing_identical_log_adopts_and_divergent_refuses"),
     ("zstd 撕裂尾恢复", "zstd_torn_tail_keeps_the_committed_prefix_and_classifies_the_frame"),
     ("abort 补合成 tool/result", "unstarted_call_closes_with_not_started_error_and_no_source_seqs"),
     ("两级补偿错误码与文案", "started_call_closes_with_outcome_unknown_and_call_seq_source"),
@@ -97,6 +97,7 @@ AUTHORISED_OUTGOING = {
     "replace_bounds_not_earlier_are_rejected",
     "header_shape_guard_covers_the_whole_table",
     "text_block_round_trips_with_verbatim_type_key",
+    "republishing_an_existing_log_refuses_and_keeps_bytes_identical",
 }
 
 # Withdrawals: bindings whose Then carries an unimplemented module half go

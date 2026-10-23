@@ -1004,7 +1004,10 @@ mod tests {
     }
 
     #[test]
-    fn republishing_an_existing_log_refuses_and_keeps_bytes_identical() {
+    fn republishing_identical_log_adopts_and_divergent_refuses() {
+        // PRD 19.2 条 16 (deliberate deviation from dsh's outright
+        // refusal): a republish of byte-identical content adopts the
+        // existing log, a divergent one refuses.
         let compression = JsonlCompression::None;
         let root = TempRoot::new("eexist");
         let id = SessionId::new("dup");
@@ -1013,19 +1016,24 @@ mod tests {
         let path =
             crate::persist::filename::log_path(root.path(), None, &id, compression).expect("path");
         let before = fs::read(&path).expect("read published bytes");
-        // The pre-publish guard refuses with the dsh plain-Error text; the
-        // link() EEXIST race behind it maps to AlreadyExists (TOCTOU
-        // backstop, not reachable through this API surface).
-        let error = materialize(root.path(), &meta, 0, &chain(), compression)
-            .expect_err("second materialize");
+        // Identical republish: adopted, bytes unchanged.
+        materialize(root.path(), &meta, 0, &chain(), compression).expect("identical republish");
+        assert_eq!(fs::read(&path).expect("read again"), before);
+        // Divergent republish: refused with the 19.2 text, bytes unchanged.
+        let mut divergent = chain();
+        if let Some(last) = divergent.last_mut() {
+            last.time += 1;
+        }
+        let error = materialize(root.path(), &meta, 0, &divergent, compression)
+            .expect_err("divergent republish");
         assert!(matches!(error, PersistError::Corruption(_)));
         assert!(
             error
                 .message()
-                .contains("refusing to materialize \"dup\": a log already exists on disk")
+                .contains("refusing to materialize \"dup\": a divergent log already exists")
         );
-        assert_eq!(fs::read(&path).expect("read again"), before);
-        // No temp litter beside the artifact after the failed publish.
+        assert_eq!(fs::read(&path).expect("read after refuse"), before);
+        // No temp litter beside the artifact after either path.
         let siblings: Vec<String> = fs::read_dir(path.parent().expect("dir"))
             .expect("list dir")
             .map(|entry| {

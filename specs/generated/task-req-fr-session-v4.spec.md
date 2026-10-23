@@ -185,7 +185,7 @@ Scenario: 无 LLM 回退标题
   那么 回退 5 词或 40 字节，上限 80 字节
 
 Scenario: 独占发布与回滚
-  Test: republishing_an_existing_log_refuses_and_keeps_bytes_identical
+  Test: republishing_identical_log_adopts_and_divergent_refuses
   假设 新会话首发与一次 append 失败
   当 观察发布路径时
   那么 首发走临时文件加 link 独占发布且逐级目录 fsync，append 失败时文件 truncate 回滚无半行
@@ -604,11 +604,11 @@ Scenario: zstd 撕裂尾恢复
   当 加载时
   那么 丢弃不完整尾记录、完整记录全部还原且会话可继续追加
 
-Scenario: 后继世代 EEXIST 拒绝发布
-  Test: republishing_an_existing_log_refuses_and_keeps_bytes_identical
+Scenario: 后继世代 EEXIST 逐字节比对
+  Test: republishing_identical_log_adopts_and_divergent_refuses
   假设 发布后继世代时目标文件名已存在
   当 link 返回已存在时
-  那么 拒绝发布（不做覆盖或采纳），已有文件逐字节保持不变
+  那么 与已有文件逐字节比对：一致则采纳，不一致则报错拒绝（PRD 19.2 条 16）
 
 Scenario: node-0 重写白名单
   Test: node_zero_system_head_rejects_non_system_rewrite

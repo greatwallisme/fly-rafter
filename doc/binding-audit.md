@@ -39,7 +39,7 @@
 | 013 | seedLength 拒绝 | header_shape_guard_covers_the_whole_table | 真证 | |
 | 014 | 五角色与七种 ContentBlock 往返无损 | roles_and_blocks_round_trip | 真证（F9 已修） | 27 个合法角色×块组合文件级往返 + 越权 tool-addition 拒（dsh tool-change 仅 developer 合法，测试如实记录） |
 | 015 | 扩展事件与 end-seed 回环 | fork_seed_round_trips_with_the_inherited_cut | 真证（F5 已修） | approval/asked + tool/ptc-dispatch 与 Given 点名一致 |
-| 016 | 独占发布与回滚 | republishing_an_existing_log_refuses_and_keeps_bytes_identical（+ append_rollback 集成测试） | 真证（F2 已修） | RLIMIT_FSIZE 注入：错误上抛 + 字节复原（独立测试进程防并行干扰）；fsync/link 仍为审查级保证（如实登记） |
+| 016 | 独占发布与回滚 | republishing_identical_log_adopts_and_divergent_refuses（+ append_rollback 集成测试共证） | 真证（F2 已修 + F15 B 案重绑） | 独占发布/EEXIST 两臂在 republish 钉测；RLIMIT_FSIZE 注入回滚（错误上抛 + 字节复原，独立测试进程）；fsync/link 仍为审查级保证（如实登记） |
 | 017 | 非法 replace 被拒 | illegal_replace_is_rejected | 真证（F10 已修） | 两拒绝合入单测试，重绑完成 |
 | 018 | tool/result 替换越权 | tool_result_rewrite_may_change_only_content | 真证 | |
 | 019 | 两级补偿错误码与文案 | pending_req_fr_session_two_level_abort_codes | 前置撤回（F11 已修） | 等 agent-loop 切片后重绑 |
@@ -64,7 +64,7 @@
 | 066 | canonicalHeader 空 tools 省略 | request_header_fold_last_wins_and_canonicalizes | 真证 | |
 | 067 | 工具增删 developer 门控 | pending_req_fr_session_tool_gate | 前置撤回（F13 已修） | 等 agent-loop 切片后重绑 |
 | 068 | zstd 撕裂尾恢复 | zstd_torn_tail_keeps_the_committed_prefix_and_classifies_the_frame | 真证（F14 已修） | 修复后续写新 turn 并全量读回已断言 |
-| 069 | 后继世代 EEXIST 拒绝发布 | republishing_an_existing_log_refuses_and_keeps_bytes_identical | 真证（F15 按 A 修复） | 场景 Then 改为 dsh 拒发语义（拒绝发布、字节不变）；依据项目常设 1:1 规则执行，B 案（偏离 dsh）如需可再裁 |
+| 069 | 后继世代 EEXIST 逐字节比对 | republishing_identical_log_adopts_and_divergent_refuses | 真证（F15 用户终裁 B 案） | 场景原文「一致则采纳」保留；实现改幂等采纳 + 不一致拒绝（PRD 19.2 条 16 + 决策 30，2026-10-23 用户批准的行为性 1:1 偏差）；钉测两臂断言 |
 | 070 | node-0 重写白名单 | node_zero_system_head_rejects_non_system_rewrite | 真证 | |
 | 071 | series 重置基线 | series_reset_drops_prefix_reuse | 真证 | |
 | 072 | tool-addition 经 headerSeq 进 updates | additions_resolve_through_header_seq_into_updates | 真证 | |
@@ -179,7 +179,7 @@
 - [x] F12 [020] 文件级折叠回环（framing.rs 测试尾部）：[[0,2]] 落盘 + 读回展开 [0,1,2]。
 - [x] F13 [067] 撤回 pending_req_fr_session_tool_gate。验证：spec 行 + lifecycle skipped。
 - [x] F14 [068] 修复后可继续追加（read.rs zstd 撕裂测试尾部）：repair + 续写新 turn + 全量读回。
-- [x] F15 [069] 场景失真按 A 案修复：Then 改为 dsh 拒发语义（"拒绝发布（不做覆盖或采纳），已有文件逐字节保持不变"），标题改"后继世代 EEXIST 拒绝发布"。依据：项目常设规则"行为与协议 1:1 对齐 dsh"直接裁决了方向（B 案违反 1:1 且需 19.2 登记 + 用户确认）；如用户改裁 B 案再改回并走 19.2。
+- [x] F15 [069] 用户终裁 **B 案**（2026-10-23"可以 修改 PRD 19.2"）：场景保持原文「一致则采纳，不一致则报错拒绝」；实现偏离 dsh 拒发语义——materialize 前置守卫与 link EEXIST 竞态回退两处逐字节比对，一致采纳（幂等 no-op）、不一致拒绝（"divergent log already exists"）；登记 PRD 19.2 条 16 + 决策 30；钉测 republishing_identical_log_adopts_and_divergent_refuses 两臂断言并重绑。初判 A 案（常设 1:1 规则）被用户改裁，以此行记录为准。
 - [x] F16 [025] CLI 测试扩为两 dump（fr/tests/dump_cli.rs dump_config_and_schema_generated_from_real_assembly）重绑；fr-config 数据面单测改名 composed_layers_agree_between_dump_and_schema_projection 防选择器重名。
 - [x] F17 [037] diagnostics stderr 格式：新 fr_schema::dump::schema_diagnostic_line（括号/无括号两形态单测逐字钉死），fr/src/main.rs 接线，经 fr-config 再导出。
 - [x] F18 [003] fork 测试补 forked 文案（FORKED_NOT_STARTED + TOOL_NOT_STARTED + is_error）断言。
