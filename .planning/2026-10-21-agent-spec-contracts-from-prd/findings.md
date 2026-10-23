@@ -518,3 +518,13 @@ Q33 plugin: 记录通道 M1 范围 / Q34 KNOWN 词表注册机制 / Q35 message 
 - serde 知识点（4 测试失败根因）：**枚举级 `rename_all` 只作用于变体名，不级联变体字段**——全部带字段变体逐一补 `#[serde(rename_all = "camelCase")]`（27 处）；另 event 联合（type 字段与 data 单源、未知事件保留）将用手工 serde 实现（下一切片 event.rs）。
 - 四关全绿：fmt / clippy 双口径 -D warnings / test 143（127+16）/ doc 零警告。
 - 待续切片：event.rs（SessionEvent 信封手工 serde + SessionHeader/EpochHeader/SurfaceOp/EventData 14 变体）→ fr-session crate（信封校验/surface/deriveMessages/ToolHistory/词表/plugin 通道/持久化）。
+
+## 2026-10-23 — Phase 13 实现切片 B：fr-wire event.rs 会话信封（手工 serde）
+
+- event.rs 954 行 + 10 钉测（fr-wire 16→26）。核心机制：**SessionEvent 手工 Serialize/Deserialize**——`type` 键与 `data` 对象单源于 `SessionEventData` 联合（serialize 按 variant 分派；deserialize 按 type 名分发到具名 Data 结构体，未知名落入 `Unknown{type_name, data: RawObject}` 原样保留）；信封键序与 dsh writer 插入序一致（type, seq, time, data, sourceEventSeqs?, surfaceOp?, ignorable?——preserve_order 下逐字节锚点稳定）；信封未知键在 wire 层即拒（错误含 `unknown envelope keys`；dsh 六键白名单的 fr 对应）。
+- 变体面（14 + Unknown）：turn/start|end（reason 七变体 + CancelCause 四 kind + merge-extensible Other）、step/start|end（同构 StepBoundsData）、user/message（**data 直载 Message**，E2 落地）、developer/system/assistant/message、assistant/attempt、tool/call、tool/result（error{name,code,reason?} + meta）、request/header（EpochHeader：config + adapterDefaults? + tools?；system 为 persistence-reserved 不建模，admission 拒）、request/context、session/end-seed（inherited?）。
+- SurfaceOp：untagged{Append(AppendOp), Replace(ReplaceOp{op,startSeq,endSeq})}；Append/ReplaceTag 自定义 serde（裸字符串 "append"/"replace"）。头部族：SessionHeader（逻辑头，delegationDepth 可选——物理行形态属持久化层）/Origin/EpochHeader/RequestContextData/ToolResultError。
+- 设计要点：14 个 `*Data` 具名结构体（避免 untagged 内联枚举的字段形状歧义碰撞——如 step/start 与 assistant/attempt 字段子集关系）；SessionEventData 不派生 serde（手工单源）；Eq 全量可派生即派生，三个 untagged Other 回退（ContentBlock/MessageSource/FinishReason/TurnEndReason）以 `#[expect(clippy::derive_partial_eq_without_eq, reason=…)]` 带因豁免。
+- clippy 自纠：doc_markdown 批量（--fix）、Eq 逐类型、match 臂合并（StepStart|StepEnd）、redundant clone ×3、文档段过长拆段；测试断言改为 `json["key"]` 直接比较与 `expect_err`（避 assertions_on_result_states）。
+- 四关全绿：fmt / clippy 双口径 -D warnings / workspace test（fr-wire 26）/ doc 零警告。
+- 待续切片 C：fr-session crate 本体（信封校验/surface 折叠双计数/deriveMessages/ToolHistory/词表声明/plugin 通道/持久化物理层与租约）——dsh 精确语义在 findings 三节真源记录。

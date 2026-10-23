@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 13 实现切片 A 完成：crates/fr-wire 会话域首批（ids/content/message/call_config/stream，16 钉测；merge-extensible 双轨 + flatten extras + TrueOnly + safe-integer 域）；四关全绿（143 tests）。dsh-llm 全类型面 + attachment refs 真源已读。下一切片 = event.rs（SessionEvent 信封手工 serde：type 与 data 单源、14 变体、未知事件保留 + SessionHeader/EpochHeader/SurfaceOp）→ fr-session crate（信封校验/surface/deriveMessages/ToolHistory/词表声明/plugin 通道/持久化物理层）。
+Phase 13 实现切片 B 完成：fr-wire event.rs 会话信封（手工 serde 单源 type/data、14+Unknown 变体、信封键序对齐 dsh writer、未知信封键拒、SurfaceOp 自定义 serde、头族）+ 10 钉测（fr-wire 26 总）。四关全绿。下一切片 = fr-session crate 本体切片 C（信封校验/surface 折叠双计数/deriveMessages/ToolHistory/词表声明聚合/plugin 记录通道/持久化物理层与写租约）——dsh 精确语义全在 findings 三节真源记录。
 
 ## Current Phase
-Phase 13（fr-session v4 全量——切片 A（fr-wire 首批）完成）
+Phase 13（fr-session v4 全量——切片 B（event.rs 信封）完成）
 
 ## Phases
 

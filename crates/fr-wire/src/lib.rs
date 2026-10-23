@@ -12,6 +12,7 @@
 
 pub mod call_config;
 pub mod content;
+pub mod event;
 pub mod ids;
 pub mod message;
 pub mod stream;
@@ -23,6 +24,12 @@ pub use call_config::{
 pub use content::{
     ContentBlock, FileAttachmentRef, ImageAttachmentRef, ImageMediaType, KnownContentBlock,
     OriginalDimensions, RawObject, TrueOnly,
+};
+pub use event::{
+    AppendOp, CancelCause, EndSeedData, EpochHeader, Origin, ReplaceOp, ReplaceTag,
+    RequestContextData, RequestHeaderData, RequestHeaderReason, SessionEvent, SessionEventData,
+    SessionHeader, StepBoundsData, SurfaceOp, ToolCallData, ToolResultData, ToolResultError,
+    TurnEndReason, TurnEndReasonKind, TurnStartData, UnknownEventData, event_type,
 };
 pub use ids::{
     AttachmentId, LlmAttemptId, MessageId, ProviderRequestId, ReasoningEffortId, SAFE_INTEGER_MAX,
