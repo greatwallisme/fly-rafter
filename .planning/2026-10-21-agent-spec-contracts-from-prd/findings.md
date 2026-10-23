@@ -594,6 +594,42 @@ Q33 plugin: 记录通道 M1 范围 / Q34 KNOWN 词表注册机制 / Q35 message 
 - 门禁：四关复跑全绿（workspace 225 tests，clippy 0，doc 0）+ 三门禁 0 errors。
 - **Q41A**：下一切片 = fr-session store 服务接线（Tracker/句柄/live 200ms 批窗/flushAll/list 发现面），Phase 13 完整闭环。
 
+## 2026-10-23 — Q42A' 裁决落地：切片 F 持久化运行时实现
+
+- **Q42A' 裁决**（用户"A"）：同步 core + 写句柄 actor worker + 有界并行 list + Condvar 调度线程。Q38「listConcurrency 以 tokio 信号量等价」推定文字随之修订为「同步有界并行（std::thread::scope + Mutex+Condvar 信号量），默认 3 语义逐字」——PRD/19.2 无需改动（该推定仅存 findings）。
+- **实现落点**（全部 crates/fr-session/src/persist/）：scheduler.rs（TimerTarget lazy 失效 armed 位 + Condvar/deadline 堆单线程，catch_unwind 防火）、handle.rs（Op 枚举 + per-handle worker 线程 `fr-session-handle-<id>` + 每-op mpsc 回执 ≡ dsh promise 链；CloseSlot 幂等共享结局 ≡ closing ??=；SharedReadState/缓冲小锁零 I/O 持锁）、tracker.rs（writers/pending/open_handles，uid 身份）、backend.rs（create/open 双臂 + stat/list + findLog/legacy 拒/编码守卫/版本门 + readStableBytes 一次重试截断前缀 + read_generation_header 首行读器）。
+- **关键 1:1 发现（登记，Phase 15 必守）**：日志内 turn 编号 1 起——dsh relationships.ts `n = 1`（验证器首个 turn/start 必须为 turn 1），若 0 起则 dsh 无法恢复自身会话；fr 验证器 next_turn:1 同构已对。fr-agent-loop 发首个 turn/start 时 MUST 用 1。
+- **极端钉测逮捕真 bug 一件**：create_dir_all_mode 的 `create_dir` 并发竞态下输家 EEXIST 直接上抛（10 并发写句柄测试必现）——dsh 用 Node `mkdir recursive` 天然容忍；已修为 EEXIST 容忍（mkdir -p 语义），5× 复跑稳定。
+- **机械登记（内部结构不镜像 dsh，非行为偏差）**：JsonlHandleStorage 接缝内联为具体 Arc<JsonlBackend>（Rust 模块同 crate 无循环问题）；AbortSignal/eventState/coldLogMemo 不移植（Q42 已登记）；ensure_root_encoding 只 memo 确定性编码拒绝（transient I/O 重试更有益，dsh 全 memo 的偏差理由已注释）；HandleInner.uid（进程内计数器）作 tracker 记账身份。
+- **钉测 +19**（backend.rs tests 模块，文案逐字）：round-trip/pending 可见性/duplicate 双拒/claim 拒/NotFound/contiguity/readonly 双拒/closed 先于参数/offset 域/单调缩水/torn zstd 帧修复/live 窗口 drain/drainPaused 暂停后 close 修复/版本门 v3+v5 双文案/legacy flat/10 并发写句柄/大会话库有界并行 list+坏工件跳过/新鲜度跨句柄/close 失败即结局且幂等。
+- **门禁终态（实跑）**：fmt PASS / clippy --workspace --all-targets 0（35 条机械尾全数真修，零 allow）/ cargo test --workspace 275 passed 0 failed / doc 0 / SESSION lifecycle 75 passed 0 failed 27 skipped（基线保持）。余 27 pending 均依赖 agent-loop 触发/SessionStore 服务/prompt 投影，本切片无新绑定对象（bind-session-tests.py 无需扩表）。
+
+## 待裁决问题登记（2026-10-23 呈 Q42：切片 F 并发载体）
+
+**用户设计指令（2026-10-23，约束性）**：M1 必须把多会话并发、大会话库等极端情况纳入首日设计，禁止留待 M2 打补丁。据此 Q42 方案 A' 增补「极端优先」四项（原文见会话呈报，裁决后按此落地）：
+1. worker 线程仅属写句柄（读句柄无线程——dsh read 不入链，storage.ts:118-156 实证；线程数 = 活跃写会话数）。
+2. 有界并行 list **M1 即实现**（mapSessionDirectories 按 dsh listConcurrency=3 语义：std::thread::scope + Mutex+Condvar 信号量；项目先序、首错 = 输入序、项目失败后仍收齐目录结果再抛——index.ts:1095-1130 settle 语义逐字）；listConcurrency 成为后端真实字段。
+3. live 缓冲无界 + drainPaused 失败保留重试 = dsh 原语义（storage.ts:89-93,294-316），登记为 1:1 事实不改动；整日志驻留内存（read_stored_log 全量读）同为 dsh 同构事实。
+4. 跨进程安全已由切片 E 结构性覆盖（flock 租约 + materialize EEXIST 互斥 + 进程内 claim），无新增工作。
+本切片增配极端钉测：10 并发写句柄交错 append（序列正确性 + 各句柄单调读）；大会话库有界并行 list（序与首错语义）；事件洪峰慢 drain（缓冲保留 + drainPaused 重试 + 后台失败回报）。
+机制修正：A 案串行化骨架 = per-handle actor worker（dsh promise 链字面直译，Op 枚举 + 单消费者），Mutex 退为小共享单元（live 缓冲/primed/observed_length）专用；Condvar+deadline 堆调度线程扛 200ms 批窗；lock-free/io_uring/mio/rayon/ArcSwap 逐项裁决为不适用（fsync 毫秒主导、平台锁死、无行为增益），理由已呈会话。
+
+事实：
+- dsh 全 Promise：句柄串行 = per-handle promise 链（storage.ts:357-370 enqueueChain/run）；200ms 批窗 = setTimeout（storage.ts:36,277-281）；列表并发 = pLimit(3)（index.ts:91,328）；取消 = AbortSignal（写前 throwIfAborted）。
+- fr-session 现状：全同步（std::fs + libc flock），tokio 仅 dev-deps（切片 E E2E 用）；workspace.dependencies 已有 tokio 1（rt-multi-thread/time/sync/fs 等）。PRD:107 宿主事件泵、fr-ptc、TUI 均 tokio，但域 crate 无一引入。
+- SESSION 合约 102 场景无一钉 200ms/取消/并发（rg 实证零命中）；200ms 批窗为 Q38 物理推定项（未否决成立）；Q38 曾记「listConcurrency 以 tokio 信号量等价默认 3」的推定文字——选项 A 需修订该推定。
+- dsh index.ts:225-231 自证：settleLimited 并发执行的结果与首错选取「matches a sequential loop whatever the completion order」——sequential loop 即语义参照，并发仅缩墙钟。
+
+选项：
+- A. 同步 core（推荐）：句柄/后端 API 全同步；Mutex 复现 promise 链串行（dsh 链持锁跨文件 I/O，同构）；200ms 批窗 = 后端私有调度线程（Condvar + deadline 堆，单线程）；list/listArtifacts 顺序执行（结果与首错逐项同果；listConcurrency 键的处置——接受惰性或暂不暴露——随步 3 config schema 接线再呈）；AbortSignal 不移植（同步 API 无取消通道；dsh 信号仅写前检查，fr 调用方不可取消即语义为「无取消」）；零新生产依赖；测试即时确定。sync core 与后续宿主 async 壳兼容。
+- B. tokio async：句柄/后端 async fn；tokio 进 fr-session [dependencies]；timer = tokio::time::sleep；listConcurrency = Semaphore(3)（Q38 原文）；取消可留 CancellationToken。代价：域 crate 公共面全 async 化、每测试 #[tokio::test]、与现有同步 Session 模型层组合需桥接。
+
+附带事实登记（非分叉，两案共通）：Rust 所有权使 eventState shared-frozen/深冻结无对应物——读结果恒为 owned 拷贝，SessionHandleReadResult.eventState 不移植（seam 内部形态，非 wire 协议）；coldLogMemo（generation.ts:255-285 readStableJsonlFile 一次重试 + 截断前缀语义保留，memo 缓存本身不移植——纯性能件零行为差）；迁移机械（prepared/publication/migrationPreparations/historicalCorpusRevision）按 PRD 19.1 排除，v≠4 一律 session_format_version_refusal。
+
+裁决后动作：
+- A：修订 Q38 推定登记 → persist/{handle,tracker,backend}.rs + assert_contiguous/created_at 快照校验 + PersistError 扩展（ReadOnly/HandleClosed/InvalidInput/Aggregate）→ 钉测（文案逐字）→ 绑定 SESSION 场景。
+- B：tokio 进生产依赖后按 async 全家桶实现。
+
 ## 2026-10-23 — Phase 13 切片 F 真源全读（三）：persistence 运行时面（storage.ts 571 + handle.ts 117 + store.fork）
 
 ### storage.ts（句柄/追踪器/路由全文）

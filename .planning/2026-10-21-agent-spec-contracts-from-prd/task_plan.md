@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-F1-F20 修复清单全部落地（lifecycle 75 passed / 0 failed / 27 skipped，四关全绿）。待用户验收；其后继续切片 F 实现（handle/tracker/live 路由 → create/open/stat/list 发现面 → ctx 事件接线形态呈报）。
+切片 F（持久化运行时）已落地（Q42A'：同步 actor worker + 有界并行 list + Condvar 调度线程；19 钉测含 10 并发句柄/大会话库极端测，逮捕并修复 mkdir 并发竞态真 bug；四关全绿 275 tests，lifecycle 75/0/27 基线保持，guard 20 合约未过=阻断期预期）。待用户验收；验收后进入 SessionStore 内存层切片与 ctx 事件接线形态呈报（携 dougong 源码证据）。
 
 ## Current Phase
 Phase 13（fr-session v4 全量——切片 F（持久化运行时）进行中）
@@ -94,12 +94,14 @@ Phase 13（fr-session v4 全量——切片 F（持久化运行时）进行中�
 ### Phase 13: fr-session v4 全量
 - [ ] SessionEvent 全集（判别联合、dsh types.ts 逐字字段、五扩展 log-only）
 - [x] 持久化物理不变量（wx+0600+fsync → link+unlink 发布 → 目录 fsync → append truncate 回滚 → zstd 撕裂尾恢复 → 写租约 POSIX 侧）与世代/版本校验（切片 E）
+- [x] 持久化运行时（切片 F，Q42A'：handle actor worker/tracker/live 200ms 路由/flushAll/stat/list/create/open 流/有界并行 list/版本门/legacy 拒——19 钉测含 10 并发句柄与大会话库极端测）
 - [ ] surface/replace-op 硬约束全集（五类入表面、双闭区间、sourceEventSeqs 校验、折叠编码、双计数）
 - [ ] deriveMessages 投影（不可变请求投影）+ canonical request/header（空 tools 省略、adapterDefaults 条件保留、顺序敏感相等比较）
 - [x] fork（sourceEventSeqs 前缀派生；build_fork_seed + forked closers 已落）+ resume 四拒门禁（store 服务切片）
-- [ ] 对照 REQ-FR-SESSION 场景逐条落测试
-- Foundation Note: 本 crate 是管线咽喉：fr-agent-loop/fr-headless 依赖其 deriveMessages/surface 语义，语义字段逐字对齐 dsh types.ts
-- **Status:** pending
+- [ ] SessionStore 内存层（prepare/enter/announce/fork/resume 拒绝码族）+ ctx 事件接线（步 3 呈报 dougong 监听器形态）
+- [ ] 对照 REQ-FR-SESSION 场景逐条落测试（75 passed / 27 skipped，余项依赖后续切片）
+- Foundation Note: 本 crate 是管线咽喉：fr-agent-loop/fr-headless 依赖其 deriveMessages/surface 语义，语义字段逐字对齐 dsh types.ts；日志内 turn 编号 1 起（findings 切片 F 节登记）
+- **Status:** in_progress
 
 ### Phase 13b: fr-llm seam + 三 provider
 - [ ] fr-llm：LlmAdapter trait（stream 必实现 + 7 默认方法）、GenerateOptions、StreamChunk 七种、流装配结算（block-end 上 delta 忽略、重复 close 忽略、delta-only 兜底、缺 id/name 兜底 call-<index>、max-tokens 过滤、ReplayEnvelope 一致性）、prepare_call 代际绑定、toolUpdate 能力差异表

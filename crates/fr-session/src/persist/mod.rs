@@ -16,18 +16,24 @@ compile_error!(
     "fr-session persistence is POSIX-only in M1; the win32 lease and publish paths land with the M1 platform gate (PRD 19.2 item 15)"
 );
 
+pub mod backend;
 pub mod error;
 pub mod filename;
 pub mod framing;
+pub mod handle;
 pub mod header_line;
 pub mod io;
 pub mod lease;
 pub mod paths;
 pub mod read;
+pub mod scheduler;
+pub(crate) mod tracker;
 pub mod v4_checks;
 pub mod zstd;
 
+pub use backend::{JsonlBackend, JsonlBackendBuilder, SessionSnapshot};
 pub use error::{PersistError, session_format_version_refusal};
+pub use handle::{HandleRead, JsonlSessionHandle, SessionAccess};
 
 /// The current session format generation this build writes and reads.
 pub const SESSION_FORMAT_VERSION: u64 = 4;

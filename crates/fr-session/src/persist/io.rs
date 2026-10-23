@@ -27,7 +27,14 @@ pub(super) fn create_dir_all_mode(dir: &Path, mode: u32) -> Result<(), PersistEr
         }
     }
     for component in missing.into_iter().rev() {
-        std::fs::create_dir(&component).map_err(PersistError::Io)?;
+        // Two racers can pass the `!current.exists()` probe together; the
+        // mkdir loser eats `EEXIST`, which the dsh recursive-mkdir
+        // semantics (`mkdir -p`) already tolerate.
+        match std::fs::create_dir(&component) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(PersistError::Io(error)),
+        }
         std::fs::set_permissions(&component, std::fs::Permissions::from_mode(mode))
             .map_err(PersistError::Io)?;
     }
@@ -311,16 +318,37 @@ pub fn repair(path: &Path, offset: u64) -> Result<(), PersistError> {
     handle.sync_all().map_err(PersistError::Io)
 }
 
-/// The stored dev+ino pair of one artifact file.
+/// The stored stat identity of one artifact file: the dsh
+/// `JsonlPhysicalIdentity` fields (dev, ino, size, mtime/ctime in
+/// nanoseconds) backing revision tokens and stable-read checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FileIdentity {
     /// The device id.
     pub dev: u64,
     /// The inode number.
     pub ino: u64,
+    /// The file size in bytes.
+    pub size: u64,
+    /// The last modification time in nanoseconds (may be pre-epoch).
+    pub mtime_ns: i128,
+    /// The last status change time in nanoseconds (may be pre-epoch).
+    pub ctime_ns: i128,
 }
 
-/// The current dev+ino of a file, for revision-stable re-read checks.
+impl FileIdentity {
+    /// The dsh `fileRevision` token text: the five identity fields joined
+    /// with `:` (dsh session-persistence-jsonl/src/index.ts:200-208).
+    #[must_use]
+    pub fn revision(&self) -> String {
+        format!(
+            "{}:{}:{}:{}:{}",
+            self.dev, self.ino, self.size, self.mtime_ns, self.ctime_ns
+        )
+    }
+}
+
+/// The current stat identity of a file, for revision tokens and
+/// stable-read checks.
 ///
 /// # Errors
 ///
@@ -330,6 +358,9 @@ pub fn file_identity(path: &Path) -> Result<FileIdentity, PersistError> {
     Ok(FileIdentity {
         dev: metadata.dev(),
         ino: metadata.ino(),
+        size: metadata.size(),
+        mtime_ns: i128::from(metadata.mtime()) * 1_000_000_000 + i128::from(metadata.mtime_nsec()),
+        ctime_ns: i128::from(metadata.ctime()) * 1_000_000_000 + i128::from(metadata.ctime_nsec()),
     })
 }
 

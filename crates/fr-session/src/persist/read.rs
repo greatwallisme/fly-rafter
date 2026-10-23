@@ -681,9 +681,28 @@ pub fn read_stored_log(
     known: EventVocabulary,
 ) -> Result<ReadOutcome, PersistError> {
     let raw = std::fs::read(path).map_err(PersistError::Io)?;
+    decode_stored_log(root, path, &raw, expected_id, compression, known)
+}
+
+/// Decodes one already-read stored-log byte buffer: the shared body of
+/// [`read_stored_log`] and the runtime's stable-read path.
+///
+/// # Errors
+///
+/// Returns `Unsupported` (with the raw-log suffix) for format refusals,
+/// `Corruption` (with the raw-log suffix) for every decode failure, and
+/// the identity refusals.
+pub(crate) fn decode_stored_log(
+    root: &Path,
+    path: &Path,
+    raw: &[u8],
+    expected_id: &SessionId,
+    compression: JsonlCompression,
+    known: EventVocabulary,
+) -> Result<ReadOutcome, PersistError> {
     let parsed = match compression {
-        JsonlCompression::Zstd => read_zstd_prefix(&raw, known),
-        JsonlCompression::None => read_log_prefix(&raw, known),
+        JsonlCompression::Zstd => read_zstd_prefix(raw, known),
+        JsonlCompression::None => read_log_prefix(raw, known),
     }
     .map_err(|error| match error {
         PersistError::Unsupported(message) => {

@@ -24,10 +24,54 @@ pub enum PersistError {
     /// (`SessionPersistenceNotFoundError` equivalence).
     #[error("{0}")]
     NotFound(String),
+    /// A mutation was refused on a read handle (`SessionReadOnlyError`
+    /// equivalence).
+    #[error("{0}")]
+    ReadOnly(String),
+    /// An operation hit a handle after `close` began
+    /// (`SessionHandleClosedError` equivalence).
+    #[error("{0}")]
+    HandleClosed(String),
+    /// Caller input failed a check the dsh seam reports as `TypeError`
+    /// or a plain validation `Error`.
+    #[error("{0}")]
+    InvalidInput(String),
+    /// Several failures aggregated under one dsh `AggregateError`; the
+    /// display text is the aggregate message, the causes stay inspectable.
+    #[error("{message}")]
+    Aggregate {
+        /// The dsh aggregate message.
+        message: String,
+        /// The aggregated failures, in collection order.
+        errors: Vec<Self>,
+    },
     /// A filesystem error propagated unchanged (Node `ErrnoException`
     /// equivalence); callers classify `ENOENT` with [`Self::is_enoent`].
     #[error(transparent)]
     Io(#[from] std::io::Error),
+}
+
+impl Clone for PersistError {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Unsupported(message) => Self::Unsupported(message.clone()),
+            Self::Corruption(message) => Self::Corruption(message.clone()),
+            Self::AlreadyExists(message) => Self::AlreadyExists(message.clone()),
+            Self::AlreadyOwned(message) => Self::AlreadyOwned(message.clone()),
+            Self::NotFound(message) => Self::NotFound(message.clone()),
+            Self::ReadOnly(message) => Self::ReadOnly(message.clone()),
+            Self::HandleClosed(message) => Self::HandleClosed(message.clone()),
+            Self::InvalidInput(message) => Self::InvalidInput(message.clone()),
+            Self::Aggregate { message, errors } => Self::Aggregate {
+                message: message.clone(),
+                errors: errors.clone(),
+            },
+            // `std::io::Error` is not `Clone`; the reconstruction keeps the
+            // error kind (callers classify ENOENT via `is_enoent`) and the
+            // message text.
+            Self::Io(error) => Self::Io(std::io::Error::new(error.kind(), error.to_string())),
+        }
+    }
 }
 
 impl PersistError {
@@ -40,7 +84,11 @@ impl PersistError {
             | Self::Corruption(message)
             | Self::AlreadyExists(message)
             | Self::AlreadyOwned(message)
-            | Self::NotFound(message) => message,
+            | Self::NotFound(message)
+            | Self::ReadOnly(message)
+            | Self::HandleClosed(message)
+            | Self::InvalidInput(message)
+            | Self::Aggregate { message, .. } => message,
             Self::Io(_) => "",
         }
     }

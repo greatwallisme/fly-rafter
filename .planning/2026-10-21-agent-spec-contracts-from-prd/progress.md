@@ -242,3 +242,16 @@
 - 用户裁决 B：[069] 场景保持「一致则采纳」原文；实现偏离 dsh 拒发语义——materialize 前置守卫与 link EEXIST 竞态回退两处逐字节比对，一致采纳（幂等 no-op 零写入）、不一致拒绝（"divergent log already exists"）。reject_existing_log 守卫随之删除。
 - 登记：PRD 19.2 条 16 + 决策 30（本 PRD 首条经用户批准的行为性 1:1 偏差）；审计簿 F15 行与 [069]/[016] 行同步；钉测改名 republishing_identical_log_adopts_and_divergent_refuses（两臂断言），[016][069] 均重绑（旧名进 AUTHORISED_OUTGOING）。
 - 门禁复跑（实跑）：fmt PASS / clippy workspace 0（is_ok_and 修一处）/ test --workspace 254 passed 0 failed / doc 0 / lifecycle 75 passed 0 failed 27 skipped。
+
+## 2026-10-23 — 切片 F 真源全读收口 + Q42 载体分叉登记（"继续"后恢复）
+
+- 工作树净（HEAD c26e67d）确认。切片 F 真源全读收口：storage.ts / handle.ts / index.ts 服务类全文（create/open/stat/list/findLog/ensureRootEncoding/listArtifacts/acquireLease/首行读器/readStableJsonlFile generation.ts:255-285）+ storage-contract.ts + errors.ts 全读；fr 侧接缝核实（persist/ 物理层 API、error.rs 词汇、fr-wire SessionHeader、tokio 仅 dev-deps、PRD:107 仅钉宿主层 tokio、SESSION 合约零场景钉 200ms/取消/并发）。
+- Q42 载体分叉（A 同步 core + 后端私有调度线程 / B tokio async）登记于 findings「待裁决问题登记（2026-10-23 呈 Q42）」节（含 A 案三件机械后果：eventState / coldLogMemo / AbortSignal 不移植；v≠4 一律 session_format_version_refusal），集中呈报待裁决后动码。
+
+## 2026-10-23 — Phase 13 切片 F 落地（Q42A' 同步 actor worker）
+
+- 用户裁决 Q42A'（并发载体 A 案 + 极端优先四项）。实现：persist/{scheduler,handle,tracker,backend}.rs 全量（handle 串行 = per-handle worker 线程 + Op mpsc 回执；200ms 批窗 = Condvar/deadline 堆单调度线程；list = 有界并行 settle 语义逐字；close 幂等共享 CloseSlot）。详 findings 本轮节。
+- 排障留档：本会话 Write 大文件三次输出退化（scheduler/坏测试体），全部按 Session 7 纪律改小块 heredoc 重建；clippy 35 条机械尾分五批真修（含 worker_loop 内联、tracker uid 身份化、guard 显式早_drop），零 allow。
+- 测试逮捕真 bug：create_dir_all_mode 并发 mkdir 竞态 EEXIST 上抛（10 并发句柄钉测必现）——修复为 mkdir -p 容忍语义，5× 稳定。
+- 门禁（实跑）：四关全绿（275 tests / clippy 0 / fmt PASS / doc 0）；lifecycle 75/0/27 基线保持；guard --spec-dir specs/generated --min-score 0.7 后台运行中（阻断期预期）。
+- 待用户：切片 F 验收；提交（guard 阻断期 --no-verify 惯例）。
