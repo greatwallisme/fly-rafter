@@ -1,9 +1,11 @@
 //! Conversation messages and producer sources, verbatim to dsh `dsh-llm`
 //! message.ts wire shapes.
 //!
-//! Sources are merge-extensible: unknown producer kinds round-trip through
-//! the `MessageSource::Other` fallback, and known kinds retain
-//! producer-added fields via `#[serde(flatten)]`.
+//! Both layers are merge-extensible: unknown producer kinds round-trip
+//! through the `MessageSource::Other` fallback, unknown roles through
+//! `Message::Other`, and known kinds and roles retain producer-added
+//! fields via `#[serde(flatten)]` — a newer writer's log is never
+//! silently reshaped.
 
 use crate::content::{ContentBlock, RawObject, TrueOnly};
 use crate::ids::{MessageId, ToolCallId};
@@ -107,6 +109,9 @@ pub enum KnownMessage {
         content: Vec<ContentBlock>,
         /// Producer source; always the system-prompt kind for this role.
         source: MessageSource,
+        /// Producer-added message fields, retained verbatim.
+        #[serde(flatten)]
+        extra: RawObject,
     },
     /// A user-role message.
     #[serde(rename = "user")]
@@ -118,6 +123,9 @@ pub enum KnownMessage {
         content: Vec<ContentBlock>,
         /// Producer source supplied by the producer.
         source: MessageSource,
+        /// Producer-added message fields, retained verbatim.
+        #[serde(flatten)]
+        extra: RawObject,
     },
     /// A model-produced assistant message.
     #[serde(rename = "assistant")]
@@ -129,6 +137,9 @@ pub enum KnownMessage {
         content: Vec<ContentBlock>,
         /// Producer source; always the model kind for this role.
         source: MessageSource,
+        /// Producer-added message fields, retained verbatim.
+        #[serde(flatten)]
+        extra: RawObject,
     },
     /// Incremental agent session changes in conversation order.
     #[serde(rename = "developer")]
@@ -140,6 +151,9 @@ pub enum KnownMessage {
         content: Vec<ContentBlock>,
         /// Producer source supplied by the producer.
         source: MessageSource,
+        /// Producer-added message fields, retained verbatim.
+        #[serde(flatten)]
+        extra: RawObject,
     },
     /// A first-class tool-role message carrying one tool result.
     #[serde(rename = "tool")]
@@ -156,6 +170,9 @@ pub enum KnownMessage {
         /// Whether the tool invocation failed.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         is_error: Option<TrueOnly>,
+        /// Producer-added message fields, retained verbatim.
+        #[serde(flatten)]
+        extra: RawObject,
     },
 }
 
@@ -165,8 +182,9 @@ pub enum KnownMessage {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Message {
-    /// A known role.
-    Known(KnownMessage),
+    /// A known role, boxed: the message payload dwarfs the verbatim fallback
+    /// and `SessionEvent` embeds this enum on every log line.
+    Known(Box<KnownMessage>),
     /// An unknown role or shape, retained verbatim.
     Other(RawObject),
 }
@@ -253,6 +271,7 @@ mod tests {
             source: MessageSource::Known(KnownMessageSource::User {
                 extra: RawObject::new(),
             }),
+            extra: RawObject::new(),
         }
     }
 
@@ -271,7 +290,7 @@ mod tests {
             Some("user")
         );
         let back: Message = serde_json::from_value(json).unwrap_or_else(|_| panic!("round trip"));
-        assert_eq!(back, Message::Known(user_message()));
+        assert_eq!(back, Message::Known(Box::new(user_message())));
     }
 
     #[test]
@@ -285,6 +304,7 @@ mod tests {
             }),
             tool_call_id: ToolCallId::new("c-1"),
             is_error: Some(TrueOnly),
+            extra: RawObject::new(),
         };
         let json = serde_json::to_value(&message).unwrap_or_else(|_| serde_json::Value::Null);
         assert_eq!(
@@ -292,6 +312,42 @@ mod tests {
             Some("c-1")
         );
         assert_eq!(json.get("isError"), Some(&serde_json::Value::Bool(true)));
+    }
+
+    #[test]
+    fn known_role_retains_producer_added_fields() {
+        let mut extra = RawObject::new();
+        extra.insert(
+            "producer".to_owned(),
+            serde_json::json!({"seq": 7, "kind": "plugin/recorder"}),
+        );
+        let message = KnownMessage::User {
+            id: MessageId::new("m-4"),
+            content: vec![ContentBlock::Known(KnownContentBlock::Text {
+                text: "hi".to_owned(),
+            })],
+            source: MessageSource::Known(KnownMessageSource::User {
+                extra: RawObject::new(),
+            }),
+            extra,
+        };
+        let json = serde_json::to_value(&message).unwrap_or_else(|_| serde_json::Value::Null);
+        assert_eq!(
+            json.get("producer").and_then(serde_json::Value::as_object),
+            Some(
+                &serde_json::json!({"seq": 7, "kind": "plugin/recorder"})
+                    .as_object()
+                    .expect("object")
+                    .clone()
+            )
+        );
+        let back: Message =
+            serde_json::from_value(json.clone()).unwrap_or_else(|_| panic!("round trip"));
+        assert_eq!(back, Message::Known(Box::new(message)));
+        assert_eq!(
+            serde_json::to_value(&back).unwrap_or_else(|_| serde_json::Value::Null),
+            json
+        );
     }
 
     #[test]

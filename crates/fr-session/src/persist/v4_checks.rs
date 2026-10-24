@@ -2007,7 +2007,7 @@ pub fn validate_delivery_accepted(
     )?;
     let seq = count(
         row.get("seq").unwrap_or(&Value::Null),
-        "delivery throughSeq",
+        "delivery marker seq",
     )?;
     if through_seq >= seq {
         return Err(format_error("delivery throughSeq must precede its marker"));

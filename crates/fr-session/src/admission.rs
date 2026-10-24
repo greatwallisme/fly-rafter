@@ -83,7 +83,7 @@ fn validate_developer(
 
 fn developer_blocks(message: &Message) -> Result<&[ContentBlock], AdmissionError> {
     match message {
-        Message::Known(KnownMessage::Developer { content, .. }) => Ok(content),
+        Message::Known(known) if known.role_name() == "developer" => Ok(known.content()),
         _ => Err(AdmissionError::new(
             "session event developer/message and developer role must occur together",
         )),
@@ -109,7 +109,7 @@ fn validate_coordinates(event_type: &str, turn: u64, step: u64) -> Result<(), Ad
 
 fn validate_message_shape(event_type: &str, message: &Message) -> Result<(), AdmissionError> {
     let known = match message {
-        Message::Known(known) => known,
+        Message::Known(known) => known.as_ref(),
         Message::Other(_) => {
             return Err(AdmissionError::new(format!(
                 "session event {event_type} carries an unknown message role"
@@ -207,9 +207,9 @@ fn tool_call_id_of(source: &MessageSource) -> Option<fr_wire::ids::ToolCallId> {
     }
 }
 
-const fn known_tool_is_error(message: &Message) -> Option<bool> {
+fn known_tool_is_error(message: &Message) -> Option<bool> {
     match message {
-        Message::Known(KnownMessage::Tool { is_error, .. }) => Some(is_error.is_some()),
+        Message::Known(known) if known.role_name() == "tool" => known.is_error(),
         _ => None,
     }
 }

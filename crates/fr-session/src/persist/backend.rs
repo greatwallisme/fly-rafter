@@ -148,7 +148,7 @@ impl JsonlBackend {
     /// has none.
     pub(crate) fn route_live(&self, id: &SessionId, event: &SessionEvent) {
         if let Some(inner) = self.tracker.writer(id) {
-            JsonlSessionHandle::from_inner(inner).enqueue_live(event);
+            inner.enqueue_live(event);
         }
     }
 
@@ -163,8 +163,7 @@ impl JsonlBackend {
         let Some(inner) = self.tracker.writer(id) else {
             return Ok(());
         };
-        let handle = JsonlSessionHandle::from_inner(inner);
-        match handle.drain_live().and_then(|()| handle.flush()) {
+        match inner.drain_live().and_then(|()| inner.flush()) {
             // A handle closed during the sweep drained durably before
             // refusing this flush; both count as flushed.
             Ok(()) | Err(PersistError::HandleClosed(_)) => Ok(()),
@@ -188,7 +187,7 @@ impl JsonlBackend {
         let Some(inner) = self.tracker.writer(id) else {
             return Ok(());
         };
-        JsonlSessionHandle::from_inner(inner).append(suffix)
+        inner.append(suffix)
     }
 
     /// Closes one session's write handle (the dsh `session/disposed`
@@ -202,7 +201,7 @@ impl JsonlBackend {
         let Some(inner) = self.tracker.writer(id) else {
             return Ok(());
         };
-        JsonlSessionHandle::from_inner(inner).close()
+        inner.close()
     }
 }
 
@@ -1305,6 +1304,54 @@ mod tests {
     }
 
     #[test]
+    fn dropped_write_handle_releases_its_claim() {
+        let (root, backend) = backend("drop-release");
+        let _keep = &root;
+        let id = format!("s-drop-{}", unique_id());
+        {
+            let handle = backend.create(&header(&id), 0).expect("create");
+            handle.append(&turn(0, 1)).expect("append");
+        } // Dropped without close: the last drop must run the close body.
+        let again = backend
+            .open(&SessionId::new(id), SessionAccess::Write)
+            .expect("claim released by the dropped handle");
+        again.append(&turn(2, 2)).expect("append after reclaim");
+    }
+
+    #[test]
+    fn dropped_handle_drains_routed_live_buffer() {
+        let (root, backend) = backend("drop-drain");
+        let _keep = &root;
+        let id = format!("s-drop-drain-{}", unique_id());
+        {
+            let handle = backend.create(&header(&id), 0).expect("create");
+            handle.append(&turn(0, 1)).expect("append");
+            handle.enqueue_live(&turn(2, 2)[0]);
+        } // Drop → close: the routed buffer drains durably.
+        let reader = backend
+            .open(&SessionId::new(id), SessionAccess::Read)
+            .expect("read open after drop");
+        let events = reader.read(0, ALL).expect("read").events;
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[2].seq.get(), 2);
+    }
+
+    #[test]
+    fn clone_stays_open_until_last_drop() {
+        let (root, backend) = backend("drop-clone");
+        let _keep = &root;
+        let id = format!("s-clone-{}", unique_id());
+        let first = backend.create(&header(&id), 0).expect("create");
+        let second = Clone::clone(&first);
+        drop(first);
+        second.append(&turn(0, 1)).expect("clone stays open");
+        drop(second);
+        backend
+            .open(&SessionId::new(id), SessionAccess::Write)
+            .expect("claim released after the last drop");
+    }
+
+    #[test]
     fn unmaterialized_create_is_visible_and_reads_detached() {
         let (root, backend) = backend("pending");
         let _keep = &root;
@@ -1333,7 +1380,10 @@ mod tests {
         let (root, backend) = backend("dup");
         let _keep = &root;
         let id = format!("s-dup-{}", unique_id());
-        backend.create(&header(&id), 0).expect("create");
+        // The first handle stays alive: dropping it closes the session, and
+        // an unmaterialized close erases the id (dsh release semantics), so
+        // the duplicate create would wrongly succeed.
+        let _handle = backend.create(&header(&id), 0).expect("create");
         let error = backend
             .create(&header(&id), 0)
             .expect_err("duplicate refuses");

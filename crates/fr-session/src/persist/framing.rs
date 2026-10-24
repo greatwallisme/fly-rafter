@@ -90,8 +90,12 @@ pub fn decode_seq_ranges(value: &Value, max_entries: u64) -> Result<Vec<SessionS
         }
         let start = safe_count(&pair[0], "sourceEventSeqs range start")?;
         let end = safe_count(&pair[1], "sourceEventSeqs range end")?;
-        if start > end || end >= max_entries || end - start + 1 > max_entries - output.len() as u64
-        {
+        // Single members are only range-checked after the loop, so the
+        // running length can already exceed the cap here; saturate like the
+        // dsh JS arithmetic (a negative difference rejects every range)
+        // instead of underflowing.
+        let remaining = max_entries.saturating_sub(output.len() as u64);
+        if start > end || end >= max_entries || end - start + 1 > remaining {
             return Err("sourceEventSeqs range exceeds its event seq".to_owned());
         }
         for current in start..=end {
@@ -345,30 +349,36 @@ mod tests {
         let user = |seq_value: u64, text: &str| {
             let mut event = event(
                 seq_value,
-                fr_wire::event::SessionEventData::UserMessage(Message::Known(KnownMessage::User {
-                    id: MessageId::new(format!("u-{seq_value}")),
-                    content: vec![ContentBlock::Known(KnownContentBlock::Text {
-                        text: text.to_owned(),
-                    })],
-                    source: MessageSource::Known(KnownMessageSource::User {
+                fr_wire::event::SessionEventData::UserMessage(Message::Known(Box::new(
+                    KnownMessage::User {
+                        id: MessageId::new(format!("u-{seq_value}")),
+                        content: vec![ContentBlock::Known(KnownContentBlock::Text {
+                            text: text.to_owned(),
+                        })],
+                        source: MessageSource::Known(KnownMessageSource::User {
+                            extra: RawObject::new(),
+                        }),
                         extra: RawObject::new(),
-                    }),
-                })),
+                    },
+                ))),
             );
             event.surface_op = Some(SurfaceOp::Append(AppendOp));
             event
         };
         let mut replacement = event(
             3,
-            fr_wire::event::SessionEventData::UserMessage(Message::Known(KnownMessage::User {
-                id: MessageId::new("u-c"),
-                content: vec![ContentBlock::Known(KnownContentBlock::Text {
-                    text: "compacted".to_owned(),
-                })],
-                source: MessageSource::Known(KnownMessageSource::User {
+            fr_wire::event::SessionEventData::UserMessage(Message::Known(Box::new(
+                KnownMessage::User {
+                    id: MessageId::new("u-c"),
+                    content: vec![ContentBlock::Known(KnownContentBlock::Text {
+                        text: "compacted".to_owned(),
+                    })],
+                    source: MessageSource::Known(KnownMessageSource::User {
+                        extra: RawObject::new(),
+                    }),
                     extra: RawObject::new(),
-                }),
-            })),
+                },
+            ))),
         );
         replacement.surface_op = Some(SurfaceOp::Replace(ReplaceOp {
             op: ReplaceTag,

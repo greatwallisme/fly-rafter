@@ -18,7 +18,9 @@ pub struct ToolHistoryProjection {
     declared: Vec<(String, ToolSchema)>,
     baseline_seq: Option<u64>,
     history: ToolHistory,
-    active_len: usize,
+    /// Active definitions from the latest request header (dsh `active`):
+    /// the snapshot fallback returns this list, not the series baseline.
+    active: Vec<ToolSchema>,
     available: Vec<String>,
 }
 
@@ -54,7 +56,7 @@ impl ToolHistoryProjection {
                     };
                     self.available = tools.iter().map(|t| t.name.clone()).collect();
                 }
-                self.active_len = tools.len();
+                self.active = tools;
             }
             fr_wire::event::SessionEventData::DeveloperMessage(data) => {
                 let definitions = data
@@ -127,17 +129,16 @@ impl ToolHistoryProjection {
     /// matching updates; those fall back to the plain active declarations.
     #[must_use]
     pub fn snapshot(&self) -> ToolHistory {
-        let complete = self.active_len == self.available.len()
+        let complete = self.active.len() == self.available.len()
             && self
-                .history
-                .tools
+                .active
                 .iter()
                 .all(|tool| self.available.iter().any(|name| name == &tool.name));
         if complete {
             self.history.clone()
         } else {
             ToolHistory {
-                tools: self.history.tools.clone(),
+                tools: self.active.clone(),
                 updates: Vec::new(),
             }
         }
@@ -152,7 +153,7 @@ fn wire(tool: &ToolSchema) -> String {
 
 const fn as_known(message: &fr_wire::message::Message) -> Option<&KnownMessage> {
     match message {
-        fr_wire::message::Message::Known(known) => Some(known),
+        fr_wire::message::Message::Known(known) => Some(&**known),
         fr_wire::message::Message::Other(_) => None,
     }
 }

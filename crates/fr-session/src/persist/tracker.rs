@@ -200,10 +200,9 @@ impl BackendTracker {
         };
         let mut errors: Vec<PersistError> = Vec::new();
         for inner in writers {
-            let handle = JsonlSessionHandle::from_inner(Arc::clone(&inner));
             // A handle closed during the sweep counts as flushed: its close
             // drained the routed buffer durably before refusing this flush.
-            let outcome = handle.drain_live().and_then(|()| handle.flush());
+            let outcome = inner.drain_live().and_then(|()| inner.flush());
             if let Err(error) = outcome
                 && !matches!(error, PersistError::HandleClosed(_))
             {
@@ -237,7 +236,7 @@ impl BackendTracker {
         };
         let mut errors: Vec<PersistError> = Vec::new();
         for inner in handles {
-            if let Err(error) = JsonlSessionHandle::from_inner(Arc::clone(&inner)).close() {
+            if let Err(error) = inner.close() {
                 errors.push(error);
             }
         }

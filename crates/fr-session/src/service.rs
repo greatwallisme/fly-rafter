@@ -51,7 +51,7 @@ use fr_wire::event::{SessionEvent, SessionEventData, SurfaceOp};
 use fr_wire::ids::SessionId;
 
 use crate::persist::tracker::lock;
-use crate::persist::{JsonlBackend, PersistError, SessionAccess};
+use crate::persist::{JsonlBackend, JsonlSessionHandle, PersistError, SessionAccess};
 use crate::session::SurfaceIntent;
 use crate::store::{ListenerError, SessionMeta, SessionStore};
 use crate::vocabulary::EventVocabulary;
@@ -167,6 +167,10 @@ pub struct SessionService {
     /// Sessions past their publication edge — the live-routing gate.
     announced: Shared<HashSet<SessionId>>,
     outbound: Shared<OutboundLog>,
+    /// The live persistence handles the service owns: create/fork/resume
+    /// retain them here (the mirror machinery routes through the tracker
+    /// entries an adopted handle keeps), and the disposal edge removes them.
+    handles: Shared<HashMap<SessionId, JsonlSessionHandle>>,
 }
 
 impl std::fmt::Debug for SessionService {
@@ -175,6 +179,7 @@ impl std::fmt::Debug for SessionService {
             .field("store", &self.store)
             .field("announced", &lock(&self.announced).len())
             .field("outbound", &lock(&self.outbound).records.len())
+            .field("handles", &lock(&self.handles).len())
             .finish_non_exhaustive()
     }
 }
@@ -201,6 +206,8 @@ impl SessionService {
         let mut store = SessionStore::new(Arc::clone(&clock), warn);
         let announced: Shared<HashSet<SessionId>> = Arc::new(Mutex::new(HashSet::new()));
         let outbound: Shared<OutboundLog> = Arc::new(Mutex::new(OutboundLog::default()));
+        let handles: Shared<HashMap<SessionId, JsonlSessionHandle>> =
+            Arc::new(Mutex::new(HashMap::new()));
 
         // session/event: live routing (gated on publication) + mirror.
         let backend_event = Arc::clone(&backend);
@@ -244,8 +251,10 @@ impl SessionService {
         let backend_disposed = Arc::clone(&backend);
         let announced_disposed = Arc::clone(&announced);
         let outbound_disposed = Arc::clone(&outbound);
+        let handles_disposed = Arc::clone(&handles);
         store.subscribe_disposed(Arc::new(move |id| {
             lock(&announced_disposed).remove(id);
+            lock(&handles_disposed).remove(id);
             lock(&outbound_disposed).push(
                 id.clone(),
                 MirrorKind::Disposed,
@@ -276,6 +285,7 @@ impl SessionService {
             clock,
             announced,
             outbound,
+            handles,
         })
     }
 
@@ -364,7 +374,29 @@ fn optional_u64(request: &serde_json::Value, key: &str) -> Result<Option<u64>, S
     }
 }
 
-/// Decodes the shared `meta` object; absent fields keep their defaults.
+fn optional_str(request: &serde_json::Value, key: &str) -> Result<Option<String>, String> {
+    match request.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(value) => value
+            .as_str()
+            .map(|text| Some(text.to_owned()))
+            .ok_or_else(|| format!("session service payload field {key} must be a string")),
+    }
+}
+
+fn optional_bool(request: &serde_json::Value, key: &str) -> Result<Option<bool>, String> {
+    match request.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(value) => value
+            .as_bool()
+            .map(Some)
+            .ok_or_else(|| format!("session service payload field {key} must be a boolean")),
+    }
+}
+
+/// Decodes the shared `meta` object; absent fields keep their defaults, and
+/// wrong-typed fields are refused (the same fail-closed decode the numeric
+/// and origin fields already apply).
 fn decode_meta(request: &serde_json::Value) -> Result<SessionMeta, String> {
     let Some(meta) = request.get("meta") else {
         return Ok(SessionMeta::default());
@@ -385,26 +417,12 @@ fn decode_meta(request: &serde_json::Value) -> Result<SessionMeta, String> {
                     .ok_or_else(|| "meta.createdAt must be an integer".to_owned())?,
             ),
         },
-        cwd: meta
-            .get("cwd")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_owned),
-        parent_session: meta
-            .get("parentSession")
-            .and_then(serde_json::Value::as_str)
-            .map(SessionId::new),
-        is_seeded: meta
-            .get("isSeeded")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false),
+        cwd: optional_str(meta, "cwd")?,
+        parent_session: optional_id(meta, "parentSession")?,
+        is_seeded: optional_bool(meta, "isSeeded")?.unwrap_or(false),
         origin,
-        delegation_depth: meta
-            .get("delegationDepth")
-            .and_then(serde_json::Value::as_u64),
-        agent_preset: meta
-            .get("agentPreset")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_owned),
+        delegation_depth: optional_u64(meta, "delegationDepth")?,
+        agent_preset: optional_str(meta, "agentPreset")?,
     })
 }
 
@@ -464,12 +482,15 @@ fn service_create(
     let seed = decode_seed(request)?;
     let inherited = optional_u64(request, "inheritedEventCount")?.unwrap_or(0);
     let backend = Arc::clone(&service.backend);
+    let handles = Arc::clone(&service.handles);
     let session_id = service
         .store
         .create_with(id, &meta, seed, inherited, |session, inherited| {
             backend
                 .create(session.header(), inherited)
-                .map(|_| ())
+                .map(|handle| {
+                    lock(&handles).insert(session.header().id.clone(), handle);
+                })
                 .map_err(|error| persistence_text(&error))
         })
         .map_err(|error| error.to_string())?;
@@ -566,12 +587,15 @@ fn service_fork(
         ),
     };
     let backend = Arc::clone(&service.backend);
+    let handles = Arc::clone(&service.handles);
     let session_id = service
         .store
         .fork_with(&source, child_id, boundary, |session, inherited| {
             backend
                 .create(session.header(), inherited)
-                .map(|_| ())
+                .map(|handle| {
+                    lock(&handles).insert(session.header().id.clone(), handle);
+                })
                 .map_err(|error| persistence_text(&error))
         })
         .map_err(|error| error.to_string())?;
@@ -624,8 +648,12 @@ fn service_resume(
     })();
     // Rollback swallows the close failure: the setup failure is primary
     // (the veto path already closed the handle through the disposal edge).
+    // Success retains the handle: a live resume keeps holding the claim, so
+    // a second resume of the same id refuses before any I/O (dsh resumeWith).
     if outcome.is_err() {
         let _ = handle.close();
+    } else {
+        lock(&service.handles).insert(id, handle);
     }
     let session_id = outcome?;
     Ok(serde_json::json!({ "sessionId": session_id.as_str() }))
@@ -1118,14 +1146,17 @@ mod tests {
     #[test]
     fn restore_rebuilds_in_memory_without_persistence() {
         let mut service = make_service_at(&temp_root("restore"));
+        // The dsh constructor refuses an inherited cut whose next event is
+        // not the tagged marker: the marker sits at the cut index, so the
+        // seed leads with the copied event and marks the cut behind it.
         call(
             &mut service,
             METHOD_SESSION_RESTORE,
             &serde_json::json!({
-                "id": "r1", "meta": { "cwd": "/repo" }, "inheritedEventCount": 1,
+                "id": "r1", "meta": { "cwd": "/repo", "isSeeded": true }, "inheritedEventCount": 1,
                 "seed": [
-                    { "type": "session/end-seed", "seq": 0, "time": 5, "data": { "inherited": true } },
-                    { "type": "turn/start", "seq": 1, "time": 6, "data": { "turn": 0 } }
+                    { "type": "turn/start", "seq": 0, "time": 5, "data": { "turn": 0 } },
+                    { "type": "session/end-seed", "seq": 1, "time": 6, "data": { "inherited": true } }
                 ]
             }),
         )

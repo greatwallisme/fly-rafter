@@ -118,9 +118,17 @@ unsafe extern "C" fn call(
     // SAFETY: the host passes back a handle previously returned by `setup`
     // and not yet released via `teardown`.
     let state = unsafe { &mut *(handle.cast::<VocabularyState>()) };
-    // SAFETY: `in_data` is valid for `in_len` readable bytes per the host
-    // contract (an empty payload arrives as null/0).
-    let payload = unsafe { std::slice::from_raw_parts(in_data, in_len) };
+    // The host contract delivers `in_data` valid for `in_len` readable
+    // bytes; an empty payload arrives as null/0 and never dereferences the
+    // pointer, which `from_raw_parts` requires non-null even for a
+    // zero-length slice.
+    let payload: &[u8] = if in_len == 0 || in_data.is_null() {
+        &[]
+    } else {
+        // SAFETY: `in_len` is nonzero and `in_data` non-null here, valid for
+        // `in_len` readable bytes per the host contract.
+        unsafe { std::slice::from_raw_parts(in_data, in_len) }
+    };
     let reply = match dispatch(method, payload, &mut state.vocabulary) {
         Ok(reply) => reply,
         Err(message) => {

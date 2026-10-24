@@ -30,6 +30,12 @@ pub struct SurfaceIntent {
 struct DerivedCache {
     generation: u64,
     projecting: Vec<SessionSeq>,
+    /// Surface nodes already scanned for projection (dsh `derivedNodes`).
+    /// The resume cursor is the consumed NODE count, not the projecting
+    /// count: nodes that project to no message (empty assistant/system/
+    /// developer carriers) would otherwise be rescanned and re-pushed on
+    /// every later append.
+    consumed: usize,
 }
 
 /// An append-only, event-sourced session over typed events.
@@ -87,10 +93,53 @@ impl Session {
         inherited_event_count: u64,
     ) -> Result<Self, SessionError> {
         let mut session = Self::new(header);
-        session.inherited_event_count = inherited_event_count;
         for event in seed {
             session.append_seed_event(event)?;
         }
+        // The dsh constructor's post-seed invariants (index.ts:671-689):
+        // the inherited cut is fail-closed, never trusted as given.
+        if !session.header.is_seeded && inherited_event_count != 0 {
+            return Err(SessionError::Other(
+                "unseeded session inherited event count must be 0".to_owned(),
+            ));
+        }
+        if inherited_event_count > session.log.len() as u64 {
+            return Err(SessionError::Other(
+                "session inherited event count exceeds its event log".to_owned(),
+            ));
+        }
+        let marked_cut = session
+            .event_at(inherited_event_count)
+            .is_some_and(|event| {
+                matches!(&event.data, SessionEventData::SessionEndSeed(data) if data.inherited.is_some())
+            });
+        if session.header.is_seeded
+            && inherited_event_count != session.log.len() as u64
+            && !marked_cut
+        {
+            return Err(SessionError::Other(
+                "seeded session constructor seed must equal its inherited prefix or mark its inherited cut"
+                    .to_owned(),
+            ));
+        }
+        if marked_cut {
+            // `marked_cut` implies the cut is below the log length, so the
+            // conversion and the +1 tail start cannot overflow or go out of
+            // bounds.
+            let cut = usize::try_from(inherited_event_count).unwrap_or(usize::MAX);
+            if session.log[cut + 1..]
+                .iter()
+                .any(|event| {
+                    matches!(&event.data, SessionEventData::SessionEndSeed(data) if data.inherited.is_some())
+                })
+            {
+                return Err(SessionError::Other(
+                    "session inherited event count must identify the final inherited marker"
+                        .to_owned(),
+                ));
+            }
+        }
+        session.inherited_event_count = inherited_event_count;
         Ok(session)
     }
 
@@ -278,14 +327,16 @@ impl Session {
     pub fn derive_messages(&mut self) -> Vec<&Message> {
         if self.surface.content_generation != self.derived.generation {
             self.derived.projecting.clear();
+            self.derived.consumed = 0;
             self.derived.generation = self.surface.content_generation;
         }
-        let start = self.derived.projecting.len();
+        let start = self.derived.consumed;
         for &seq_value in self.surface.nodes.get(start..).unwrap_or_default() {
             if self.projects_message(seq_value) {
                 self.derived.projecting.push(seq_value);
             }
         }
+        self.derived.consumed = self.surface.nodes.len();
         self.derived
             .projecting
             .iter()
@@ -394,7 +445,7 @@ mod tests {
     }
 
     fn user_data(text: &str) -> SessionEventData {
-        SessionEventData::UserMessage(Message::Known(KnownMessage::User {
+        SessionEventData::UserMessage(Message::Known(Box::new(KnownMessage::User {
             id: MessageId::new("m-1"),
             content: vec![ContentBlock::Known(KnownContentBlock::Text {
                 text: text.to_owned(),
@@ -402,7 +453,8 @@ mod tests {
             source: MessageSource::Known(KnownMessageSource::User {
                 extra: RawObject::new(),
             }),
-        }))
+            extra: RawObject::new(),
+        })))
     }
 
     fn append_intent() -> SurfaceIntent {
@@ -433,13 +485,14 @@ mod tests {
         SessionEventData::SystemMessage(SystemMessageData {
             turn,
             step,
-            message: Message::Known(KnownMessage::System {
+            message: Message::Known(Box::new(KnownMessage::System {
                 id: MessageId::new("sys-1"),
                 content: vec![],
                 source: MessageSource::Known(KnownMessageSource::SystemPrompt {
                     extra: RawObject::new(),
                 }),
-            }),
+                extra: RawObject::new(),
+            })),
         })
     }
 
@@ -447,7 +500,7 @@ mod tests {
         SessionEventData::DeveloperMessage(DeveloperMessageData {
             turn,
             step,
-            message: Message::Known(KnownMessage::Developer {
+            message: Message::Known(Box::new(KnownMessage::Developer {
                 id: MessageId::new("dev-1"),
                 content: vec![],
                 source: MessageSource::Other(
@@ -456,7 +509,8 @@ mod tests {
                         .cloned()
                         .expect("object"),
                 ),
-            }),
+                extra: RawObject::new(),
+            })),
             header_seq: None,
         })
     }
@@ -575,34 +629,57 @@ mod tests {
     #[test]
     fn empty_assistant_projects_to_no_message() {
         let mut session = Session::new(header());
-        let empty_assistant =
-            SessionEventData::AssistantMessage(fr_wire::event::AssistantMessageData {
-                turn: 0,
-                step: 0,
-                message: Message::Known(KnownMessage::Assistant {
-                    id: MessageId::new("a-1"),
-                    content: vec![],
-                    source: MessageSource::Known(KnownMessageSource::Model {
-                        provider: "p".to_owned(),
-                        model: "m".to_owned(),
-                        replay_state: None,
-                        extra: RawObject::new(),
-                    }),
-                }),
-                stream: vec![],
-                usage: Some(fr_wire::call_config::TokenUsage {
-                    input_tokens: 1,
-                    output_tokens: 1,
-                    ..fr_wire::call_config::TokenUsage::default()
-                }),
-                interrupted: None,
-            });
         session
-            .append_surface(1, empty_assistant, append_intent())
+            .append_surface(1, empty_assistant_data(), append_intent())
             .unwrap_or_else(|e| panic!("a: {e}"));
         assert_eq!(session.surface_nodes().len(), 1);
         let derived: Vec<&Message> = session.derive_messages();
         assert_eq!(derived.as_slice(), &[] as &[&Message]);
+    }
+
+    fn empty_assistant_data() -> SessionEventData {
+        SessionEventData::AssistantMessage(fr_wire::event::AssistantMessageData {
+            turn: 0,
+            step: 0,
+            message: Message::Known(Box::new(KnownMessage::Assistant {
+                id: MessageId::new("a-1"),
+                content: vec![],
+                source: MessageSource::Known(KnownMessageSource::Model {
+                    provider: "p".to_owned(),
+                    model: "m".to_owned(),
+                    replay_state: None,
+                    extra: RawObject::new(),
+                }),
+                extra: RawObject::new(),
+            })),
+            stream: vec![],
+            usage: Some(fr_wire::call_config::TokenUsage {
+                input_tokens: 1,
+                output_tokens: 1,
+                ..fr_wire::call_config::TokenUsage::default()
+            }),
+            interrupted: None,
+        })
+    }
+
+    #[test]
+    fn derive_resume_tracks_consumed_nodes_not_projecting_count() {
+        // The resume cursor counts surface nodes, not projecting nodes: a
+        // node that projects to no message (the empty assistant) must not be
+        // rescanned on the next derive, or it re-pushes every later message
+        // behind it.
+        let mut session = Session::new(header());
+        session
+            .append_surface(1, empty_assistant_data(), append_intent())
+            .unwrap_or_else(|e| panic!("a: {e}"));
+        session
+            .append_surface(2, user_data("first"), append_intent())
+            .unwrap_or_else(|e| panic!("u1: {e}"));
+        assert_eq!(session.derive_messages().len(), 1);
+        session
+            .append_surface(3, user_data("second"), append_intent())
+            .unwrap_or_else(|e| panic!("u2: {e}"));
+        assert_eq!(session.derive_messages().len(), 2);
     }
 
     #[test]
@@ -616,15 +693,17 @@ mod tests {
             .unwrap_or_else(|e| panic!("u2: {e}"));
         let before = session.derive_messages();
         assert_eq!(before.len(), 2);
-        let mut replacement = SessionEventData::UserMessage(Message::Known(KnownMessage::User {
-            id: MessageId::new("m-3"),
-            content: vec![ContentBlock::Known(KnownContentBlock::Text {
-                text: "compacted".to_owned(),
-            })],
-            source: MessageSource::Known(KnownMessageSource::User {
+        let mut replacement =
+            SessionEventData::UserMessage(Message::Known(Box::new(KnownMessage::User {
+                id: MessageId::new("m-3"),
+                content: vec![ContentBlock::Known(KnownContentBlock::Text {
+                    text: "compacted".to_owned(),
+                })],
+                source: MessageSource::Known(KnownMessageSource::User {
+                    extra: RawObject::new(),
+                }),
                 extra: RawObject::new(),
-            }),
-        }));
+            })));
         let _ = &mut replacement;
         session
             .append_surface(
@@ -1008,7 +1087,7 @@ mod tests {
             data: SessionEventData::AssistantMessage(AssistantMessageData {
                 turn,
                 step,
-                message: Message::Known(KnownMessage::Assistant {
+                message: Message::Known(Box::new(KnownMessage::Assistant {
                     id: MessageId::new(format!("a-{seq_value}")),
                     content: vec![ContentBlock::Known(KnownContentBlock::ToolCall {
                         id: ToolCallId::new(call_id),
@@ -1021,7 +1100,8 @@ mod tests {
                         replay_state: None,
                         extra: RawObject::new(),
                     }),
-                }),
+                    extra: RawObject::new(),
+                })),
                 stream: Vec::new(),
                 usage: None,
                 interrupted: None,
@@ -1058,7 +1138,7 @@ mod tests {
             data: SessionEventData::ToolResult(ToolResultData {
                 turn,
                 step,
-                message: Message::Known(KnownMessage::Tool {
+                message: Message::Known(Box::new(KnownMessage::Tool {
                     id: MessageId::new(format!("r-{seq_value}")),
                     content: vec![ContentBlock::Known(KnownContentBlock::Text {
                         text: "ok".to_owned(),
@@ -1069,7 +1149,8 @@ mod tests {
                     }),
                     tool_call_id: ToolCallId::new(call_id),
                     is_error: None,
-                }),
+                    extra: RawObject::new(),
+                })),
                 error: None,
                 meta: None,
             }),
@@ -1181,7 +1262,7 @@ mod tests {
         let data = SessionEventData::DeveloperMessage(DeveloperMessageData {
             turn: 1,
             step: 1,
-            message: Message::Known(KnownMessage::Developer {
+            message: Message::Known(Box::new(KnownMessage::Developer {
                 id: MessageId::new("d-1"),
                 content: vec![],
                 source: MessageSource::Other(
@@ -1190,7 +1271,8 @@ mod tests {
                         .cloned()
                         .expect("object"),
                 ),
-            }),
+                extra: RawObject::new(),
+            })),
             header_seq: None,
         });
         let event = pinned_event(data, true);
@@ -1208,7 +1290,7 @@ mod tests {
         let data = SessionEventData::SystemMessage(SystemMessageData {
             turn: 1,
             step: 1,
-            message: Message::Known(KnownMessage::System {
+            message: Message::Known(Box::new(KnownMessage::System {
                 id: MessageId::new("s-1"),
                 content: vec![ContentBlock::Known(KnownContentBlock::Text {
                     text: "prompt".to_owned(),
@@ -1216,7 +1298,8 @@ mod tests {
                 source: MessageSource::Known(KnownMessageSource::SystemPrompt {
                     extra: RawObject::new(),
                 }),
-            }),
+                extra: RawObject::new(),
+            })),
         });
         let event = pinned_event(data, true);
         assert_eq!(event.event_type(), "system/message");
@@ -1234,7 +1317,7 @@ mod tests {
         let data = SessionEventData::AssistantMessage(AssistantMessageData {
             turn: 1,
             step: 1,
-            message: Message::Known(KnownMessage::Assistant {
+            message: Message::Known(Box::new(KnownMessage::Assistant {
                 id: MessageId::new("a-1"),
                 content: vec![ContentBlock::Known(KnownContentBlock::Text {
                     text: "reply".to_owned(),
@@ -1245,7 +1328,8 @@ mod tests {
                     replay_state: None,
                     extra: RawObject::new(),
                 }),
-            }),
+                extra: RawObject::new(),
+            })),
             stream: Vec::new(),
             usage: None,
             interrupted: None,
@@ -1302,7 +1386,7 @@ mod tests {
         let data = SessionEventData::ToolResult(ToolResultData {
             turn: 1,
             step: 1,
-            message: Message::Known(KnownMessage::Tool {
+            message: Message::Known(Box::new(KnownMessage::Tool {
                 id: MessageId::new("r-1"),
                 content: vec![ContentBlock::Known(KnownContentBlock::Text {
                     text: "ok".to_owned(),
@@ -1313,7 +1397,8 @@ mod tests {
                 }),
                 tool_call_id: ToolCallId::new("c-1"),
                 is_error: None,
-            }),
+                extra: RawObject::new(),
+            })),
             error: None,
             meta: None,
         });
@@ -1539,13 +1624,14 @@ mod tests {
         SessionEventData::SystemMessage(SystemMessageData {
             turn: 1,
             step: 1,
-            message: Message::Known(KnownMessage::System {
+            message: Message::Known(Box::new(KnownMessage::System {
                 id: MessageId::new("sys-1"),
                 content: universal_blocks(),
                 source: MessageSource::Known(KnownMessageSource::SystemPrompt {
                     extra: RawObject::new(),
                 }),
-            }),
+                extra: RawObject::new(),
+            })),
         })
     }
 
@@ -1555,7 +1641,7 @@ mod tests {
         SessionEventData::DeveloperMessage(DeveloperMessageData {
             turn: 1,
             step: 1,
-            message: Message::Known(KnownMessage::Developer {
+            message: Message::Known(Box::new(KnownMessage::Developer {
                 id: MessageId::new("dev-1"),
                 content,
                 source: MessageSource::Other(
@@ -1564,26 +1650,28 @@ mod tests {
                         .cloned()
                         .expect("object"),
                 ),
-            }),
+                extra: RawObject::new(),
+            })),
             header_seq: Some(seq(1)),
         })
     }
 
     fn user_message_data_matrix() -> SessionEventData {
-        SessionEventData::UserMessage(Message::Known(KnownMessage::User {
+        SessionEventData::UserMessage(Message::Known(Box::new(KnownMessage::User {
             id: MessageId::new("usr-1"),
             content: universal_blocks(),
             source: MessageSource::Known(KnownMessageSource::User {
                 extra: RawObject::new(),
             }),
-        }))
+            extra: RawObject::new(),
+        })))
     }
 
     fn assistant_message_data_matrix() -> SessionEventData {
         SessionEventData::AssistantMessage(AssistantMessageData {
             turn: 1,
             step: 1,
-            message: Message::Known(KnownMessage::Assistant {
+            message: Message::Known(Box::new(KnownMessage::Assistant {
                 id: MessageId::new("asst-1"),
                 content: universal_blocks(),
                 source: MessageSource::Known(KnownMessageSource::Model {
@@ -1592,7 +1680,8 @@ mod tests {
                     replay_state: None,
                     extra: RawObject::new(),
                 }),
-            }),
+                extra: RawObject::new(),
+            })),
             stream: Vec::new(),
             usage: None,
             interrupted: None,
@@ -1603,7 +1692,7 @@ mod tests {
         SessionEventData::ToolResult(ToolResultData {
             turn: 1,
             step: 1,
-            message: Message::Known(KnownMessage::Tool {
+            message: Message::Known(Box::new(KnownMessage::Tool {
                 id: MessageId::new("tool-1"),
                 content: universal_blocks(),
                 source: MessageSource::Known(KnownMessageSource::Tool {
@@ -1612,7 +1701,8 @@ mod tests {
                 }),
                 tool_call_id: ToolCallId::new("call-x"),
                 is_error: None,
-            }),
+                extra: RawObject::new(),
+            })),
             error: None,
             meta: None,
         })
@@ -1687,7 +1777,9 @@ mod tests {
         let SessionEventData::UserMessage(message) = &mut smuggled[5].data else {
             panic!("user row");
         };
-        if let Message::Known(KnownMessage::User { content, .. }) = message {
+        if let Message::Known(known) = message
+            && let KnownMessage::User { content, .. } = known.as_mut()
+        {
             content.push(ContentBlock::Known(KnownContentBlock::ToolAddition {
                 tool_name: "bash".to_owned(),
             }));

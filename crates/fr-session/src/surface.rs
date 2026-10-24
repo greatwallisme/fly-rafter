@@ -140,36 +140,43 @@ fn assert_source_event_references(
             "assistant/message embeds its source stream and cannot carry sourceEventSeqs",
         ));
     }
-    if let Some(sources) = &event.source_event_seqs {
-        if sources.is_empty() {
-            return Err(AdmissionError::new("sourceEventSeqs must not be empty"));
-        }
-        let mut seen = std::collections::HashSet::new();
-        for source in sources {
-            if !seen.insert(source.get()) {
-                return Err(AdmissionError::new(
-                    "sourceEventSeqs must not contain duplicates",
-                ));
+    // Absent `sourceEventSeqs` behaves as an empty source set (dsh keeps the
+    // coverage check unconditional), so a replace that shadows nodes without
+    // citing them is refused, never silently applied.
+    let sources: std::collections::HashSet<u64> = match &event.source_event_seqs {
+        Some(sources) => {
+            if sources.is_empty() {
+                return Err(AdmissionError::new("sourceEventSeqs must not be empty"));
             }
-            if source.get() >= event.seq.get() {
-                return Err(AdmissionError::new(format!(
-                    "sourceEventSeqs must reference earlier events: {} >= current seq {}",
-                    source.get(),
-                    event.seq.get()
-                )));
+            let mut seen = std::collections::HashSet::new();
+            for source in sources {
+                if !seen.insert(source.get()) {
+                    return Err(AdmissionError::new(
+                        "sourceEventSeqs must not contain duplicates",
+                    ));
+                }
+                if source.get() >= event.seq.get() {
+                    return Err(AdmissionError::new(format!(
+                        "sourceEventSeqs must reference earlier events: {} >= current seq {}",
+                        source.get(),
+                        event.seq.get()
+                    )));
+                }
             }
+            seen
         }
-        let missing: Vec<String> = shadowed_seqs
-            .iter()
-            .filter(|seq| !seen.contains(&seq.get()))
-            .map(|seq| seq.get().to_string())
-            .collect();
-        if !missing.is_empty() {
-            return Err(AdmissionError::new(format!(
-                "surface replace: sourceEventSeqs must include every shadowed surface node; missing {}",
-                missing.join(", ")
-            )));
-        }
+        None => std::collections::HashSet::new(),
+    };
+    let missing: Vec<String> = shadowed_seqs
+        .iter()
+        .filter(|seq| !sources.contains(&seq.get()))
+        .map(|seq| seq.get().to_string())
+        .collect();
+    if !missing.is_empty() {
+        return Err(AdmissionError::new(format!(
+            "surface replace: sourceEventSeqs must include every shadowed surface node; missing {}",
+            missing.join(", ")
+        )));
     }
     Ok(())
 }
@@ -461,7 +468,7 @@ mod tests {
     }
 
     fn user_text(id: &str, text: &str) -> Message {
-        Message::Known(KnownMessage::User {
+        Message::Known(Box::new(KnownMessage::User {
             id: MessageId::new(id),
             content: vec![ContentBlock::Known(KnownContentBlock::Text {
                 text: text.to_owned(),
@@ -469,7 +476,8 @@ mod tests {
             source: MessageSource::Known(KnownMessageSource::User {
                 extra: RawObject::new(),
             }),
-        })
+            extra: RawObject::new(),
+        }))
     }
 
     fn empty_event(n: u64) -> SessionEvent {
@@ -501,7 +509,7 @@ mod tests {
             data: SessionEventData::ToolResult(ToolResultData {
                 turn: 0,
                 step: 0,
-                message: Message::Known(KnownMessage::Tool {
+                message: Message::Known(Box::new(KnownMessage::Tool {
                     id: MessageId::new(format!("t-{n}")),
                     content: vec![ContentBlock::Known(KnownContentBlock::Text {
                         text: text.to_owned(),
@@ -512,7 +520,8 @@ mod tests {
                     }),
                     tool_call_id: ToolCallId::new(call_id),
                     is_error: None,
-                }),
+                    extra: RawObject::new(),
+                })),
                 error: None,
                 meta: None,
             }),
@@ -683,7 +692,9 @@ mod tests {
         let SessionEventData::ToolResult(data) = &mut rewritten.data else {
             panic!("rewritten must be a tool result");
         };
-        if let Message::Known(KnownMessage::Tool { id, .. }) = &mut data.message {
+        if let Message::Known(known) = &mut data.message
+            && let KnownMessage::Tool { id, .. } = known.as_mut()
+        {
             *id = MessageId::new("t-2");
         }
         rewritten.surface_op = Some(SurfaceOp::Replace(ReplaceOp {
@@ -710,7 +721,9 @@ mod tests {
             panic!("rewritten must be a tool result");
         };
         {
-            if let Message::Known(KnownMessage::Tool { id, .. }) = &mut data.message {
+            if let Message::Known(known) = &mut data.message
+                && let KnownMessage::Tool { id, .. } = known.as_mut()
+            {
                 *id = MessageId::new("t-2");
             }
             data.error = Some(ToolResultError {

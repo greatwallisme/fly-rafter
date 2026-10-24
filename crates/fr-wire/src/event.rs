@@ -666,84 +666,54 @@ impl SessionEvent {
 }
 
 /// Dispatches one `data` object to its typed payload by the event `type`.
+///
+/// Each arm is selected by the `type` key itself, so the payload decoder is
+/// exact by construction: a known type's data either parses as that type's
+/// payload or the envelope is refused.
 fn deserialize_data(type_name: &str, data: serde_json::Value) -> Result<SessionEventData, String> {
-    let from = |tag: &str| -> Result<(), String> {
-        if type_name == tag {
-            Ok(())
-        } else {
-            Err(format!("data does not match event type {type_name}"))
-        }
-    };
     Ok(match type_name {
         event_type::TURN_START => {
-            from(event_type::TURN_START)?;
             SessionEventData::TurnStart(serde_json::from_value(data).map_err(|e| e.to_string())?)
         }
         event_type::TURN_END => {
-            from(event_type::TURN_END)?;
             SessionEventData::TurnEnd(serde_json::from_value(data).map_err(|e| e.to_string())?)
         }
         event_type::STEP_START => {
-            from(event_type::STEP_START)?;
             SessionEventData::StepStart(serde_json::from_value(data).map_err(|e| e.to_string())?)
         }
         event_type::STEP_END => {
-            from(event_type::STEP_END)?;
             SessionEventData::StepEnd(serde_json::from_value(data).map_err(|e| e.to_string())?)
         }
         event_type::USER_MESSAGE => {
             SessionEventData::UserMessage(serde_json::from_value(data).map_err(|e| e.to_string())?)
         }
-        event_type::DEVELOPER_MESSAGE => {
-            from(event_type::DEVELOPER_MESSAGE)?;
-            SessionEventData::DeveloperMessage(
-                serde_json::from_value(data).map_err(|e| e.to_string())?,
-            )
-        }
-        event_type::SYSTEM_MESSAGE => {
-            from(event_type::SYSTEM_MESSAGE)?;
-            SessionEventData::SystemMessage(
-                serde_json::from_value(data).map_err(|e| e.to_string())?,
-            )
-        }
-        event_type::ASSISTANT_MESSAGE => {
-            from(event_type::ASSISTANT_MESSAGE)?;
-            SessionEventData::AssistantMessage(
-                serde_json::from_value(data).map_err(|e| e.to_string())?,
-            )
-        }
-        event_type::ASSISTANT_ATTEMPT => {
-            from(event_type::ASSISTANT_ATTEMPT)?;
-            SessionEventData::AssistantAttempt(
-                serde_json::from_value(data).map_err(|e| e.to_string())?,
-            )
-        }
+        event_type::DEVELOPER_MESSAGE => SessionEventData::DeveloperMessage(
+            serde_json::from_value(data).map_err(|e| e.to_string())?,
+        ),
+        event_type::SYSTEM_MESSAGE => SessionEventData::SystemMessage(
+            serde_json::from_value(data).map_err(|e| e.to_string())?,
+        ),
+        event_type::ASSISTANT_MESSAGE => SessionEventData::AssistantMessage(
+            serde_json::from_value(data).map_err(|e| e.to_string())?,
+        ),
+        event_type::ASSISTANT_ATTEMPT => SessionEventData::AssistantAttempt(
+            serde_json::from_value(data).map_err(|e| e.to_string())?,
+        ),
         event_type::TOOL_CALL => {
-            from(event_type::TOOL_CALL)?;
             SessionEventData::ToolCall(serde_json::from_value(data).map_err(|e| e.to_string())?)
         }
         event_type::TOOL_RESULT => {
-            from(event_type::TOOL_RESULT)?;
             SessionEventData::ToolResult(serde_json::from_value(data).map_err(|e| e.to_string())?)
         }
-        event_type::REQUEST_HEADER => {
-            from(event_type::REQUEST_HEADER)?;
-            SessionEventData::RequestHeader(
-                serde_json::from_value(data).map_err(|e| e.to_string())?,
-            )
-        }
-        event_type::REQUEST_CONTEXT => {
-            from(event_type::REQUEST_CONTEXT)?;
-            SessionEventData::RequestContext(
-                serde_json::from_value(data).map_err(|e| e.to_string())?,
-            )
-        }
-        event_type::SESSION_END_SEED => {
-            from(event_type::SESSION_END_SEED)?;
-            SessionEventData::SessionEndSeed(
-                serde_json::from_value(data).map_err(|e| e.to_string())?,
-            )
-        }
+        event_type::REQUEST_HEADER => SessionEventData::RequestHeader(
+            serde_json::from_value(data).map_err(|e| e.to_string())?,
+        ),
+        event_type::REQUEST_CONTEXT => SessionEventData::RequestContext(
+            serde_json::from_value(data).map_err(|e| e.to_string())?,
+        ),
+        event_type::SESSION_END_SEED => SessionEventData::SessionEndSeed(
+            serde_json::from_value(data).map_err(|e| e.to_string())?,
+        ),
         other => SessionEventData::Unknown(UnknownEventData {
             type_name: other.to_owned(),
             data: match data {
@@ -777,7 +747,7 @@ mod tests {
     }
 
     fn user_message() -> Message {
-        Message::Known(KnownMessage::User {
+        Message::Known(Box::new(KnownMessage::User {
             id: crate::ids::MessageId::new("m-1"),
             content: vec![ContentBlock::Known(KnownContentBlock::Text {
                 text: "hi".to_owned(),
@@ -785,7 +755,8 @@ mod tests {
             source: MessageSource::Known(KnownMessageSource::User {
                 extra: RawObject::new(),
             }),
-        })
+            extra: RawObject::new(),
+        }))
     }
 
     fn envelope(data: SessionEventData) -> SessionEvent {

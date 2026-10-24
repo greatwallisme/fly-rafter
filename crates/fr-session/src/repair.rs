@@ -159,7 +159,7 @@ impl ToolCallRecovery {
             } else {
                 not_started_text
             };
-            let message = Message::Known(KnownMessage::Tool {
+            let message = Message::Known(Box::new(KnownMessage::Tool {
                 id: MessageId::new(format!(
                     "{}-tool-result-{}-{seq}",
                     self.cause.id_prefix(),
@@ -174,7 +174,8 @@ impl ToolCallRecovery {
                 }),
                 tool_call_id: call_id.clone(),
                 is_error: Some(TrueOnly),
-            });
+                extra: RawObject::new(),
+            }));
             results.push(SessionEvent {
                 seq: SessionSeq::new(seq)?,
                 time,
@@ -219,7 +220,10 @@ fn register_advertised_calls(
     data: &AssistantMessageData,
     pending: &mut IndexMap<ToolCallId, PendingCall>,
 ) {
-    let Message::Known(KnownMessage::Assistant { content, .. }) = &data.message else {
+    let Message::Known(known) = &data.message else {
+        return;
+    };
+    let KnownMessage::Assistant { content, .. } = known.as_ref() else {
         return;
     };
     for block in content {
@@ -239,10 +243,13 @@ fn register_advertised_calls(
 
 /// The tool-source call id of one tool result message, when present.
 fn result_source_call_id(result: &ToolResultData) -> Option<ToolCallId> {
-    let Message::Known(KnownMessage::Tool {
+    let Message::Known(known) = &result.message else {
+        return None;
+    };
+    let KnownMessage::Tool {
         source: MessageSource::Known(KnownMessageSource::Tool { call_id, .. }),
         ..
-    }) = &result.message
+    } = known.as_ref()
     else {
         return None;
     };
@@ -363,7 +370,7 @@ mod tests {
             data: SessionEventData::AssistantMessage(AssistantMessageData {
                 turn,
                 step,
-                message: Message::Known(KnownMessage::Assistant {
+                message: Message::Known(Box::new(KnownMessage::Assistant {
                     id: MessageId::new(format!("assistant-{seq}")),
                     content: vec![ContentBlock::Known(KnownContentBlock::ToolCall {
                         id: ToolCallId::new(call_id),
@@ -376,7 +383,8 @@ mod tests {
                         replay_state: None,
                         extra: raw(),
                     }),
-                }),
+                    extra: RawObject::new(),
+                })),
                 stream: Vec::new(),
                 usage: None,
                 interrupted: None,
@@ -499,17 +507,22 @@ mod tests {
         };
         assert_eq!(closers[0].seq.get(), 3);
         assert_eq!(closers[0].time, log[2].time);
-        let Message::Known(KnownMessage::Tool {
+        let Message::Known(known) = &result.message else {
+            panic!("tool-role message");
+        };
+        let KnownMessage::Tool {
             id,
             content,
             source: MessageSource::Known(KnownMessageSource::Tool { call_id, extra }),
             tool_call_id,
             is_error,
-        }) = &result.message
+            extra: message_extra,
+        } = known.as_ref()
         else {
             panic!("tool-role message");
         };
         assert_eq!(*extra, RawObject::new());
+        assert_eq!(*message_extra, RawObject::new());
         assert_eq!(id.as_str(), "interrupted-tool-result-call-a-3");
         assert_eq!(call_id.as_str(), "call-a");
         assert_eq!(*tool_call_id, call_id.clone());
@@ -576,7 +589,10 @@ mod tests {
             closers[0].source_event_seqs.as_deref(),
             Some(&[SessionSeq::new(3).expect("seq")][..])
         );
-        let Message::Known(KnownMessage::Tool { content, .. }) = &result.message else {
+        let Message::Known(known) = &result.message else {
+            panic!("tool-role message");
+        };
+        let KnownMessage::Tool { content, .. } = known.as_ref() else {
             panic!("tool-role message");
         };
         let Some(ContentBlock::Known(KnownContentBlock::Text { text })) = content.first() else {
@@ -591,7 +607,7 @@ mod tests {
         appended.data = SessionEventData::ToolResult(ToolResultData {
             turn: 1,
             step: 1,
-            message: Message::Known(KnownMessage::Tool {
+            message: Message::Known(Box::new(KnownMessage::Tool {
                 id: MessageId::new("result-1"),
                 content: vec![ContentBlock::Known(KnownContentBlock::Text {
                     text: "done".to_owned(),
@@ -602,7 +618,8 @@ mod tests {
                 }),
                 tool_call_id: ToolCallId::new("call-a"),
                 is_error: None,
-            }),
+                extra: RawObject::new(),
+            })),
             error: None,
             meta: None,
         });
@@ -666,8 +683,11 @@ mod tests {
             .iter()
             .map(|event| match &event.data {
                 SessionEventData::ToolResult(result) => match &result.message {
-                    Message::Known(KnownMessage::Tool { id, .. }) => id.as_str().to_owned(),
-                    _ => panic!("tool-role"),
+                    Message::Known(known) => match known.as_ref() {
+                        KnownMessage::Tool { id, .. } => id.as_str().to_owned(),
+                        _ => panic!("tool-role"),
+                    },
+                    Message::Other(_) => panic!("tool/result"),
                 },
                 _ => panic!("tool/result"),
             })
@@ -696,7 +716,10 @@ mod tests {
         let SessionEventData::ToolResult(result) = &closers[0].data else {
             panic!("tool/result first");
         };
-        let Message::Known(KnownMessage::Tool { id, content, .. }) = &result.message else {
+        let Message::Known(known) = &result.message else {
+            panic!("tool-role message");
+        };
+        let KnownMessage::Tool { id, content, .. } = known.as_ref() else {
             panic!("tool-role message");
         };
         assert!(id.as_str().starts_with("forked-tool-result-call-a-"));

@@ -11,6 +11,7 @@
 use crate::cond::EvalContext;
 use crate::error::{Error, Result};
 use crate::source::PathResolver;
+use crate::stack::json_quote;
 use regex::Regex;
 use serde_json::Value;
 use std::fmt::Write as _;
@@ -45,7 +46,11 @@ fn convert_config(
 ) -> Result<Value> {
     match value {
         serde_yaml_ng::Value::Tagged(tagged) => {
-            if tagged.tag.to_string().ends_with("js") {
+            // The flip parse yields exactly `!js`; the source dialect spells
+            // `!!js`. Any other tag is unsupported and must fail closed, so
+            // the comparison is exact rather than suffix-based.
+            let tag = tagged.tag.to_string();
+            if tag == "!!js" || tag == "!js" {
                 let text = tagged
                     .value
                     .as_str()
@@ -464,19 +469,21 @@ pub fn compose(layers: &[Vec<PatchLine>]) -> ComposeOutcome {
                 continue;
             }
             let Some(id) = &line.id else {
-                warnings.push("patch row without id skipped".to_owned());
+                warnings.push("patch: id is required for non-insert patches".to_owned());
                 continue;
             };
             let Some(&position) = index.get(id) else {
-                warnings.push(format!("patch: entry {id} not found, skipped"));
+                warnings.push(format!("patch: entry {} not found", json_quote(id)));
                 continue;
             };
             if let Some(name) = &line.name
                 && rows[position].name != *name
             {
                 warnings.push(format!(
-                    "patch: name mismatch for {id} (expected {}, got {name}), skipped",
-                    rows[position].name
+                    "patch: name mismatch for {} (expected {}, got {}), skipping",
+                    json_quote(id),
+                    json_quote(&rows[position].name),
+                    json_quote(name)
                 ));
                 continue;
             }

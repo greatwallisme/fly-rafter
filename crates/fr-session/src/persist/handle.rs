@@ -8,7 +8,7 @@
 
 use std::fmt;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, mpsc};
 use std::time::Duration;
 
@@ -183,6 +183,8 @@ pub(crate) struct HandleInner {
     close_slot: Mutex<Option<Arc<CloseSlot>>>,
     /// The warn hook for background drain failures (dsh `ctx.logger.warn`).
     report: Option<Arc<dyn Fn(String) + Send + Sync>>,
+    /// Live handle count over this inner; the last drop runs the close body.
+    live_handles: AtomicUsize,
 }
 
 impl fmt::Debug for JsonlSessionHandle {
@@ -198,8 +200,9 @@ impl fmt::Debug for JsonlSessionHandle {
 ///
 /// All operations serialize through the per-handle worker; `read` never
 /// observes a shorter log than a prior read on this handle, and `close`
-/// is idempotent with one shared outcome.
-#[derive(Clone)]
+/// is idempotent with one shared outcome. Dropping the last live handle
+/// (clones share the count) runs the same close: the routed live buffer
+/// drains durably, the write lease frees, and the tracker claim releases.
 pub struct JsonlSessionHandle {
     inner: Arc<HandleInner>,
 }
@@ -251,6 +254,7 @@ impl JsonlSessionHandle {
             ops_tx,
             close_slot: Mutex::new(None),
             report,
+            live_handles: AtomicUsize::new(1),
         });
         let worker_name = format!("fr-session-handle-{}", inner.id.as_str());
         let worker_inner = Arc::clone(&inner);
@@ -260,11 +264,10 @@ impl JsonlSessionHandle {
             .spawn(move || {
                 // The worker owns the queue and the mutation state. A completed
                 // close ends the loop (close is terminal: every later op
-                // refuses as closed), dropping the core with its lease; a
-                // sender-less channel ends it the same way (dsh process-death
-                // semantics). Without the close exit the worker's own
-                // `worker_inner` clone would keep the op-channel sender alive
-                // forever and leak this thread.
+                // refuses as closed), dropping the core with its lease — the
+                // last live handle's Drop guarantees that close, so the
+                // thread always exits; the sender-less channel arm stays as
+                // the defensive exit (dsh process-death semantics).
                 while let Ok(op) = ops_rx.recv() {
                     let closing = matches!(op, Op::Close { .. });
                     worker_dispatch(&worker_inner, &mut worker_core, op);
@@ -305,14 +308,9 @@ impl JsonlSessionHandle {
     pub(crate) fn inner_arc(&self) -> Arc<HandleInner> {
         Arc::clone(&self.inner)
     }
-
-    /// Re-wraps a tracked inner (teardown and flush sweeps).
-    pub(crate) const fn from_inner(inner: Arc<HandleInner>) -> Self {
-        Self { inner }
-    }
 }
 
-impl JsonlSessionHandle {
+impl HandleInner {
     /// Reads a slice of the valid contiguous logical log (dsh `read`): the
     /// slice is a legal log prefix segment — a torn physical tail is never
     /// returned — and repeated reads never observe an older state than a
@@ -323,7 +321,7 @@ impl JsonlSessionHandle {
     ///
     /// Returns `HandleClosed` after `close`, `InvalidInput` for an offset
     /// or length beyond the safe-integer domain, and the storage refusals.
-    pub fn read(&self, offset: u64, length: u64) -> Result<HandleRead, PersistError> {
+    pub(crate) fn read(&self, offset: u64, length: u64) -> Result<HandleRead, PersistError> {
         self.assert_open("read")?;
         // dsh validates `Number.isSafeInteger`; the u64 domain only leaves
         // the upper bound to refuse.
@@ -335,13 +333,13 @@ impl JsonlSessionHandle {
             }
         }
         let plan = {
-            let shared = lock(&self.inner.shared);
+            let shared = lock(&self.shared);
             if shared.primed.is_some() {
-                match self.inner.access {
+                match self.access {
                     SessionAccess::Write => ReadPlan::PrimedWrite,
                     SessionAccess::Read => ReadPlan::PrimedReadProbe,
                 }
-            } else if self.inner.access == SessionAccess::Write && !shared.materialized {
+            } else if self.access == SessionAccess::Write && !shared.materialized {
                 ReadPlan::UnmaterializedWrite
             } else {
                 ReadPlan::Resolve
@@ -351,7 +349,7 @@ impl JsonlSessionHandle {
             // A write handle reads its own verified stored prefix until its
             // first append clears it (dsh `readPrimed` on the write arm).
             ReadPlan::PrimedWrite => {
-                let mut shared = lock(&self.inner.shared);
+                let mut shared = lock(&self.shared);
                 let events = shared
                     .primed
                     .as_ref()
@@ -367,16 +365,11 @@ impl JsonlSessionHandle {
             // current-generation artifact resolves; the first resolution
             // discards the prefix and rescans (dsh read-arm primed probe).
             ReadPlan::PrimedReadProbe => {
-                if self
-                    .inner
-                    .backend
-                    .resolve_current_log(&self.inner.id)?
-                    .is_some()
-                {
-                    lock(&self.inner.shared).primed = None;
+                if self.backend.resolve_current_log(&self.id)?.is_some() {
+                    lock(&self.shared).primed = None;
                     self.read_current(offset, length)
                 } else {
-                    let mut shared = lock(&self.inner.shared);
+                    let mut shared = lock(&self.shared);
                     let events = shared
                         .primed
                         .as_ref()
@@ -391,14 +384,14 @@ impl JsonlSessionHandle {
             }
             // An unmaterialized create handle owns an empty detached log.
             ReadPlan::UnmaterializedWrite => Ok(HandleRead { events: Vec::new() }),
-            ReadPlan::Resolve => match self.inner.backend.resolve_current_log(&self.inner.id)? {
+            ReadPlan::Resolve => match self.backend.resolve_current_log(&self.id)? {
                 Some(path) => self.read_current_at(&path, offset, length),
-                None if self.inner.backend.has_pending_session(&self.inner.id) => {
+                None if self.backend.has_pending_session(&self.id) => {
                     Ok(HandleRead { events: Vec::new() })
                 }
                 None => Err(PersistError::NotFound(format!(
                     "session \"{}\" not found",
-                    self.inner.id.as_str()
+                    self.id.as_str()
                 ))),
             },
         }
@@ -413,7 +406,7 @@ impl JsonlSessionHandle {
     /// Returns `HandleClosed`/`ReadOnly` refusals, `InvalidInput` for a
     /// batch that does not contiguously continue the stored log, and the
     /// storage write failures.
-    pub fn append(&self, events: &[SessionEvent]) -> Result<(), PersistError> {
+    pub(crate) fn append(&self, events: &[SessionEvent]) -> Result<(), PersistError> {
         self.assert_open("append")?;
         let batch = events.to_vec();
         self.call("append", move |reply| Op::Append { batch, reply })
@@ -426,7 +419,7 @@ impl JsonlSessionHandle {
     /// # Errors
     ///
     /// Returns `HandleClosed`/`ReadOnly` refusals and the storage failures.
-    pub fn flush(&self) -> Result<(), PersistError> {
+    pub(crate) fn flush(&self) -> Result<(), PersistError> {
         self.assert_open("flush")?;
         self.call("flush", |reply| Op::Flush { reply })
     }
@@ -438,19 +431,19 @@ impl JsonlSessionHandle {
     /// # Errors
     ///
     /// Returns the underlying write failure with the batch retained.
-    pub fn drain_live(&self) -> Result<(), PersistError> {
+    pub(crate) fn drain_live(&self) -> Result<(), PersistError> {
         self.call("drain", |reply| Op::Drain { reply })
     }
 
     /// Buffers one published live session event (a persistence-owned copy)
     /// and arms the bounded batching window when idle (dsh `enqueueLive`).
     /// The routing installer is the only caller.
-    pub fn enqueue_live(&self, event: &SessionEvent) {
-        lock(&self.inner.buffered).push(event.clone());
-        if self.inner.drain_paused.load(Ordering::Acquire) {
+    pub(crate) fn enqueue_live(&self, event: &SessionEvent) {
+        lock(&self.buffered).push(event.clone());
+        if self.drain_paused.load(Ordering::Acquire) {
             return;
         }
-        self.inner.timer.arm(&self.inner.scheduler);
+        self.timer.arm(&self.scheduler);
     }
 
     /// Releases the handle (dsh `close`): idempotent with one shared
@@ -462,12 +455,12 @@ impl JsonlSessionHandle {
     /// # Errors
     ///
     /// Returns the aggregated drain/release failures.
-    pub fn close(&self) -> Result<(), PersistError> {
+    pub(crate) fn close(&self) -> Result<(), PersistError> {
         // Insert-and-send in one lock scope: two concurrent closers must
         // observe exactly one close body, or the second body's
         // `release_handle` would evict a successor write handle's claim.
         let slot = {
-            let mut guard = lock(&self.inner.close_slot);
+            let mut guard = lock(&self.close_slot);
             let existing = guard.as_ref().map(Arc::clone);
             let created = existing.is_none();
             let slot = existing.unwrap_or_else(|| {
@@ -477,8 +470,8 @@ impl JsonlSessionHandle {
             });
             drop(guard);
             if created {
-                self.inner.closing.store(true, Ordering::Release);
-                let sender = self.inner.ops_tx.clone();
+                self.closing.store(true, Ordering::Release);
+                let sender = self.ops_tx.clone();
                 if sender
                     .send(Op::Close {
                         slot: Arc::clone(&slot),
@@ -496,8 +489,8 @@ impl JsonlSessionHandle {
     }
 
     fn assert_open(&self, operation: &str) -> Result<(), PersistError> {
-        if self.inner.closing.load(Ordering::Acquire) {
-            return Err(closed_error(&self.inner.id, operation));
+        if self.closing.load(Ordering::Acquire) {
+            return Err(closed_error(&self.id, operation));
         }
         Ok(())
     }
@@ -506,13 +499,12 @@ impl JsonlSessionHandle {
     /// worker and waits for its settlement (one dsh chain turn).
     fn call(&self, operation: &str, build: impl FnOnce(OpReply) -> Op) -> Result<(), PersistError> {
         let (reply, receiver) = mpsc::channel();
-        self.inner
-            .ops_tx
+        self.ops_tx
             .send(build(reply))
-            .map_err(|_send_error| closed_error(&self.inner.id, operation))?;
+            .map_err(|_send_error| closed_error(&self.id, operation))?;
         receiver
             .recv()
-            .map_err(|_recv_error| closed_error(&self.inner.id, operation))?
+            .map_err(|_recv_error| closed_error(&self.id, operation))?
     }
 
     /// Reads one slice out of the prepared stored prefix, advancing the
@@ -535,15 +527,15 @@ impl JsonlSessionHandle {
     /// Reads one slice from the current physical generation and enforces
     /// this handle's monotonic view (dsh `readCurrent`).
     fn read_current(&self, offset: u64, length: u64) -> Result<HandleRead, PersistError> {
-        let Some(path) = self.inner.backend.resolve_current_log(&self.inner.id)? else {
+        let Some(path) = self.backend.resolve_current_log(&self.id)? else {
             // The plan resolved a path moments ago; a concurrent eviction
             // falls back to the pending/absent rules of the resolve arm.
-            if self.inner.backend.has_pending_session(&self.inner.id) {
+            if self.backend.has_pending_session(&self.id) {
                 return Ok(HandleRead { events: Vec::new() });
             }
             return Err(PersistError::NotFound(format!(
                 "session \"{}\" not found",
-                self.inner.id.as_str()
+                self.id.as_str()
             )));
         };
         self.read_current_at(&path, offset, length)
@@ -555,18 +547,15 @@ impl JsonlSessionHandle {
         offset: u64,
         length: u64,
     ) -> Result<HandleRead, PersistError> {
-        let stored = self
-            .inner
-            .backend
-            .read_stored_log_for_handle(&self.inner.id, path)?;
+        let stored = self.backend.read_stored_log_for_handle(&self.id, path)?;
         let stored_length = stored.events.len() as u64;
         {
-            let mut shared = lock(&self.inner.shared);
+            let mut shared = lock(&self.shared);
             if stored_length < shared.observed_length {
                 return Err(PersistError::Corruption(format!(
                     "session \"{}\": stored log shrank below a previously observed prefix \
 ({stored_length} < {})",
-                    self.inner.id.as_str(),
+                    self.id.as_str(),
                     shared.observed_length
                 )));
             }
@@ -575,6 +564,82 @@ impl JsonlSessionHandle {
         Ok(HandleRead {
             events: slice_events(stored.events, offset, length),
         })
+    }
+}
+
+impl JsonlSessionHandle {
+    /// Reads a slice of the valid contiguous logical log (dsh `read`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `HandleClosed` after `close` and the storage refusals.
+    pub fn read(&self, offset: u64, length: u64) -> Result<HandleRead, PersistError> {
+        self.inner.read(offset, length)
+    }
+
+    /// Appends one contiguous batch continuing the current logical end
+    /// (dsh `append`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `HandleClosed`/`ReadOnly` refusals and the storage failures.
+    pub fn append(&self, events: &[SessionEvent]) -> Result<(), PersistError> {
+        self.inner.append(events)
+    }
+
+    /// The durability barrier (dsh `flush`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `HandleClosed`/`ReadOnly` refusals and the storage failures.
+    pub fn flush(&self) -> Result<(), PersistError> {
+        self.inner.flush()
+    }
+
+    /// Durably drains the routed live buffer (dsh `drainLive`).
+    ///
+    /// # Errors
+    ///
+    /// Returns the underlying write failure with the batch retained.
+    pub fn drain_live(&self) -> Result<(), PersistError> {
+        self.inner.drain_live()
+    }
+
+    /// Buffers one published live session event (dsh `enqueueLive`); the
+    /// routing installer is the only caller.
+    pub fn enqueue_live(&self, event: &SessionEvent) {
+        self.inner.enqueue_live(event);
+    }
+
+    /// Releases the handle (dsh `close`): idempotent with one shared
+    /// outcome.
+    ///
+    /// # Errors
+    ///
+    /// Returns the aggregated drain/release failures.
+    pub fn close(&self) -> Result<(), PersistError> {
+        self.inner.close()
+    }
+}
+
+impl Clone for JsonlSessionHandle {
+    fn clone(&self) -> Self {
+        self.inner.live_handles.fetch_add(1, Ordering::AcqRel);
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+impl Drop for JsonlSessionHandle {
+    fn drop(&mut self) {
+        // The last live handle closes: the worker drains its routed live
+        // buffer, frees the write lease, and releases the tracker claim, so
+        // an abandoned handle can neither leak its worker thread nor pin its
+        // session against a later write open (Q48A, 2026-10-24 user ruling).
+        if self.inner.live_handles.fetch_sub(1, Ordering::AcqRel) == 1 {
+            let _ = self.inner.close();
+        }
     }
 }
 

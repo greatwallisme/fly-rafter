@@ -274,7 +274,14 @@ impl<'a> Parser<'a> {
 }
 
 fn strict_eq(lhs: &Value, rhs: &Value) -> bool {
-    lhs == rhs
+    match (lhs, rhs) {
+        // JS `===` compares Numbers by f64 value: `1 === 1.0` is true, and
+        // precision loss above 2**53 is part of the semantics (dsh `!!js`
+        // expressions run under real JS). serde_json Numbers are finite,
+        // so the f64 projection has no NaN/inf case.
+        (Value::Number(lhs), Value::Number(rhs)) => lhs.as_f64() == rhs.as_f64(),
+        _ => lhs == rhs,
+    }
 }
 
 #[cfg(test)]
@@ -292,6 +299,31 @@ mod tests {
             env: Box::new(move |name: &str| map.get(name).cloned()),
             has_profile_context: true,
             platform: "linux",
+        }
+    }
+
+    #[test]
+    fn strict_eq_compares_numbers_by_js_value() {
+        let ctx = ctx(None);
+        for text in [
+            "60000 === 60000.0",
+            "1 === 1",
+            // Above 2**53 JS Numbers lose precision: both literals project
+            // to the same f64, so JS (and this subset) compares them equal.
+            "9007199254740993 === 9007199254740992",
+        ] {
+            assert_eq!(
+                eval(text, &ctx).unwrap_or_else(|e| panic!("{text}: {e}")),
+                Value::Bool(true),
+                "{text}"
+            );
+        }
+        for text in ["1 === 1.5", "1 === \"1\"", "1 === true"] {
+            assert_eq!(
+                eval(text, &ctx).unwrap_or_else(|e| panic!("{text}: {e}")),
+                Value::Bool(false),
+                "{text}"
+            );
         }
     }
 

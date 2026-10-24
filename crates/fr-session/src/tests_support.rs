@@ -57,7 +57,7 @@ pub fn developer_addition(n: u64, header_seq: u64, tool_name: &str) -> SessionEv
         data: SessionEventData::DeveloperMessage(DeveloperMessageData {
             turn: 0,
             step: 0,
-            message: Message::Known(KnownMessage::Developer {
+            message: Message::Known(Box::new(KnownMessage::Developer {
                 id: MessageId::new(format!("d-{n}")),
                 content: vec![ContentBlock::Known(KnownContentBlock::ToolAddition {
                     tool_name: tool_name.to_owned(),
@@ -65,7 +65,8 @@ pub fn developer_addition(n: u64, header_seq: u64, tool_name: &str) -> SessionEv
                 source: MessageSource::Known(KnownMessageSource::User {
                     extra: RawObject::new(),
                 }),
-            }),
+                extra: RawObject::new(),
+            })),
             header_seq: Some(seq(header_seq)),
         }),
         ignorable: None,

@@ -261,8 +261,12 @@ written by a retired pre-release harness",
                 .map_err(|error| PersistError::Corruption(error.message))?;
             events.push(event);
         }
-        crate::session::Session::from_seed(self.meta.clone(), events.clone())
-            .map_err(|error| PersistError::Corruption(error.to_string()))?;
+        crate::session::Session::from_seed_parts(
+            self.meta.clone(),
+            events.clone(),
+            marker.unwrap_or(0),
+        )
+        .map_err(|error| PersistError::Corruption(error.to_string()))?;
         Ok(StoredScan {
             meta: self.meta,
             inherited_event_count: marker.unwrap_or(0),
@@ -837,7 +841,7 @@ mod tests {
             data: SessionEventData::ToolResult(ToolResultData {
                 turn,
                 step,
-                message: Message::Known(KnownMessage::Tool {
+                message: Message::Known(Box::new(KnownMessage::Tool {
                     id: MessageId::new(format!("r-{seq}")),
                     content: vec![ContentBlock::Known(KnownContentBlock::Text {
                         text: "done".to_owned(),
@@ -848,7 +852,8 @@ mod tests {
                     }),
                     tool_call_id: ToolCallId::new(call_id),
                     is_error: None,
-                }),
+                    extra: RawObject::new(),
+                })),
                 error: None,
                 meta: None,
             }),
@@ -865,7 +870,7 @@ mod tests {
             data: SessionEventData::AssistantMessage(AssistantMessageData {
                 turn,
                 step,
-                message: Message::Known(KnownMessage::Assistant {
+                message: Message::Known(Box::new(KnownMessage::Assistant {
                     id: MessageId::new(format!("a-{seq}")),
                     content: vec![ContentBlock::Known(KnownContentBlock::ToolCall {
                         id: ToolCallId::new(call_id),
@@ -878,7 +883,8 @@ mod tests {
                         replay_state: None,
                         extra: RawObject::new(),
                     }),
-                }),
+                    extra: RawObject::new(),
+                })),
                 stream: Vec::new(),
                 usage: None,
                 interrupted: None,

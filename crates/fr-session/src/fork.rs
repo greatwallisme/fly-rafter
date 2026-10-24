@@ -100,7 +100,7 @@ mod tests {
             data: SessionEventData::AssistantMessage(AssistantMessageData {
                 turn,
                 step,
-                message: Message::Known(KnownMessage::Assistant {
+                message: Message::Known(Box::new(KnownMessage::Assistant {
                     id: MessageId::new(format!("assistant-{seq}")),
                     content: vec![ContentBlock::Known(KnownContentBlock::ToolCall {
                         id: ToolCallId::new(call_id),
@@ -113,7 +113,8 @@ mod tests {
                         replay_state: None,
                         extra: RawObject::new(),
                     }),
-                }),
+                    extra: RawObject::new(),
+                })),
                 stream: Vec::new(),
                 usage: None,
                 interrupted: None,
@@ -153,9 +154,12 @@ mod tests {
         assert_eq!(result.step, 1);
         // The synthetic result carries the extracted forked not-started
         // wording verbatim (dsh repair.ts CLOSER_TEXT).
-        let Message::Known(KnownMessage::Tool {
+        let Message::Known(known) = &result.message else {
+            panic!("tool-role message");
+        };
+        let KnownMessage::Tool {
             content, is_error, ..
-        }) = &result.message
+        } = known.as_ref()
         else {
             panic!("tool-role message");
         };
