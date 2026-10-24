@@ -15,6 +15,7 @@ use crate::stack::json_quote;
 use regex::Regex;
 use serde_json::Value;
 use std::fmt::Write as _;
+use std::path::Path;
 
 /// One row of a `fr.patch.yml` document: an entry definition/override, or an
 /// `insert` group appending new root-level rows.
@@ -38,12 +39,15 @@ const fn row_no_of(index: usize) -> usize {
 }
 
 /// Converts one YAML value to JSON, evaluating `!!js` tagged values and
-/// `!!js ` prefixed strings through the restricted subset.
+/// `!!js ` prefixed strings through the restricted subset. The error is the
+/// bare message; the row number is attached by the caller that knows it
+/// ([`row_from_value`]), so a sentinel row index can never leak into
+/// diagnostics.
 fn convert_config(
     value: &serde_yaml_ng::Value,
     ctx: &EvalContext,
     whereami: &str,
-) -> Result<Value> {
+) -> std::result::Result<Value, String> {
     match value {
         serde_yaml_ng::Value::Tagged(tagged) => {
             // The flip parse yields exactly `!js`; the source dialect spells
@@ -54,38 +58,21 @@ fn convert_config(
                 let text = tagged
                     .value
                     .as_str()
-                    .ok_or_else(|| Error::PatchLine {
-                        row_no: 0,
-                        message: format!("{whereami}: !!js tag must wrap a string expression"),
-                    })?
+                    .ok_or_else(|| format!("{whereami}: !!js tag must wrap a string expression"))?
                     .to_owned();
-                crate::cond::eval(&text, ctx).map_err(|reason| Error::PatchLine {
-                    row_no: 0,
-                    message: format!("{whereami}: {reason}"),
-                })
+                crate::cond::eval(&text, ctx).map_err(|reason| format!("{whereami}: {reason}"))
             } else {
-                Err(Error::PatchLine {
-                    row_no: 0,
-                    message: format!("{whereami}: unsupported YAML tag {}", tagged.tag),
-                })
+                Err(format!("{whereami}: unsupported YAML tag {}", tagged.tag))
             }
         }
         serde_yaml_ng::Value::String(text) => text.strip_prefix("!!js ").map_or_else(
             || Ok(Value::String(text.clone())),
-            |expr| {
-                crate::cond::eval(expr, ctx).map_err(|reason| Error::PatchLine {
-                    row_no: 0,
-                    message: format!("{whereami}: {reason}"),
-                })
-            },
+            |expr| crate::cond::eval(expr, ctx).map_err(|reason| format!("{whereami}: {reason}")),
         ),
         serde_yaml_ng::Value::Null => Ok(Value::Null),
         serde_yaml_ng::Value::Bool(flag) => Ok(Value::Bool(*flag)),
         serde_yaml_ng::Value::Number(number) => {
-            serde_json::to_value(number).map_err(|e| Error::PatchLine {
-                row_no: 0,
-                message: format!("{whereami}: unsupported number: {e}"),
-            })
+            serde_json::to_value(number).map_err(|e| format!("{whereami}: unsupported number: {e}"))
         }
         serde_yaml_ng::Value::Sequence(items) => {
             let mut out = Vec::with_capacity(items.len());
@@ -100,10 +87,7 @@ fn convert_config(
                 let key_text = match key {
                     serde_yaml_ng::Value::String(text) => text.clone(),
                     other => {
-                        return Err(Error::PatchLine {
-                            row_no: 0,
-                            message: format!("{whereami}: non-string mapping key {other:?}"),
-                        });
+                        return Err(format!("{whereami}: non-string mapping key {other:?}"));
                     }
                 };
                 out.insert(key_text, convert_config(item, ctx, whereami)?);
@@ -113,27 +97,14 @@ fn convert_config(
     }
 }
 
-fn err_message(error: &Error) -> String {
-    match error {
-        Error::PatchLine { message, .. }
-        | Error::PatchParse(message)
-        | Error::Io(message)
-        | Error::Profile(message)
-        | Error::EnvBootstrap(message) => message.clone(),
-    }
-}
-
 /// Extracts one patch row from a YAML mapping (tags preserved because the
 /// whole document is deserialized into `serde_yaml_ng::Value`).
-fn row_from_value(
-    value: &serde_yaml_ng::Value,
+fn row_from_mapping(
+    mapping: &serde_yaml_ng::Mapping,
     ctx: &EvalContext,
     row_no: usize,
 ) -> std::result::Result<PatchLine, (usize, String)> {
     let fail = |message: String| (row_no, message);
-    let mapping = value
-        .as_mapping()
-        .ok_or_else(|| fail("patch row must be a mapping".to_owned()))?;
     let mut id = None;
     let mut name = None;
     let mut config = None;
@@ -169,7 +140,7 @@ fn row_from_value(
             }
             "config" => {
                 let converted = convert_config(item, ctx, &format!("row {row_no} config"))
-                    .map_err(|error| (row_no, err_message(&error)))?;
+                    .map_err(|message| (row_no, message))?;
                 if !converted.is_null() && !converted.is_object() {
                     return Err(fail("config must be an object or null".to_owned()));
                 }
@@ -181,7 +152,10 @@ fn row_from_value(
                     .ok_or_else(|| fail("insert must be a sequence of rows".to_owned()))?;
                 let mut inserted = Vec::with_capacity(seq.len());
                 for (idx, inner) in seq.iter().enumerate() {
-                    let row = row_from_value(inner, ctx, row_no)
+                    let Some(inner) = inner.as_mapping() else {
+                        return Err(fail(format!("insert[{idx}] must be a mapping")));
+                    };
+                    let row = row_from_mapping(inner, ctx, row_no)
                         .map_err(|(_, message)| (row_no, format!("insert[{idx}]: {message}")))?;
                     if row.insert.is_some() {
                         return Err(fail(format!(
@@ -229,25 +203,49 @@ fn row_from_value(
 ///
 /// # Errors
 ///
-/// Returns [`Error::PatchParse`] when the document is not a valid YAML
-/// sequence of rows and [`Error::PatchLine`] when a row violates the row
-/// schema or an expression falls outside the restricted subset (the whole
-/// document is rejected — fail-closed, matching dsh's throw on user patch
-/// errors).
+/// Parse and shape failures carry dsh's `parsePatchList` diagnostics
+/// verbatim (app-boot index.ts:582-589: `{bin}: failed to parse {label}
+/// {path}`, `{bin}: {label} {path} must be a top-level YAML array of loader
+/// patch entries`, `{bin}: {label} entry {N} in {path} must be a mapping (a
+/// loader patch entry)`, 1-based N). [`Error::PatchLine`] covers the fr-side
+/// row schema (unknown key, missing id on an inserted row, expression outside
+/// the restricted subset); the whole document is rejected either way —
+/// fail-closed, matching dsh's throw on user patch errors.
 ///
 /// # Panics
 ///
 /// Never at runtime: the internal regex pattern is constant and compiled
 /// through `expect` with a statically valid pattern.
-pub fn parse_patch_lines(yaml: &str, ctx: &EvalContext) -> Result<Vec<PatchLine>> {
-    let doc = parse_js_dialect(yaml)?;
-    let seq = doc.as_sequence().ok_or_else(|| {
-        Error::PatchParse("patch document must be a YAML sequence of rows".to_owned())
+pub fn parse_patch_lines(
+    yaml: &str,
+    ctx: &EvalContext,
+    path: &Path,
+    label: &str,
+    bin: &str,
+) -> Result<Vec<PatchLine>> {
+    let doc = parse_js_dialect(yaml).map_err(|e| {
+        Error::PatchParse(format!(
+            "{bin}: failed to parse {label} {}: {e}",
+            path.display()
+        ))
     })?;
+    let Some(seq) = doc.as_sequence() else {
+        return Err(Error::PatchParse(format!(
+            "{bin}: {label} {} must be a top-level YAML array of loader patch entries",
+            path.display()
+        )));
+    };
     let mut lines = Vec::with_capacity(seq.len());
     for (idx, item) in seq.iter().enumerate() {
+        let Some(mapping) = item.as_mapping() else {
+            return Err(Error::PatchParse(format!(
+                "{bin}: {label} entry {} in {} must be a mapping (a loader patch entry)",
+                idx + 1,
+                path.display()
+            )));
+        };
         lines.push(
-            row_from_value(item, ctx, row_no_of(idx))
+            row_from_mapping(mapping, ctx, row_no_of(idx))
                 .map_err(|(row_no, message)| Error::PatchLine { row_no, message })?,
         );
     }
@@ -663,10 +661,21 @@ mod tests {
         EvalContext::neutral()
     }
 
+    /// Parses with the pinned boot diagnostic context (the user patch layer
+    /// label and file position).
+    fn parse_lines(yaml: &str) -> Result<Vec<PatchLine>> {
+        parse_patch_lines(
+            yaml,
+            &neutral_ctx(),
+            Path::new("patches.yml"),
+            "patches",
+            "fr",
+        )
+    }
+
     #[test]
     fn parses_wellformed_document() {
-        let lines = parse_patch_lines(SAMPLE, &neutral_ctx())
-            .unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let lines = parse_lines(SAMPLE).unwrap_or_else(|e| panic!("parse failed: {e}"));
         assert_eq!(lines.len(), 1, "one insert group");
         let inserted = lines[0].insert.as_ref().expect("insert group");
         assert_eq!(inserted.len(), 3);
@@ -680,9 +689,8 @@ mod tests {
 
     #[test]
     fn toggle_only_override_keeps_other_keys() {
-        let base = parse_patch_lines(SAMPLE, &neutral_ctx())
-            .unwrap_or_else(|e| panic!("parse failed: {e}"));
-        let overlay = parse_patch_lines("- id: llm-primary\n  disabled: true\n", &neutral_ctx())
+        let base = parse_lines(SAMPLE).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let overlay = parse_lines("- id: llm-primary\n  disabled: true\n")
             .unwrap_or_else(|e| panic!("parse failed: {e}"));
         let outcome = compose(&[base, overlay]);
         assert!(outcome.warnings.is_empty(), "{:?}", outcome.warnings);
@@ -699,13 +707,9 @@ mod tests {
 
     #[test]
     fn config_override_replaces_wholesale() {
-        let base = parse_patch_lines(SAMPLE, &neutral_ctx())
+        let base = parse_lines(SAMPLE).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let overlay = parse_lines("- id: llm-primary\n  config:\n    model: deepseek-reasoner\n")
             .unwrap_or_else(|e| panic!("parse failed: {e}"));
-        let overlay = parse_patch_lines(
-            "- id: llm-primary\n  config:\n    model: deepseek-reasoner\n",
-            &neutral_ctx(),
-        )
-        .unwrap_or_else(|e| panic!("parse failed: {e}"));
         let outcome = compose(&[base, overlay]);
         let row = outcome
             .rows
@@ -717,11 +721,9 @@ mod tests {
 
     #[test]
     fn unmatched_and_mismatched_overrides_warn_and_skip() {
-        let base = parse_patch_lines(SAMPLE, &neutral_ctx())
-            .unwrap_or_else(|e| panic!("parse failed: {e}"));
-        let overlay = parse_patch_lines(
+        let base = parse_lines(SAMPLE).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let overlay = parse_lines(
             "- id: nonexistent\n  disabled: true\n- id: llm-primary\n  name: fr-other\n  disabled: true\n",
-            &neutral_ctx(),
         )
         .unwrap_or_else(|e| panic!("parse failed: {e}"));
         let outcome = compose(&[base, overlay]);
@@ -736,14 +738,12 @@ mod tests {
 
     #[test]
     fn insert_appends_and_later_layers_can_override() {
-        let base = parse_patch_lines(
+        let base = parse_lines(
             "- insert:\n    - id: headless-startup\n      name: fr-headless\n    - id: second\n      name: fr-second\n",
-            &neutral_ctx(),
         )
         .unwrap_or_else(|e| panic!("parse failed: {e}"));
-        let overlay =
-            parse_patch_lines("- id: headless-startup\n  disabled: true\n", &neutral_ctx())
-                .unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let overlay = parse_lines("- id: headless-startup\n  disabled: true\n")
+            .unwrap_or_else(|e| panic!("parse failed: {e}"));
         let outcome = compose(&[base, overlay]);
         assert!(outcome.warnings.is_empty(), "{:?}", outcome.warnings);
         assert_eq!(outcome.rows.len(), 2);
@@ -762,8 +762,7 @@ mod tests {
             "compile",
             &["libfr_llm_deepseek.so", "libfr_session_persistence.so"],
         );
-        let lines = parse_patch_lines(SAMPLE, &neutral_ctx())
-            .unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let lines = parse_lines(SAMPLE).unwrap_or_else(|e| panic!("parse failed: {e}"));
         let composed = compose(&[lines]);
         let outcome = compile_to_loader_doc(
             &composed.rows,
@@ -798,8 +797,7 @@ mod tests {
             "loader-contract",
             &["libfr_llm_deepseek.so", "libfr_session_persistence.so"],
         );
-        let lines = parse_patch_lines(SAMPLE, &neutral_ctx())
-            .unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let lines = parse_lines(SAMPLE).unwrap_or_else(|e| panic!("parse failed: {e}"));
         let composed = compose(&[lines]);
         let outcome = compile_to_loader_doc(
             &composed.rows,
@@ -818,8 +816,7 @@ mod tests {
     fn first_party_wasm_resolution_is_rejected() {
         let temp = TempArtifacts::new("trust", &["fr_demo.wasm"]);
         let yaml = "- insert:\n    - id: demo\n      name: fr-demo\n";
-        let lines =
-            parse_patch_lines(yaml, &neutral_ctx()).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let lines = parse_lines(yaml).unwrap_or_else(|e| panic!("parse failed: {e}"));
         let outcome = compile_to_loader_doc(
             &compose(&[lines]).rows,
             &temp.resolver(),
@@ -842,8 +839,7 @@ mod tests {
     fn literal_paths_skip_resolution() {
         let temp = TempArtifacts::new("literal", &[]);
         let yaml = "- insert:\n    - id: a\n      name: /opt/fr/lib/libfoo.so\n    - id: b\n      name: /opt/fr/lib/bar.wasm\n";
-        let lines =
-            parse_patch_lines(yaml, &neutral_ctx()).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let lines = parse_lines(yaml).unwrap_or_else(|e| panic!("parse failed: {e}"));
         let outcome = compile_to_loader_doc(
             &compose(&[lines]).rows,
             &temp.resolver(),
@@ -862,8 +858,7 @@ mod tests {
     #[test]
     fn js_tagged_values_evaluate_through_subset() {
         let yaml = "- id: approval\n  name: fr-approval\n  config:\n    policy: !!js \"(env.FR_PERMISSION_MODE ?? 'workspace-write') === 'danger-full-access' ? 'never' : 'ask'\"\n";
-        let lines =
-            parse_patch_lines(yaml, &neutral_ctx()).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let lines = parse_lines(yaml).unwrap_or_else(|e| panic!("parse failed: {e}"));
         assert_eq!(
             lines[0].config,
             Some(json!({"policy": "ask"})),
@@ -876,8 +871,7 @@ mod tests {
         // Flow style is outside the recognized value positions; a dropped tag
         // would silently evaluate to the raw expression string.
         let yaml = "- id: bad\n  name: fr-bad\n  config: {p: !!js \"process.env.X\"}\n";
-        let err =
-            parse_patch_lines(yaml, &neutral_ctx()).expect_err("flow-style !!js must be rejected");
+        let err = parse_lines(yaml).expect_err("flow-style !!js must be rejected");
         assert!(
             err.to_string()
                 .contains("outside a recognized value position"),
@@ -890,8 +884,7 @@ mod tests {
         // Q25B: tag-shaped text inside a block scalar is string content —
         // the flip must not rewrite it into an expression.
         let yaml = "- id: a\n  name: n\n  config:\n    note: |\n      k: !!js v\n";
-        let lines =
-            parse_patch_lines(yaml, &neutral_ctx()).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let lines = parse_lines(yaml).unwrap_or_else(|e| panic!("parse failed: {e}"));
         assert_eq!(
             lines[0].config,
             Some(json!({"note": "k: !!js v\n"})),
@@ -904,8 +897,7 @@ mod tests {
         // Q25B: tag-shaped text inside a quoted multi-line scalar is string
         // content, not a value position.
         let yaml = "- id: a\n  name: n\n  config:\n    note: \"line1\\n  k: !!js v\"\n";
-        let lines =
-            parse_patch_lines(yaml, &neutral_ctx()).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let lines = parse_lines(yaml).unwrap_or_else(|e| panic!("parse failed: {e}"));
         assert_eq!(
             lines[0].config,
             Some(json!({"note": "line1\n  k: !!js v"})),
@@ -919,8 +911,7 @@ mod tests {
         // recognize (dotted key) must fail closed with the pinned diagnostic
         // instead of silently losing the tag (19.2 条 12).
         let yaml = "- id: a\n  name: n\n  config:\n    p.q: !!js \"env.FR_X\"\n";
-        let err = parse_patch_lines(yaml, &neutral_ctx())
-            .expect_err("unrecognized structural tag must fail");
+        let err = parse_lines(yaml).expect_err("unrecognized structural tag must fail");
         assert!(
             err.to_string()
                 .contains("outside a recognized value position"),
@@ -931,45 +922,71 @@ mod tests {
     #[test]
     fn expression_outside_subset_rejects_document() {
         let yaml = "- id: bad\n  name: fr-bad\n  config:\n    p: !!js \"process.getBuiltinModule('node:path')\"\n";
-        let err = parse_patch_lines(yaml, &neutral_ctx()).expect_err("subset escape must fail");
+        let err = parse_lines(yaml).expect_err("subset escape must fail");
         assert!(matches!(err, Error::PatchLine { .. }), "{err}");
     }
 
     #[test]
     fn rejects_insert_group_carrying_entry_keys() {
         let yaml = "- id: a\n  insert:\n    - id: b\n      name: n\n";
-        let err = parse_patch_lines(yaml, &neutral_ctx()).expect_err("insert with id must fail");
+        let err = parse_lines(yaml).expect_err("insert with id must fail");
         assert!(matches!(err, Error::PatchLine { .. }), "{err}");
     }
 
     #[test]
     fn rejects_inserted_row_missing_name() {
         let yaml = "- insert:\n    - id: b\n";
-        let err = parse_patch_lines(yaml, &neutral_ctx()).expect_err("inserted row needs id+name");
+        let err = parse_lines(yaml).expect_err("inserted row needs id+name");
         assert!(matches!(err, Error::PatchLine { .. }), "{err}");
     }
 
     #[test]
     fn rejects_unknown_row_key() {
         let yaml = "- id: a\n  name: n\n  bogus: 1\n";
-        let err =
-            parse_patch_lines(yaml, &neutral_ctx()).expect_err("unknown key must be rejected");
+        let err = parse_lines(yaml).expect_err("unknown key must be rejected");
         assert!(matches!(err, Error::PatchLine { row_no: 1, .. }), "{err}");
     }
 
     #[test]
     fn rejects_non_object_config() {
         let yaml = "- id: a\n  name: n\n  config: [1, 2]\n";
-        let err =
-            parse_patch_lines(yaml, &neutral_ctx()).expect_err("array config must be rejected");
+        let err = parse_lines(yaml).expect_err("array config must be rejected");
         assert!(matches!(err, Error::PatchLine { row_no: 1, .. }), "{err}");
     }
 
     #[test]
     fn rejects_non_sequence_document() {
-        let err =
-            parse_patch_lines("id: a\n", &neutral_ctx()).expect_err("mapping doc must be rejected");
+        let err = parse_lines("id: a\n").expect_err("mapping doc must be rejected");
         assert!(matches!(err, Error::PatchParse(_)));
+    }
+
+    #[test]
+    fn patch_document_shape_errors_pin_dsh_texts() {
+        // dsh parsePatchList (app-boot index.ts:582-589) throws full
+        // `{bin}: ...` lines for parse failures, non-sequence documents, and
+        // non-mapping rows (1-based); fr mirrors them verbatim, with the
+        // layer label (`patches` for the user/home layers, `overlay` for
+        // `--patch`) standing in for dsh's caller context.
+        let path = Path::new("user.yml");
+        let err = parse_patch_lines("id: a\n", &neutral_ctx(), path, "patches", "fr")
+            .expect_err("mapping doc must be rejected");
+        assert_eq!(
+            err.to_string(),
+            "fr: patches user.yml must be a top-level YAML array of loader patch entries"
+        );
+        let err = parse_patch_lines("- id: a\n- 5\n", &neutral_ctx(), path, "overlay", "fr")
+            .expect_err("non-mapping row must be rejected");
+        assert_eq!(
+            err.to_string(),
+            "fr: overlay entry 2 in user.yml must be a mapping (a loader patch entry)"
+        );
+        let err = parse_patch_lines("- id: [a\n", &neutral_ctx(), path, "patches", "fr")
+            .expect_err("syntax error must be rejected");
+        assert!(
+            err.to_string()
+                .starts_with("fr: failed to parse patches user.yml: "),
+            "{err}"
+        );
     }
 
     fn no_schemas(_: &str) -> Option<&'static fr_schema::Schema> {
@@ -1001,8 +1018,7 @@ mod tests {
             &["libfr_llm_deepseek.so", "libfr_session_persistence.so"],
         );
         let yaml = "- insert:\n    - id: llm\n      name: fr-llm-deepseek\n      config:\n        model: other\n    - id: session\n      name: fr-session-persistence\n";
-        let lines =
-            parse_patch_lines(yaml, &neutral_ctx()).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let lines = parse_lines(yaml).unwrap_or_else(|e| panic!("parse failed: {e}"));
         let composed = compose(&[lines]);
         let schema = plugin_schema_fixture();
         let schema_by_name = |name: &str| match name {
@@ -1043,8 +1059,7 @@ mod tests {
     fn absent_schema_skips_validation() {
         let temp = TempArtifacts::new("schema-absent", &["libfr_llm_deepseek.so"]);
         let yaml = "- insert:\n    - id: llm\n      name: fr-llm-deepseek\n      config:\n        model: anything-goes\n";
-        let lines =
-            parse_patch_lines(yaml, &neutral_ctx()).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let lines = parse_lines(yaml).unwrap_or_else(|e| panic!("parse failed: {e}"));
         let composed = compose(&[lines]);
         let outcome = compile_to_loader_doc(
             &composed.rows,
@@ -1063,8 +1078,7 @@ mod tests {
         // the slot reads it as the declared fallback, not a violation.
         let temp = TempArtifacts::new("schema-fallback", &["libfr_llm_deepseek.so"]);
         let yaml = "- insert:\n    - id: llm\n      name: fr-llm-deepseek\n";
-        let lines =
-            parse_patch_lines(yaml, &neutral_ctx()).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let lines = parse_lines(yaml).unwrap_or_else(|e| panic!("parse failed: {e}"));
         let composed = compose(&[lines]);
         let schema = plugin_schema_fixture();
         let schema_by_name = |name: &str| match name {

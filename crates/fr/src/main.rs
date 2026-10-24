@@ -225,6 +225,7 @@ fn dump(invocation: &DumpInvocation, schema_mode: bool) -> fr_config::error::Res
     // it only for --default-only (dsh dump-config-schema.ts / profile-boot).
     let user_layer = schema_mode || !invocation.default_only;
     let loaded = prepare_profile(
+        "fr",
         &home,
         &invocation.profile,
         user_layer,

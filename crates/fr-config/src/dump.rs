@@ -579,6 +579,33 @@ fn build_map(
     }
 }
 
+/// Freezes the rows of one insert targeting a detached group (dsh
+/// `buildMap(insert)` after the invisible push): each non-empty string id
+/// enters the index as a [`RowTarget::Detached`] snapshot, recursing into a
+/// truthy-`group` row's array `config` exactly like [`build_map`], so later
+/// patches resolve those ids with the detached-row warning semantics instead
+/// of spuriously reporting them as not found.
+fn build_map_detached(index: &mut HashMap<String, RowTarget>, rows: &[Value]) {
+    let id_key = Value::String("id".into());
+    let group_key = Value::String("group".into());
+    let config_key = Value::String("config".into());
+    for row in rows {
+        let Some(mapping) = row.as_mapping() else {
+            continue;
+        };
+        if let Some(Value::String(id)) = mapping.get(&id_key)
+            && !id.is_empty()
+        {
+            index.insert(id.clone(), RowTarget::Detached(row.clone()));
+        }
+        if mapping.get(&group_key).is_some_and(js_truthy)
+            && let Some(Value::Sequence(children)) = mapping.get(&config_key)
+        {
+            build_map_detached(index, children);
+        }
+    }
+}
+
 /// Walks a recorded [`RowPath`] to the mutable row it addresses.
 fn row_at_mut<'a>(rows: &'a mut [Value], path: &[usize]) -> Option<&'a mut Value> {
     let (&head, tail) = path.split_first()?;
@@ -732,9 +759,11 @@ fn apply_insert_patch(
         Some(RowTarget::Live(path)) => {
             insert_into_group(data, index, &path, inserted, &id_text, warnings);
         }
-        // dsh pushes into the detached group's config array; the change is
-        // invisible, but the not-a-group check still reads the detached row.
-        // (Rows inserted there are likewise invisible and are not indexed.)
+        // dsh pushes into the detached group's config array and still runs
+        // `buildMap(insert)`, so the added rows join the id index as detached
+        // objects: later patches find them (warnings read the frozen rows)
+        // and their changes are invisible. Skip only the not-a-group case,
+        // which `continue`s before both the push and the index.
         Some(RowTarget::Detached(target)) => {
             if !target
                 .as_mapping()
@@ -742,7 +771,9 @@ fn apply_insert_patch(
                 .is_some_and(js_truthy)
             {
                 warnings.push(format!("patch insert: entry {id_text} is not a group"));
+                return;
             }
+            build_map_detached(index, inserted);
         }
         None => warnings.push(format!("patch insert: entry {id_text} not found")),
     }
@@ -1211,16 +1242,19 @@ mod tests {
         );
         let ctx = crate::cond::EvalContext::neutral();
         let stack = crate::stack::load_stack(
+            "fr",
             &home,
-            EntryKind::Headless,
-            Some("headless"),
-            std::slice::from_ref(&overlay),
-            None,
+            crate::stack::StackRequest {
+                entry: EntryKind::Headless,
+                profile: Some("headless"),
+                overlays: std::slice::from_ref(&overlay),
+                from_default_profile: None,
+            },
             &no_warnings,
             &ctx,
         )
         .unwrap_or_else(|e| panic!("stack failed: {e}"));
-        let loaded = crate::stack::load_profile(&home, "headless", true, &ctx)
+        let loaded = crate::stack::load_profile("fr", &home, "headless", true, &ctx)
             .unwrap_or_else(|e| panic!("profile failed: {e}"));
         let layers =
             collect_dump_layers(&home, EntryKind::Headless, &loaded, false, &[overlay], BIN)
@@ -1228,7 +1262,14 @@ mod tests {
         let base = loaded.dir.join(crate::stack::ROOT_FILENAME);
         let dump = render_dump(BIN, &base, &layers, &no_warnings)
             .unwrap_or_else(|e| panic!("dump failed: {e}"));
-        let reparsed = crate::patch::parse_patch_lines(&dump, &ctx).unwrap_or_else(|e| {
+        let reparsed = crate::patch::parse_patch_lines(
+            &dump,
+            &ctx,
+            std::path::Path::new("dump.yml"),
+            "patches",
+            BIN,
+        )
+        .unwrap_or_else(|e| {
             panic!("dump must re-parse through the boot-grade parser: {e}\n{dump}")
         });
         let boot_mounted = crate::patch::compose(&stack.layers);
@@ -1268,7 +1309,7 @@ mod tests {
         );
         write_file(&home.join(crate::stack::PATCH_FILENAME), "also: [broken\n");
         let ctx = crate::cond::EvalContext::neutral();
-        let loaded = crate::stack::load_profile(&home, "headless", false, &ctx)
+        let loaded = crate::stack::load_profile("fr", &home, "headless", false, &ctx)
             .unwrap_or_else(|e| panic!("default-only load failed: {e}"));
         let overlay = dir.path().join("overlay.yml");
         write_file(&overlay, "- id: b\n  disabled: true\n");
@@ -1289,7 +1330,7 @@ mod tests {
             layers[0].patches[0]
         );
         // With the user layer read, the same files are fail-closed.
-        let loaded_bad = crate::stack::load_profile(&home, "headless", true, &ctx);
+        let loaded_bad = crate::stack::load_profile("fr", &home, "headless", true, &ctx);
         assert!(loaded_bad.is_err(), "broken user patch must fail the load");
     }
 
@@ -1314,7 +1355,7 @@ mod tests {
         let overlay = dir.path().join("rel-overlay.yml");
         write_file(&overlay, "- id: o\n  disabled: true\n");
         let ctx = crate::cond::EvalContext::neutral();
-        let loaded = crate::stack::load_profile(&home, "work", true, &ctx)
+        let loaded = crate::stack::load_profile("fr", &home, "work", true, &ctx)
             .unwrap_or_else(|e| panic!("load failed: {e}"));
         let layers = collect_dump_layers(
             &home,
@@ -1401,8 +1442,14 @@ mod tests {
         // The whole dump still parses through the boot-grade parser and the
         // tagged value evaluates from the override row.
         let ctx = crate::cond::EvalContext::neutral();
-        let reparsed = crate::patch::parse_patch_lines(&dump, &ctx)
-            .unwrap_or_else(|e| panic!("re-parse failed: {e}\n{dump}"));
+        let reparsed = crate::patch::parse_patch_lines(
+            &dump,
+            &ctx,
+            std::path::Path::new("dump.yml"),
+            "patches",
+            BIN,
+        )
+        .unwrap_or_else(|e| panic!("re-parse failed: {e}\n{dump}"));
         assert_eq!(reparsed.len(), 1, "{dump}");
         assert_eq!(
             reparsed[0].config,
@@ -1463,6 +1510,68 @@ mod tests {
         assert_eq!(
             parsed[0]["config"][0]["name"], "new.so",
             "the new occupant stays untouched: {parsed:?}"
+        );
+    }
+
+    #[test]
+    fn detached_group_insert_still_indexes_added_rows() {
+        // dsh runs `buildMap(insert)` even when the target group is a
+        // detached object: the added rows join the id index, so a later
+        // patch targeting one resolves against the frozen row (silent
+        // matching-name mutation; a name mismatch still warns reading the
+        // inserted row) instead of spuriously reporting `not found`. The
+        // group itself must be detached by an ANCESTOR's config
+        // replacement — its own replacement keeps it live.
+        let dir = TempDir::new("detach-insert");
+        let base = dir.path().join("base.yml");
+        write_file(
+            &base,
+            "- id: o\n  name: o.so\n  group: true\n  config:\n    - id: g\n      name: group.so\n      group: true\n",
+        );
+        let layer_a = DumpLayer {
+            label: "a.yml".to_owned(),
+            patches: raw_rows(
+                "- id: o\n  config:\n    - id: g\n      name: group.so\n      group: true\n",
+            ),
+        };
+        let layer_b = DumpLayer {
+            label: "b.yml".to_owned(),
+            patches: raw_rows("- id: g\n  insert:\n    - id: x\n      name: x.so\n"),
+        };
+        let layer_c = DumpLayer {
+            label: "c.yml".to_owned(),
+            patches: raw_rows("- id: x\n  config:\n    v: 2\n"),
+        };
+        let layer_d = DumpLayer {
+            label: "d.yml".to_owned(),
+            patches: raw_rows("- id: x\n  name: wrong.so\n  config:\n    v: 3\n"),
+        };
+        let warnings: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+        let sink = |line: &str| {
+            warnings
+                .lock()
+                .unwrap_or_else(|e| panic!("poisoned: {e}"))
+                .push(line.to_owned());
+        };
+        let dump = render_dump(BIN, &base, &[layer_a, layer_b, layer_c, layer_d], &sink)
+            .unwrap_or_else(|e| panic!("dump failed: {e}"));
+        assert_eq!(
+            warnings
+                .into_inner()
+                .unwrap_or_else(|e| panic!("poisoned: {e}")),
+            vec![format!(
+                "{BIN}: [d.yml] patch: name mismatch for \"x\" (expected \"x.so\", got \"wrong.so\"), skipping"
+            )],
+            "the inserted row is indexed: matching name mutates invisibly, mismatch reads it"
+        );
+        assert!(
+            !dump.contains("v: 2"),
+            "the matching patch lands invisibly: {dump}"
+        );
+        assert!(!dump.contains("v: 3"), "{dump}");
+        assert!(
+            !dump.contains("x.so"),
+            "the inserted row itself stays out of the tree: {dump}"
         );
     }
 
@@ -1616,7 +1725,7 @@ mod tests {
         let home = dir.path().join("home");
         let profile_dir = write_profile(&home, "bundles: []\n", "- id: a\n  name: ./noop.so\n");
         let ctx = crate::cond::EvalContext::neutral();
-        let loaded = crate::stack::load_profile(&home, "headless", false, &ctx)
+        let loaded = crate::stack::load_profile("fr", &home, "headless", false, &ctx)
             .unwrap_or_else(|e| panic!("load failed: {e}"));
         let layers = collect_dump_layers(&home, EntryKind::Headless, &loaded, false, &[], BIN)
             .unwrap_or_else(|e| panic!("collect failed: {e}"));
@@ -1680,7 +1789,7 @@ mod tests {
         let home = dir.path().join("home");
         write_profile(&home, "bundles: [missing-bundle]\n", "[]\n");
         let ctx = crate::cond::EvalContext::neutral();
-        let loaded = crate::stack::load_profile(&home, "headless", false, &ctx)
+        let loaded = crate::stack::load_profile("fr", &home, "headless", false, &ctx)
             .unwrap_or_else(|e| panic!("load failed: {e}"));
         assert_eq!(loaded.skipped_bundles.len(), 1);
         let layers = collect_dump_layers(&home, EntryKind::Headless, &loaded, false, &[], BIN)

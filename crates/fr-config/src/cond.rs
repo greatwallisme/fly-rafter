@@ -3,7 +3,9 @@
 //! Replaces dsh's `!!js` tag per PRD 5 / CONFIG-4 (2026-10-22 Q3A ruling):
 //! env chains with `??` defaults, equality comparisons, platform ternaries,
 //! bare env reads, literals, and the profile-context boolean. Arbitrary JS
-//! is never evaluated.
+//! is never evaluated. Precedence matches JS (dsh `!!js` expressions run
+//! under real JS): ternary < `??` < equality < operands, so
+//! `env.X ?? 'a' === 'b'` coalesces `env.X` with `'a' === 'b'`.
 
 use serde_json::Value;
 
@@ -138,7 +140,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_ternary(&mut self) -> Result<Value, String> {
-        let cond = self.parse_equality()?;
+        let cond = self.parse_coalesce()?;
         // A single `?` opens a ternary; `??` is the nullish-coalescing
         // default operator and must not be consumed here.
         if self.lookahead_is("?") && !self.lookahead_is("??") {
@@ -154,6 +156,22 @@ impl<'a> Parser<'a> {
             };
         }
         Ok(cond)
+    }
+
+    /// JS nullish coalescing sits between the ternary and equality levels
+    /// (`a ?? b === c` is `a ?? (b === c)` under real JS, which is what dsh
+    /// `!!js` expressions run): the chain is left-associative and coalesces
+    /// only a null lhs.
+    fn parse_coalesce(&mut self) -> Result<Value, String> {
+        let mut lhs = self.parse_equality()?;
+        while self.lookahead_is("??") {
+            self.eat("??");
+            let rhs = self.parse_equality()?;
+            if lhs == Value::Null {
+                lhs = rhs;
+            }
+        }
+        Ok(lhs)
     }
 
     fn parse_equality(&mut self) -> Result<Value, String> {
@@ -195,17 +213,7 @@ impl<'a> Parser<'a> {
 
     fn parse_env_chain(&mut self) -> Result<Value, String> {
         let name = self.parse_ident("env variable name")?;
-        let mut value = (self.ctx.env)(&name).map_or(Value::Null, Value::String);
-        // The `?? <default>` clause is part of the expression grammar: it is
-        // consumed whether or not the lookup succeeded, and chains are allowed
-        // (left-associative, coalescing only null, matching JS semantics).
-        while self.lookahead_is("??") {
-            self.eat("??");
-            let default = self.parse_literal()?;
-            if value.is_null() {
-                value = default;
-            }
-        }
+        let value = (self.ctx.env)(&name).map_or(Value::Null, Value::String);
         Ok(value)
     }
 
@@ -213,18 +221,22 @@ impl<'a> Parser<'a> {
         self.skip_ws();
         let mut ident = String::new();
         while let Some(&ch) = self.chars.get(self.pos) {
-            if ch.is_ascii_alphanumeric() || ch == '_' {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '$' {
                 ident.push(ch);
                 self.pos += 1;
             } else {
                 break;
             }
         }
+        // JS identifier-start without the unicode escapes: a letter, `_`, or
+        // `$` (dsh reads `process.env._JAVA_OPTIONS` through real JS dot
+        // access); a digit-leading name is not dot-accessible JS and stays
+        // rejected.
         if ident.is_empty()
             || !ident
                 .chars()
                 .next()
-                .is_some_and(|ch: char| ch.is_ascii_alphabetic())
+                .is_some_and(|ch: char| ch.is_ascii_alphabetic() || ch == '_' || ch == '$')
         {
             return Err(format!("expected {what} at column {}", self.pos));
         }
@@ -325,6 +337,64 @@ mod tests {
                 "{text}"
             );
         }
+    }
+
+    #[test]
+    fn js_precedence_nullish_binds_looser_than_equality() {
+        // JS: `a ?? b === c` is `a ?? (b === c)` — a set lhs short-circuits
+        // the comparison, a null lhs coalesces into the equality result.
+        let set = ctx(Some(vec![("FR_X", "b")]));
+        assert_eq!(
+            eval("env.FR_X ?? 'a' === 'b'", &set).unwrap_or_else(|e| panic!("{e}")),
+            json!("b"),
+            "a set lhs short-circuits past the comparison"
+        );
+        assert_eq!(
+            eval("env.FR_X ?? 'a' === 'b'", &ctx(None)).unwrap_or_else(|e| panic!("{e}")),
+            json!(false),
+            "null lhs coalesces into the equality result"
+        );
+        // The canonical dsh idiom with explicit parens is unchanged.
+        assert_eq!(
+            eval("(env.FR_X ?? 'a') === 'b'", &set).unwrap_or_else(|e| panic!("{e}")),
+            json!(true)
+        );
+    }
+
+    #[test]
+    fn env_chain_accepts_env_reads_as_defaults() {
+        // Defaults are equality-level expressions: `env.X ?? env.Y` is valid
+        // JS under dsh and must evaluate, not reject.
+        let y_only = ctx(Some(vec![("FR_Y", "z")]));
+        assert_eq!(
+            eval("env.FR_X ?? env.FR_Y", &y_only).unwrap_or_else(|e| panic!("{e}")),
+            json!("z")
+        );
+        let x_set = ctx(Some(vec![("FR_X", "x"), ("FR_Y", "z")]));
+        assert_eq!(
+            eval("env.FR_X ?? env.FR_Y", &x_set).unwrap_or_else(|e| panic!("{e}")),
+            json!("x")
+        );
+    }
+
+    #[test]
+    fn env_names_accept_js_identifier_leading_characters() {
+        // JS dot access reaches `_`/`$`-leading names (`process.env
+        // ._JAVA_OPTIONS` under dsh); digit-leading names are not
+        // dot-accessible JS and stay rejected.
+        let set = ctx(Some(vec![("_JAVA_OPTIONS", "j"), ("$VAR", "d")]));
+        assert_eq!(
+            eval("env._JAVA_OPTIONS", &set).unwrap_or_else(|e| panic!("{e}")),
+            json!("j")
+        );
+        assert_eq!(
+            eval("env.$VAR", &set).unwrap_or_else(|e| panic!("{e}")),
+            json!("d")
+        );
+        assert!(
+            eval("env.1VAR", &set).is_err(),
+            "digit-leading names stay rejected"
+        );
     }
 
     #[test]

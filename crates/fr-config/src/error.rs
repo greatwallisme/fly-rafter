@@ -3,8 +3,10 @@
 /// Configuration domain errors.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// A `fr.patch.yml` document failed to parse as a patch line sequence.
-    #[error("patch parse error: {0}")]
+    /// A `fr.patch.yml` document failed to parse as a patch line sequence;
+    /// the message is the full user-facing diagnostic (dsh throws carry the
+    /// whole `${bin}: ...` line).
+    #[error("{0}")]
     PatchParse(String),
 
     /// A patch row violates the row schema (unknown key, missing id on an
@@ -18,14 +20,16 @@ pub enum Error {
         message: String,
     },
 
-    /// A file-system operation failed during layered loading; the path is
-    /// embedded in the message.
-    #[error("config io error: {0}")]
+    /// A file-system operation failed during layered loading; the message
+    /// is the full user-facing diagnostic (dsh throws carry the whole
+    /// `${bin}: ...` line).
+    #[error("{0}")]
     Io(String),
 
     /// The profile layer is invalid: illegal name, unknown profile, or a
-    /// malformed `profile.yml` manifest.
-    #[error("profile error: {0}")]
+    /// malformed `profile.yml` manifest; the message is the full
+    /// user-facing diagnostic.
+    #[error("{0}")]
     Profile(String),
 
     /// A `.env` layer set a bootstrap-only name that only the launching

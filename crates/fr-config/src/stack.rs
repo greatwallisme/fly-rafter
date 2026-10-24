@@ -68,6 +68,24 @@ impl EntryKind {
     }
 }
 
+/// The selection a stack load is built from.
+///
+/// Fields: the entry bundle, the selected profile (if any), `--patch`
+/// overlays, and the `--from-default-profile` template — the options bag of
+/// dsh's `prepareProfile`, mirrored.
+#[derive(Debug, Clone, Copy)]
+pub struct StackRequest<'a> {
+    /// The entry bundle mounted as layer 1.
+    pub entry: EntryKind,
+    /// The selected profile; `None` builds the entry-only stack (and
+    /// refuses `from_default_profile`, which has nothing to replace).
+    pub profile: Option<&'a str>,
+    /// Required `--patch` overlay files.
+    pub overlays: &'a [PathBuf],
+    /// Factory template replacing the selected profile before loading.
+    pub from_default_profile: Option<&'a str>,
+}
+
 /// Built-in bundle YAML by name (profile manifest `bundles:` references).
 /// M1 ships the headless entry bundle only.
 #[must_use]
@@ -105,7 +123,10 @@ pub fn validate_profile_name(name: &str) -> Result<()> {
         || name == ".."
         || name == "node_modules";
     if illegal {
-        return Err(Error::Profile(format!("invalid profile name {name:?}")));
+        return Err(Error::Profile(format!(
+            "fr: invalid profile name {}",
+            json_quote(name)
+        )));
     }
     Ok(())
 }
@@ -145,18 +166,31 @@ pub struct LoadedProfile {
 ///
 /// # Errors
 ///
-/// [`Error::Io`] when the file cannot be read; [`Error::Profile`] when the
-/// content is not a mapping, a key is not a string, `bundles` is not a list
-/// of non-empty strings, or an unknown key is present.
-pub fn read_profile_manifest(dir: &Path) -> Result<Vec<String>> {
+/// Read and not-an-object failures carry dsh's `readProfileManifest`
+/// diagnostics verbatim (app-boot profile.ts:617/622); the parse-error text
+/// is engine-specific (PRD 19.2 条 19). [`Error::Profile`] further covers a
+/// non-string key, `bundles` that is not a list of non-empty strings, or an
+/// unknown key.
+pub fn read_profile_manifest(bin: &str, dir: &Path) -> Result<Vec<String>> {
     let path = dir.join(MANIFEST_FILENAME);
-    let content = fs::read_to_string(&path)
-        .map_err(|e| Error::Io(format!("failed to read {}: {e}", path.display())))?;
+    let content = fs::read_to_string(&path).map_err(|e| {
+        Error::Io(format!(
+            "{bin}: failed to read profile manifest {}: {e}",
+            path.display()
+        ))
+    })?;
+    // The parse-error text stays the fr-side wrapper: dsh's manifest is JSON
+    // bare-throwing V8 SyntaxErrors, fr's is YAML through serde — engine and
+    // format both differ, so this line is engine-specific by design
+    // (PRD 19.2 条 19).
     let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content)
         .map_err(|e| Error::Profile(format!("failed to parse {}: {e}", path.display())))?;
-    let mapping = value
-        .as_mapping()
-        .ok_or_else(|| Error::Profile(format!("{} must be a mapping", path.display())))?;
+    let mapping = value.as_mapping().ok_or_else(|| {
+        Error::Profile(format!(
+            "{bin}: profile manifest {} must hold a JSON object",
+            path.display()
+        ))
+    })?;
     let mut bundles = Vec::new();
     for (key, item) in mapping {
         let key_text = key
@@ -258,15 +292,24 @@ pub(crate) fn anchor_base(path: &Path) -> PathBuf {
 ///
 /// # Errors
 ///
-/// [`Error::Io`] when the file exists but cannot be read; parse errors
-/// propagate from [`parse_patch_lines`].
-pub fn load_optional_patches(path: &Path, ctx: &EvalContext) -> Result<Option<Vec<PatchLine>>> {
+/// [`Error::Io`] with dsh's verbatim read diagnostic when the file exists
+/// but cannot be read; parse errors propagate from [`parse_patch_lines`].
+pub fn load_optional_patches(
+    bin: &str,
+    path: &Path,
+    ctx: &EvalContext,
+) -> Result<Option<Vec<PatchLine>>> {
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(Error::Io(format!("failed to read {}: {e}", path.display()))),
+        Err(e) => {
+            return Err(Error::Io(format!(
+                "{bin}: failed to read patches {}: {e}",
+                path.display()
+            )));
+        }
     };
-    let mut lines = parse_patch_lines(&content, ctx)?;
+    let mut lines = parse_patch_lines(&content, ctx, path, "patches", bin)?;
     anchor_insert_names(&mut lines, &anchor_base(path));
     Ok(Some(lines))
 }
@@ -278,12 +321,17 @@ pub fn load_optional_patches(path: &Path, ctx: &EvalContext) -> Result<Option<Ve
 ///
 /// # Errors
 ///
-/// [`Error::Io`] when the file cannot be read (including absence); parse
-/// errors propagate from [`parse_patch_lines`].
-pub fn load_required_overlay(path: &Path, ctx: &EvalContext) -> Result<Vec<PatchLine>> {
-    let content = fs::read_to_string(path)
-        .map_err(|e| Error::Io(format!("failed to read overlay {}: {e}", path.display())))?;
-    let mut lines = parse_patch_lines(&content, ctx)?;
+/// [`Error::Io`] with dsh's verbatim read diagnostic when the file cannot
+/// be read (including absence); parse errors propagate from
+/// [`parse_patch_lines`].
+pub fn load_required_overlay(bin: &str, path: &Path, ctx: &EvalContext) -> Result<Vec<PatchLine>> {
+    let content = fs::read_to_string(path).map_err(|e| {
+        Error::Io(format!(
+            "{bin}: failed to read overlay {}: {e}",
+            path.display()
+        ))
+    })?;
+    let mut lines = parse_patch_lines(&content, ctx, path, "overlay", bin)?;
     anchor_insert_names(&mut lines, &anchor_base(path));
     Ok(lines)
 }
@@ -346,6 +394,7 @@ fn render_manifest_template(template_bundles: &[&str]) -> String {
 /// [`Error::Profile`] for illegal names, unknown profiles, and manifest
 /// violations; [`Error::Io`] for read failures; patch parse errors propagate.
 pub fn load_profile(
+    bin: &str,
     home: &Path,
     name: &str,
     user_layer: bool,
@@ -358,18 +407,27 @@ pub fn load_profile(
         match profile_template_bundles(name) {
             Some(bundles) => init_profile(&dir, bundles)?,
             None => {
-                return Err(Error::Profile(format!("profile {name:?} does not exist")));
+                return Err(Error::Profile(format!(
+                    "{bin}: profile {} does not exist",
+                    json_quote(name)
+                )));
             }
         }
     }
-    let bundles = read_profile_manifest(&dir)?;
+    let bundles = read_profile_manifest(bin, &dir)?;
     let mut layers = Vec::new();
     let mut bundle_names = Vec::new();
     let mut skipped_bundles = Vec::new();
     for bundle in bundles {
         match builtin_bundle_yaml(&bundle) {
             Some(yaml) => {
-                layers.push(parse_patch_lines(yaml, ctx)?);
+                layers.push(parse_patch_lines(
+                    yaml,
+                    ctx,
+                    Path::new(&bundle),
+                    "patches",
+                    bin,
+                )?);
                 bundle_names.push(bundle);
             }
             None => skipped_bundles.push(SkippedBundle {
@@ -379,7 +437,7 @@ pub fn load_profile(
         }
     }
     let patch = if user_layer {
-        load_optional_patches(&dir.join(PATCH_FILENAME), ctx)?.unwrap_or_default()
+        load_optional_patches(bin, &dir.join(PATCH_FILENAME), ctx)?.unwrap_or_default()
     } else {
         Vec::new()
     };
@@ -409,6 +467,7 @@ pub fn load_profile(
 /// [`initialize_profile_from_default`]); root write failures are
 /// [`Error::Io`].
 pub fn prepare_profile(
+    bin: &str,
     home: &Path,
     name: &str,
     user_layer: bool,
@@ -419,7 +478,7 @@ pub fn prepare_profile(
     if let Some(template) = from_default_profile {
         initialize_profile_from_default(home, name, template, warn)?;
     }
-    let loaded = load_profile(home, name, user_layer, ctx)?;
+    let loaded = load_profile(bin, home, name, user_layer, ctx)?;
     let root = loaded.dir.join(ROOT_FILENAME);
     fs::write(&root, ROOT_CONFIG)
         .map_err(|e| Error::Io(format!("failed to write {}: {e}", root.display())))?;
@@ -589,39 +648,58 @@ pub struct StackOutcome {
 ///
 /// # Errors
 ///
-/// Fails on illegal profile names, unknown profiles, replacement template
+/// Fails on `from_default_profile` without a selected profile
+/// (`--from-default-profile requires --profile` — dsh `resolveBoot` refuses
+/// the combination at the CLI before this layer runs, so the message is
+/// fr's own), illegal profile names, unknown profiles, replacement template
 /// errors, manifest errors, unreadable files, required overlay absence, and
 /// patch parse errors — parse and required-file failures are fail-closed
 /// (startup dies).
 pub fn load_stack(
+    bin: &str,
     home: &Path,
-    entry: EntryKind,
-    profile: Option<&str>,
-    overlays: &[PathBuf],
-    from_default_profile: Option<&str>,
+    request: StackRequest<'_>,
     warn: &dyn Fn(&str),
     ctx: &EvalContext,
 ) -> Result<StackOutcome> {
+    let StackRequest {
+        entry,
+        profile,
+        overlays,
+        from_default_profile,
+    } = request;
+    if profile.is_none() && from_default_profile.is_some() {
+        return Err(Error::Profile(
+            "--from-default-profile requires --profile".to_owned(),
+        ));
+    }
     let entry_yaml = match entry {
         EntryKind::Headless => HEADLESS_BUNDLE_YAML,
     };
-    let mut layers = vec![parse_patch_lines(entry_yaml, ctx)?];
+    let entry_name = entry.bundle_name().to_owned();
+    let mut layers = vec![parse_patch_lines(
+        entry_yaml,
+        ctx,
+        Path::new(&entry_name),
+        "patches",
+        bin,
+    )?];
     // `profile_patch` stays `None` without a selected profile so no phantom
     // empty layer is appended.
     let (profile_layers, profile_patch, skipped_bundles) = match profile {
         Some(name) => {
-            let loaded = prepare_profile(home, name, true, from_default_profile, warn, ctx)?;
+            let loaded = prepare_profile(bin, home, name, true, from_default_profile, warn, ctx)?;
             (loaded.layers, Some(loaded.patch), loaded.skipped_bundles)
         }
         None => (Vec::new(), None, Vec::new()),
     };
     layers.extend(profile_layers);
     layers.extend(profile_patch);
-    if let Some(home_layer) = load_optional_patches(&home.join(PATCH_FILENAME), ctx)? {
+    if let Some(home_layer) = load_optional_patches(bin, &home.join(PATCH_FILENAME), ctx)? {
         layers.push(home_layer);
     }
     for overlay in overlays {
-        layers.push(load_required_overlay(overlay, ctx)?);
+        layers.push(load_required_overlay(bin, overlay, ctx)?);
     }
     Ok(StackOutcome {
         layers,
@@ -674,13 +752,14 @@ mod tests {
     #[test]
     fn optional_patch_absent_is_empty_layer() {
         let home = TempHome::new("opt");
-        let absent = load_optional_patches(&home.path().join("nope.yml"), &EvalContext::neutral())
-            .unwrap_or_else(|e| panic!("absent file must be Ok(None): {e}"));
+        let absent =
+            load_optional_patches("fr", &home.path().join("nope.yml"), &EvalContext::neutral())
+                .unwrap_or_else(|e| panic!("absent file must be Ok(None): {e}"));
         assert!(absent.is_none());
         let present = home.path().join("patch.yml");
         fs::write(&present, "- id: llm-primary\n  disabled: true\n")
             .unwrap_or_else(|e| panic!("write failed: {e}"));
-        let layer = load_optional_patches(&present, &EvalContext::neutral())
+        let layer = load_optional_patches("fr", &present, &EvalContext::neutral())
             .unwrap_or_else(|e| panic!("present file must parse: {e}"));
         assert_eq!(layer.expect("some").len(), 1);
     }
@@ -691,7 +770,7 @@ mod tests {
         let path = home.path().join("bad.yml");
         fs::write(&path, "- id: a\n  bogus: 1\n").unwrap_or_else(|e| panic!("write failed: {e}"));
         assert!(
-            load_optional_patches(&path, &EvalContext::neutral()).is_err(),
+            load_optional_patches("fr", &path, &EvalContext::neutral()).is_err(),
             "parse errors must fail closed"
         );
     }
@@ -699,8 +778,11 @@ mod tests {
     #[test]
     fn required_overlay_absent_fails_startup() {
         let home = TempHome::new("overlay");
-        let outcome =
-            load_required_overlay(&home.path().join("ghost.yml"), &EvalContext::neutral());
+        let outcome = load_required_overlay(
+            "fr",
+            &home.path().join("ghost.yml"),
+            &EvalContext::neutral(),
+        );
         assert!(outcome.is_err(), "missing overlay must fail");
     }
 
@@ -712,22 +794,28 @@ mod tests {
         let manifest = dir.join(MANIFEST_FILENAME);
         fs::write(&manifest, "bundles: [headless]\n")
             .unwrap_or_else(|e| panic!("write failed: {e}"));
-        let bundles =
-            read_profile_manifest(&dir).unwrap_or_else(|e| panic!("valid manifest failed: {e}"));
+        let bundles = read_profile_manifest("fr", &dir)
+            .unwrap_or_else(|e| panic!("valid manifest failed: {e}"));
         assert_eq!(bundles, vec!["headless".to_owned()]);
         fs::write(&manifest, "bogus: 1\n").unwrap_or_else(|e| panic!("write failed: {e}"));
-        assert!(read_profile_manifest(&dir).is_err(), "unknown key rejected");
+        assert!(
+            read_profile_manifest("fr", &dir).is_err(),
+            "unknown key rejected"
+        );
         fs::write(&manifest, "bundles: [\"\"]\n").unwrap_or_else(|e| panic!("write failed: {e}"));
-        assert!(read_profile_manifest(&dir).is_err(), "empty name rejected");
+        assert!(
+            read_profile_manifest("fr", &dir).is_err(),
+            "empty name rejected"
+        );
         fs::write(&manifest, "- a\n- b\n").unwrap_or_else(|e| panic!("write failed: {e}"));
         assert!(
-            read_profile_manifest(&dir).is_err(),
+            read_profile_manifest("fr", &dir).is_err(),
             "non-mapping manifest rejected"
         );
         fs::write(&manifest, "bundles: [a]\nbundles: [b]\n")
             .unwrap_or_else(|e| panic!("write failed: {e}"));
         assert!(
-            read_profile_manifest(&dir).is_err(),
+            read_profile_manifest("fr", &dir).is_err(),
             "duplicate keys must be rejected, not silently last-wins"
         );
     }
@@ -754,7 +842,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("mkdir failed: {e}"));
         fs::write(dir.join(MANIFEST_FILENAME), "bundles: [headless, nope]\n")
             .unwrap_or_else(|e| panic!("write failed: {e}"));
-        let loaded = load_profile(home.path(), "work", true, &EvalContext::neutral())
+        let loaded = load_profile("fr", home.path(), "work", true, &EvalContext::neutral())
             .unwrap_or_else(|e| panic!("load failed: {e}"));
         assert_eq!(loaded.layers.len(), 1, "only the known bundle loads");
         assert_eq!(loaded.skipped_bundles.len(), 1);
@@ -778,7 +866,7 @@ mod tests {
     #[test]
     fn fresh_headless_profile_auto_inits() {
         let home = TempHome::new("auto");
-        let loaded = load_profile(home.path(), "headless", true, &EvalContext::neutral())
+        let loaded = load_profile("fr", home.path(), "headless", true, &EvalContext::neutral())
             .unwrap_or_else(|e| panic!("auto-init failed: {e}"));
         assert!(
             home.path()
@@ -800,7 +888,7 @@ mod tests {
     #[test]
     fn unknown_profile_name_errors() {
         let home = TempHome::new("ghost");
-        let outcome = load_profile(home.path(), "ghost", true, &EvalContext::neutral());
+        let outcome = load_profile("fr", home.path(), "ghost", true, &EvalContext::neutral());
         assert!(outcome.is_err(), "unknown profile must fail");
     }
 
@@ -833,11 +921,14 @@ mod tests {
         )
         .unwrap_or_else(|e| panic!("write failed: {e}"));
         let outcome = load_stack(
+            "fr",
             home.path(),
-            EntryKind::Headless,
-            Some("headless"),
-            &[overlay],
-            None,
+            StackRequest {
+                entry: EntryKind::Headless,
+                profile: Some("headless"),
+                overlays: &[overlay],
+                from_default_profile: None,
+            },
             &|_| {},
             &EvalContext::neutral(),
         )
@@ -861,11 +952,14 @@ mod tests {
     #[test]
     fn entry_bundle_compiles_to_valid_loader_doc() {
         let outcome = load_stack(
+            "fr",
             Path::new("/nonexistent-fr-home"),
-            EntryKind::Headless,
-            None,
-            &[],
-            None,
+            StackRequest {
+                entry: EntryKind::Headless,
+                profile: None,
+                overlays: &[],
+                from_default_profile: None,
+            },
             &|_| {},
             &EvalContext::neutral(),
         )
@@ -934,7 +1028,7 @@ mod tests {
             "- insert:\n    - id: a\n      name: ./ext/libfoo.so\n    - id: b\n      name: ../sib/bar.wasm\n    - id: c\n      name: plugins/foo.so\n",
         )
         .unwrap_or_else(|e| panic!("write failed: {e}"));
-        let lines = load_required_overlay(&overlay, &EvalContext::neutral())
+        let lines = load_required_overlay("fr", &overlay, &EvalContext::neutral())
             .unwrap_or_else(|e| panic!("load failed: {e}"));
         let inserted = lines[0].insert.as_ref().expect("insert group");
         assert_eq!(
@@ -965,7 +1059,7 @@ mod tests {
         let overlay = home.path().join("patch.yml");
         fs::write(&overlay, "- id: x\n  name: ./matcher\n  disabled: true\n")
             .unwrap_or_else(|e| panic!("write failed: {e}"));
-        let lines = load_required_overlay(&overlay, &EvalContext::neutral())
+        let lines = load_required_overlay("fr", &overlay, &EvalContext::neutral())
             .unwrap_or_else(|e| panic!("load failed: {e}"));
         assert_eq!(
             lines[0].name.as_deref(),
@@ -988,6 +1082,7 @@ mod tests {
         fs::write(profile_dir.join(PATCH_FILENAME), "- id: a\n  bogus: 1\n")
             .unwrap_or_else(|e| panic!("write patch failed: {e}"));
         let loaded = prepare_profile(
+            "fr",
             home.path(),
             "headless",
             false,
@@ -1005,6 +1100,7 @@ mod tests {
         );
         // With the user layer on, the same broken file is fail-closed.
         let outcome = prepare_profile(
+            "fr",
             home.path(),
             "headless",
             true,
@@ -1029,6 +1125,7 @@ mod tests {
         .unwrap_or_else(|e| panic!("write patch failed: {e}"));
         let warnings: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
         prepare_profile(
+            "fr",
             home.path(),
             "work",
             true,
@@ -1084,6 +1181,7 @@ mod tests {
     fn from_default_rejects_unknown_template_and_shipped_target() {
         let home = TempHome::new("from-default-guard");
         let unknown = prepare_profile(
+            "fr",
             home.path(),
             "work",
             true,
@@ -1095,6 +1193,7 @@ mod tests {
         assert!(err.to_string().contains("unknown default profile"), "{err}");
         for target in ["headless", "HEADLESS"] {
             let shipped = prepare_profile(
+                "fr",
                 home.path(),
                 target,
                 true,
@@ -1122,5 +1221,99 @@ mod tests {
                 "{name} must ship a template"
             );
         }
+    }
+
+    #[test]
+    fn optional_patch_read_failure_pins_dsh_text() {
+        // dsh loadOptionalPatches (app-boot index.ts:526): an existing but
+        // unreadable path throws `{bin}: failed to read patches {file}: {error}`.
+        let home = TempHome::new("opt-read");
+        let path = home.path().join("dir.yml");
+        fs::create_dir(&path).unwrap_or_else(|e| panic!("mkdir failed: {e}"));
+        let err = load_optional_patches("fr", &path, &EvalContext::neutral())
+            .expect_err("a directory is not readable as a patch file");
+        let prefix = format!("fr: failed to read patches {}: ", path.display());
+        assert!(err.to_string().starts_with(&prefix), "{err}");
+    }
+
+    #[test]
+    fn overlay_read_failure_pins_dsh_text() {
+        // dsh loadOverlayPatches (app-boot index.ts:545): a missing required
+        // overlay throws `{bin}: failed to read overlay {file}: {error}`.
+        let home = TempHome::new("overlay-read");
+        let path = home.path().join("ghost.yml");
+        let err = load_required_overlay("fr", &path, &EvalContext::neutral())
+            .expect_err("missing overlays fail startup");
+        let prefix = format!("fr: failed to read overlay {}: ", path.display());
+        assert!(err.to_string().starts_with(&prefix), "{err}");
+    }
+
+    #[test]
+    fn from_default_profile_without_profile_rejected() {
+        // Q51A (2026-10-24 ruling): `from_default_profile` names a template
+        // that replaces a selected profile; with no profile there is nothing
+        // to replace, so the combination is refused fail-closed. dsh
+        // `resolveBoot` refuses it earlier at the CLI, so the message is
+        // fr's own.
+        let home = TempHome::new("fdp-no-profile");
+        let err = load_stack(
+            "fr",
+            home.path(),
+            StackRequest {
+                entry: EntryKind::Headless,
+                profile: None,
+                overlays: &[],
+                from_default_profile: Some("headless"),
+            },
+            &|_| {},
+            &EvalContext::neutral(),
+        )
+        .expect_err("from-default-profile without a profile must be refused");
+        assert_eq!(err.to_string(), "--from-default-profile requires --profile");
+    }
+
+    #[test]
+    fn manifest_read_diagnostics_pins_dsh_texts() {
+        // dsh readProfileManifest (app-boot profile.ts:617/622): a read
+        // failure throws `{bin}: failed to read profile manifest {path}`,
+        // a non-object manifest `{bin}: profile manifest {path} must hold a
+        // JSON object`. The parse-error line between them is engine-specific
+        // by design (PRD 19.2 条 19).
+        let home = TempHome::new("manifest-read");
+        let dir = home.path().join(PROFILES_DIR).join("work");
+        fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("mkdir failed: {e}"));
+        let err = read_profile_manifest("fr", &dir).expect_err("missing manifest must fail");
+        let path = dir.join(MANIFEST_FILENAME);
+        let prefix = format!("fr: failed to read profile manifest {}: ", path.display());
+        assert!(err.to_string().starts_with(&prefix), "{err}");
+        fs::write(&path, "- a\n").unwrap_or_else(|e| panic!("write failed: {e}"));
+        let err = read_profile_manifest("fr", &dir).expect_err("sequence manifest must fail");
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "fr: profile manifest {} must hold a JSON object",
+                path.display()
+            )
+        );
+    }
+
+    #[test]
+    fn invalid_profile_name_pins_dsh_text() {
+        // dsh profile.ts:173 hardcodes the `dsh:` prefix and quotes the name
+        // with JSON.stringify; fr brands the prefix and mirrors the quoting
+        // through json_quote.
+        let err = validate_profile_name("bad/name").expect_err("a slash makes the name illegal");
+        assert_eq!(err.to_string(), "fr: invalid profile name \"bad/name\"");
+    }
+
+    #[test]
+    fn unknown_profile_pins_dsh_text() {
+        // dsh profile.ts:798 prefix + quoted name; the `create it with ...`
+        // remedy suffix is dropped (Q53A2: fr M1 has no plugin command,
+        // PRD 19.2 条 19).
+        let home = TempHome::new("ghost-name");
+        let err = load_profile("fr", home.path(), "ghost", true, &EvalContext::neutral())
+            .expect_err("unknown profiles fail the load");
+        assert_eq!(err.to_string(), "fr: profile \"ghost\" does not exist");
     }
 }

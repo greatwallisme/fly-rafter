@@ -32,7 +32,7 @@ pub use patch::{
 pub use source::{PathResolver, SourceKind, SourceSpec, check_trust_boundary};
 pub use stack::{
     EntryKind, LoadedProfile, ROOT_CONFIG, ROOT_FILENAME, SkippedBundle, StackOutcome,
-    builtin_bundle_yaml, init_profile, initialize_profile_from_default, load_optional_patches,
-    load_profile, load_required_overlay, load_stack, prepare_profile, profile_template_bundles,
-    read_profile_manifest, validate_profile_name,
+    StackRequest, builtin_bundle_yaml, init_profile, initialize_profile_from_default,
+    load_optional_patches, load_profile, load_required_overlay, load_stack, prepare_profile,
+    profile_template_bundles, read_profile_manifest, validate_profile_name,
 };

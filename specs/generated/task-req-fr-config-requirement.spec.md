@@ -11,7 +11,7 @@ dsh 依赖 cordis 原生分层补丁能力装配插件；dougong loader 只接�
 ## Decisions
 
 - Generated draft from KLL requirement artifact; human review must confirm boundaries and test selectors before implementation.
-- fr-config MUST 解析 fr.patch.yml 有序分层装配（自底向上：入口默认 bundle → profile bundle 栈 → profile patch → 家目录 patch → `--patch` 命令行补丁），合并语义 MUST 对齐 dsh `applyEntryPatches`（2026-10-22 Q1/Q2 裁决，vendor/include/src/index.ts:57-127）：行内 id/name 为匹配器，其余键**逐键覆盖**（config 整键替换不深合并；只携 disabled 的覆盖行仅翻转 disabled）；覆盖行未命中 id 或 name 不匹配 → 警告跳过（不致命、不进 failures）；行序 = 首次插入序；`insert` 行 MUST 向装配根插入新行（fr 不做 group 嵌套），后续层 MUST 能覆盖先前层插入的行。装载文件布局 MUST（2026-10-22 Q1/Q2/Q3 裁决，对齐 dsh app-boot profile.ts / profile-context.ts / index.ts）：profile = `<FR_HOME>/profiles/<name>/`，名字校验拒绝空名、含 `/` 或 `\`、`.`、`..`、`node_modules`；清单 `profile.yml` 的 `bundles:` 仅引用宿主内置命名 bundle，未知名 → skipped 警告非致命；profile patch = `<profile>/fr.patch.yml`（可选，缺文件 = 空层）；家目录 patch = `<FR_HOME>/fr.patch.yml`（可选，缺文件 = 空层）；`--patch` 为必需文件、缺文件报错终止；任何 patch 解析错误 fail-closed；已知入口名的 profile 首次使用自动初始化（清单 + 空白 patch 模板，绝不覆盖既有文件；fr 模板 bundles 为空列表——入口默认 bundle 恒在层 1，不重复挂载），未知名报错。
+- fr-config MUST 解析 fr.patch.yml 有序分层装配（自底向上：入口默认 bundle → profile bundle 栈 → profile patch → 家目录 patch → `--patch` 命令行补丁），合并语义 MUST 对齐 dsh `applyEntryPatches`（2026-10-22 Q1/Q2 裁决，vendor/include/src/index.ts:57-127）：行内 id/name 为匹配器，其余键**逐键覆盖**（config 整键替换不深合并；只携 disabled 的覆盖行仅翻转 disabled）；覆盖行未命中 id 或 name 不匹配 → 警告跳过（不致命、不进 failures）；行序 = 首次插入序；`insert` 行 MUST 向装配根插入新行（fr 不做 group 嵌套），后续层 MUST 能覆盖先前层插入的行。装载文件布局 MUST（2026-10-22 Q1/Q2/Q3 裁决，对齐 dsh app-boot profile.ts / profile-context.ts / index.ts）：profile = `<FR_HOME>/profiles/<name>/`，名字校验拒绝空名、含 `/` 或 `\`、`.`、`..`、`node_modules`；清单 `profile.yml` 的 `bundles:` 仅引用宿主内置命名 bundle，未知名 → skipped 警告非致命；profile patch = `<profile>/fr.patch.yml`（可选，缺文件 = 空层）；家目录 patch = `<FR_HOME>/fr.patch.yml`（可选，缺文件 = 空层）；`--patch` 为必需文件、缺文件报错终止；任何 patch 解析错误 fail-closed；已知入口名的 profile 首次使用自动初始化（清单 + 空白 patch 模板，绝不覆盖既有文件；fr 模板 bundles 为空列表——入口默认 bundle 恒在层 1，不重复挂载），未知名报错。patch 装载诊断文案 MUST 逐字对齐 dsh parsePatchList 族（2026-10-24 Q52A 裁决，app-boot index.ts:520-590 实证）：读失败 `fr: failed to read patches <path>: <原因>`（--patch 层 `fr: failed to read overlay <path>: <原因>`）、解析失败 `fr: failed to parse <label> <path>: <原因>`、非序列文档 `fr: <label> <path> must be a top-level YAML array of loader patch entries`、非映射行 `fr: <label> entry <N> in <path> must be a mapping (a loader patch entry)`（N 1-based；label：可选/家目录层与内嵌 bundle 资产 patches、--patch 层 overlay）；错误变体裸输出（Io/Profile/PatchParse 无 fr 包装前缀）；`--from-default-profile` 未伴随 profile 时 MUST fail-closed 拒绝装载（2026-10-24 Q51A 裁决：`--from-default-profile requires --profile`，dsh resolveBoot 在 CLI 层先行拒绝故 dsh 无此库态，文案为 fr 自有面）。清单与 profile 名诊断文案 MUST 逐字对齐 dsh（2026-10-24 Q53A 裁决，app-boot profile.ts:617/622/173/798 实证）：读失败 `fr: failed to read profile manifest <path>: <原因>`、非对象 `fr: profile manifest <path> must hold a JSON object`、非法名 `fr: invalid profile name "<name>"`（JSON.stringify 引号形）、未知 profile `fr: profile "<name>" does not exist`；:798 尾部补救命令后缀不移植（fr M1 无 plugin 命令，PRD 19.2 条 19）；清单解析错误文案系引擎自有（dsh V8 SyntaxError / fr YAML 解析器文案），同为裸抛结构不可字节对齐（同条）。
 - fr-config MUST 将展开后的装配编译为 dougong loader JSON 文档（source.kind 仅 dylib/wasm：行 name 经产物解析规则映射——字面路径，或 `FR_PLUGIN_PATH` 各目录与安装库目录 `<prefix>/lib/fr/` 下按 slug（`-`→`_`）先查 `lib<slug>.so`（dylib）再查 `<slug>.wasm`（wasm），先命中定形态，未命中进入 failures；config 对象、isolate），经 `Reconciler::replace + apply` 幂等收敛；编译产物 MUST 为 dougong `Config::parse` 可接受的合法文档，且 MUST NOT 出现 builtin source。insert 行 name 为 `./`/`../` 开头的相对路径 MUST 在装载期锚定到所在补丁文件目录转绝对（2026-10-22 Q6 裁决，对齐 dsh anchorInsertedPluginNames index.ts:550-561，词法归一不做符号链接解析）；覆盖行 name 为匹配器 MUST NOT 锚定；无 `./`/`../` 前缀的含分隔符 name 保持字面路径。
 - fr 的 config schema 以 fr-schema 声明式描述树为单一真源（2026-10-22 Q7 裁决，等价 dsh schemastery 校验+投影双重角色）：每插件 schema 为 fr-schema 描述符（受限子集，M1 面 = string/number/integer/boolean/object/array/dict；meta 注解仅 default 与 description；子集外声明不可构造——fail-closed），同一声明派生 `validate` 与 `to_json_schema`（JSON Schema 2020-12 关键词面，对齐 dsh ConfigJsonSchemaObject）。fr-config MUST 在装配期按插件 slug 查 fr-schema 注册表对每行 config 校验：查无 schema MUST 跳过该行校验（2026-10-22 Q9 裁决，对齐 dsh absent 标注；第三方字面路径工件宿主侧本无其 schema，不构成装载障碍）；有 schema 且单行校验失败进入 `Report::failures`，MUST NOT 阻塞其余槽位。插件工件 MUST 在激活体顶部以 fr-schema 链接副本对 config 再校验（双侧校验），激活期校验失败按插件装载失败 fail-closed。
 - patch 行内条件表达式（`!!js` 标记或 `!!js ` 前缀字符串）MUST 限于受限声明式子集（2026-10-22 Q3A 勘误扩充）：`env.NAME ?? 默认值` 链、相等比较（`==`/`===`）、`platform === 'linux'|'macos'|'windows'` 与平台三元、裸 env 值读取、字面量、`profile-context` 布尔（dsh `ctx.get('profileContext')` 的 fr 等价物：入口/profile 上下文存在性，支持 `!` 取反）；MUST NOT 支持任意 JS 求值；子集外表达式（如 `getBuiltinModule` 类）MUST 求值失败 fail-closed（patch 文档整体拒绝，启动终止——对齐 dsh 用户层 patch 错误抛出语义）。
@@ -91,10 +91,10 @@ Scenario: profile 清单未知名 skipped 警告非致命
   那么 该名进入 skipped 列表并附原因，其余 bundle 正常装载，不致命
 
 Scenario: profile 名校验拒绝非法名
-  Test: profile_name_validation_rejects_dsh_rules
+  Test: invalid_profile_name_pins_dsh_text
   假设 profile 名为空、含 / 或 \、等于 . 或 ..、或为 node_modules
   当 解析 profile 引用时
-  那么 拒绝并报错，不产生文件系统副作用
+  那么 拒绝并报错，不产生文件系统副作用，文案逐字 `fr: invalid profile name "<name>"`（对齐 dsh profile.ts:173，JSON.stringify 引号形）
 
 Scenario: profile 模板首用自动初始化
   Test: fresh_headless_profile_auto_inits
@@ -103,10 +103,16 @@ Scenario: profile 模板首用自动初始化
   那么 自动创建目录、profile.yml（bundles 为空列表）与空白 fr.patch.yml 模板，绝不覆盖既有文件
 
 Scenario: 未知 profile 名报错
-  Test: unknown_profile_name_errors
+  Test: unknown_profile_pins_dsh_text
   假设 profile 名无内置模板且对应目录不存在
   当 装载该 profile 时
-  那么 报错指明 profile 不存在，启动终止
+  那么 报错指明 profile 不存在并终止启动，文案逐字 `fr: profile "<name>" does not exist`（dsh profile.ts:798 前段；补救命令后缀不移植，PRD 19.2 条 19）
+
+Scenario: profile 清单读失败与非对象文案逐字对齐
+  Test: manifest_read_diagnostics_pins_dsh_texts
+  假设 profile 清单文件不可读（如为目录）或解析结果非映射
+  当 装载该 profile 时
+  那么 分别以单行错误终止启动：`fr: failed to read profile manifest <path>: <原因>`、`fr: profile manifest <path> must hold a JSON object`（对齐 dsh readProfileManifest profile.ts:617/622）
 
 Scenario: 可选 patch 缺文件为空层
   Test: optional_patch_absent_is_empty_layer
@@ -125,6 +131,30 @@ Scenario: patch 解析错误 fail-closed
   假设 任一层 patch 文件存在解析错误（行 schema 违例或子集外表达式）
   当 装载时
   那么 报错并终止启动，不产生部分装配产物
+
+Scenario: 可选 patch 读失败文案逐字对齐
+  Test: optional_patch_read_failure_pins_dsh_text
+  假设 profile patch 或家目录 patch 路径存在但不可读（如为目录）
+  当 装载时
+  那么 以单行错误终止启动：`fr: failed to read patches <path>: <原因>`（对齐 dsh loadOptionalPatches index.ts:526）
+
+Scenario: --patch 读失败文案逐字对齐
+  Test: overlay_read_failure_pins_dsh_text
+  假设 --patch 给出的路径不可读或不存在
+  当 装载 overlays 时
+  那么 以单行错误终止启动：`fr: failed to read overlay <path>: <原因>`（对齐 dsh loadOverlayPatches index.ts:545）
+
+Scenario: patch 文档形态错误文案逐字对齐
+  Test: patch_document_shape_errors_pin_dsh_texts
+  假设 patch 文档为非序列、YAML 语法错误或含非映射行
+  当 装载时
+  那么 分别以单行错误终止启动：`fr: <label> <path> must be a top-level YAML array of loader patch entries`、`fr: failed to parse <label> <path>: <原因>`、`fr: <label> entry <N> in <path> must be a mapping (a loader patch entry)`（label 按层 patches/overlay，对齐 dsh parsePatchList index.ts:582-589）
+
+Scenario: from-default-profile 缺 profile 拒绝装载
+  Test: from_default_profile_without_profile_rejected
+  假设 装载调用给出 from-default-profile 模板但未选 profile
+  当 装载时
+  那么 fail-closed 拒绝：`--from-default-profile requires --profile`（2026-10-24 Q51A 裁决；dsh resolveBoot 在 CLI 层先拒，库层同拒为 fr 自有面）
 
 Scenario: 编译产物为合法 loader 文档
   Test: compiled_document_is_valid_loader_config
