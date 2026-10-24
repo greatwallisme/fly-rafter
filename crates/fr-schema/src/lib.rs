@@ -19,4 +19,6 @@ pub use dump::{
     dump_config_schema,
 };
 pub use registry::lookup;
-pub use schema::{Property, Schema, Violation, to_json_schema, validate};
+pub use schema::{
+    DeclarationError, Finite, Properties, Property, Schema, Violation, to_json_schema, validate,
+};

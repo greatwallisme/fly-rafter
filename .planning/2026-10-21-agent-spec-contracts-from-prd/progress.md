@@ -300,3 +300,18 @@
 - 门禁（本会话实跑）：fmt PASS / clippy workspace -D warnings 0 / test --workspace 305 passed 0 failed（fr-session 148 = 142+6）/ doc PASS；SESSION lifecycle 82 passed / 0 failed / 26 skipped（+6 全绑定，余 pending 属 Phase 14-18）；guard exit 1（阻断期预期，20 份 pending 合约非本次回归）。
 - 自纠三件：①五连发 Edit 全漏 file_path 参数（补参重发）；②新测试按 SessionError::Other 析构，实际走 #[from] AdmissionError 变体（改 5 处为 SessionError::Admission + .message）；③code-quality hook 对 bind-session-tests.py 报 3 处（纪律文档串/WITHDRAW 注释/设计内输出行）——git diff 复证皆既有行非本次引入，判误报留档。
 - 待用户：切片 H + 评审修复 + B 案落地一并验收提交（--no-verify 惯例）；下阶段 Phase 13 收口或 Phase 13b fr-llm。
+
+## 2026-10-24 — /code-review high --fix（审核对象 = 整个 fr-schema 模块，后台代理执行）
+
+- 7 findings（子代理 0/2，上限内自选内联角度）：4 项全修 + 1 项部分修（仅文档）+ 2 项待裁决。修复清单：①project_definitions 缓存键仅按 &Schema 指针（dsh document.ts:70 Map<NativeConfigSchema> 同构，别名共享声明单投影不扰编号）；②js_truthy NaN falsy 对齐 JS 短路（+.nan/.inf 钉测）；③helper_pins 死断言删除；④insert_bounds 泛型合并；⑤Property::name 唯一性文档注释（行为残留 Q46）。
+- 待裁决（集中呈 Q45-Q47，登记 findings）：Q45（中）validate 拒 Null vs 投影 nullable + $comment 自述省略回退——patch.rs:459/484→563 可达，插件声明 schema 后省略 config 的行被剔；dsh dump 路径只挂接不校验（collect.ts:203-215 补核），行值消解属 schemastery 运行时。Q46（低）重复 Property 名 validate 交集 vs 投影 last-wins。Q47（低）Number 默认 NaN/inf 静默投影 null + range 双过。
+- 独立复验（本会话实跑）：fmt PASS / clippy workspace -D warnings 0 / test --workspace 305 passed 0 failed（fr 11 + fr-config 88 + fr-schema 29 + fr-session 148 + E2E 2 + fr-wire 27，fr-schema 基线同量）/ doc PASS；五处真源 file:line 当场补核。自纠：首轮 clippy 带 | tail 吞退出码（同款坑复踩），净命令重跑。
+- 工作区 2 文件未提交（fr-schema/src/dump.rs + schema.rs，+30/-28），待用户验收提交；下阶段 Phase 13 收口或 Phase 13b fr-llm 仍待裁决。
+
+## 2026-10-24 — 用户裁决 Q45A/Q46A/Q47A 落地：fr-schema validate null 口径收口 + 声明面构造纪律
+
+- 裁决执行：45A validate 非必需节点（根/非必需属性/数组项/dict 值）放行 null 视同省略走默认、必需位拒绝（镜像投影 nullable/`not:{type:'null'}`——决策 26 预留项收口）；46A Properties 构造期拒绝重复属性名；47A Finite 构造期拒绝非有限 Number 默认。PRD 6.3 补 validate 语义 + 23 决策 32；无 19.2 偏差（45A = dsh 同构对齐）。
+- 实现：schema.rs 新增 DeclarationError/Finite/Properties（TryFrom+Display+Deref，Result 非 panic）+ validate_value required 管道（与 project_core 逐位镜像）；lib.rs 再导出；fr-config patch.rs +1 编译级钉测（null config 行槽内放行）+ 夹具改 Properties 构造。
+- 自纠五件：①Edit 转写失真（schema: 误作 module:）与 ②误发占位 Edit 调用（均未命中，文件零破坏）；③④两新钉测 authored 错（夹具漏必需键 model；投影断言误索引 anyOf[0] 内 default——注解已提升至包裹位顶层）；⑤clippy 两处机械修（fmt 参数名 f / use_self）。
+- 门禁（实跑）：四关全绿 309 tests（fr-schema 32 / fr-config 89，余与基线同量）/ doc -D 0 / CONFIG lifecycle 55 passed 0 failed 259 skipped 基线一致（合约零改动）；guard 未复跑（阻断期常态不变）。
+- 残留观察未行动：Number 界与值对 NaN 的惰性（疑 dsh JS 1:1 同款，另呈裁决才动）；工作区 5 文件待验收提交（fr-schema schema.rs+lib.rs、fr-config patch.rs、prd.md、规划留档）；下阶段 Phase 13 收口或 Phase 13b fr-llm 仍待裁决。

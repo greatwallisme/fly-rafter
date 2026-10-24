@@ -6,13 +6,112 @@
 
 use serde_json::{Map, Value};
 
+/// A declaration rejected at construction (PRD 6.3 subset, fail-closed).
+///
+/// Declarations are plugin-author input, so rejection is a [`Result`], not a
+/// panic: the offending declaration never enters the system and the author
+/// gets a precise reason.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeclarationError {
+    /// Human-readable reason the declaration was rejected.
+    pub message: String,
+}
+
+impl std::fmt::Display for DeclarationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for DeclarationError {}
+
+/// A finite `f64`, the [`Schema::Number`] default domain (Q47A).
+///
+/// `Value::from` maps NaN and the infinities to JSON `null`, so a non-finite
+/// default would silently project as `"default": null` and violate the
+/// guarantee that a default satisfies its own declaration; the non-finite
+/// state is unconstructible instead.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Finite(f64);
+
+impl TryFrom<f64> for Finite {
+    type Error = DeclarationError;
+
+    /// # Errors
+    ///
+    /// Returns a [`DeclarationError`] when `value` is NaN or an infinity.
+    fn try_from(value: f64) -> Result<Self, Self::Error> {
+        if value.is_finite() {
+            Ok(Self(value))
+        } else {
+            Err(DeclarationError {
+                message: "default must be a finite number".to_owned(),
+            })
+        }
+    }
+}
+
+impl Finite {
+    /// The wrapped value; finite by construction.
+    #[must_use]
+    pub const fn get(self) -> f64 {
+        self.0
+    }
+}
+
+impl From<Finite> for Value {
+    fn from(finite: Finite) -> Self {
+        // Finite by construction, so this never collapses to `null`.
+        Self::from(finite.0)
+    }
+}
+
+/// Declared object keys, unique by name (Q46A).
+///
+/// Validation intersects same-name declarations while projection keeps only
+/// the last one, so duplicates would make the two faces derived from one
+/// [`Schema::Object`] diverge; the duplicate state is unconstructible.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Properties(Vec<Property>);
+
+impl TryFrom<Vec<Property>> for Properties {
+    type Error = DeclarationError;
+
+    /// # Errors
+    ///
+    /// Returns a [`DeclarationError`] naming the first duplicated key.
+    fn try_from(properties: Vec<Property>) -> Result<Self, Self::Error> {
+        for (index, property) in properties.iter().enumerate() {
+            if properties[..index]
+                .iter()
+                .any(|seen| seen.name == property.name)
+            {
+                return Err(DeclarationError {
+                    message: format!("duplicate declared key `{}`", property.name),
+                });
+            }
+        }
+        Ok(Self(properties))
+    }
+}
+
+impl std::ops::Deref for Properties {
+    type Target = [Property];
+
+    fn deref(&self) -> &[Property] {
+        &self.0
+    }
+}
+
 /// A plugin config schema declaration.
 ///
 /// The M1 face covers the value shapes the assembly defaults require
 /// (PRD 6.4). Declarations outside the face cannot be constructed, so an
 /// unsupported declaration fails at compile time rather than at validation
 /// time (fail-closed). Defaults are typed per variant, so a default that
-/// violates its own declaration is likewise unconstructible.
+/// violates its own declaration is likewise unconstructible; the same
+/// construction-time discipline keeps object keys unique ([`Properties`])
+/// and number defaults finite ([`Finite`]).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Schema {
     /// UTF-8 string; a non-empty `candidates` list restricts to enumeration
@@ -43,7 +142,7 @@ pub enum Schema {
         /// Inclusive upper bound.
         max: Option<f64>,
         /// Declared default, projected to the `default` annotation.
-        default: Option<f64>,
+        default: Option<Finite>,
         /// Projected to the `description` annotation.
         description: Option<String>,
     },
@@ -58,8 +157,8 @@ pub enum Schema {
     /// `false` rejects unknown keys (fail-closed, mirroring the tool schema
     /// discipline of REQ-FR-TOOLS-5).
     Object {
-        /// Declared keys in declaration order.
-        properties: Vec<Property>,
+        /// Declared keys in declaration order; unique by construction.
+        properties: Properties,
         /// Whether undeclared keys are allowed.
         additional_properties: bool,
         /// Projected to the `description` annotation.
@@ -84,7 +183,9 @@ pub enum Schema {
 /// One declared object key.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Property {
-    /// Object key.
+    /// Object key; uniqueness within one [`Schema::Object`] declaration is
+    /// enforced by [`Properties`] construction, since validation intersects
+    /// same-name declarations while projection keeps only the last one.
     pub name: String,
     /// Whether the key must be present.
     pub required: bool,
@@ -104,14 +205,29 @@ pub struct Violation {
 
 /// Validates `value` against `schema`, returning every violation (empty when
 /// the value conforms).
+///
+/// Null is the declared fallback face (PRD 6.3, dsh schemastery semantics;
+/// Q45A): a non-required node resolves null to the declaration's defaults,
+/// while a required node rejects it like any other type mismatch, mirroring
+/// the projection's nullable types and `not: {"type": "null"}`.
 #[must_use]
 pub fn validate(schema: &Schema, value: &Value) -> Vec<Violation> {
     let mut violations = Vec::new();
-    validate_value(schema, value, "", &mut violations);
+    // The root carries no requiredness, mirroring the projection root.
+    validate_value(schema, value, false, "", &mut violations);
     violations
 }
 
-fn validate_value(schema: &Schema, value: &Value, path: &str, out: &mut Vec<Violation>) {
+fn validate_value(
+    schema: &Schema,
+    value: &Value,
+    required: bool,
+    path: &str,
+    out: &mut Vec<Violation>,
+) {
+    if value.is_null() && !required {
+        return;
+    }
     match schema {
         Schema::String { candidates, .. } => {
             let Some(text) = value.as_str() else {
@@ -159,11 +275,12 @@ fn validate_value(schema: &Schema, value: &Value, path: &str, out: &mut Vec<Viol
                 push(out, path, "expected object");
                 return;
             };
-            for property in properties {
+            for property in properties.iter() {
                 match map.get(&property.name) {
                     Some(property_value) => validate_value(
                         &property.schema,
                         property_value,
+                        property.required,
                         &join(path, &property.name),
                         out,
                     ),
@@ -191,7 +308,7 @@ fn validate_value(schema: &Schema, value: &Value, path: &str, out: &mut Vec<Viol
                 return;
             };
             for (index, element) in array.iter().enumerate() {
-                validate_value(items, element, &format!("{path}[{index}]"), out);
+                validate_value(items, element, false, &format!("{path}[{index}]"), out);
             }
         }
         Schema::Dict { values, .. } => {
@@ -200,7 +317,7 @@ fn validate_value(schema: &Schema, value: &Value, path: &str, out: &mut Vec<Viol
                 return;
             };
             for (key, dict_value) in map {
-                validate_value(values, dict_value, &join(path, key), out);
+                validate_value(values, dict_value, false, &join(path, key), out);
             }
         }
     }
@@ -299,7 +416,7 @@ fn project_core(schema: &Schema, required: bool) -> Value {
             description,
         } => {
             let mut object = type_object("integer");
-            insert_i64_bounds(&mut object, *min, *max);
+            insert_bounds(&mut object, *min, *max);
             insert_annotations(
                 &mut object,
                 (*default).map(Value::from),
@@ -314,7 +431,7 @@ fn project_core(schema: &Schema, required: bool) -> Value {
             description,
         } => {
             let mut object = type_object("number");
-            insert_f64_bounds(&mut object, *min, *max);
+            insert_bounds(&mut object, *min, *max);
             insert_annotations(
                 &mut object,
                 (*default).map(Value::from),
@@ -460,21 +577,14 @@ fn project_properties(properties: &[Property]) -> (Map<String, Value>, Vec<Value
     (property_map, required)
 }
 
-fn insert_i64_bounds(object: &mut Map<String, Value>, min: Option<i64>, max: Option<i64>) {
+/// Inserts inclusive `minimum`/`maximum` bounds; the bound type projects
+/// through [`Value::from`] (`i64` exactly, `f64` verbatim).
+fn insert_bounds<T: Into<Value>>(object: &mut Map<String, Value>, min: Option<T>, max: Option<T>) {
     if let Some(min) = min {
-        object.insert("minimum".into(), Value::from(min));
+        object.insert("minimum".into(), min.into());
     }
     if let Some(max) = max {
-        object.insert("maximum".into(), Value::from(max));
-    }
-}
-
-fn insert_f64_bounds(object: &mut Map<String, Value>, min: Option<f64>, max: Option<f64>) {
-    if let Some(min) = min {
-        object.insert("minimum".into(), Value::from(min));
-    }
-    if let Some(max) = max {
-        object.insert("maximum".into(), Value::from(max));
+        object.insert("maximum".into(), max.into());
     }
 }
 
@@ -578,17 +688,27 @@ mod tests {
         assert_eq!(validate(&schema, &json!(1))[0].message, "expected boolean");
     }
 
+    /// Builds an object declaration; fixtures always declare unique keys.
+    fn object_schema(properties: Vec<Property>, additional_properties: bool) -> Schema {
+        Schema::Object {
+            properties: properties
+                .try_into()
+                .expect("test fixtures declare unique keys"),
+            additional_properties,
+            description: None,
+        }
+    }
+
     #[test]
     fn object_rejects_unknown_keys_when_additional_properties_false() {
-        let schema = Schema::Object {
-            properties: vec![Property {
+        let schema = object_schema(
+            vec![Property {
                 name: "model".into(),
                 required: false,
                 schema: string_schema(),
             }],
-            additional_properties: false,
-            description: None,
-        };
+            false,
+        );
         assert_eq!(
             validate(&schema, &json!({ "model": "deepseek-flash" })),
             Vec::new()
@@ -599,11 +719,7 @@ mod tests {
 
     #[test]
     fn object_unknown_keys_allowed_when_additional_properties_true() {
-        let schema = Schema::Object {
-            properties: Vec::new(),
-            additional_properties: true,
-            description: None,
-        };
+        let schema = object_schema(Vec::new(), true);
         assert_eq!(
             validate(&schema, &json!({ "anything": [1, 2] })),
             Vec::new()
@@ -612,15 +728,14 @@ mod tests {
 
     #[test]
     fn object_requires_declared_keys() {
-        let schema = Schema::Object {
-            properties: vec![Property {
+        let schema = object_schema(
+            vec![Property {
                 name: "model".into(),
                 required: true,
                 schema: string_schema(),
             }],
-            additional_properties: false,
-            description: None,
-        };
+            false,
+        );
         let violations = validate(&schema, &json!({}));
         assert_eq!(violations[0].message, "missing required key `model`");
         assert_eq!(validate(&schema, &json!({ "model": "x" })), Vec::new());
@@ -628,12 +743,12 @@ mod tests {
 
     #[test]
     fn nested_violation_paths_use_dot_and_bracket_format() {
-        let schema = Schema::Object {
-            properties: vec![Property {
+        let schema = object_schema(
+            vec![Property {
                 name: "outer".into(),
                 required: false,
-                schema: Schema::Object {
-                    properties: vec![Property {
+                schema: object_schema(
+                    vec![Property {
                         name: "inner".into(),
                         required: false,
                         schema: Schema::Array {
@@ -641,13 +756,11 @@ mod tests {
                             description: None,
                         },
                     }],
-                    additional_properties: false,
-                    description: None,
-                },
+                    false,
+                ),
             }],
-            additional_properties: false,
-            description: None,
-        };
+            false,
+        );
         let violations = validate(&schema, &json!({ "outer": { "inner": ["ok", 7] } }));
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].path, "outer.inner[1]");
@@ -732,15 +845,14 @@ mod tests {
 
     #[test]
     fn projection_object_array_and_dict() {
-        let object = Schema::Object {
-            properties: vec![Property {
+        let object = object_schema(
+            vec![Property {
                 name: "model".into(),
                 required: true,
                 schema: string_schema(),
             }],
-            additional_properties: false,
-            description: None,
-        };
+            false,
+        );
         assert_eq!(
             to_json_schema(&object),
             json!({
@@ -813,8 +925,8 @@ mod tests {
 
     #[test]
     fn validation_and_projection_share_one_declaration() {
-        let schema = Schema::Object {
-            properties: vec![
+        let schema = object_schema(
+            vec![
                 Property {
                     name: "model".into(),
                     required: true,
@@ -838,9 +950,8 @@ mod tests {
                     },
                 },
             ],
-            additional_properties: false,
-            description: None,
-        };
+            false,
+        );
         assert_eq!(
             validate(&schema, &json!({ "model": "deepseek-flash" })),
             Vec::new()
@@ -883,6 +994,91 @@ mod tests {
                 ],
             })
         );
+    }
+
+    #[test]
+    fn null_falls_back_on_non_required_nodes() {
+        // Q45A: null is the omission fallback wherever the projection merges
+        // `null` into the type list (root, non-required keys, array items,
+        // dict values); required keys reject it like any type mismatch.
+        let schema = object_schema(
+            vec![
+                Property {
+                    name: "model".into(),
+                    required: true,
+                    schema: string_schema(),
+                },
+                Property {
+                    name: "note".into(),
+                    required: false,
+                    schema: string_schema(),
+                },
+            ],
+            false,
+        );
+        assert_eq!(validate(&schema, &Value::Null), Vec::new());
+        assert_eq!(
+            validate(&schema, &json!({ "model": "x", "note": null })),
+            Vec::new()
+        );
+        let violations = validate(&schema, &json!({ "model": null }));
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].path, "model");
+        assert_eq!(violations[0].message, "expected string");
+        let array = Schema::Array {
+            items: Box::new(string_schema()),
+            description: None,
+        };
+        assert_eq!(validate(&array, &json!([null])), Vec::new());
+        let dict = Schema::Dict {
+            values: Box::new(string_schema()),
+            description: None,
+        };
+        assert_eq!(validate(&dict, &json!({ "k": null })), Vec::new());
+    }
+
+    #[test]
+    fn duplicate_property_names_are_unconstructible() {
+        // Q46A: the faces disagree on same-name declarations (validation
+        // intersects, projection keeps the last), so the state cannot exist.
+        let error = Properties::try_from(vec![
+            Property {
+                name: "a".into(),
+                required: false,
+                schema: string_schema(),
+            },
+            Property {
+                name: "a".into(),
+                required: true,
+                schema: string_schema(),
+            },
+        ])
+        .expect_err("duplicate names must be rejected");
+        assert_eq!(error.message, "duplicate declared key `a`");
+        let unique = Properties::try_from(vec![Property {
+            name: "a".into(),
+            required: false,
+            schema: string_schema(),
+        }])
+        .expect("unique names construct");
+        assert_eq!(unique.len(), 1);
+    }
+
+    #[test]
+    fn non_finite_number_defaults_are_unconstructible() {
+        // Q47A: a non-finite default projects to JSON `null` through
+        // Value::from, silently breaking default-satisfies-declaration.
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let error = Finite::try_from(value).expect_err("non-finite defaults must be rejected");
+            assert_eq!(error.message, "default must be a finite number");
+        }
+        let number = Schema::Number {
+            min: None,
+            max: None,
+            default: Some(Finite::try_from(2.5).expect("finite value constructs")),
+            description: None,
+        };
+        assert_eq!(to_json_schema(&number)["default"], json!(2.5));
     }
 
     fn string_schema() -> Schema {

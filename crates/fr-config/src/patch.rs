@@ -979,7 +979,9 @@ mod tests {
                     default: None,
                     description: None,
                 },
-            }],
+            }]
+            .try_into()
+            .expect("fixture declares unique keys"),
             additional_properties: false,
             description: None,
         }
@@ -1046,5 +1048,35 @@ mod tests {
         .unwrap_or_else(|e| panic!("compile failed: {e}"));
         assert_eq!(outcome.failures.len(), 0, "{:?}", outcome.failures);
         assert!(outcome.doc.contains("anything-goes"), "{}", outcome.doc);
+    }
+
+    #[test]
+    fn null_config_falls_back_at_schema_slot() {
+        // Q45A: an omitted config seeds Value::Null (patch.rs:459/484) and
+        // the slot reads it as the declared fallback, not a violation.
+        let temp = TempArtifacts::new("schema-fallback", &["libfr_llm_deepseek.so"]);
+        let yaml = "- insert:\n    - id: llm\n      name: fr-llm-deepseek\n";
+        let lines =
+            parse_patch_lines(yaml, &neutral_ctx()).unwrap_or_else(|e| panic!("parse failed: {e}"));
+        let composed = compose(&[lines]);
+        let schema = plugin_schema_fixture();
+        let schema_by_name = |name: &str| match name {
+            "fr-llm-deepseek" => Some(&schema),
+            _ => None,
+        };
+        let outcome = compile_to_loader_doc(
+            &composed.rows,
+            &temp.resolver(),
+            &first_party_is_fr_prefix,
+            &schema_by_name,
+        )
+        .unwrap_or_else(|e| panic!("compile failed: {e}"));
+        assert_eq!(outcome.failures.len(), 0, "{:?}", outcome.failures);
+        let value: Value =
+            serde_json::from_str(&outcome.doc).unwrap_or_else(|e| panic!("bad json: {e}"));
+        let plugins = value["plugins"].as_array().expect("plugins array");
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0]["name"], "llm");
+        assert_eq!(plugins[0]["config"], Value::Null);
     }
 }

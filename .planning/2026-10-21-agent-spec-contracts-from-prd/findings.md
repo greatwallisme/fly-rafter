@@ -765,3 +765,40 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 四关全绿：fmt PASS / clippy --workspace --all-targets -D warnings 0 / test --workspace 299 passed 0 failed / doc -D 0；三道需求门禁 exit 0；lifecycle SESSION 76/0/26；guard 阻断期预期（20 合约）。
 ### 显式缓议（非本切片砍除）
 - dylib 壳未接服务面：ABI v2 setup() 无配置通道，root/vocabulary 注入属 Q44-B fabric INIT/宿主装配器（Phase 18）职权；本切片交付纯 dispatch + 运行时（测试经纯函数面），壳保持 vocabulary 面不变。
+
+## 2026-10-24 — /code-review high --fix（审核对象 = 整个 fr-schema 模块，后台代理执行 + 本会话独立复验）
+
+恢复基线：HEAD 3c2aa15（切片 H + fr-session 评审修复 + B 案已入库），工作树净。评审范围 = crates/fr-schema/src 全部 4 文件（2463 行）；dsh 权威参照 config-schema/{collect,document,projector}.ts + dump-config-schema.ts，fr-config 调用方（dump.rs/patch.rs）交叉核对。子代理用量 0/2（上限内自选内联角度）。
+
+### 修复清单（4 项全修 + 1 项部分修，工作区 2 文件 +30/-28）
+1. dump.rs `project_definitions` 投影缓存键去插件名、仅按 `&Schema` 指针（原 (指针, 名) 二元组）——dsh document.ts:70 `projections = new Map<NativeConfigSchema, ...>` 按声明节点作键（本会话补核属实）；两插件别名共享同一声明此前会发两份相同 configN 并扰动后续编号，现共享声明只投影一次。
+2. dump.rs `js_truthy` NaN 改 falsy，对齐 JS `row.group &&` 短路语义（YAML `.nan` 组此前误真值，带序列配置的行会误入子目标清除族）；+.nan/.inf 两钉测（既有测试函数内扩展）。
+3. dump.rs helper_pins 死断言删除（断言字面空 Vec 为空）+ 失去用途的 Collected 测试导入清理。
+4. schema.rs `insert_i64_bounds`/`insert_f64_bounds` 合并为泛型 `insert_bounds<T: Into<Value>>`。
+5. schema.rs `Property::name` 唯一性契约补文档注释（部分修复；行为面残留 = Q46）。
+
+### 待裁决问题登记（2026-10-24 呈 Q45-Q47）
+- **Q45（中）null 省略回退不对称**。fr 侧三面互斥（全部本会话补核）：`validate` 每节点拒 `Value::Null`（schema.rs:110-175，各变体经 as_str/as_f64/as_object None 臂，无可选放行旁路）；投影面对非必需节点发 `type:["T","null"]`（schema.rs:379-393，Q27A 钉住 dsh config0 形态）；dump $comment 自述 "validates a fallback on null/omission"（dump.rs:513）。可达路径：patch.rs:459/484 省略 config 的行以 Null 进 :562-563 校验槽（本会话补核）——插件声明 schema 后该行 violations 进 failures 被剔。dsh 侧事实（本会话补核）：dump 路径 collect.ts:203-215 只挂接 native schema 供投影、不引导校验行 config 值；行值的省略/null 消解属 schemastery 运行时（应用默认值放行——评审代理引证，未逐行追 schemastery）。
+  - **45A 放行**：validate 对非必需节点放行 Null（即 $comment 已自述的意图面；与投影 nullable、dsh「省略即回退」三方一致；required 节点仍拒）。
+  - **45B 维持 fail-closed**：PRD 19.2 登记偏差 + dump.rs:513 $comment 措辞修正（当前文案与行为相悖）。
+- **Q46（低）重复 Property 名双面分歧**：`Schema::Object` 同名两条声明 → validate 两条都跑（交集语义）vs 投影 last-wins 且 required 数组可重复输出。dsh 对象字面量不可能重复键，该状态 fr 独有。
+  - 46A 构造期拒绝重复名（fail-closed，声明面 API 收紧）；46B 双面统一 last-wins（validate 只认最后一条）；46C 维持现状（文档注释已载明，接受冷僻输入下两派生面分歧）。
+- **Q47（低）非有限默认值**：`Schema::Number` 默认 NaN/inf 经 `Value::from(f64)` 静默投影 `"default": null`，`check_f64_range` 对 NaN 双过（两向比较均假）→ 违反「默认值必满足自身声明」自洽（验证通过、投影变 null）。
+  - 47A 构造/校验期拒绝非有限默认；47B 登记 19.2 缓议（评审代理判 M1 过于冷僻，仅报告未动）。
+
+### 门禁与复验（本会话实跑）
+四关全绿：fmt PASS / clippy --workspace -D warnings 0 / test --workspace 305 passed 0 failed（fr 11 + fr-config 88 + fr-schema 29 + fr-session 148 + E2E 2 + fr-wire 27；fr-schema 与基线同量）/ doc PASS。真源补核：document.ts:70、collect.ts:203-215、patch.rs:459/484/562-563、schema.rs:110-175/379-393、dump.rs:513。
+- 自纠一件：首轮 clippy 命令带 `| tail -5` 吞退出码（progress.md 留档过的同款坑，本轮复踩），识别后净命令重跑。
+- 工作区 2 文件未提交（crates/fr-schema/src/dump.rs + schema.rs），待用户验收提交。
+
+## 2026-10-24 — 用户裁决 Q45A/Q46A/Q47A 落地：validate null 回退口径收口 + 声明面构造纪律
+
+- 裁决执行：45A（validate 非必需节点放行 null 视同省略走默认，必需位拒绝，镜像投影 nullable/`not:{type:'null'}`——PRD 决策 26 预留项收口）；46A（`Properties` 构造期拒绝重复属性名）；47A（`Finite` 构造期拒绝非有限 Number 默认）。
+- 实现：schema.rs 新增 `DeclarationError`（Result 非 panic——M-PANIC-ON-BUG：声明是插件作者输入非编程错误）+ `Finite(f64)`（TryFrom<f64> 拒 NaN/±inf；From<Finite> for Value 保 finite 恒投影数字）+ `Properties(Vec<Property>)`（TryFrom 拒重名；Deref<Target=[Property]>）；`Schema::Number.default: Option<Finite>`、`Schema::Object.properties: Properties`；`validate_value` 增 required 管道（根/items/dict 值 = false、Object 属性 = property.required——与 project_core 投影管道逐位镜像）+ null 早退分支；lib.rs 再导出三类型。
+- fr-config 集成钉测：patch.rs `null_config_falls_back_at_schema_slot`（省略 config 行 → Value::Null → 槽内放行、行正常装载进 loader doc）；`plugin_schema_fixture` 改 Properties 构造。
+- 测试自纠两件（实现正确、测试 authored 错）：①null_falls_back 钉测夹具漏带必需键 model——"missing required key" 是必需键缺席的正当拒绝非实现缺陷，夹具补 model；②非有限默认投影断言误索引 `["anyOf"][0]["default"]`——wrap_value_positions 把 default 注解提升至包裹位顶层（projection_integer_and_number_bounds 钉测形态即证），改 `["default"]`。
+- clippy 两处机械修：Display::fmt 参数名回 trait 默认 `f`（renamed_function_params）；From<Finite> impl 内 `Value::from` → `Self::from`（use_self）。
+- 文档面：PRD 6.3 validate 括注补 null 回退面与构造纪律 + 23 决策 32；无 19.2 偏差（45A = dsh schemastery「省略即默认」同构对齐，46A/47A = fr 内部纪律）；dump $comment 与 CONFIG 场景 240 投影全脸文本零改动（45A 使 validate 与二者一致而非相悖）。
+- 门禁（本会话实跑）：fmt PASS / clippy --workspace --all-targets -D warnings 0 / test --workspace 309 passed 0 failed（fr-schema 32 = 29+3，fr-config 89 = 88+1，余与基线同量）/ RUSTDOCFLAGS -D warnings doc PASS；CONFIG lifecycle 55 passed / 0 failed / 259 skipped 与基线逐位一致（合约零改动）；guard 未复跑（阻断期常态，20 份 pending 合约未变动）。
+- 残留观察（未行动，47A 裁决未扩围）：Number min/max 界与 check_f64_range 对 NaN 的惰性（NaN 界恒不触发、NaN 配置值双过）——属 bound/value 面；dsh JS 同为 `typeof NaN === 'number'` 且比较恒假，疑为 1:1 同款，若需收口须另呈裁决。
+- 工作区 5 文件未提交（fr-schema schema.rs/lib.rs、fr-config patch.rs、doc/prd.md、规划留档），待用户验收提交。

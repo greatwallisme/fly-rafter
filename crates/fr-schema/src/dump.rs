@@ -288,21 +288,22 @@ fn base_definitions() -> serde_json::Map<String, Value> {
     definitions
 }
 
-/// Projects registry hits to `configN` definitions cached per (plugin name,
-/// declaration identity) and fills every entry's `configRef` (misses take
+/// Projects registry hits to `configN` definitions cached per declaration
+/// identity and fills every entry's `configRef` (misses take
 /// [`UNKNOWN_CONFIG`]). dsh keys projections by descriptor node, so one name
 /// resolving to two declarations splits into two `configN` definitions and
 /// lights the ambiguity face consumed by [`entry_rules`]; the fr equivalent
-/// of node identity is the `&Schema` pointer handed back by `schema_of`.
+/// of node identity is the `&Schema` pointer handed back by `schema_of` —
+/// the cache keys on the pointer alone, so one declaration shared by
+/// several names projects once, as in dsh.
 fn project_definitions(
     collected: &mut [Collected<'_>],
     definitions: &mut serde_json::Map<String, Value>,
 ) {
-    let mut projections: HashMap<(usize, String), String> = HashMap::new();
+    let mut projections: HashMap<usize, String> = HashMap::new();
     for slot in collected.iter_mut() {
         if let Some(schema) = slot.schema {
-            let name = slot.entry.name.clone().unwrap_or_default();
-            let key = (std::ptr::from_ref(schema).addr(), name);
+            let key = std::ptr::from_ref(schema).addr();
             let next = projections.len();
             let reference = projections
                 .entry(key)
@@ -616,12 +617,15 @@ fn index_targets(
 }
 
 /// JS truthiness over the YAML value domain, matching dsh's coercion in
-/// `indexTargets` (`row.group && ...`).
+/// `indexTargets` (`row.group && ...`): `false`, `null`, `0`, `""`, and
+/// `NaN` are falsy, every other value truthy.
 fn js_truthy(value: &RowValue) -> bool {
     match value {
         RowValue::Bool(flag) => *flag,
         RowValue::String(text) => !text.is_empty(),
-        RowValue::Number(number) => number.as_f64().is_some_and(|f| f != 0.0),
+        RowValue::Number(number) => number
+            .as_f64()
+            .is_some_and(|number| number != 0.0 && !number.is_nan()),
         RowValue::Mapping(_) | RowValue::Sequence(_) | RowValue::Tagged(_) => true,
         RowValue::Null => false,
     }
@@ -887,9 +891,9 @@ mod tests {
     //! Tests for the config-schema dump face (PRD 6.3, Q26B public skeleton).
 
     use super::{
-        Collected, DiagnosticLevel, EntryStatus, RowValue, SchemaDiagnostic, SchemaDump,
-        SchemaEntry, TreeKind, diagnostic_value, dump_config_schema, entry_value, js_truthy,
-        json_name, literal_string, patch_rule, schema_diagnostic_line,
+        DiagnosticLevel, EntryStatus, RowValue, SchemaDiagnostic, SchemaDump, SchemaEntry,
+        TreeKind, diagnostic_value, dump_config_schema, entry_value, js_truthy, json_name,
+        literal_string, patch_rule, schema_diagnostic_line,
     };
 
     #[test]
@@ -1474,6 +1478,11 @@ mod tests {
         assert!(!js_truthy(&RowValue::String(String::new())));
         assert!(!js_truthy(&parse_scalar("0")));
         assert!(js_truthy(&parse_scalar("1")));
+        assert!(!js_truthy(&parse_scalar(".nan")), "NaN is falsy in dsh");
+        assert!(
+            js_truthy(&parse_scalar(".inf")),
+            "Infinity is truthy in dsh"
+        );
     }
 
     /// Unit pins for helpers kept private to the module.
@@ -1498,8 +1507,6 @@ mod tests {
             Some(&string("group")),
             "TreeKind stays expressible on the x-fr entry face"
         );
-        let empty: &Vec<Collected<'_>> = &Vec::new();
-        assert_eq!(empty.len(), 0);
         assert_eq!(EntryStatus::Partial.as_str(), "partial");
         assert_eq!(EntryStatus::Unsupported.as_str(), "unsupported");
         assert_eq!(DiagnosticLevel::Warning.as_str(), "warning");
