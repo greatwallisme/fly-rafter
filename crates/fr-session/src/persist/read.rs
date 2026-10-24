@@ -438,6 +438,9 @@ pub fn read_zstd_prefix(
                 Recovery::Recoverable,
                 known,
             )?);
+            // The vocabulary moved into the scanner above; this reassignment
+            // satisfies the loop's conditional-move analysis for later
+            // iterations (the value is never read again).
             known = EventVocabulary::default();
             header_frame = Some(plaintext);
         } else {

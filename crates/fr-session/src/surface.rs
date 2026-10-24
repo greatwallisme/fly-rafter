@@ -33,6 +33,11 @@ pub struct SurfaceFoldResult {
     /// Monotonic count of committed replacements (message projections are
     /// not implemented; see PRD 19.2 item 14).
     pub content_generation: u64,
+    /// The surface node holding the first `system/message`: established by
+    /// the first append onto an empty surface, transferable only by a
+    /// single-node system rewrite (PRD 19.2 item 18; mirrors the stored-side
+    /// fold rule that refuses headless `system/message` on open).
+    pub protected_head: Option<SessionSeq>,
 }
 
 /// Whether an event's payload produces an LLM message eligible for the surface.
@@ -189,6 +194,14 @@ pub(crate) fn plan_event(
 ) -> Result<Option<SurfacePlan>, AdmissionError> {
     assert_developer_header(event, events)?;
     let op = validate_surface_metadata(event)?;
+    if event.event_type() == event_type::SYSTEM_MESSAGE
+        && !state.nodes.is_empty()
+        && state.protected_head.is_none()
+    {
+        return Err(AdmissionError::new(
+            "system/message requires a protected first surface head",
+        ));
+    }
     let Some(SurfaceOp::Replace(replace)) = op else {
         return Ok(op.map(|_| SurfacePlan::Append));
     };
@@ -239,7 +252,12 @@ pub(crate) fn apply_plan(
     plan: Option<SurfacePlan>,
 ) -> Option<SurfaceReplacement> {
     match plan {
-        Some(SurfacePlan::Append) => state.nodes.push(event.seq),
+        Some(SurfacePlan::Append) => {
+            if event.event_type() == event_type::SYSTEM_MESSAGE && state.nodes.is_empty() {
+                state.protected_head = Some(event.seq);
+            }
+            state.nodes.push(event.seq);
+        }
         Some(SurfacePlan::Replace {
             start,
             end,
@@ -247,6 +265,15 @@ pub(crate) fn apply_plan(
             end_idx,
             shadowed,
         }) => {
+            // The plan stage has already refused any protected-head rewrite
+            // other than a single-node system replacement, so containment
+            // alone decides the transfer.
+            if state
+                .protected_head
+                .is_some_and(|head| shadowed.contains(&head))
+            {
+                state.protected_head = Some(event.seq);
+            }
             state
                 .nodes
                 .splice(start_idx..=end_idx, std::iter::once(event.seq));
@@ -276,23 +303,14 @@ fn assert_developer_header(
     let Some(header_seq) = data.header_seq else {
         return Ok(());
     };
-    let header_event = events.get(usize::try_from(header_seq.get()).unwrap_or(usize::MAX));
-    let is_earlier_header = header_seq.get() < event.seq.get()
-        && header_event
-            .is_some_and(|candidate| candidate.event_type() == event_type::REQUEST_HEADER);
-    if !is_earlier_header {
-        return Err(AdmissionError::new(
-            "developer/message headerSeq must reference an earlier request/header",
-        ));
-    }
-    let header_event = header_event
-        .filter(|candidate| candidate.event_type() == event_type::REQUEST_HEADER)
-        .ok_or_else(|| {
-            AdmissionError::new(
-                "developer/message headerSeq must reference an earlier request/header",
-            )
-        })?;
-    let SessionEventData::RequestHeader(header_data) = &header_event.data else {
+    let header_event = if header_seq.get() < event.seq.get() {
+        events.get(usize::try_from(header_seq.get()).unwrap_or(usize::MAX))
+    } else {
+        None
+    };
+    let Some(SessionEventData::RequestHeader(header_data)) =
+        header_event.map(|candidate| &candidate.data)
+    else {
         return Err(AdmissionError::new(
             "developer/message headerSeq must reference an earlier request/header",
         ));
@@ -623,6 +641,39 @@ mod tests {
         let events = vec![system_head, append_user(1, "hi"), rewrite];
         let err = fold_surface(&events).expect_err("system head");
         assert!(err.message.contains("node 0 holds the system prompt"));
+    }
+
+    fn system_append(n: u64) -> SessionEvent {
+        let mut event = append_user(n, "prompt");
+        event.data = SessionEventData::SystemMessage(fr_wire::event::SystemMessageData {
+            turn: 1,
+            step: 1,
+            message: user_text(&format!("s-{n}"), "prompt"),
+        });
+        event
+    }
+
+    #[test]
+    fn first_system_message_becomes_protected_head() {
+        let events = vec![system_append(0), append_user(1, "hi")];
+        let result = fold_surface(&events).unwrap_or_else(|e| panic!("fold: {}", e.message));
+        assert_eq!(result.protected_head, Some(seq(0)));
+        assert_eq!(result.nodes, vec![seq(0), seq(1)]);
+    }
+
+    #[test]
+    fn protected_head_transfers_on_single_node_rewrite() {
+        let mut rewrite = system_append(1);
+        rewrite.surface_op = Some(SurfaceOp::Replace(ReplaceOp {
+            op: ReplaceTag,
+            start_seq: seq(0),
+            end_seq: seq(0),
+        }));
+        rewrite.source_event_seqs = Some(vec![seq(0)]);
+        let events = vec![system_append(0), rewrite];
+        let result = fold_surface(&events).unwrap_or_else(|e| panic!("fold: {}", e.message));
+        assert_eq!(result.protected_head, Some(seq(1)));
+        assert_eq!(result.nodes, vec![seq(1)]);
     }
 
     #[test]

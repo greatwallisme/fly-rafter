@@ -34,10 +34,12 @@ fn expected_role(event_type: &str) -> Option<&'static str> {
 pub fn validate_event_data(event: &SessionEvent) -> Result<(), AdmissionError> {
     match &event.data {
         SessionEventData::DeveloperMessage(data) => {
-            validate_developer(data.turn, data.header_seq, &data.message)?;
+            validate_developer(data.header_seq, &data.message)?;
+            validate_coordinates("developer/message", data.turn, data.step)?;
             validate_message_shape(event.event_type(), &data.message)
         }
         SessionEventData::SystemMessage(data) => {
+            validate_coordinates("system/message", data.turn, data.step)?;
             validate_message_shape(event.event_type(), &data.message)
         }
         SessionEventData::UserMessage(message) => {
@@ -55,7 +57,6 @@ pub fn validate_event_data(event: &SessionEvent) -> Result<(), AdmissionError> {
 }
 
 fn validate_developer(
-    turn: u64,
     header_seq: Option<fr_wire::ids::SessionSeq>,
     message: &Message,
 ) -> Result<(), AdmissionError> {
@@ -77,7 +78,6 @@ fn validate_developer(
             "session event requires headerSeq exactly when tool additions are present",
         ));
     }
-    let _ = turn;
     Ok(())
 }
 
@@ -88,6 +88,23 @@ fn developer_blocks(message: &Message) -> Result<&[ContentBlock], AdmissionError
             "session event developer/message and developer role must occur together",
         )),
     }
+}
+
+/// Rejects zero turn/step coordinates on the step-message families (the
+/// write side of the stored positivity gates; PRD 19.2 item 17 — dsh live
+/// appends lack this check, fr refuses at admission time).
+fn validate_coordinates(event_type: &str, turn: u64, step: u64) -> Result<(), AdmissionError> {
+    if turn == 0 {
+        return Err(AdmissionError::new(format!(
+            "session event {event_type} turn must be positive"
+        )));
+    }
+    if step == 0 {
+        return Err(AdmissionError::new(format!(
+            "session event {event_type} step must be positive"
+        )));
+    }
+    Ok(())
 }
 
 fn validate_message_shape(event_type: &str, message: &Message) -> Result<(), AdmissionError> {

@@ -258,11 +258,19 @@ impl JsonlSessionHandle {
         std::thread::Builder::new()
             .name(worker_name)
             .spawn(move || {
-                // The worker owns the queue and the mutation state; when
-                // every sender drops, recv fails and the core drops with
-                // its lease (dsh process-death semantics).
+                // The worker owns the queue and the mutation state. A completed
+                // close ends the loop (close is terminal: every later op
+                // refuses as closed), dropping the core with its lease; a
+                // sender-less channel ends it the same way (dsh process-death
+                // semantics). Without the close exit the worker's own
+                // `worker_inner` clone would keep the op-channel sender alive
+                // forever and leak this thread.
                 while let Ok(op) = ops_rx.recv() {
+                    let closing = matches!(op, Op::Close { .. });
                     worker_dispatch(&worker_inner, &mut worker_core, op);
+                    if closing {
+                        break;
+                    }
                 }
             })
             .map_err(PersistError::Io)?;
@@ -455,30 +463,35 @@ impl JsonlSessionHandle {
     ///
     /// Returns the aggregated drain/release failures.
     pub fn close(&self) -> Result<(), PersistError> {
-        let first = lock(&self.inner.close_slot).as_ref().is_none();
-        let slot = if first {
-            let slot = Arc::new(CloseSlot::new());
-            lock(&self.inner.close_slot).get_or_insert(Arc::clone(&slot));
-            slot
-        } else {
-            lock(&self.inner.close_slot)
-                .as_ref()
-                .map_or_else(|| Arc::new(CloseSlot::new()), Arc::clone)
-        };
-        if first {
-            self.inner.closing.store(true, Ordering::Release);
-            let sender = self.inner.ops_tx.clone();
-            if sender
-                .send(Op::Close {
-                    slot: Arc::clone(&slot),
-                })
-                .is_err()
-            {
-                // The worker is already gone (abandoned handle): nothing to
-                // drain and the lease died with its owner.
-                slot.complete(Ok(()));
+        // Insert-and-send in one lock scope: two concurrent closers must
+        // observe exactly one close body, or the second body's
+        // `release_handle` would evict a successor write handle's claim.
+        let slot = {
+            let mut guard = lock(&self.inner.close_slot);
+            let existing = guard.as_ref().map(Arc::clone);
+            let created = existing.is_none();
+            let slot = existing.unwrap_or_else(|| {
+                let slot = Arc::new(CloseSlot::new());
+                *guard = Some(Arc::clone(&slot));
+                slot
+            });
+            drop(guard);
+            if created {
+                self.inner.closing.store(true, Ordering::Release);
+                let sender = self.inner.ops_tx.clone();
+                if sender
+                    .send(Op::Close {
+                        slot: Arc::clone(&slot),
+                    })
+                    .is_err()
+                {
+                    // The worker is already gone (abandoned handle): nothing to
+                    // drain and the lease died with its owner.
+                    slot.complete(Ok(()));
+                }
             }
-        }
+            slot
+        };
         slot.wait()
     }
 
@@ -670,12 +683,19 @@ fn persist_contiguous(
     if let Some(recovered) = core.recovered_tail.take()
         && !recovered.is_empty()
     {
-        inner.backend.persist_batch(
+        let outcome = inner.backend.persist_batch(
             &inner.header,
             &recovered,
             core.materialized,
             inner.inherited_event_count,
-        )?;
+        );
+        if outcome.is_err() {
+            // The torn bytes these events were recovered from are already
+            // truncated away, so dropping the in-memory copy on a failed
+            // rewrite would lose them for good; keep them retryable.
+            core.recovered_tail = Some(recovered);
+            outcome?;
+        }
     }
     inner.backend.persist_batch(
         &inner.header,

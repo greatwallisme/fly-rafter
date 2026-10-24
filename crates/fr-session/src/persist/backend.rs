@@ -322,6 +322,7 @@ impl JsonlBackend {
         // session leaves no filesystem footprint at all.
         self.tracker
             .register_created(&snapshot, inherited_event_count)?;
+        let created_id = snapshot.id.clone();
         let handle = JsonlSessionHandle::new(
             Arc::clone(self),
             snapshot,
@@ -337,7 +338,17 @@ impl JsonlBackend {
             },
             self.scheduler.clone(),
             self.warn_hook.clone(),
-        )?;
+        );
+        // A failed worker spawn must not leave the registration behind: the
+        // phantom pending entry would refuse the id forever while stat/list
+        // keep reporting a session that never existed.
+        let handle = match handle {
+            Ok(handle) => handle,
+            Err(error) => {
+                self.tracker.rollback_created(&created_id);
+                return Err(error);
+            }
+        };
         self.tracker.adopt(&handle);
         Ok(handle)
     }

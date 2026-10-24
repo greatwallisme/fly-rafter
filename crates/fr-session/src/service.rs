@@ -355,11 +355,13 @@ fn optional_id(request: &serde_json::Value, key: &str) -> Result<Option<SessionI
     }
 }
 
-fn optional_u64(request: &serde_json::Value, key: &str) -> u64 {
-    request
-        .get(key)
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0)
+fn optional_u64(request: &serde_json::Value, key: &str) -> Result<Option<u64>, String> {
+    match request.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(value) => value.as_u64().map(Some).ok_or_else(|| {
+            format!("session service payload field {key} must be a non-negative safe integer")
+        }),
+    }
 }
 
 /// Decodes the shared `meta` object; absent fields keep their defaults.
@@ -375,7 +377,14 @@ fn decode_meta(request: &serde_json::Value) -> Result<SessionMeta, String> {
         ),
     };
     Ok(SessionMeta {
-        created_at: meta.get("createdAt").and_then(serde_json::Value::as_i64),
+        created_at: match meta.get("createdAt") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(value) => Some(
+                value
+                    .as_i64()
+                    .ok_or_else(|| "meta.createdAt must be an integer".to_owned())?,
+            ),
+        },
         cwd: meta
             .get("cwd")
             .and_then(serde_json::Value::as_str)
@@ -453,7 +462,7 @@ fn service_create(
     let id = optional_id(request, "id")?;
     let meta = decode_meta(request)?;
     let seed = decode_seed(request)?;
-    let inherited = optional_u64(request, "inheritedEventCount");
+    let inherited = optional_u64(request, "inheritedEventCount")?.unwrap_or(0);
     let backend = Arc::clone(&service.backend);
     let session_id = service
         .store
@@ -629,7 +638,7 @@ fn service_restore(
     let id = optional_id(request, "id")?;
     let meta = decode_meta(request)?;
     let seed = decode_seed(request)?;
-    let inherited = optional_u64(request, "inheritedEventCount");
+    let inherited = optional_u64(request, "inheritedEventCount")?.unwrap_or(0);
     let session_id = service
         .store
         .create_with(id, &meta, seed, inherited, |_, _| Ok(()))

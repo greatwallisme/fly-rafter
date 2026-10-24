@@ -282,3 +282,21 @@
 - clippy pedantic 尾修 ~15 条全数真修（or-pattern 合臂/文档首段拆分/const fn/消费式传参/AppendParts 别名/解构消 clone/引用传参/method reference/assert_eq 换型），零 allow。bind-session-tests.py 曾出现 Read 渲染与盘上内容不符（roles_and_blocks_round_trip[s]）——改用行号锚点+断言闭合括号。
 - 门禁：四关全绿 299 tests；三需求门禁 exit 0；lifecycle 76/0/26（文件名版本错配钉测诚实转正 1 场景）。
 - 待用户：切片 H 验收 + 提交；turn-0 append 侧 laxity 是否补 admission 检查（契约级，见 findings 切片 H 节）；下阶段 = Phase 13 收口（fr-session v4 全量完成）或 Phase 13b fr-llm。
+
+## 2026-10-24 — /code-review high --fix（审核对象 = 切片 H 后整个 fr-session 模块，后台代理执行）
+
+- 9 findings（问题数不设限达成），8 项已修复、1 项 SKIPPED 待裁决、1 项假阳性澄清（read.rs known 初始化非死码，E0382 循环分析所需，已补注释）。
+- 修复清单：①handle.rs worker 循环 Close 后退出（原 Arc 自持致线程/Core 永久泄漏，注释与事实相悖）；②close() 插槽插入+发送合并单锁域（并发双 close 会二次 release 蒂逐后继写者）；③backend.rs create 失败路径补 tracker.rollback_created（原 `?` 逃逸留幽灵 pending，id 永久拒开）；④handle.rs recovered_tail 持久化失败回填（原 ENOSPC 下恢复事件永久丢失+seq 断档锁死日志）；⑤store.rs fork 未知源文案对齐 dsh `session "X" not found`（钉测同步）；⑥service.rs inheritedEventCount/createdAt 错型改显拒（原静默强转 0/丢弃）；⑦surface.rs assert_developer_header 死二次查找收敛单次；⑧admission.rs 死参 turn + io.rs 死绑定 published 删除。
+- SKIPPED（finding 7，需裁决）：live/live-store append 接受非系统头上的 system/message，stored validator 开门即拒 → flush 后会话不可恢复。dsh live fold（surface.ts）同款不对称，改则属行为偏离须走 PRD 19.2。与切片 H 已登记的 turn-0 append laxity 同类（写侧 laxity vs 读侧严门）。
+- 独立复验（本会话实跑）：fmt PASS / clippy workspace -D warnings 0 / test --workspace 299 passed 0 failed（fr-session 141 lib + 1 E2E = 142，与基线同量）/ doc PASS。抽查 rollback_created 与 worker Close-exit 落盘属实。
+- 工作区 9 文件未提交（admission/backend/handle/io/read/tracker/service/store/surface），待切片 H 验收一并提交。
+
+## 2026-10-24 — 用户裁决 B 案落地：写侧 laxity 收口双偏差（19.2 条 17/18 + 决策 31）
+- 裁决执行：turn/step 正数与 system/message 保护头两处「live 接受、flush 后开门即拒」改为写侧 admission 即拒，各记 19.2 偏差。
+- 文档面：PRD 19.2 条 17（positivity 镜像范围钉死两族，链单调性不入写侧）+ 条 18（保护头同文案同规则）+ 23 决策 31；intake SESSION-21/22 条款 + 6 场景（2 异常 + 1 正常 × 2 组）+ 2 真源行。
+- 管线全序列重跑全绿：import → transition 20/20 → draft → refine → depends 清理 → 绑定重放（CONFIG 80 + SESSION 86 对，幂等）→ lint-knowledge 0 errors（1089 advisory）→ graph/plan --gate exit 0 → questions 0 blocking。
+- 实现：admission.rs validate_coordinates（system/developer message 四文案）+ surface.rs SurfaceFoldResult.protected_head（空 surface 首插建头、单节点 system 重写转移——plan 级 assert_system_head_rewrite 已保证转移条件，apply 级 containment 即决）+ plan_event 拒收检查（文案与读侧逐字一致）。三写入口（surface/log_only/seed）经 validate_event_data 自动全覆盖。
+- 测试 +6：session.rs 四测（零坐标双族精确文案 + seq 不变、正坐标接受、非保护头拒 + seq 不变）+ surface.rs 两测（首插建头、单节点重写转移）。
+- 门禁（本会话实跑）：fmt PASS / clippy workspace -D warnings 0 / test --workspace 305 passed 0 failed（fr-session 148 = 142+6）/ doc PASS；SESSION lifecycle 82 passed / 0 failed / 26 skipped（+6 全绑定，余 pending 属 Phase 14-18）；guard exit 1（阻断期预期，20 份 pending 合约非本次回归）。
+- 自纠三件：①五连发 Edit 全漏 file_path 参数（补参重发）；②新测试按 SessionError::Other 析构，实际走 #[from] AdmissionError 变体（改 5 处为 SessionError::Admission + .message）；③code-quality hook 对 bind-session-tests.py 报 3 处（纪律文档串/WITHDRAW 注释/设计内输出行）——git diff 复证皆既有行非本次引入，判误报留档。
+- 待用户：切片 H + 评审修复 + B 案落地一并验收提交（--no-verify 惯例）；下阶段 Phase 13 收口或 Phase 13b fr-llm。

@@ -73,6 +73,12 @@ PAIRS = [
     ("ptc-dispatch 子调用不进请求", "ptc_subcall_records_stay_out_of_derived_messages"),
     ("五角色与七种 ContentBlock 往返无损", "roles_and_blocks_round_trip"),
     ("文件名世代与头版本不一致报错", "filename_header_version_mismatch_refuses"),
+    ("system/message turn 0 写侧即拒", "system_message_zero_coordinates_are_rejected"),
+    ("developer/message step 0 写侧即拒", "developer_message_zero_coordinates_are_rejected"),
+    ("正坐标 step 消息照常接受", "positive_coordinates_are_accepted"),
+    ("非保护头上的 system/message 写侧即拒", "system_message_on_unprotected_head_is_rejected"),
+    ("空 surface 首插 system/message 建保护头", "first_system_message_becomes_protected_head"),
+    ("保护头经单节点重写转移", "protected_head_transfers_on_single_node_rewrite"),
 ]
 
 # The 14 core types x 触发/表面归属/回环 map to their per-type pin test

@@ -605,9 +605,9 @@ impl SessionStore {
     ///
     /// # Errors
     ///
-    /// `session "X" already exists` for a live child id; `session "X" is
-    /// not live in this store` for an unknown source; the boundary family
-    /// below; a vetoing created listener on the child.
+    /// `session "X" already exists` for a live child id; `session "X" not
+    /// found` for an unknown source; the boundary family below; a vetoing
+    /// created listener on the child.
     pub fn fork(
         &mut self,
         source: &SessionId,
@@ -663,7 +663,13 @@ impl SessionStore {
             );
         }
         let (cwd, seed, inherited) = {
-            let entry = self.live_entry_mut(source)?;
+            // dsh resolves a string fork source with the SESSION_NOT_FOUND
+            // refusal (`session "X" not found`), not the live-entry text the
+            // object-bearing methods throw (index.ts:1438).
+            let entry = self
+                .entries
+                .get_mut(source)
+                .ok_or_else(|| SessionError::Other(format!("session \"{source}\" not found")))?;
             let cwd = entry.session.header().cwd.clone();
             let last = entry.session.seq();
             let boundary = boundary.unwrap_or_else(|| last - 1);
@@ -906,7 +912,7 @@ mod tests {
         let err = store
             .fork(&SessionId::new("zz"), SessionId::new("c0"), None)
             .expect_err("unknown source");
-        assert_eq!(err.to_string(), "session \"zz\" is not live in this store");
+        assert_eq!(err.to_string(), "session \"zz\" not found");
         store
             .create(Some(SessionId::new("c2")), &meta(), Vec::new(), 0)
             .expect("create c2");

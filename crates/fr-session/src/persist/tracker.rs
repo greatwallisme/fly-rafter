@@ -118,6 +118,15 @@ impl BackendTracker {
         lock(&self.state).writers.remove(id);
     }
 
+    /// Rolls a failed create-handle construction back: erases both the write
+    /// claim and the pending entry so a failed `create` leaves the id
+    /// untouched (dsh `registerCreated` + `release` failure path).
+    pub fn rollback_created(&self, id: &SessionId) {
+        let mut state = lock(&self.state);
+        state.writers.remove(id);
+        state.pending.remove(id);
+    }
+
     /// The pending entry for a created-but-unmaterialized session, if any.
     pub fn pending_of(&self, id: &SessionId) -> Option<PendingSession> {
         lock(&self.state).pending.get(id).cloned()

@@ -1691,6 +1691,8 @@ dsh 的“协议即会话日志”原则要求：模型可见即已记录，每�
 - [REQ-FR-SESSION-18] 事件词表 MUST 以激活期声明聚合（2026-10-23 Q34A）：fr-session 内核类型静态 + 各插件激活期声明其拥有的持久事件类型名，fr-session 聚合为读路径已知集（语义同 dsh KNOWN_SESSION_EVENT_TYPES，known-event-types.ts:22-85）；重复声明同类型 MUST 报装配错误（fail-closed）；descriptor 自由 JSON 扩展键 MUST NOT 作为声明通道（dougong 宿主 trait 不回透 descriptor）。
 - [REQ-FR-SESSION-19] plugin 记录通道 MUST（2026-10-23 Q33A）：fr-session 提供 append-record 服务入口——ignorable:true 强制、类型名 `plugin:` 小写段语法校验（语法同 dsh types.ts:525）、data 丢失无损 JSON 校验；读回 API 等价 dsh pluginRecordOf；M1 无调用方，调用方约束入合约 Boundaries。
 - [REQ-FR-SESSION-20] tools 投影 MUST（2026-10-23 Q36A 补遗，dsh tool-history.ts）：request/header 进 headers 表，reason==='series' 或 startsSeries 或同名工具定义变更（JSON.stringify 比较）即重置基线；developer/message 的 tool-addition 经 headerSeq 解析定义追加进 updates；快照 = {tools: 基线, updates: [{messageId, additions}]}；active≠available 时 legacy 回退 updates: []。
+- [REQ-FR-SESSION-21] 写侧坐标正数 MUST（2026-10-24 裁决 B 案，19.2 条 17）：system/message 与 developer/message 的写侧 admission 对 turn 或 step 为 0 即拒（文案 `session event <type> turn must be positive` / `session event <type> step must be positive` 四条），镜像存储侧 positivity 门（dsh assertV4SystemMessageFields / assertV4DeveloperData developer 分支的读侧族）；turn/step 编号自 1 起；turn 链单调性不入写侧（读侧专属不变量）。
+- [REQ-FR-SESSION-22] 写侧 system/message 保护头 MUST（2026-10-24 裁决 B 案，19.2 条 18）：surface 非空且保护头缺席时的 system/message 写入即拒，文案与存储侧逐字一致（`system/message requires a protected first surface head`）；空 surface 首插 system/message 建立保护头，单节点 system/message 重写转移保护头——写侧折叠状态与读侧 fold_surface 语义逐点一致，seed 重放同受检。
 ## Scenarios
 
 Rule: REQ-FR-SESSION-1 — v4 事件全集与 EpochHeader
@@ -2253,6 +2255,40 @@ Rule: REQ-FR-SESSION-20 — tools 投影
   当 tools 投影消费该事件时
   那么 additions 从该 header 解析定义并追加进 updates，快照为 {tools: 基线, updates}
 
+Rule: REQ-FR-SESSION-21 — 写侧坐标正数
+
+场景: system/message turn 0 写侧即拒
+  假设 活会话将追加 data.turn 为 0 的 system/message
+  当 append 提交该事件时
+  那么 写侧拒绝（session event system/message turn must be positive），事件不入日志
+
+场景: developer/message step 0 写侧即拒
+  假设 活会话将追加 data.step 为 0 的 developer/message
+  当 append 提交该事件时
+  那么 写侧拒绝（session event developer/message step must be positive），事件不入日志
+
+场景: 正坐标 step 消息照常接受
+  假设 活会话将追加 turn 与 step 均为正的 system/message 与 developer/message
+  当 append 依次提交这些事件时
+  那么 写侧接受并照常入日志折叠
+
+Rule: REQ-FR-SESSION-22 — 写侧保护头
+
+场景: 非保护头上的 system/message 写侧即拒
+  假设 活会话 surface 首节点为 user/message（保护头缺席）且 surface 非空
+  当 append 提交 system/message 时
+  那么 写侧拒绝（system/message requires a protected first surface head），事件不入日志
+
+场景: 空 surface 首插 system/message 建保护头
+  假设 活会话 surface 为空
+  当 append 提交 system/message 时
+  那么 写侧接受且该节点成为保护头
+
+场景: 保护头经单节点重写转移
+  假设 保护头在位且新 system/message 以 replace 恰好只覆盖保护头节点
+  当 append 提交该替换时
+  那么 写侧接受且保护头转移为新节点
+
 ## Dependencies
 
 None.
@@ -2262,6 +2298,8 @@ None.
 - doc/prd.md#7.1: SessionEvent 判别联合，字段与 dsh types.ts 逐字一致；durable 事件全集表
 - dsh packages/core/session/src/known-event-types.ts:22-85: 64 类型词表目录（构建期生成）；REQ-FR-SESSION-18 激活期声明为其 fr 运行期等价（Q34A）
 - dsh packages/core/session/src/tool-history.ts: tools 投影全实现（REQ-FR-SESSION-20 真源，Q36A）
+- dsh packages/core/session/src/surface.ts: live fold 的保护头不对称即 REQ-FR-SESSION-22 偏差的 dsh 侧事实（2026-10-24 裁决 B）
+- dsh core/session 校验层 assertV4SystemMessageFields / assertV4DeveloperData positivity 族: REQ-FR-SESSION-21 的镜像范围真源（2026-10-24 裁决 B）
 - dsh packages/core/session/src/types.ts:202-233/310-331: turn/end 七变体与 user/message 直载（E1/E2 勘误证据）
 - dsh packages/core/session/src/index.ts:492-512: appendPluginRecord/pluginRecordOf（REQ-FR-SESSION-19 真源，Q33A）
 - doc/prd.md#7.2: 只实现 v4；世代命名，永不改名/删除已发布文件；读到非 v4 报明确错误

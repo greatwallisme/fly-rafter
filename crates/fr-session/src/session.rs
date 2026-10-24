@@ -429,6 +429,125 @@ mod tests {
         assert_eq!(session.surface_nodes(), &[seq(1)]);
     }
 
+    fn system_message_with(turn: u64, step: u64) -> SessionEventData {
+        SessionEventData::SystemMessage(SystemMessageData {
+            turn,
+            step,
+            message: Message::Known(KnownMessage::System {
+                id: MessageId::new("sys-1"),
+                content: vec![],
+                source: MessageSource::Known(KnownMessageSource::SystemPrompt {
+                    extra: RawObject::new(),
+                }),
+            }),
+        })
+    }
+
+    fn developer_message_with(turn: u64, step: u64) -> SessionEventData {
+        SessionEventData::DeveloperMessage(DeveloperMessageData {
+            turn,
+            step,
+            message: Message::Known(KnownMessage::Developer {
+                id: MessageId::new("dev-1"),
+                content: vec![],
+                source: MessageSource::Other(
+                    serde_json::json!({"kind": "agent"})
+                        .as_object()
+                        .cloned()
+                        .expect("object"),
+                ),
+            }),
+            header_seq: None,
+        })
+    }
+
+    #[test]
+    fn system_message_zero_coordinates_are_rejected() {
+        let mut session = Session::new(header());
+        let error = session
+            .append_surface(1, system_message_with(0, 1), append_intent())
+            .expect_err("turn zero");
+        let SessionError::Admission(error) = error else {
+            panic!("expected the admission refusal");
+        };
+        assert_eq!(
+            error.message,
+            "session event system/message turn must be positive"
+        );
+        assert_eq!(session.seq(), 0);
+
+        let error = session
+            .append_surface(1, system_message_with(1, 0), append_intent())
+            .expect_err("step zero");
+        let SessionError::Admission(error) = error else {
+            panic!("expected the admission refusal");
+        };
+        assert_eq!(
+            error.message,
+            "session event system/message step must be positive"
+        );
+        assert_eq!(session.seq(), 0);
+    }
+
+    #[test]
+    fn developer_message_zero_coordinates_are_rejected() {
+        let mut session = Session::new(header());
+        let error = session
+            .append_surface(1, developer_message_with(0, 1), append_intent())
+            .expect_err("turn zero");
+        let SessionError::Admission(error) = error else {
+            panic!("expected the admission refusal");
+        };
+        assert_eq!(
+            error.message,
+            "session event developer/message turn must be positive"
+        );
+        assert_eq!(session.seq(), 0);
+
+        let error = session
+            .append_surface(1, developer_message_with(1, 0), append_intent())
+            .expect_err("step zero");
+        let SessionError::Admission(error) = error else {
+            panic!("expected the admission refusal");
+        };
+        assert_eq!(
+            error.message,
+            "session event developer/message step must be positive"
+        );
+        assert_eq!(session.seq(), 0);
+    }
+
+    #[test]
+    fn positive_coordinates_are_accepted() {
+        let mut session = Session::new(header());
+        session
+            .append_surface(1, system_message_with(1, 1), append_intent())
+            .unwrap_or_else(|e| panic!("system: {e}"));
+        session
+            .append_surface(2, developer_message_with(2, 1), append_intent())
+            .unwrap_or_else(|e| panic!("developer: {e}"));
+        assert_eq!(session.seq(), 2);
+    }
+
+    #[test]
+    fn system_message_on_unprotected_head_is_rejected() {
+        let mut session = Session::new(header());
+        session
+            .append_surface(1, user_data("hello"), append_intent())
+            .unwrap_or_else(|e| panic!("user: {e}"));
+        let error = session
+            .append_surface(2, system_message_with(1, 1), append_intent())
+            .expect_err("unprotected head");
+        let SessionError::Admission(error) = error else {
+            panic!("expected the fold refusal");
+        };
+        assert_eq!(
+            error.message,
+            "system/message requires a protected first surface head"
+        );
+        assert_eq!(session.seq(), 1);
+    }
+
     #[test]
     fn derive_messages_skips_empty_and_log_only_and_caches_tail_growth() {
         let mut session = Session::new(header());

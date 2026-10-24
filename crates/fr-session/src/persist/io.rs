@@ -224,7 +224,6 @@ pub fn materialize(
     // concurrently cannot clobber each other. rename() would silently
     // overwrite.
     let linked = std::fs::hard_link(&tmp, &final_path);
-    let published = linked.is_ok();
     if let Err(error) = linked {
         // Remove an unpublished temp on failure.
         let _ = std::fs::remove_file(&tmp);
@@ -241,7 +240,6 @@ pub fn materialize(
         }
         return Err(PersistError::Io(error));
     }
-    let _ = published;
     // link() succeeded — the log is published. fsync the directory so the
     // new entry survives a power loss.
     sync_dir(&dir)?;
