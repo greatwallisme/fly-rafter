@@ -275,3 +275,10 @@
 - 排障：EventListener 类型漏 `>`（heredoc 手误两处，sed+python 修）；session.rs header() 重复（源文件本有，删我加的副本）；unsubscribe 四表异构类型数组编译错（拆四个 retain）；finish_announce/detach 的 announcing→AnnounceState 枚举迁移漏一处 finish_append（编译逮住）；clippy 8 警告全数真修（AnnounceState 枚举化/手写 Debug/fork 早退重构消 clone/let-chain/map_or/文档首段拆分），零 allow。
 - 门禁：四关全绿 286 tests；lifecycle SESSION 75/0/27 基线保持；guard 后台（阻断期预期）。
 - 待用户：切片 G 验收 + 提交（--no-verify 惯例）；下一切片 H = plugin 服务面 + tracker 装配 + drain 面 + 绑定基础设施。
+
+## 2026-10-24 — 切片 H 实现：服务面 + 装配 + drain + 绑定（fr-session 141 tests，workspace 299 四关全绿）
+- 判定「切片m」= 切片 H。交付：store create_with/fork_with 事务变体（挂钩在 prepare/enter 之间）、persist 路由面四方法、service.rs（SessionService + 7 方法号 JSON 面 + Q43-A 镜像 drain + 四监听者装配）、fr-wire SessionEventData::from_parts。
+- 排障六件：①连续两次 Edit 生成乱码记号（切片 boundary/placeholder 族）——python 精确修复并列入自纠；②create_with 挂钩 `?` 需 map_err(Other)（无 From<String>）；③测试 turn 0 触发读侧生命周期门（turn 编号 1 起）——登记 append 侧 laxity 待裁决；④user/message wire 需 id+source{kind:user}；⑤drain 下一游标漏计已投递记录（实现与文档契约不符，测试逮住）；⑥seed 重放不路由 → 落盘缺前缀（读门拒）——补 appendUnstoredSuffix 同步。
+- clippy pedantic 尾修 ~15 条全数真修（or-pattern 合臂/文档首段拆分/const fn/消费式传参/AppendParts 别名/解构消 clone/引用传参/method reference/assert_eq 换型），零 allow。bind-session-tests.py 曾出现 Read 渲染与盘上内容不符（roles_and_blocks_round_trip[s]）——改用行号锚点+断言闭合括号。
+- 门禁：四关全绿 299 tests；三需求门禁 exit 0；lifecycle 76/0/26（文件名版本错配钉测诚实转正 1 场景）。
+- 待用户：切片 H 验收 + 提交；turn-0 append 侧 laxity 是否补 admission 检查（契约级，见 findings 切片 H 节）；下阶段 = Phase 13 收口（fr-session v4 全量完成）或 Phase 13b fr-llm。

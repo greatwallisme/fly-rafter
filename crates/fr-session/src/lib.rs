@@ -12,6 +12,7 @@ pub mod fork;
 pub mod persist;
 pub mod plugin_shell;
 pub mod repair;
+pub mod service;
 pub mod session;
 pub mod store;
 pub mod surface;
@@ -23,6 +24,10 @@ pub(crate) mod tests_support;
 
 pub use admission::{is_plugin_record_type, validate_event_data};
 pub use error::{AdmissionError, SessionError};
+pub use service::{
+    METHOD_SESSION_APPEND, METHOD_SESSION_CREATE, METHOD_SESSION_DRAIN, METHOD_SESSION_FLUSH,
+    METHOD_SESSION_FORK, METHOD_SESSION_RESTORE, METHOD_SESSION_RESUME, SessionService,
+};
 pub use session::{Session, SurfaceIntent, canonical_header};
 pub use store::{DetachHandle, SessionMeta, SessionStore, SubscriberId};
 pub use surface::{SurfaceFoldResult, SurfaceReplacement, fold_surface};

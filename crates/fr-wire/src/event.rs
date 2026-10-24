@@ -13,6 +13,7 @@ use crate::content::TrueOnly;
 use crate::ids::{SessionId, SessionSeq, ToolCallId};
 use crate::message::Message;
 use crate::stream::AssistantStreamRecord;
+use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 
 /// Why a turn ended: a known reason, or a plugin-added reason retained
@@ -551,11 +552,22 @@ impl SessionEventData {
             Self::Unknown(unknown) => &unknown.type_name,
         }
     }
+
+    /// Builds one typed payload from its wire `type` key and `data` object
+    /// (the envelope decoder's data dispatch, exposed for service faces that
+    /// receive `(type, data)` pairs rather than whole envelopes).
+    ///
+    /// # Errors
+    ///
+    /// Returns the envelope decoder's refusal when `data` does not match
+    /// `type_name`'s payload shape.
+    pub fn from_parts(type_name: &str, data: serde_json::Value) -> Result<Self, String> {
+        deserialize_data(type_name, data)
+    }
 }
 
 impl Serialize for SessionEvent {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap;
         let field_count = 4
             + usize::from(self.source_event_seqs.is_some())
             + usize::from(self.surface_op.is_some())

@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-切片 F（持久化运行时）已落地（Q42A'：同步 actor worker + 有界并行 list + Condvar 调度线程；19 钉测含 10 并发句柄/大会话库极端测，逮捕并修复 mkdir 并发竞态真 bug；四关全绿 275 tests，lifecycle 75/0/27 基线保持，guard 20 合约未过=阻断期预期）。切片 G（SessionStore 内存层）已落地：四关全绿 286 tests，lifecycle SESSION 75/0/27 基线保持，guard 阻断期预期。余项：切片 H（plugin 服务面 + tracker 装配 + Q43-A drain 面 + bind-session-tests.py）；dougong requirements.md §4 四分叉（D-V3-1/3/4/5）与 fr 排期（44-B 先行 vs 等 v3）待用户裁决。
+切片 H 已落地（2026-10-24）：plugin 服务面七方法号 + store/persist 装配 + Q43-A drain 面 + 文件名版本错配钉测绑定（lifecycle 76/0/26），workspace 299 tests 四关全绿，Phase 13 fr-session 代码面收口（对照场景绑定 76/102，余 26 pending 属 Phase 14-18 依赖项）。待用户：切片 H 验收提交；turn-0 append 侧 laxity 是否补 admission（契约级）；dougong requirements.md §4 四分叉（D-V3-1/3/4/5）与 fr 排期（44-B 先行 vs 等 v3）。下阶段：Phase 13b fr-llm。
 
 ## Current Phase
-Phase 13（fr-session v4 全量——切片 F（持久化运行时）进行中）
+Phase 13（fr-session v4 全量——切片 H 已落地，代码面收口，验收待用户）
 
 ## Phases
 
@@ -98,7 +98,8 @@ Phase 13（fr-session v4 全量——切片 F（持久化运行时）进行中�
 - [x] surface/replace-op 硬约束全集（五类入表面、双闭区间、sourceEventSeqs 校验、折叠编码、双计数）——切片 C 落地
 - [x] deriveMessages 投影（不可变请求投影）+ canonical request/header（空 tools 省略、adapterDefaults 条件保留、顺序敏感相等比较）——切片 D 落地
 - [x] fork（sourceEventSeqs 前缀派生；build_fork_seed + forked closers 已落）+ store 侧 restore 原语（切片 G）；host 层 resume 四拒门禁在 Phase 18（PRD:323）
-- [x] SessionStore 内存层（prepare/enter/announce/fork/restore/flush 检查点/四 feed/拒绝码族，切片 G 落地）；跨插件接线面 = 切片 H（plugin 服务面 + tracker 装配 + Q43-A drain 面）
+- [x] SessionStore 内存层（prepare/enter/announce/fork/restore/flush 检查点/四 feed/拒绝码族，切片 G 落地）
+- [x] 切片 H：plugin 服务面（create/append/flush/fork/resume/restore/drain 七方法号 + fr-wire 载荷）+ tracker 装配（store 四监听 ↔ persist 路由面）+ Q43-A drain 面（per-session cursor 镜像，2026-10-24 落地，299 tests 四关全绿）；dylib 壳接线随 Q44-B fabric INIT/Phase 18 装配器
 - [ ] 对照 REQ-FR-SESSION 场景逐条落测试（75 passed / 27 skipped 维持；bind-session-tests.py 绑定基础设施属切片 H）
 - Foundation Note: 本 crate 是管线咽喉：fr-agent-loop/fr-headless 依赖其 deriveMessages/surface 语义，语义字段逐字对齐 dsh types.ts；日志内 turn 编号 1 起（findings 切片 F 节登记）
 - **Status:** in_progress

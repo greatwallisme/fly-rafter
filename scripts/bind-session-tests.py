@@ -72,6 +72,7 @@ PAIRS = [
     ("node-0 重写白名单", "node_zero_system_head_rejects_non_system_rewrite"),
     ("ptc-dispatch 子调用不进请求", "ptc_subcall_records_stay_out_of_derived_messages"),
     ("五角色与七种 ContentBlock 往返无损", "roles_and_blocks_round_trip"),
+    ("文件名世代与头版本不一致报错", "filename_header_version_mismatch_refuses"),
 ]
 
 # The 14 core types x 触发/表面归属/回环 map to their per-type pin test

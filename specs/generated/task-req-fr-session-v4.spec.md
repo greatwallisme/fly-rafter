@@ -191,7 +191,7 @@ Scenario: 独占发布与回滚
   那么 首发走临时文件加 link 独占发布且逐级目录 fsync，append 失败时文件 truncate 回滚无半行
 
 Scenario: 文件名世代与头版本不一致报错
-  Test: pending_req_fr_session_requirement
+  Test: filename_header_version_mismatch_refuses
   假设 磁盘文件名为 v4 但头内 version 为 5
   当 加载时
   那么 报错拒绝

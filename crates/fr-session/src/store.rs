@@ -296,7 +296,29 @@ impl SessionStore {
         seed: Vec<SessionEvent>,
         inherited_event_count: u64,
     ) -> Result<SessionId, SessionError> {
+        self.create_with(id, meta, seed, inherited_event_count, |_, _| Ok(()))
+    }
+
+    /// Like [`Self::create`], with one persistence hook invoked between the
+    /// prepare and the enter: the dsh `createStoredSession` position, where
+    /// write ownership is taken BEFORE the publication edge, so a vetoing
+    /// `announce` still unwinds through the paired disposal (the hook
+    /// failing leaves the prepared session unentered and nothing behind).
+    ///
+    /// # Errors
+    ///
+    /// The [`Self::create`] contract, plus the hook's own error surfaced
+    /// verbatim before any lifecycle edge exists.
+    pub fn create_with(
+        &mut self,
+        id: Option<SessionId>,
+        meta: &SessionMeta,
+        seed: Vec<SessionEvent>,
+        inherited_event_count: u64,
+        persist: impl FnOnce(&Session, u64) -> Result<(), ListenerError>,
+    ) -> Result<SessionId, SessionError> {
         let session = self.prepare(id, meta, seed, inherited_event_count)?;
+        persist(&session, inherited_event_count).map_err(SessionError::Other)?;
         let mut detach = self.enter(session)?;
         let session_id = detach.id.clone();
         if let Err(err) = self.announce(&session_id) {
@@ -592,9 +614,29 @@ impl SessionStore {
         child_id: SessionId,
         boundary: Option<u64>,
     ) -> Result<SessionId, SessionError> {
-        if self.entries.contains_key(&child_id) {
+        self.fork_with(source, Some(child_id), boundary, |_, _| Ok(()))
+    }
+
+    /// Like [`Self::fork`], with an optional child id (absent = the store
+    /// counter mints, dsh `create(undefined)` mint) and the same
+    /// prepare-to-enter persistence hook as [`Self::create_with`].
+    ///
+    /// # Errors
+    ///
+    /// The [`Self::fork`] rejection family plus the hook's own error
+    /// surfaced verbatim before any lifecycle edge exists.
+    pub fn fork_with(
+        &mut self,
+        source: &SessionId,
+        child_id: Option<SessionId>,
+        boundary: Option<u64>,
+        persist: impl FnOnce(&Session, u64) -> Result<(), ListenerError>,
+    ) -> Result<SessionId, SessionError> {
+        if let Some(child) = &child_id
+            && self.entries.contains_key(child)
+        {
             return Err(SessionError::Other(format!(
-                "session \"{child_id}\" already exists"
+                "session \"{child}\" already exists"
             )));
         }
         let empty_source = self
@@ -607,8 +649,8 @@ impl SessionStore {
                 .entries
                 .get(source)
                 .and_then(|entry| entry.session.header().cwd.clone());
-            return self.create(
-                Some(child_id),
+            return self.create_with(
+                child_id,
                 &SessionMeta {
                     cwd,
                     parent_session: Some(source.clone()),
@@ -617,6 +659,7 @@ impl SessionStore {
                 },
                 Vec::new(),
                 0,
+                persist,
             );
         }
         let (cwd, seed, inherited) = {
@@ -653,7 +696,7 @@ impl SessionStore {
             is_seeded: true,
             ..SessionMeta::default()
         };
-        self.create(Some(child_id), &meta, seed, inherited)
+        self.create_with(child_id, &meta, seed, inherited, persist)
     }
 }
 
@@ -938,5 +981,62 @@ mod tests {
             .create(Some(SessionId::new("x")), &relative, Vec::new(), 0)
             .expect_err("relative cwd");
         assert_eq!(err.to_string(), "meta.cwd must be an absolute path");
+    }
+
+    #[test]
+    fn create_with_hook_failure_leaves_nothing() {
+        let (mut store, _log) = make_store();
+        let err = store
+            .create_with(
+                Some(SessionId::new("h1")),
+                &meta(),
+                Vec::new(),
+                0,
+                |_, _| Err("storage down".to_owned()),
+            )
+            .expect_err("hook refuses");
+        assert_eq!(err.to_string(), "storage down");
+        assert!(store.get(&SessionId::new("h1")).is_none());
+        // The hook sits before any lifecycle edge, so the id is untouched.
+        store
+            .create_with(
+                Some(SessionId::new("h1")),
+                &meta(),
+                Vec::new(),
+                0,
+                |_, _| Ok(()),
+            )
+            .expect("retry after hook failure");
+    }
+
+    #[test]
+    fn fork_with_mints_child_and_hook_failure_leaves_nothing() {
+        let (mut store, _log) = make_store();
+        let parent = store
+            .create(
+                Some(SessionId::new("p")),
+                &SessionMeta {
+                    cwd: Some("/tmp/w".to_owned()),
+                    ..meta()
+                },
+                Vec::new(),
+                0,
+            )
+            .expect("create parent");
+        store
+            .append_log_only(&parent, 1, turn_start_data(1))
+            .expect("append");
+        let err = store
+            .fork_with(&parent, Some(SessionId::new("c1")), None, |_, _| {
+                Err("storage down".to_owned())
+            })
+            .expect_err("hook refuses");
+        assert_eq!(err.to_string(), "storage down");
+        assert!(store.get(&SessionId::new("c1")).is_none());
+        let child = store
+            .fork_with(&parent, None, None, |_, _| Ok(()))
+            .expect("mint child");
+        assert!(child.as_str().starts_with("session-"));
+        assert!(store.get(&child).is_some());
     }
 }

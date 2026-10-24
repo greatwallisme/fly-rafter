@@ -123,6 +123,14 @@ impl BackendTracker {
         lock(&self.state).pending.get(id).cloned()
     }
 
+    /// The active write handle for one session, if any (dsh `writers.get`).
+    pub(crate) fn writer(&self, id: &SessionId) -> Option<Arc<HandleInner>> {
+        lock(&self.state)
+            .writers
+            .get(id)
+            .and_then(|slot| slot.as_ref().map(Arc::clone))
+    }
+
     /// Whether this process still tracks a created-but-unmaterialized
     /// session.
     pub fn has_pending(&self, id: &SessionId) -> bool {

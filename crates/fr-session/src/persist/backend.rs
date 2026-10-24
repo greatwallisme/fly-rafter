@@ -141,6 +141,69 @@ impl JsonlBackend {
     pub fn close_all(&self) -> Result<(), PersistError> {
         self.tracker.close_all_for_dispose()
     }
+
+    /// Routes one committed event into the session's live write buffer (the
+    /// dsh `session/event` listener body: `writers.get(id)?.enqueueLive`).
+    /// A missing writer is a no-op — a session created by another process
+    /// has none.
+    pub(crate) fn route_live(&self, id: &SessionId, event: &SessionEvent) {
+        if let Some(inner) = self.tracker.writer(id) {
+            JsonlSessionHandle::from_inner(inner).enqueue_live(event);
+        }
+    }
+
+    /// Drains and flushes one session's write handle (the dsh
+    /// `session/flush` listener body); a handle closed mid-sweep counts as
+    /// flushed, matching [`Self::flush`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the drain or flush failure verbatim.
+    pub(crate) fn flush_session(&self, id: &SessionId) -> Result<(), PersistError> {
+        let Some(inner) = self.tracker.writer(id) else {
+            return Ok(());
+        };
+        let handle = JsonlSessionHandle::from_inner(inner);
+        match handle.drain_live().and_then(|()| handle.flush()) {
+            // A handle closed during the sweep drained durably before
+            // refusing this flush; both count as flushed.
+            Ok(()) | Err(PersistError::HandleClosed(_)) => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Appends one explicit batch through the session's write handle (the
+    /// dsh `appendUnstoredSuffix` seam: seed replay never re-emits through
+    /// `session/event`, so the publication commit point stores the prefix
+    /// through the handle instead). A missing writer is a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Returns the append failure verbatim.
+    pub(crate) fn append_suffix(
+        &self,
+        id: &SessionId,
+        suffix: &[SessionEvent],
+    ) -> Result<(), PersistError> {
+        let Some(inner) = self.tracker.writer(id) else {
+            return Ok(());
+        };
+        JsonlSessionHandle::from_inner(inner).append(suffix)
+    }
+
+    /// Closes one session's write handle (the dsh `session/disposed`
+    /// listener body: buffered events drain first, an unmaterialized
+    /// session leaves nothing behind).
+    ///
+    /// # Errors
+    ///
+    /// Returns the close failure verbatim.
+    pub(crate) fn close_session(&self, id: &SessionId) -> Result<(), PersistError> {
+        let Some(inner) = self.tracker.writer(id) else {
+            return Ok(());
+        };
+        JsonlSessionHandle::from_inner(inner).close()
+    }
 }
 
 impl Drop for JsonlBackend {
@@ -1569,6 +1632,40 @@ supported v4, and this build ships no upgrade path for it (raw log: {})",
                     || stat_error.message().contains("no upgrade path")
             );
         }
+    }
+
+    #[test]
+    fn filename_header_version_mismatch_refuses() {
+        // A v4-named artifact whose header line declares v5 refuses with the
+        // filename/header mismatch text (dsh readGenerationHeader).
+        let (root, backend) = backend("mismatch");
+        let id_text = format!("s-mismatch-{}", unique_id());
+        let id = SessionId::new(id_text.clone());
+        let dir = root
+            .path()
+            .join("proj-mismatch")
+            .join(paths::encode_segment(&id_text).expect("encode"));
+        fs::create_dir_all(&dir).expect("dirs");
+        let header_line = format!(
+            "{{\"type\":\"session\",\"version\":5,\"id\":\"{id_text}\",\"createdAt\":1,\"isSeeded\":false,\"delegationDepth\":0}}\n"
+        );
+        let path = dir.join("session.v4.jsonl.zstd");
+        let frame =
+            crate::persist::zstd::compress_zstd_frame(header_line.as_bytes()).expect("frame");
+        fs::write(&path, frame).expect("write artifact");
+        // Selection reads the header first, so the version gate's
+        // newer-harness refusal precedes the filename/header mismatch arm.
+        let expected = format!(
+            "session \"{id_text}\" uses log format v5, but this harness reads only v4: the log \
+was written by a newer harness — upgrade the harness to open it (raw log: {})",
+            path.display()
+        );
+        let error = backend
+            .open(&id, SessionAccess::Read)
+            .expect_err("mismatch refuses");
+        assert_eq!(error.message(), expected);
+        let stat_error = backend.stat(&id).expect_err("stat refuses mismatch");
+        assert_eq!(stat_error.message(), expected);
     }
 
     #[test]

@@ -734,3 +734,34 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - **门禁（实跑）**：四关全绿（workspace 286 tests / fmt PASS / clippy --workspace --all-targets -D warnings 0 / doc 0）；lifecycle SESSION = 75 passed / 0 failed / 27 skipped 基线逐位保持；guard 后台运行（阻断期 20 合约未过预期）。
 - **clippy 尾修 8 条真修零 allow**：AnnounceState 三态枚举替换 4-bool（struct_excessive_bools）、SessionStore 手写 Debug（missing-debug-implementations）、fork 早退分支重构消 redundant_clone + single-match、flush let-chain + map_or、模块文档首段拆分。
 - **余项（切片 H）**：plugin 服务面（create/append/flush/fork/resume/restore 方法号 + fr-wire 载荷）+ tracker 装配（store.subscribe ↔ tracker.enqueue/close）+ 出站 drain 面（Q43-A，宿主泵中继）+ bind-session-tests.py 绑定基础设施。27 skipped 场景中 agent-loop/prompt/title/approval/ptc 依赖项属 Phase 15-18。
+
+## 2026-10-24 — 切片 H 落地：plugin 服务面 + tracker 装配 + Q43-A drain 面 + 绑定收口
+
+恢复基线：HEAD 91a1ca3（切片 G 已提交），工作树净。用户指令「继续完成切片m」判定为切片 H（Phase 13 唯一余项）。
+
+### 交付结构
+- **store.rs 事务变体**：`create_with`/`fork_with`（prepare → persist 挂钩 → enter → announce；挂钩失败在任何生命周期边之前返回，零残留）；`create`/`fork` 退化为无挂钩委托；`fork_with` 的 childId 为 Option（缺省 = store 计数器铸造，dsh `create(undefined)` 同形）。挂钩位置 = dsh `createStoredSession`（prepare 之后、enter 之前）——veto 经 detach → 配对 disposal 边回滚。
+- **persist 路由面**：tracker `writer(id)`（dsh `writers.get`）；backend `route_live`（enqueue_live，缺写柄 no-op）、`flush_session`（drain+flush，HandleClosed 记为已 flush 与 flush_all 同判）、`close_session`、`append_suffix`（dsh `appendUnstoredSuffix` 缝）。
+- **service.rs（新，~1200 行含 11 钉测）**：`SessionService` = store + backend + 共享 announced 集 + 出站镜像日志。四监听者装配（持久化 flush 先注册——注册序决定 store 首败；镜像后注册）：
+  - session/event：**announced 门控路由**——dsh 发布前 append 不经 session/event 复现（否则 veto 的 create 会把缓冲 drain 进物化文件，违反无残留契约；镜像记录不门控，全事件镜像）；
+  - session/flush：持久化 drain+flush（Err 传播 = 首败序）+ 镜像；
+  - session/disposed：去标记 + 镜像 + close（close 失败 = 监听者 Err → store containment warn，dsh 仅-warn 处置）；
+  - session/created：标记 + 镜像（payload 仅 {sessionId}，头经 stat/open 面；dsh 对象载荷无 wire 对应，M1 无 title 类消费者）。
+- **方法号**：2 create / 3 append / 4 flush / 5 fork / 6 resume / 7 restore / 8 drain（0/1 = 壳 declare/describe）。
+- **append 路由**（dsh `append(type, data, opts?)` 逐字）：plugin: 语法 → append_record（携带 surface 元数据拒绝，fr 自撰文案——dsh 该路径无可达形状）；surfaceOp 有 → append_surface；无 → append_log_only（`requires a surfaceOp marker` / `cannot carry surfaceOp` 文案由 session.rs 既有检查逐字产出）；sourceEventSeqs 无 surfaceOp 拒绝（fr 自撰，TS 重载对不可表达）。time = 注入 clock（dsh Date.now() 同为内部赋值）。回复 = 提交后事件全文（dsh append 返回事件同形）。
+- **resume**（dsh agent-loop resumeWith 会话级移植）：open write 先行（并发 resume 互斥）→ 冷读 → `repair::interrupted_turn_closers` → 经句柄 append closers → prepare(seed, meta=盘上头, inherited) → 发布；失败路径 close 吞错（dsh 回滚吞 disposal rejection）。二次 resume = AlreadyOwned（open 先于 prepare，dsh 同序）。
+- **restore**：内存重建（payload 种子 + 发布，零持久化交互）；与 create 的差别 = 不挂持久化。
+- **Q43-A drain 面**：per-session 单调 cursor 镜像日志（created/event/flush/disposed 四类，全局 push 序）；drain 破坏式（≤ floor 丢弃），回复带下一游标（丢弃与已投递一并推进——首版实现漏计已投递，测试逮住修正）；advisory 车道 + 单消费者（泵）契约入模块文档。缓冲无界 = dsh live 缓冲同款取舍。
+- **fr-wire**：`SessionEventData::from_parts(type, data)` 公开（信封解码器的 data 分派复用）。
+- **seed 后缀同步**：seed 重放不经 session/event（dsh 事实）→ 落盘头无前缀行，读门拒（测试逮住）→ create/fork 成功后 `sync_unstored_suffix` 经写柄补写全部事件（dsh appendUnstoredSuffix 发布点）；放在发布边之后 = veto 保持无残留（比 dsh 时序更干净，dsh 的窗口是调用方避免的疣）。
+- **绑定**：backend 补钉测 `filename_header_version_mismatch_refuses`（filename v4 + 头 v5 → selection 先读头，version gate 的 newer-harness 文案先于 mismatch 分支——实测钉死）；bind-session-tests.py 增 1 对，lifecycle 76/0/26（+1 诚实转正）。
+
+### 真源事实（本轮新增）
+- turn 编号 1 起（读侧 v4 生命周期门强制；append 侧 admission 不查 turn 连续性——测试用 turn 0 时 append 成功、落盘读回被拒。**登记待裁决**：dsh 在 append 站点失败（"a bad event fails at the append site"），fr 是否需要在 append 侧补 turn 连续性检查 = 契约级问题，未擅动）。
+- dsh 会话编排（agent-loop index.ts:692/860）：create = prepare → persistence.create(header)（发布前取写权）→ setup 窗口 → appendUnstoredSuffix → publish；resume = open write → 冷读 → closers → prepare → suffix → publish。store.fork 本身不接持久化（生产调用方走 agent 种子路径）；fr 服务面 fork 挂钩 backend.create 取更优时序（veto 零残留）。
+- dsh `KnownMessage::User` wire 形 = {role:"user", id, content, source:{kind:"user"}}（id/source 必需）。
+
+### 门禁（实跑）
+四关全绿：fmt PASS / clippy --workspace --all-targets -D warnings 0 / test --workspace 299 passed 0 failed / doc -D 0；三道需求门禁 exit 0；lifecycle SESSION 76/0/26；guard 阻断期预期（20 合约）。
+### 显式缓议（非本切片砍除）
+- dylib 壳未接服务面：ABI v2 setup() 无配置通道，root/vocabulary 注入属 Q44-B fabric INIT/宿主装配器（Phase 18）职权；本切片交付纯 dispatch + 运行时（测试经纯函数面），壳保持 vocabulary 面不变。
