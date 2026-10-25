@@ -13,7 +13,7 @@
 //! documentation gives `setup`/`call` interleaving).
 
 use dougong_abi::{
-    ABI_VERSION, PluginExports, STATUS_CAPACITY, STATUS_FAILED, STATUS_OK, write_out,
+    ABI_VERSION, HostExports, PluginExports, STATUS_CAPACITY, STATUS_FAILED, STATUS_OK, write_out,
 };
 
 use crate::vocabulary::EventVocabulary;
@@ -96,7 +96,11 @@ unsafe extern "C" fn descriptor(out: *mut u8, cap: usize, len: *mut usize) -> i3
     }
 }
 
-unsafe extern "C" fn setup() -> *mut std::os::raw::c_void {
+// ABI v3 hands the outbound `HostExports` vtable here. The vocabulary shell
+// consumes no outbound capability, so the pointer is dropped unstashed: per
+// the export-table contract it is valid for this call only, and copying it
+// would extend its lifetime toward the documented UB window past `teardown`.
+unsafe extern "C" fn setup(_host: *const HostExports) -> *mut std::os::raw::c_void {
     let state = Box::new(VocabularyState {
         vocabulary: EventVocabulary::core(),
     });

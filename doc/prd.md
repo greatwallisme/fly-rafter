@@ -7,7 +7,7 @@
 | 状态 | 定稿（需求访谈完成，全部决策经用户逐项确认） |
 | 交付口径 | 本文档为唯一需求真源；实现阶段除本文档显式标注“实现时核对”的条目外，不得引入未记录的行为 |
 | 上游参照 | deepseek-harness v0.2.1-rc.2（下称 dsh），本地 `~/project/reference/cordis/deepseek-harness` |
-| 基座 | dougong 0.2.0（下称“内核”），本地 `~/project/dougong`，crates.io 已发布 |
+| 基座 | dougong 0.3.0（下称“内核”），本地 `~/project/dougong`，crates.io 已发布 |
 
 ---
 
@@ -90,7 +90,7 @@ Fly Rafter（飞椽，`fr`）是一个以 dougong 组合内核为基座的 AI ag
 
 | dsh（TypeScript） | fly-rafter（Rust） |
 |---|---|
-| vendored cordis 内核 | dougong 0.2.0（git 依赖；本机开发期可叠 `[patch]` path 覆盖；内核改动在 dougong 仓库进行并随里程碑发版 crates.io） |
+| vendored cordis 内核 | dougong 0.3.0（crates.io 依赖；本机开发期可叠 `[patch]` path 覆盖；内核改动在 dougong 仓库进行并随里程碑发版 crates.io） |
 | cordis.patch.yml 分层补丁（cordis **原生**能力） | dougong **不提供**分层补丁——其 loader 只接受整份 JSON 文档、整文档替换 + 幂等收敛（dougong 设计裁决 D9，`dougong-loader/src/lib.rs`）。分层 patch 语义（有序栈、按 id 整行覆盖）由 **fr-config 在 fr 层重建**（6.2），编译为 dougong loader JSON 文档后经 `Reconciler::replace + apply` 收敛 |
 | 插件向共享 Context 贡献服务 | `ctx.provide` / `ctx.require` / `Injection` 声明 |
 | 五种事件分发（emit/parallel/serial/waterfall/bail） | `ctx.emit/parallel/serial/bail/waterfall`（同名同语义） |
@@ -699,7 +699,7 @@ fr headless [TASK] [--session-id <id>] [--json] [--help]
 
 ## 23. 决策记录（2026-10-21 访谈确认）
 
-1. 基座 dougong 0.2.0，git 依赖（本机可叠 path 覆盖），内核改动随里程碑发版
+1. 基座 dougong 0.3.0，crates.io 依赖（本机可叠 path 覆盖），内核改动随里程碑发版
 2. 字面全插件：agent 主循环也是插件；宿主 = 装配器 + 事件泵
 3. 1:1 口径 = 行为与协议对齐；内部结构按 dougong 重造
 4. 身份句换 Fly Rafter，其余提示词逐字保留
@@ -736,3 +736,4 @@ fr headless [TASK] [--session-id <id>] [--json] [--help]
 33. 持久化句柄弃置纪律与 wire/条件子集两处对齐（2026-10-24 Q48A/Q49A/Q50A，/code-review 轮裁决）：JsonlSessionHandle 弃置即关闭——最后一份存活句柄（clone 共享 live_handles 计数）drop 时运行与 close() 同一 close 体（drain 路由缓冲 → 释放写租约 → tracker 声明回收），弃置句柄既不泄 worker 线程也不再钉住会话；backend/tracker 扫描面改直调 HandleInner 操作、from_inner 临时句柄形态废除，service 持自有句柄表承接 create/fork/resume 存活语义（"a live resume holds the claim" 自此真实成立，旧实现镜像机制寄生于泄漏的 tracker Arc 属缺陷依赖，已随本裁决拔除）；KnownMessage 各角色变体加 `#[serde(flatten)] extra` 保生产者附加键（dsh SessionEvent.data 为纯 TS 编译期类型、运行时无剥键，types.ts:494-505 实证，日志未知键无损往返 = 1:1 对齐；Message::Known 装 Box 系 clippy large_enum_variant 既定修法，fr 内部形态非协议面）；cond strict_eq 数字按 JS f64 值相等（dsh `!!js` 表达式即真 JS 语义，`1 === 1.0` 恒真、2^53 上精度损失属语义本体）。三者皆 1:1 对齐或 fr 内部纪律，无 19.2 偏差
 34. patch 装载诊断文案逐字对齐与 from-default-profile 库层守卫（2026-10-24 Q51A/Q52A，/code-review fr-config 轮裁决）：boot 侧 patch 读取/解析诊断对齐 dsh parsePatchList 族逐字（app-boot index.ts:520-590）——读失败 `fr: failed to read patches|overlay <path>: <原因>`、解析失败 `fr: failed to parse <label> <path>: <原因>`、非序列 `fr: <label> <path> must be a top-level YAML array of loader patch entries`、非映射行 `fr: <label> entry <N> in <path> must be a mapping (a loader patch entry)`（N 1-based）；label 按层 patches（可选/家目录层与内嵌 bundle 资产，资产以 bundle 名充 file 位——dsh boot 读 bundle patch 文件实为 overlay 标签，fr 内嵌资产无文件身份且 boot/dump 两侧必须同文案，定性为不可达内部面）与 overlay（--patch 层），与 dump 侧既定约定一致；Error::Io/Profile/PatchParse 的 thiserror 包装前缀（config io error:/profile error:/patch parse error:）废除改裸输出（EnvBootstrap 先例——dsh 抛错文本即 stderr 整行，此前 dump 侧钉测 contains() 掩盖了双前缀），PatchLine 行包装保留（fr 自有校验面）；`--from-default-profile` 未伴随 profile 时 load_stack fail-closed 拒绝（`--from-default-profile requires --profile`，dsh resolveBoot 在 CLI 层先行拒绝故 dsh 无此库态，文案为 fr 自有面）；load_stack 参数收拢为 StackRequest（dsh prepareProfile options bag 同构，消 clippy too_many_arguments）；manifest 族文案偏离（dsh profile.ts:617/622/173/798，Q53）呈裁决待办本轮未动。皆 1:1 对齐或 fr 自有面，无 19.2 偏差
 35. manifest 族诊断文案逐字对齐与两处登记偏差（2026-10-24 Q53A，/code-review fr-config 轮裁决）：清单读失败/非对象（dsh readProfileManifest profile.ts:617/622）与非法名（:173，`dsh:` 硬编码前缀品牌化为 `fr:`、JSON.stringify 引号经 json_quote 镜像）、未知 profile（:798 前段）四文案对齐 boot 侧，bin 参数沿 Q52A 通道穿入 read_profile_manifest；两处登记偏差见 19.2 条 19（补救命令后缀截除 + 清单解析错误引擎文案）；parse 错误行不做「裸抛改写」，fr 包装保留。无其他 19.2 新增
+36. 基座升级 dougong 0.3.0 与 ABI v3 采纳（2026-10-25，用户令随 0.3.0 发版继续开发）：workspace 四依赖随发版升至 0.3.0（lockfile dougong/-abi/-dylib/-loader/-wasm 五件同步）；fr-session plugin_shell `setup` 导出签名升 v3 形（收 `*const HostExports`；vocabulary 壳无出站能力需求，指针不囤积——vtable 仅 setup 调用期有效，teardown 后调用属上游文档化 UB）；PRD 基座版本三处勘误 0.2.0→0.3.0，并把「git 依赖」措辞勘正为 crates.io 依赖（Phase 11 起实际机制即 crates.io 版本依赖，`[patch]` path 覆盖通道保留），intake QUALITY-9 条款同步。0.3.0 交付 ABI v3 出站通路（HostExports require/emit，即 Q44 备选 44-C「一等公民对外通路」的落地形态）与稳定性/性能/可观测性三轨道（默认全关零行为改变）；fr 侧出站织物架构（Q44 44-A/B/C 取舍，影响 agent-loop 形态与「循环插件 fiber」措辞治理）留 Phase 15 动工前集中呈报裁决，本轮不动 PRD 4.3/8.1。上游 changelog「既有面零回归」（in-process API/loader reconcile 语义/descriptor schema 不变），四关与合约门禁零回归（326 tests 基线逐位一致）。无 19.2 偏差

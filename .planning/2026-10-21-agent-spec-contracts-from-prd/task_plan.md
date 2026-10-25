@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Q53A 已落地（2026-10-24）：manifest 族四文案逐字对齐（profile.ts:617/622/173/798 前段）+ A2 后缀截除与解析错误引擎文案差异登记 19.2 条 19 + PRD 决策 35；workspace 326 tests 四关全绿，CONFIG lifecycle 60/0/259（场景 319）。待用户：提交指令（15 文件，--no-verify 惯例）；下阶段排期（13b fr-llm vs 先清周边，推荐 13b）；dougong §4 四分叉（外仓不阻塞）。
+dougong 0.3.0 升级切片已落地（2026-10-25：四依赖+lockfile、plugin_shell setup v3 签名、PRD 三处勘误+决策 36、intake QUALITY-9、管线重跑，四关 326 tests 与 lifecycle 基线零回归）。待用户：验收提交（8 文件，--no-verify 惯例）；下阶段排期（13b fr-llm 在案推荐 vs Q44 织物裁决先行——v3 已令 44-C 一等公民出站通路可行，呈报材料备于 findings）。dougong 侧 §4 四分叉已随 0.3.0 关闭。
 
 ## Current Phase
 Phase 13（fr-session v4 全量——切片 H 已落地，代码面收口，验收待用户）

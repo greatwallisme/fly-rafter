@@ -19,7 +19,7 @@ satisfies: [REQ-FR-QUALITY]
 - MUST NOT 以放宽 lint 或断言换取绿灯；测试用例以暴露缺陷为目标。
 - 服务缝名与事件名 MUST 与 dsh 逐字一致——服务缝：llm、tools、fs、shell、terminals、subprocess、sandbox、web、lsp、jobs、subagents、goals、session-title、session-persistence、spill-store、mcp-resources；事件：agent/pre-step、agent/request、agent/request-error、agent/assistant-stream、agent/turn-stopping、tools/pre-execute、tools/execute、tools/post-execute。
 - Invoker 消费 MUST 统一经 `ctx.require::<Invoker>`，MUST NOT 使用 `ctx.get`；跨 dylib/wasm 边界的服务调用 MUST 一律走此通道。
-- workspace MUST 按 PRD 4.5 布局（26 crate）；依赖方向 MUST：fr 只依赖 fr-config 与各入口插件，任何领域 crate MUST NOT 依赖入口 crate，全部插件 crate MUST 依赖 dougong（基座 0.2.0 git 依赖，本机可叠 path 覆盖，内核改动随里程碑发版）。
+- workspace MUST 按 PRD 4.5 布局（26 crate）；依赖方向 MUST：fr 只依赖 fr-config 与各入口插件，任何领域 crate MUST NOT 依赖入口 crate，全部插件 crate MUST 依赖 dougong（基座 0.3.0 crates.io 依赖，本机可叠 path 覆盖，内核改动随里程碑发版）。
 
 ## Boundaries
 

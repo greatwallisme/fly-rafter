@@ -363,3 +363,10 @@
 - 门禁（本会话实跑）：fmt PASS / clippy workspace --all-targets -D warnings exit 0 / test --workspace **326 passed 0 failed**（基线 323+3：fr 11 / fr-config 101 / fr-schema 32 / fr-session 152 / fr-wire 28 / E2E 2）/ doc 强制重建 0 警告；CONFIG lint 0.7 PASS；CONFIG lifecycle **60 passed / 0 failed / 259 skipped / 319 total**（59+1）；stamp dry-run 照常（阻断期常态）。自纠一件：intake 场景锚点反斜杠转义层级写错（\\\\ vs 文件单 \）——断言先于写盘零损伤，修正后重放。
 - 附带核实：turn-0 append admission 已被 B 案覆盖（admission.rs:96-104 validate_coordinates 拒 turn==0/step==0 "must be positive"）——从裁决队列撤销，task_plan 同步。
 - 工作区 15 文件待验收提交（新增 stack.rs 本轮 + spec/knowledge/bind 再生）；下阶段待用户：提交指令、排期（13b fr-llm vs 先清周边，推荐 13b）、dougong §4 四分叉（外仓不阻塞）。
+
+## 2026-10-25 — dougong 0.3.0 基座升级（用户令：0.3.0 已发版，继续开发）
+
+- 升级执行：Cargo.toml 四依赖 0.2.0→0.3.0 + cargo update（lock 五件含 dougong-wasm）；plugin_shell.rs `setup` 升 v3 签名（`*const HostExports`，不囤积指针，注释载明 UB 窗口纪律）；PRD 三处版本勘误 + 「git 依赖」→「crates.io 依赖」措辞勘正 + 23 决策 36；intake QUALITY-9 同步；管线全序列重跑（import→accepted 20/20→draft→refine→depends 清理→三门禁绿）+ bind 重放幂等（SESSION 86 对），QUALITY spec 条款带新文本（specs/generated/task-req-fr-quality-requirement.spec.md:22）。
+- 门禁（本会话实跑）：四关全绿（fmt PASS / clippy workspace --all-targets -D warnings 0 / test --workspace **326 passed 0 failed** 与基线逐位一致：fr 11 / fr-config 101 / fr-schema 32 / fr-session 152 / fr-wire 28 / E2E 2 / doc 0）；lifecycle SESSION 82 pass/0 fail/26 skip、CONFIG 60/0/259 基线一致（exit 1 阻断期常态）；questions 40 条 0 blocking；guard 20 失败全为 skipped 常态。e2e dylib 工件经 ABI v3 载入验证通过（plugin_shell_e2e）。
+- 排障一件：lifecycle 调用 spec 文件名笔误（task-req-fr-config-layered-config 不存在，实为 task-req-fr-config-requirement / task-req-fr-session-v4）致首轮空解析；JSON 实键 = `verification.results[].verdict`（非 scenarios[].status）——本轮修正并留档解析配方。
+- 工作区 8 文件待验收提交（工程 2：Cargo.toml/Cargo.lock；代码 1：plugin_shell.rs；文档 3：prd/intake + 派生 knowledge/spec 各 1；规划 1）；--no-verify 惯例。下阶段待用户裁决（集中呈报见会话消息）：验收提交本切片 + 排期（13b fr-llm 在案推荐 vs Q44 织物裁决先行 vs 其他）。
