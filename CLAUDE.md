@@ -42,6 +42,8 @@ rm -rf specs/generated && agent-spec requirements draft-specs --knowledge knowle
 python3 scripts/refine-drafts.py   # 依赖行清理 + PRD 4.5 真实 crate 边界 + 共享 Forbidden
 # 生成器会把需求 id 误写进草稿 frontmatter depends:（该字段只接受 spec 名），必须删除：
 sed -i '/^depends: \[REQ-FR-/d' specs/generated/*.spec.md
+# draft-specs 全量重生成会把 Test 选择器回退为 pending_*；已实现切片须重放幂等绑定脚本：
+python3 scripts/bind-session-tests.py && python3 scripts/bind-config-tests.py   # SESSION 82 真实 / CONFIG 60 真实（重放后核对 lifecycle 基线 82/0/26 与 60/0/259）
 agent-spec requirements questions --knowledge knowledge --specs specs/generated --format json   # 反向访谈问题（blocking 才需处理）
 agent-spec trace REQ-FR-<ID> --specs specs/generated --code .                                   # satisfies 追溯与 liveness
 ```

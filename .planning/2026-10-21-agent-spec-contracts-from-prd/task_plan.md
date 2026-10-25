@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 13b 切片 1：dsh LLM 真源全读（seam 类型/流装配结算/retry policy/三 provider 差异表），产出事实表后集中呈报设计分叉（Q56+），裁决后动码。
+Q56-Q59+url 全部闭环、门禁全绿；待用户验收提交本切片后动 fr-llm seam 切片（七步合约流第 1 步写合同，dsh 事实表见 findings wave 1/2）。
 
 ## Current Phase
-Phase 13b（fr-llm seam + 三 provider——真源全读进行中；Q54 升级切片已提交 `157e4ad`，Q55A 用户裁决 2026-10-25）
+Phase 13b 切片 1 闭环（真源全读 ≈11500 行 + Q56A/Q57B/Q58-1a/2/3b/Q59A 全落地含 url 回填；PRD 13.1 勘误+13.2 段+19.2 条 20+决策 37+intake LLM-11/12；管线全绿基线零回归）
 
 ## Phases
 

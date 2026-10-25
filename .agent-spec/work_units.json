@@ -15,7 +15,7 @@
       "satisfies": [
         "REQ-FR-ACP"
       ],
-      "scenario_count": 2,
+      "scenario_count": 30,
       "blocked_by": []
     },
     {
@@ -33,7 +33,7 @@
       "satisfies": [
         "REQ-FR-AGENT-LOOP"
       ],
-      "scenario_count": 4,
+      "scenario_count": 26,
       "blocked_by": []
     },
     {
@@ -49,7 +49,7 @@
       "satisfies": [
         "REQ-FR-APPROVAL"
       ],
-      "scenario_count": 3,
+      "scenario_count": 15,
       "blocked_by": []
     },
     {
@@ -66,7 +66,7 @@
       "satisfies": [
         "REQ-FR-BUILTIN-TOOLS"
       ],
-      "scenario_count": 3,
+      "scenario_count": 408,
       "blocked_by": []
     },
     {
@@ -82,7 +82,7 @@
       "satisfies": [
         "REQ-FR-COMMANDS"
       ],
-      "scenario_count": 2,
+      "scenario_count": 12,
       "blocked_by": []
     },
     {
@@ -99,7 +99,7 @@
       "satisfies": [
         "REQ-FR-COMPACTION"
       ],
-      "scenario_count": 2,
+      "scenario_count": 23,
       "blocked_by": []
     },
     {
@@ -113,7 +113,7 @@
       "satisfies": [
         "REQ-FR-CONFIG"
       ],
-      "scenario_count": 3,
+      "scenario_count": 319,
       "blocked_by": []
     },
     {
@@ -133,7 +133,7 @@
       "satisfies": [
         "REQ-FR-HEADLESS"
       ],
-      "scenario_count": 5,
+      "scenario_count": 25,
       "blocked_by": []
     },
     {
@@ -149,7 +149,7 @@
       "satisfies": [
         "REQ-FR-LLM"
       ],
-      "scenario_count": 3,
+      "scenario_count": 33,
       "blocked_by": []
     },
     {
@@ -165,7 +165,7 @@
       "satisfies": [
         "REQ-FR-MCP"
       ],
-      "scenario_count": 2,
+      "scenario_count": 23,
       "blocked_by": []
     },
     {
@@ -181,7 +181,7 @@
       "satisfies": [
         "REQ-FR-PROMPT"
       ],
-      "scenario_count": 2,
+      "scenario_count": 47,
       "blocked_by": []
     },
     {
@@ -199,7 +199,7 @@
       "satisfies": [
         "REQ-FR-PTC"
       ],
-      "scenario_count": 4,
+      "scenario_count": 36,
       "blocked_by": []
     },
     {
@@ -213,7 +213,7 @@
       "satisfies": [
         "REQ-FR-QUALITY"
       ],
-      "scenario_count": 3,
+      "scenario_count": 13,
       "blocked_by": []
     },
     {
@@ -229,7 +229,7 @@
       "satisfies": [
         "REQ-FR-SANDBOX"
       ],
-      "scenario_count": 2,
+      "scenario_count": 9,
       "blocked_by": []
     },
     {
@@ -243,7 +243,7 @@
       "satisfies": [
         "REQ-FR-SCOPE"
       ],
-      "scenario_count": 2,
+      "scenario_count": 13,
       "blocked_by": []
     },
     {
@@ -261,7 +261,7 @@
       "satisfies": [
         "REQ-FR-SDK"
       ],
-      "scenario_count": 3,
+      "scenario_count": 29,
       "blocked_by": []
     },
     {
@@ -275,7 +275,7 @@
       "satisfies": [
         "REQ-FR-SESSION"
       ],
-      "scenario_count": 4,
+      "scenario_count": 108,
       "blocked_by": []
     },
     {
@@ -293,7 +293,7 @@
       "satisfies": [
         "REQ-FR-SUBAGENT"
       ],
-      "scenario_count": 2,
+      "scenario_count": 23,
       "blocked_by": []
     },
     {
@@ -310,7 +310,7 @@
       "satisfies": [
         "REQ-FR-TOOLS"
       ],
-      "scenario_count": 3,
+      "scenario_count": 19,
       "blocked_by": []
     },
     {
@@ -329,7 +329,7 @@
       "satisfies": [
         "REQ-FR-TUI"
       ],
-      "scenario_count": 4,
+      "scenario_count": 53,
       "blocked_by": []
     }
   ],

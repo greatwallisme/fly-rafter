@@ -4,3 +4,6 @@ target/
 .agent-spec/runs/
 .agent-spec/trace/
 .agent-spec/pending-ai-requests.json
+.planning/
+.agent-spec/graph/
+.agent-spec/code-bindings.json

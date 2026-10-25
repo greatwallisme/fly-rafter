@@ -3634,7 +3634,8 @@ None.
 - [REQ-FR-LLM-8] prepare_call 代际绑定 MUST：PreparedAdapterCall 冻结元数据；stream 一次性，二次派发报 INVALID_PREPARED_CALL；callConfigEquals 防跨代 capability 漂移（dsh llm/src/index.ts:956-1020）。
 - [REQ-FR-LLM-9] 重试策略 MUST：mode normal（maxRetries 5、retryableCodes 五类）| always；backoff 500ms 起步、上限 10s、jitter 0.1 对称抖动；执行方为独立 retry 插件挂 agent 失败步扩展点（dsh retry-policy.ts:211-262）。
 - [REQ-FR-LLM-10] fr-llm-deepseek 协议细则 MUST：messagesApiRoot 强制补全 /v1 后缀；SSE 经事件解析器，帧 event 名与 body.type 不一致 → 错误码 MALFORMED_RESPONSE；message_stop 三重校验（stop_reason 合法 + 全部块 closed + tool arguments 为合法 JSON）；stop_reason 按映射表转 finish kind；usage 自 message_start 起底、后续 delta 覆盖。
-- [REQ-FR-LLM-11] 其余 provider 适配语义 MUST：适配层永不中途 throw，错误以 usage + finish(kind error/aborted) 事件收尾；toolcall_end 将已解析参数 stringify 回原始串（与 deepseek 逐段拼接同契约）；toolUpdate 能力差异按 provider 固定：anthropic → in-history、openai-completions → addition-only、responses 系无（dsh llm-pi-ai/src/stream.ts:202-227、models.ts:80-87）。
+- [REQ-FR-LLM-11] 其余 provider 适配语义 MUST：适配层永不中途 throw，错误以 usage + finish(kind error/aborted) 事件收尾；toolcall_end 将已解析参数 stringify 回原始串（与 deepseek 逐段拼接同契约）；toolUpdate 能力差异按 provider 固定：anthropic → in-history、openai-completions → addition-only、responses 系（openai-responses/azure-openai-responses/openai-codex-responses）在 compat 声明 supportsAdditionalTools 或 supportsToolSearch 时 → addition-only、否则无（2026-10-25 Q59-a 勘误对齐 dsh 真源，dsh llm-pi-ai/src/stream.ts:202-227、models.ts:75-92）。
+- [REQ-FR-LLM-12] 三 provider 形态与命名 MUST（2026-10-25 Q56A/Q57B/Q58 裁决，PRD 决策 37）：三 crate 平切维持（fr-llm-deepseek/fr-llm-openai/fr-llm-anthropic；1:1 口径=行为与协议对齐，不镜像 dsh TS 包结构——dsh 真实形态为 llm-deepseek 直连 + llm-pi-ai 库背书多路由）；fr-llm-openai MUST 实现 openai-completions 与 openai-responses 两协议，fr-llm-anthropic 实现 anthropic-messages；fr-llm-deepseek 保留 dsh 自有 DEFAULT_MODELS 内置目录（2 条目逐字），fr-llm-openai 与 fr-llm-anthropic 第一天 MUST NOT 内置模型 catalog——路由 models 全手声明、请求引用未声明模型即报错（fail-closed，19.2 条 20）；attribution User-Agent MUST 为 `fly-rafter/<version> (+<url>)` 格式（version 取 CARGO_PKG_VERSION；url = 'https://github.com/greatwallisme/fly-rafter'，2026-10-25 用户给定，去 .git 对齐 dsh attribution.ts:43 主页形态）且缺省不可抑制；重放信封 response.kind：deepseek 侧 'deepseek-messages' 逐字保留、openai 族 'fr-openai'、anthropic 族 'fr-anthropic'、不可用重放降级哨兵 'fr-foreign'（adapter 私有 durable 元数据值域=自有命名，非会话 v4 结构字段）；fr-llm-deepseek Files 上传文件名前缀逐字 'dsh-'（同 endpoint+key 命名空间与 dsh 共享上传池，配额回收互通，用户裁决接受），upload-index 路径 <FR_HOME>/llm-deepseek/files-v3.json（formatVersion 3）。
 ## Scenarios
 
 Rule: REQ-FR-LLM-1 — adapter 契约
@@ -3806,9 +3807,31 @@ Rule: REQ-FR-LLM-11 — 适配层收尾与 toolUpdate
   那么 发 usage 与 finish(kind error) 收尾而非 panic；toolcall_end 参数串与 provider 原始串逐字节一致
 
 场景: toolUpdate 能力差异
-  假设 同一工具更新分别路由到 anthropic 与 openai-completions 与 responses 系模型
+  假设 同一工具更新分别路由到 anthropic 与 openai-completions 与 responses 系模型（后者 compat 带 supportsAdditionalTools 与不带两种）
   当 应用更新时
-  那么 分别为 in-history 追加、addition-only、不支持（拒新更新）
+  那么 anthropic 为 in-history 追加、openai-completions 为 addition-only、带 compat 标记的 responses 系为 addition-only、不带标记的 responses 系不支持（拒新更新）
+
+Rule: REQ-FR-LLM-12 — 形态与命名
+
+场景: openai 路由未声明模型报错
+  假设 fr-llm-openai 路由未声明 models
+  当 请求引用任一模型 id 时
+  那么 请求被拒且错误指名未声明模型，不回退任何内置目录
+
+场景: attribution 头格式与不可抑制
+  假设 任意 provider 发起请求
+  当 构造 User-Agent 时
+  那么 值为 fly-rafter/<version> (+https://github.com/greatwallisme/fly-rafter) 格式、version 取 crate 元数据，且不存在不携带 attribution 的请求路径
+
+场景: 重放信封 kind 命名
+  假设 三 provider 各自产出重放信封
+  当 读取 response.kind 时
+  那么 deepseek 侧为 'deepseek-messages'、openai 族为 'fr-openai'、anthropic 族为 'fr-anthropic'；不可用重放降级走 'fr-foreign' 哨兵
+
+场景: Files 前缀与索引路径逐字
+  假设 fr-llm-deepseek 经 Files API 上传一张请求图片
+  当 检查 provider 端文件名与本地索引时
+  那么 文件名以 'dsh-' 开头、索引位于 <FR_HOME>/llm-deepseek/files-v3.json 且 formatVersion 为 3
 
 ## Dependencies
 
@@ -3821,6 +3844,8 @@ Rule: REQ-FR-LLM-11 — 适配层收尾与 toolUpdate
 - doc/prd.md#19.3: 仅标准 Anthropic Messages 协议
 - confidence: high
 - doc/dsh-source-notes.md: 源码级技术关键点（file:line 证据）
+- doc/prd.md#13.2（2026-10-25 Q56A/Q57B/Q58 裁决段）+ PRD 决策 37 + 19.2 条 20：三 crate 平切/catalog 缺位/attribution/重放 kind/Files 前缀与索引路径
+- Q58-1a url 已给定回填（2026-10-25，去 .git 对齐 dsh 主页形态）；Q59-a 已勘误落条款——本块无悬置
 
 ## Open Questions
 

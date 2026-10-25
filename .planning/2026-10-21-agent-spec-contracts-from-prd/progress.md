@@ -377,3 +377,32 @@
 - Q55A 裁决执行：Phase 13b 切片 1（真源全读）动工。wave 1 = seam 定义件 2570 行全读落档（types/index/assembler/retry-policy/error/call-config/adapter-failure，事实表见 findings 本轮节——StreamChunk 七变体/装配结算全规则/retry policy 全校验/错误码分类学/prepareCall 代际绑定/adapterStream 终态失败归一边界）。
 - 关键发现：三 provider 的 dsh 真身 = llm-deepseek 直连（Anthropic Messages 协议实证 adapter.ts:144）+ llm-pi-ai 库背书多路由（openai/anthropic 在此，catalog 986 行）+ llm-retry 插件；fr 三 crate 切分与 dsh 两 adapter 形态差异 = Q56 主分叉候选，待波浪 2 读毕后集中呈报。
 - 待续（下轮）：wave 2 = message/content/assistant-stream（1333）+ api-key/brand/attribution（185）+ llm-deepseek（2168）+ llm-pi-ai（4100）+ llm-retry（259）≈ 8000 行；读毕集中呈报 Q56+ 分叉表。
+
+## 2026-10-25 — Phase 13b 切片 1 wave 2：dsh LLM 真源全读完毕（≈8941 行），Q56+ 分叉表呈报
+
+- wave 2 四批全读落档 findings.md（批 1 message/content/assistant-stream 1333；批 2 api-key/brand/attribution+llm-retry 505；批 3 llm-deepseek 全 28 文件 2838；批 4 llm-pi-ai 全 14 文件 4265）。合计 wave 1+2 ≈ 11500 行，dsh LLM 面（seam+retry+两 adapter+配套）真源全读完成。
+- 关键事实（详见 findings 本轮四节）：llm-retry 两 durable 事件+step 作用域计数+providerRetryAfterMs 优先级+single-flight 缺省；llm-deepseek 直连 Anthropic Messages（协议细则/Files API single-flight/配额恢复/upload-index v3/图片 token 计算器逐字移植/IMAGE_OFFLOAD_REQUIRED fail-closed）；llm-pi-ai 快照纪律（配置变更建新 collection 不改旧）/PI_AI_ERROR 专有码/classify 文本正则族（上游拍平 Error 所迫）/catalog drift gates/compat offer-withhold 门/deferred 校验双模/draft 探测不存储/replay 'dsh-foreign' 哨兵/UNSERVED_OAUTH={openai}。
+- PRD 对照：13.2 已裁决无 x-deepseek-harness-* 头（决策 19.3，不呈报）；13.1 "responses 系无 toolUpdate" 与 dsh models.ts:86-90 实证不符（responses 系 compat 带 supportsAdditionalTools|ToolSearch 时 addition-only）→ Q59 勘误候选；4.5 三 crate 平切 vs dsh 两 adapter（deepseek 直连+pi-ai 库背书）形态差异 → Q56 主分叉。
+- 呈报 Q56-Q59（集中单消息，编号选项，等显式裁决）：Q56 provider crate 切分形态（A 三 crate 平切维持 PRD/B 对齐 dsh 形态 fr-llm-piai 单 crate/C 内核+薄壳折中）；Q57 pi-ai model catalog Rust 数据源（A 脚本抽取生成/B 第一天全手声明+19.2 登记）；Q58 品牌化三点（attribution product/url、replay kind 'dsh-foreign'+族 kind、OWNED_FILE_PREFIX 'dsh-'+upload-index 路径——durable/外部可见命名必须 M1 前定）；Q59 PRD 13.1 勘误。
+- task_plan Next Step → Q56-Q59 裁决后动 fr-llm seam 切片。门禁未动码无需跑。
+
+## 2026-10-25 — Q56A/Q57B/Q58 裁决落地完成（Q59 悬置）——文档+管线轮，四关未涉
+
+- 裁决落盘：PRD 13.2 补「三 provider 形态与命名」裁决段 + 19.2 条 20（catalog 缺位偏离登记）+ 23 决策 37（Q56A/Q57B/Q58 全记录 + Q59 悬置定性）；intake REQ-FR-LLM 新条款 LLM-12 + 4 场景（场景 336）+ Source Trace 裁决行。deepseek-messages 逐字为呈报事实列解读（协议中立），用户如需 fr 化请指出。
+- 管线终态：import→accepted 20/20→work-units 20 ready→draft 20 份（LLM 含 LLM-12）→refine→depends 清理→**bind-session/bind-config 幂等重放（SESSION 86 对恢复）**→三门禁 0/0/0→questions 40 条 0 blocking→atlas build+bind（0 entries，草稿态无 Symbols 正常）→guard 20 失败全 skipped 常态→lifecycle 基线复验 SESSION 82/0/26、CONFIG 60/0/259 逐位一致零回归。spec 树除 LLM 合法新增 26 行外与 HEAD 逐字节一致。无 Rust 变更，四关不适用。
+- 排障三件（均当场修复）：(1) intake Open Questions 非裸 "None."（带括号说明）→ work-units 判 blocked_questions → draft-specs 跳过 LLM 单元（19/20）——解析器只认裸 "None."，悬置信息移 Source Trace；(2) `rm -rf`+draft-specs 全量重生成把 20 份 spec 的 Test 选择器回退 pending_*（既往轮次的"bind 重放"真身 = scripts/bind-session-tests.py + bind-config-tests.py 幂等重放，CLAUDE.md 再生成序列此前缺该步，已补进 CLAUDE.md）；(3) 实验性 draft-specs 二次覆盖 refine 成果（Allowed/Forbidden/depends 回退）——refine+bind 重放后整树还原，教训：draft-specs 后必须无条件跟 refine+depends+bind 重放三步。
+- 工作区 14 文件待验收提交（prd/intake/knowledge/CLAUDE.md/specs/generated LLM 1 份 + .agent-spec 2 + 规划 4）；--no-verify 惯例。
+- 遗留待用户两项：attribution url 值（Q58-1a 悬空参数，补齐后回填 PRD 13.2+intake 并由 fr-llm 切片钉测断言）；Q59（PRD 13.1 responses 系 toolUpdate 勘误 a/b）未裁决。
+
+## 2026-10-25 — Q59-a 裁决落地（PRD 13.1 勘误）——文档+管线轮
+
+- 裁决执行：PRD 13.1 toolUpdate 句勘误（"responses 系无"→"responses 系在 compat 声明 supportsAdditionalTools 或 supportsToolSearch 时→addition-only、否则无"，引注改 models.ts:75-92，标注 Q59-a）；intake LLM-11 条款与「toolUpdate 能力差异」场景 Then 同步（responses 系拆带/不带 compat 标记两态）；决策 37 的 Q59 悬置句收口（勘误属 PRD 与真源对齐，非 19.2 偏差）。
+- 管线（全序列含 bind 重放）：20 ready→draft→refine→depends→SESSION 86 对恢复→三门禁 0/0/0→questions 40/0 blocking→lifecycle 基线 SESSION 82/0/26、CONFIG 60/0/259 逐位一致。无 Rust 变更，四关不适用。
+- url 用途已向用户解释（User-Agent 注释段=公开仓库主页，provider 侧流量识别；attribution.ts:18-24 公开产品事实约束）；等用户给出 fr 的 url 值后回填 PRD 13.2+intake LLM-12（fr-llm 切片动工前到位即可，不阻塞其他准备）。
+- 工作区 10 文件待验收提交（含上轮 Q56/Q57/Q58 批次）；--no-verify 惯例。
+
+## 2026-10-25 — attribution url 回填（Q58-1a 收口）——Q56-Q59 全部裁决闭环
+
+- url 回填：`https://github.com/greatwallisme/fly-rafter`（用户给定 `…​.git` 后缀经披露后规范化去除——对齐 dsh attribution.ts:43 仓库主页形态，User-Agent 注释段=主页非 clone 端点；回改一句话可逆）。落点五处：PRD 13.2 裁决段 + 决策 37 收口 + intake LLM-12 条款 + attribution 钉测场景 Then 带 url 字面值 + Source Trace 悬置行清除。至此 LLM 需求块无悬置。
+- 管线（全序列含 bind 重放）：20 ready→draft→refine→depends→SESSION 86 对→三门禁 0/0/0→questions 40/0 blocking→lifecycle 基线 SESSION 82/0/26、CONFIG 60/0/259 逐位一致。无 Rust 变更，四关不适用。
+- Phase 13b 切片 1（真源全读 + Q56-Q59 裁决落地）整体闭环。下一步：用户验收提交（工作区 10 文件，--no-verify 惯例）后动 fr-llm seam 切片七步合约流（第 1 步写合同，异常场景 ≥ 正常场景；dsh 真源事实表见 findings wave 1/2 各节）。
