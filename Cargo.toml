@@ -6,6 +6,7 @@ members = [
     "crates/fr-schema",
     "crates/fr-wire",
     "crates/fr-session",
+    "crates/fr-llm",
 ]
 
 [workspace.package]
@@ -36,6 +37,7 @@ indexmap = "2"
 
 # Internal crates
 fr-config = { path = "crates/fr-config" }
+fr-llm = { path = "crates/fr-llm" }
 fr-schema = { path = "crates/fr-schema" }
 fr-wire = { path = "crates/fr-wire" }
 fr-session = { path = "crates/fr-session" }

@@ -1,0 +1,29 @@
+[package]
+name = "fr-llm"
+description = "Fly Rafter LLM seam: the llm service artifact (LlmRuntime parity) plus behavior library — stream settlement, error taxonomy, retry policy, request projection, attribution"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+fr-wire.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+futures-core = "0.3"
+
+# Kernel family edge for the C-ABI dylib artifact (PRD 4.5): the plugin
+# shell links only dougong-abi across the kernel boundary.
+dougong-abi = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true
