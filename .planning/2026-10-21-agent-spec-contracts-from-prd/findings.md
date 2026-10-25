@@ -819,3 +819,68 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - fr 落地：Cargo.toml 四依赖 0.3.0 + cargo update（lock 五件含 dougong-wasm）；plugin_shell.rs `setup` 升 v3 形（`_host: *const HostExports`，vocabulary 壳无出站需求指针不囤积——注释载明 vtable 仅 setup 调用期有效、teardown 后 UB 窗口纪律）。descriptor `listen:{}` 空表 v3 下语义不变，宿主不路由事件。
 - Q44 局面更新：v3 出站通路（HostExports require/emit，任意插件自有线程可同步调用）= 备选 44-C「一等公民对外通路」已由上游落地（44-B 设计的宿主织物中继/eventfd 泵前提——「ABI 无出站」——不复存在）；fr 侧织物架构取舍（44-A/B/C、agent-loop 形态、PRD 4.3「循环插件 fiber」措辞治理、per-instance 锁下 steer/abort 入站通路设计）升级为 Phase 15 动工前集中呈报项。dougong 侧 D-V3-1/3/4/5 四分叉已随 0.3.0 实现收口（changelog 引设计文档 D16 裁决记录），外仓分叉关闭。
 - 待办备忘（Phase 15 呈报材料）：per-instance 锁仅串行化宿主→插件方向外来调用（call/on_event/on_next），插件自有线程的 require 出站锁的是提供方实例——循环线程模型（Q42A' 同风格）在 v3 下可行；setup 期 require 合法（Q34A 声明集）；emit 载荷必须 JSON 与 require 载荷不透明的非对称保持。
+
+## 2026-10-25 — Phase 13b 切片 1：dsh LLM 真源全读（进行中，wave 1 = seam 定义件）
+
+基线：157e4ad（dougong 0.3.0 升级已提交），工作区净。真源 = packages/llm/llm/src（1218+571+534+492+307+208+195+175+107+96+76+68+41 = 4291 行）+ packages/llm/deepseek-llm-api-extensions/src（144+59）；**openai/anthropic provider 不在 packages/llm 下**（packages/ 一级目录无 provider/openai/anthropic 命名，fd 实证），三 provider 的 dsh 侧形态待查（Q56 候选事实）。
+
+### types.ts（571 行全读，逐文件行号）
+- LlmFailure（:41-59）：message + code（稳定中立机读码）+ status? + providerRetryAfterMs? + requestId? + offloadImages?（仅 IMAGE_OFFLOAD_REQUIRED 码，最老保留图出现次数再卸载数）。
+- ContentBlockMap（:137-145）七块：text/reasoning/image(offloaded?)/file/tool-call{id,name,arguments:raw JSON str}/tool-addition{toolName, tool?:never}/tool-removal{toolName}——merge-extensible。
+- FinishReason（:156-165）：stop/tool-calls/max-tokens/aborted{failure}/error{failure}——merge-extensible。
+- TokenUsage（:175-189）：**计数不相交**——inputTokens=未缓存输入、cached 单列 cacheRead/cacheWrite、计费输入=三者之和；DeepSeek prompt_tokens 折叠 → adapter 减算。totalTokens?/reasoningTokens?。
+- LlmImageRequestPrice/Pricing（:199-220）priceImages 同步无 IO；LlmConfigurableProvider（:245-278）provider/displayName/settingsNs/settingsPath/declared?/defaultBaseURL?/baseURLEnv?/nativeAuth?/error?；LlmNativeAuth{env[],oauth}（:281）；LlmModelDiscoveryRequest{provider?,baseURL?,api?,apiKey?}（:294-311）；LlmDiscoveredModel（:334）；LlmModelInfo{provider,id,name,description?,inputModalities?}（:348）；LlmModelContext{contextWindow}（:362）；LlmImageRequestBudget{representation:'raw'|'base64',maxBytes?,maxImages?,byteQuantum?,countQuantum?}（:374-385）；LlmReasoningEffortInfo/LlmModelReasoningInfo{efforts[],defaultEffort?}（:388-406）。
+- **SystemPromptUpdate**（:414）= 'in-history' 唯值；**ToolUpdate**（:425）= 'in-history'|'addition-only'，缺省=每请求全量声明。LlmResolvedModelInfo（:428-439）= LlmModelInfo + context?/defaultMaxTokens?/reasoning?/systemPromptUpdate?/toolUpdate?。
+- **ReplayEnvelope**（:448-460）：response(unknown) + blocks?(unknown[]，首现流序、每 emitted block 一项；装配丢块→同位丢条目；长度不匹配→弃整信封；元数据独立于块结构→省字段信封原样透传)。
+- **StreamChunk 七变体**（:470-482）：block-start{index,blockType}/text-delta{index,text}/reasoning-delta{index,text}/tool-call-delta{index,id,name?,argumentsDelta}/block-end{index,block=authoritative}/usage{usage}/finish{reason,replayState?}。契约：usage 在 finish 前且其后无输出；工具参数保持 raw JSON 字符串；adapter 抛错由 LlmRuntime.stream() 归一为终态 error/aborted finish。
+- ToolSchema（:491-502）：deferLoading?/name/description/parameters(JSON Schema obj)——**声明在 dsh-llm**（GenerateOptions 成员），dsh-tools 与 dsh-system-prompt 反向导入。
+- RequestUserInput（:505-510）role:'user' 无 id/source；RequestMessage = Message | RequestUserInput。ToolHistory（:516-526）tools(全量活动声明)+updates[{messageId,additions(自历史头解析)}]。
+- GenerateOptions（:529-571）：provider/model/reasoningEffort?/messages(RequestMessage[])/system?(一次性调用者；adapter 映射至 messages 前的 system 槽)/tools?/toolHistory?/temperature?/maxTokens?/stop?/signal?/sessionId?(Branded,replay 分游标用)/purpose?:'compaction'|'session-title'。
+- 事件 'llm/adapters-updated'（:12-25）：payload-free emit 通知，提交点触发（含 disposal），观察者失败被收容不可否决变更。
+
+### index.ts（1218 行全读）
+- LlmError（:96-131）extends HarnessError：构造期校验 message/code 非空、status 100-599 整数、providerRetryAfterMs 正有限、requestId 非空字符串、offloadImages 仅随 IMAGE_OFFLOAD_REQUIRED；failure 对象冻结。**fr 错误分类锚点**：code = AUTH/RATE_LIMIT/NO_ADAPTER 等 共享词汇（error.ts 详表待读）。
+- assertUsableApiKey（:151-166）：trim 静默（凭据源常带空白）；empty vs 非法 HTTP header 字符两文案（名字 ref 不回显秘密）；码 INVALID_CREDENTIAL（error.ts 常量）。
+- PreparedLlmCall（:169-192）：config(深冻,含物化默认)/retryPolicy(注册期捕获)/context?/inputModalities?/systemPromptUpdate?/toolUpdate?/adapterDefaults + stream(options)（**一次性派发**：重复派发 INVALID_PREPARED_CALL；config 不等 INVALID_PREPARED_CALL）。PreparedAdapterCall（:195-200）= model + stream（adapter 代际绑定）。
+- LlmAdapter 抽象类（:208-303）：**唯一必实现 stream**（:302）；默认方法七件 providerInfo({id,name})/providerRetryPolicy(undefined=默认)/imageRequestPricing(undefined)/imageRequestTarget(原样尺寸字节)/listModels([])/resolveModel({provider,id:model,name:model})/prepareCall({resolveModel, stream:this.stream})。
+- AdapterRegistrationHandle.replace（:309-327）：候选集全验证后单同步段换装（冲突/非法名/坏元数据全抛、现路由不动）；空数组合法（初始注册非法）；disposed 后 replace = REGISTRATION_DISPOSED。DirectoryRegistrationHandle（:333-348）同构（空数组合法、disposed 抛）。
+- LlmRuntime（:354-1181）：adapters Map + directory Map + discoveries Map 三注册表。
+  - emitAdaptersUpdated（:367-385）：逐监听者独立收容（sync catch + async rejection 两路），warn 文案 'llm: an llm/adapters-updated listener failed'。
+  - registerAdapter（:401-430）：providers 空 = INVALID_ADAPTER；prepareRoutes 全验证（重名/跨注册冲突=DUPLICATE_ADAPTER；providerInfo.id 必须等于 provider 且 name 非空=INVALID_ADAPTER；providerRetryPolicy 缺省 resolveRetryPolicy(undefined, `llm: provider "<p>" retryPolicy`)）；ctx.effect 挂 disposal。
+  - listProviders（:483）注册序 detached 拷贝。
+  - registerConfigurableProviders（:495-548）：provider/displayName/settingsNs 非空 + settingsPath 段非空 + 跨注册/集合内重复=DUPLICATE_DIRECTORY；空列表=INVALID_DIRECTORY；commit = 全验证后 swap。
+  - registerModelDiscovery（:569-589）settingsNs 键、重复=DUPLICATE_DISCOVERY、空=INVALID_DISCOVERY；discoverModels（:601-632）：无注册=NO_DISCOVERY、provider 与 baseURL 均空=INVALID_DISCOVERY、结果去重（首个 id 胜）保端点序、字段逐项校验静默丢弃坏 id。
+  - providerRetryPolicy(provider)（:668）注册期捕获面。
+  - listModels（:718-745）：逐项校验（provider 相等/id 非空/name 非空/description string/重复 id）违例=INVALID_CATALOG（**抛错非静默，区别于 discoverModels 的静默去重**）。
+  - resolveModelInfo（:756-771）+ normalizeModelInfo（:774-882）：provider/id 精确相等+name 非空（违例 INVALID_MODEL_INFO）；contextWindow 正整数（INVALID_MODEL_CONTEXT）；systemPromptUpdate 仅 'in-history'、toolUpdate 仅 'in-history'|'addition-only'（违例 INVALID_MODEL_INFO）；defaultMaxTokens 正 safe int（INVALID_MODEL_MAX_TOKENS）；reasoning.efforts 空=INVALID_MODEL_REASONING、effort id/name 非空不重复、defaultEffort 必在 efforts 内（INVALID_MODEL_REASONING）。
+  - resolveCallWithInfo（:908-942）：maxTokens 缺省→materialize defaultMaxTokens；reasoning 元数据缺席+显式 effort → UNSUPPORTED_REASONING_EFFORT；requested ?? defaultEffort 校验在 efforts 内（同码）；effective 来自 defaultEffort 时回写 resolvedConfig.reasoningEffort。
+  - prepareCall（:956-1014）：signal 三次 throwIfAborted（首/prepareCall 后/configure 后）；configure 收深冻 controls+modelInfo 返回部分控制面；resolveCallWithInfo 校验后 config 深冻；adapterDefaults = {reasoningEffort:true?, maxTokens:true?}（仅当 proposed 缺省而 resolved 有值）；返回冻结 PreparedLlmCall。
+  - forAdapter（:1023-1037）：assistant message source.replayState 属他 adapter 时剥 replayState（保 provider/model），冻结入参深冻出参。
+  - fileReadPath（:1043-1057）：attachments.fileHostPath → fs.processPathFromHostPath，malformed ref 容错降级 undefined（**dsh-llm 结构性不依赖 fs 包，单方法消费**）。
+  - adapterStream（:1064-1153）**终态失败归一边界**：dispatch 前一切（registration 查找/prepareCall/normalize/resolve/投影）失败 → yield adapterFailureChunk 终态后 return；迭代期 adapter next() 抛 → 终态失败 chunk；done 正常→return；**yield 在 adapter-owned try 之外**（消费者/中间件失败保持抛出）；finally 未完成→iterator.return()。
+  - 三段投影（:1096-1117）：contentHasFile→projectFilesToText(fileHandleText)；inputModalities 无 image 且有图→projectImagesForTextModel；projectToolUpdates(messages,tools,toolUpdate,toolHistory)（route 声明模式选择接收面）。
+  - stream（:1166-1180）= ctx.waterfall('llm/stream', options, adapterStream)。
+  - adapterFailureChunk（:1184-1192）：signal.aborted 或 code==='ABORTED' → {kind:'aborted',failure}，否则 {kind:'error',failure}。
+
+### assembler.ts（208 行全读）——流装配结算全部规则
+- PartialBlock{blockType,text,toolCallId?,toolCallName?,toolCallArguments,block?(block-end 权威冻结)}。
+- push 五规则：block-start 幂等建 partial（重复 index 忽略入 order 一经）；text/reasoning-delta：partial.block 已闭→忽略（malformed 流粘滞）；tool-call-delta 同 + id 覆写/name 真值才覆写/arguments 累加；block-end：**首闭胜**、再闭忽略；usage 覆写；finish 覆写（reason+replayState）。
+- ensure（:98-106）：**delta-only 协议容忍**（无 block-start 直接 delta 即建 partial）。
+- assemble（:108-121）：block-end 权威优先；tool-call 缺 id → `call-${index}`（index=块序 index）、缺 name → ''；未知块类型未闭合 → throw。
+- **assembled keep/drop 单点**（:135-150）：finish.kind==='max-tokens' → 全部 tool-call 块丢弃（kept 位图）；ReplayEnvelope.blocks 长度 ≠ all 长度 → 弃整信封；kept 过滤时 envelope.blocks 同位过滤（blocks.length==all.length 时信封原样）。
+- interruptedBlocks（:169-179）：闭+开 text/reasoning 且 trim 非空保留（流序）；tool-call 一律省（中断先于 dispatch，保留需伪造 result）；开未知块省。
+- finish 缺省 getter = {kind:'stop'}（:187-189）。
+
+### retry-policy.ts（195 行全读）——provider_retry_policy 结构
+- 默认：maxRetries 5 / initialDelayMs 500 / maxDelayMs 10000 / jitterRatio 0.1；DEFAULT_RETRYABLE_CODES = [EMPTY_RESPONSE, RATE_LIMIT, SERVER, TIMEOUT, TRANSPORT]（EMPTY_RESPONSE_CODE 来自 error.ts）。
+- 两模式：normal{mode,maxRetries?,retryableCodes?,backoff?} / always{mode,backoff?}（**无界重试至成功/取消/disposal**）。
+- ResolvedRetryPolicy 冻结不可变、注册期捕获于路由。schema 面：backoff 各字段 max=MAX_TIMER_DELAY_MS、jitter 0..1；maxRetries 整数步进 0..MAX_SAFE_INTEGER。
+- resolveRetryPolicy 校验（:149-195）：normal 未知键拒（validateKeys）；maxRetries 非负 safe int；retryableCodes 非空+元素非空串+无重复；backoff 三字段正有限≤MAX_TIMER_DELAY_MS+initial≤max+jitter 0..1；always 模式**忽略 normal-only 非活动字段但拒未知键**（NORMAL_POLICY_KEYS==ALWAYS_POLICY_KEYS 设计注释：分层配置切模式后残留字段不炸）。
+
+### error.ts（175 行全读）+ call-config.ts（96）+ adapter-failure.ts（107）+ 包结构盘点（wave 1 收尾）
+- error.ts：HarnessError{code 稳定机读码，路由于 code 而非 message}（:13-22）；常量 CONTEXT_WINDOW_EXCEEDED/QUOTA/ACCOUNT_QUOTA/**EMPTY_RESPONSE**（正常完成但零内容块——adapter 分类为失败而非空 assistant 消息，重试政策视为安全可重试）/**INVALID_CREDENTIAL**（有供给但不可用=畸形，区别 MISSING_CREDENTIAL，刻意不入默认可重试集）/**IMAGE_OFFLOAD_REQUIRED**；isContextWindowExceededError 五正则族（:54-89，OpenAI 兼容措辞识别）；isQuotaExceededError 五正则族（:97-103，终态配额措辞）；errorChain（:117-157，cause 链+AggregateError 成员渲染、环检测 path 集合、逐节点容错）；isHarnessError（instanceof 运行时窄化）。
+- call-config.ts：AGENT_LOOP_REQUESTS = **WeakSet 对象身份标记**（markAgentLoopRequest/isAgentLoopRequest，:13/:84-96——Rust 侧映射是分叉候选：结构体 bool 字段 vs 等价身份机制）；LlmCallControls{reasoningEffort?,temperature?,maxTokens?,stop?}；LlmCallConfig = controls + provider/model（每字段 1:1 映射 GenerateOptions，**loop 从记录头构建请求而非逐调用接受**）；ConfigureCall 纯同步回调（controls 深冻无默认 + model 深冻 → 返回 controls，不改路由）；LlmCallConfigAdapterDefaults{reasoningEffort?:true,maxTokens?:true}；callConfigEquals（:67-77）逐字段含 stop 逐元素相等。
+- adapter-failure.ts：normalizeLlmFailure（:16-28）——非 Error → HarnessError(String(value),'UNKNOWN')；**跨包拷贝丢类身份**→ 携带 failure 快照仅当自有数据属性（getOwnPropertyDescriptor 不触发 accessor）且 carried.code === ownErrorCode 一致才信任；否则 message + harnessErrorCode（非 HarnessError → 'UNKNOWN'，**第三方 SDK 码不进我们的分类学**）；failureSnapshot 逐字段校验（同 LlmError 构造校验）；宿主措辞 'LLM adapter failed'（非 Error 强转空/抛）。
+- **包结构盘点（三 provider 之 dsh 真身）**：packages/llm 下 = llm（core seam，已读）/ llm-deepseek（直连 adapter，**Anthropic Messages 协议**——adapter.ts:144 `anthropic-version: 2023-06-01` 头实证；~2168 行：adapter 178/translate 166/serialize 169/config 329/file-store 336/files-api 262/upload-index 224/request-files 158/image-tokens 157/types 133/request-pricing 111/images 111 等）/ llm-pi-ai（**库背书多路由 adapter**，openai/anthropic 路由在此——catalog.ts 64 处 anthropic|openai 命中；~4100 行：catalog 986/config 510/adapter 458/context 375/discovery 363/index 322/replay 259/stream 234/auth 231/provider 192/login 172）/ llm-retry（重试执行插件 259 行）/ llm-deepseek-account + llm-deepseek-api-key（账号与密钥配套插件）/ token-meter / deepseek-llm-api-extensions（顶层请求字段扩展注册表，非 adapter——prepare/accept 两段事务模式）。
+- **fr 三 crate 切分（fr-llm-deepseek/openai/anthropic）vs dsh 两 adapter（deepseek 直连 + pi-ai 库背书）形态差异 = Q56 候选主分叉**；波浪 2 待读：llm seam 剩余 message.ts 307/content.ts 492/assistant-stream.ts 534 + api-key 41/brand 76/attribution 68 + 上述三包 ≈ 6530 行。
+- Wave 1 已读并落档：types 571 / index 1218 / assembler 208 / retry-policy 195 / error 175 / call-config 96 / adapter-failure 107 = 2570 行。

@@ -370,3 +370,10 @@
 - 门禁（本会话实跑）：四关全绿（fmt PASS / clippy workspace --all-targets -D warnings 0 / test --workspace **326 passed 0 failed** 与基线逐位一致：fr 11 / fr-config 101 / fr-schema 32 / fr-session 152 / fr-wire 28 / E2E 2 / doc 0）；lifecycle SESSION 82 pass/0 fail/26 skip、CONFIG 60/0/259 基线一致（exit 1 阻断期常态）；questions 40 条 0 blocking；guard 20 失败全为 skipped 常态。e2e dylib 工件经 ABI v3 载入验证通过（plugin_shell_e2e）。
 - 排障一件：lifecycle 调用 spec 文件名笔误（task-req-fr-config-layered-config 不存在，实为 task-req-fr-config-requirement / task-req-fr-session-v4）致首轮空解析；JSON 实键 = `verification.results[].verdict`（非 scenarios[].status）——本轮修正并留档解析配方。
 - 工作区 8 文件待验收提交（工程 2：Cargo.toml/Cargo.lock；代码 1：plugin_shell.rs；文档 3：prd/intake + 派生 knowledge/spec 各 1；规划 1）；--no-verify 惯例。下阶段待用户裁决（集中呈报见会话消息）：验收提交本切片 + 排期（13b fr-llm 在案推荐 vs Q44 织物裁决先行 vs 其他）。
+
+## 2026-10-25 — Q54 提交 + Q55A 启动 Phase 13b：dsh LLM 真源全读 wave 1
+
+- Q54：dougong 0.3.0 升级切片提交 `157e4ad`（10 文件 +44/−23，--no-verify 惯例），工作区净。
+- Q55A 裁决执行：Phase 13b 切片 1（真源全读）动工。wave 1 = seam 定义件 2570 行全读落档（types/index/assembler/retry-policy/error/call-config/adapter-failure，事实表见 findings 本轮节——StreamChunk 七变体/装配结算全规则/retry policy 全校验/错误码分类学/prepareCall 代际绑定/adapterStream 终态失败归一边界）。
+- 关键发现：三 provider 的 dsh 真身 = llm-deepseek 直连（Anthropic Messages 协议实证 adapter.ts:144）+ llm-pi-ai 库背书多路由（openai/anthropic 在此，catalog 986 行）+ llm-retry 插件；fr 三 crate 切分与 dsh 两 adapter 形态差异 = Q56 主分叉候选，待波浪 2 读毕后集中呈报。
+- 待续（下轮）：wave 2 = message/content/assistant-stream（1333）+ api-key/brand/attribution（185）+ llm-deepseek（2168）+ llm-pi-ai（4100）+ llm-retry（259）≈ 8000 行；读毕集中呈报 Q56+ 分叉表。
