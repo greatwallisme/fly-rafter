@@ -103,10 +103,14 @@ impl RetryPolicy {
 }
 
 /// Validate one backoff input against the shared bounds (dsh
-/// `resolveRetryPolicy` backoff arm): every present field is a positive
-/// finite number no greater than [`MAX_TIMER_DELAY_MS`], the initial delay
-/// does not exceed the ceiling, and the jitter ratio lies in `0.0..=1.0`.
-fn resolve_backoff(input: Option<BackoffInput>) -> Result<Backoff, String> {
+/// `resolveBackoff`): every present field is a positive finite number no
+/// greater than [`MAX_TIMER_DELAY_MS`], the initial delay does not exceed
+/// the ceiling, and the jitter ratio lies in `0.0..=1.0`.
+///
+/// `path` is the full diagnostic path of the backoff object (dsh passes
+/// `` `${path}.backoff` ``); every rejection message embeds it verbatim
+/// before the offending field name (Q60-A, 2026-10-25).
+fn resolve_backoff(input: Option<BackoffInput>, path: &str) -> Result<Backoff, String> {
     let input = input.unwrap_or_default();
     let initial_delay_ms = input.initial_delay_ms.unwrap_or(DEFAULT_INITIAL_DELAY_MS);
     let max_delay_ms = input.max_delay_ms.unwrap_or(DEFAULT_MAX_DELAY_MS);
@@ -117,17 +121,19 @@ fn resolve_backoff(input: Option<BackoffInput>) -> Result<Backoff, String> {
     ] {
         if value == 0 || value > MAX_TIMER_DELAY_MS {
             return Err(format!(
-                "{name} must be a positive finite number no greater than {MAX_TIMER_DELAY_MS}"
+                "{path}.{name} must be a positive finite number no greater than {MAX_TIMER_DELAY_MS}"
             ));
         }
     }
     if initial_delay_ms > max_delay_ms {
-        return Err("initialDelayMs must not exceed maxDelayMs".to_owned());
+        return Err(format!(
+            "{path}.initialDelayMs must be less than or equal to maxDelayMs"
+        ));
     }
     // f64 fields: reject non-finite and out-of-range values (dsh validates
     // `positive finite` and `0..1`).
     if !jitter_ratio.is_finite() || !(0.0..=1.0).contains(&jitter_ratio) {
-        return Err("jitterRatio must be a number from 0 through 1".to_owned());
+        return Err(format!("{path}.jitterRatio must be between 0 and 1"));
     }
     Ok(Backoff {
         initial_delay_ms,
@@ -138,34 +144,42 @@ fn resolve_backoff(input: Option<BackoffInput>) -> Result<Backoff, String> {
 
 /// Resolve, validate, and freeze a retry policy (dsh `resolveRetryPolicy`).
 ///
+/// Validation follows the dsh arm order (Q60-A): the `always` arm validates
+/// backoff only; the `normal` arm validates `maxRetries`, then the
+/// retryable-code list, then backoff. The dsh `undefined`-config arm has no
+/// separate counterpart: an all-default input passes through the `normal`
+/// arm with the same outcome.
+///
 /// # Errors
-/// A human-readable message prefixed with `label` when any bound is
-/// violated: `maxRetries` beyond the safe-integer cap, an empty or
-/// duplicative retryable-code list, or any backoff bound above.
-pub fn resolve_retry_policy(input: RetryPolicyInput, label: &str) -> Result<RetryPolicy, String> {
-    let backoff = resolve_backoff(input.backoff).map_err(|reason| format!("{label}: {reason}"))?;
+/// Diagnostic messages verbatim from dsh `retry-policy.ts:128-193`:
+/// `{path}.{field} must be ...`, where backoff rejections use the
+/// `{path}.backoff.{field}` shape. The dsh `mode` and unknown-key arms are
+/// carried by the Rust type system and the provider deserialization layer
+/// respectively, so no runtime text exists for them here.
+pub fn resolve_retry_policy(input: RetryPolicyInput, path: &str) -> Result<RetryPolicy, String> {
     if input.always {
+        let backoff = resolve_backoff(input.backoff, &format!("{path}.backoff"))?;
         return Ok(RetryPolicy::Always { backoff });
     }
     let max_retries = input.max_retries.unwrap_or(DEFAULT_MAX_RETRIES);
     if max_retries > SAFE_INTEGER_MAX {
         return Err(format!(
-            "{label}: maxRetries must be an integer from 0 through {SAFE_INTEGER_MAX}"
+            "{path}.maxRetries must be a non-negative safe integer"
         ));
     }
     let retryable_codes = match input.retryable_codes {
         Some(codes) => {
             if codes.is_empty() {
-                return Err(format!("{label}: retryableCodes must not be empty"));
+                return Err(format!("{path}.retryableCodes must not be empty"));
             }
             if codes.iter().any(String::is_empty) {
-                return Err(format!("{label}: retryableCodes entries must be non-empty"));
+                return Err(format!(
+                    "{path}.retryableCodes must contain only non-empty strings"
+                ));
             }
             let mut seen = std::collections::HashSet::new();
             if codes.iter().any(|code| !seen.insert(code.clone())) {
-                return Err(format!(
-                    "{label}: retryableCodes must not contain duplicates"
-                ));
+                return Err(format!("{path}.retryableCodes must not contain duplicates"));
             }
             codes
         }
@@ -174,6 +188,7 @@ pub fn resolve_retry_policy(input: RetryPolicyInput, label: &str) -> Result<Retr
             .map(|code| (*code).to_owned())
             .collect(),
     };
+    let backoff = resolve_backoff(input.backoff, &format!("{path}.backoff"))?;
     Ok(RetryPolicy::Normal {
         max_retries,
         retryable_codes,
@@ -234,11 +249,11 @@ mod tests {
         assert_eq!(
             retryable_codes.as_slice(),
             [
-                EMPTY_RESPONSE_CODE_FALLBACK,
-                RATE_LIMIT_CODE_FALLBACK,
-                SERVER_CODE_FALLBACK,
-                TIMEOUT_CODE_FALLBACK,
-                TRANSPORT_CODE_FALLBACK
+                crate::error::EMPTY_RESPONSE_CODE,
+                crate::error::RATE_LIMIT_CODE,
+                crate::error::SERVER_CODE,
+                crate::error::TIMEOUT_CODE,
+                crate::error::TRANSPORT_CODE
             ]
         );
         assert_eq!(backoff.initial_delay_ms, 500);
@@ -266,7 +281,7 @@ mod tests {
         .expect("always");
         assert!(always.is_retryable("ANY_CODE"));
         assert_eq!(always.backoff().initial_delay_ms, 500);
-        // Violations carry the label.
+        // Violations carry the dsh path.
         let bad = resolve_retry_policy(
             RetryPolicyInput {
                 retryable_codes: Some(Vec::new()),
@@ -276,15 +291,96 @@ mod tests {
         );
         assert_eq!(
             bad.expect_err("empty codes"),
-            "llm: provider \"p\" retryPolicy: retryableCodes must not be empty"
+            "llm: provider \"p\" retryPolicy.retryableCodes must not be empty"
         );
     }
 
-    // The default code vocabulary lives in `error`; re-declared here only to
-    // keep the slice assertion literal (the crate re-exports both modules).
-    const EMPTY_RESPONSE_CODE_FALLBACK: &str = crate::error::EMPTY_RESPONSE_CODE;
-    const RATE_LIMIT_CODE_FALLBACK: &str = crate::error::RATE_LIMIT_CODE;
-    const SERVER_CODE_FALLBACK: &str = crate::error::SERVER_CODE;
-    const TIMEOUT_CODE_FALLBACK: &str = crate::error::TIMEOUT_CODE;
-    const TRANSPORT_CODE_FALLBACK: &str = crate::error::TRANSPORT_CODE;
+    // Pins all eight dsh resolveRetryPolicy/resolveBackoff rejection texts
+    // verbatim (retry-policy.ts:128-193, Q60-A) plus the normal-arm
+    // validation order: maxRetries, then retryableCodes, then backoff.
+    #[test]
+    fn diagnostics_pin_dsh_texts() {
+        let path = "llm: provider \"p\" retryPolicy";
+        let reject =
+            |input: RetryPolicyInput| resolve_retry_policy(input, path).expect_err("rejection");
+        let backoff = |initial: u64, max: u64, jitter: f64| BackoffInput {
+            initial_delay_ms: Some(initial),
+            max_delay_ms: Some(max),
+            jitter_ratio: Some(jitter),
+        };
+        // The two delay-ceiling texts (dsh :128, :131).
+        assert_eq!(
+            reject(RetryPolicyInput {
+                backoff: Some(backoff(0, 10_000, 0.1)),
+                ..RetryPolicyInput::default()
+            }),
+            format!(
+                "{path}.backoff.initialDelayMs must be a positive finite number no greater than {MAX_TIMER_DELAY_MS}"
+            )
+        );
+        assert_eq!(
+            reject(RetryPolicyInput {
+                backoff: Some(backoff(500, MAX_TIMER_DELAY_MS + 1, 0.1)),
+                ..RetryPolicyInput::default()
+            }),
+            format!(
+                "{path}.backoff.maxDelayMs must be a positive finite number no greater than {MAX_TIMER_DELAY_MS}"
+            )
+        );
+        // Ordering texts (dsh :134, :137).
+        assert_eq!(
+            reject(RetryPolicyInput {
+                backoff: Some(backoff(10_000, 500, 0.1)),
+                ..RetryPolicyInput::default()
+            }),
+            format!("{path}.backoff.initialDelayMs must be less than or equal to maxDelayMs")
+        );
+        assert_eq!(
+            reject(RetryPolicyInput {
+                backoff: Some(backoff(500, 10_000, f64::NAN)),
+                ..RetryPolicyInput::default()
+            }),
+            format!("{path}.backoff.jitterRatio must be between 0 and 1")
+        );
+        // Normal-arm texts (dsh :168, :171, :174, :177).
+        assert_eq!(
+            reject(RetryPolicyInput {
+                max_retries: Some(SAFE_INTEGER_MAX + 1),
+                ..RetryPolicyInput::default()
+            }),
+            format!("{path}.maxRetries must be a non-negative safe integer")
+        );
+        assert_eq!(
+            reject(RetryPolicyInput {
+                retryable_codes: Some(vec![String::new()]),
+                ..RetryPolicyInput::default()
+            }),
+            format!("{path}.retryableCodes must contain only non-empty strings")
+        );
+        assert_eq!(
+            reject(RetryPolicyInput {
+                retryable_codes: Some(vec!["A".to_owned(), "A".to_owned()]),
+                ..RetryPolicyInput::default()
+            }),
+            format!("{path}.retryableCodes must not contain duplicates")
+        );
+        // Arm order: an invalid backoff never preempts an earlier normal-arm
+        // violation (dsh validates backoff last in the normal arm).
+        assert_eq!(
+            reject(RetryPolicyInput {
+                max_retries: Some(SAFE_INTEGER_MAX + 1),
+                backoff: Some(backoff(0, 10_000, 0.1)),
+                ..RetryPolicyInput::default()
+            }),
+            format!("{path}.maxRetries must be a non-negative safe integer")
+        );
+        assert_eq!(
+            reject(RetryPolicyInput {
+                retryable_codes: Some(Vec::new()),
+                backoff: Some(backoff(0, 10_000, 0.1)),
+                ..RetryPolicyInput::default()
+            }),
+            format!("{path}.retryableCodes must not be empty")
+        );
+    }
 }

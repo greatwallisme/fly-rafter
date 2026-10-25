@@ -600,7 +600,6 @@ dependencies = [
  "futures-core",
  "regex",
  "serde_json",
- "tokio",
 ]
 
 [[package]]

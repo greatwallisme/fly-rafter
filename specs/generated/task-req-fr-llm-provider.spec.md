@@ -172,6 +172,12 @@ satisfies: [REQ-FR-LLM]
   当 重试结算时
   那么 最多 5 次、backoff 500ms 起步 10s 封顶、jitter 0.1 对称抖动；always 模式不限次数
 
+场景: 诊断文案与校验顺序逐字钉死
+  测试: diagnostics_pin_dsh_texts
+  假设 用户在 provider 配置中写非法 retryPolicy
+  当 resolveRetryPolicy 拒绝时
+  那么 八条消息与 dsh retry-policy.ts:128-193 逐字同文（含 .backoff 路径中段）、normal 臂校验顺序 maxRetries 先于 retryableCodes 先于 backoff
+
 ### Rule: request-projection — 请求投影
 
 场景: addition-only 投影省略非活动工具

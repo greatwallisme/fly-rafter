@@ -37,8 +37,8 @@ pub fn user_agent() -> String {
 /// The attribution headers an adapter must send on every provider request.
 ///
 /// Header names are lowercase (HTTP field names are case-insensitive on the
-/// wire). Omission of the identity falls back to [`APP_IDENTITY`]: nothing
-/// can suppress attribution.
+/// wire). The identity is always [`APP_IDENTITY`]: nothing can suppress
+/// attribution.
 #[must_use]
 pub fn attribution_headers() -> [(&'static str, String); 1] {
     [("user-agent", user_agent())]

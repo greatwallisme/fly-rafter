@@ -22,8 +22,5 @@ futures-core = "0.3"
 # shell links only dougong-abi across the kernel boundary.
 dougong-abi = { workspace = true }
 
-[dev-dependencies]
-tokio = { workspace = true }
-
 [lints]
 workspace = true

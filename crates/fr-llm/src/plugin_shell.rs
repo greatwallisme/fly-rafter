@@ -27,9 +27,14 @@ pub const PLUGIN_NAME: &str = "fr-llm";
 pub const METHOD_DESCRIBE: u32 = 1;
 
 /// The descriptor the loader consumes: the `llm` service over the dynamic
-/// channel, no injected dependencies or listeners in this slice.
-const DESCRIPTOR: &[u8] =
-    br#"{"name":"fr-llm","version":"0.1.0","provide":["llm"],"inject":[],"listen":{}}"#;
+/// channel, no injected dependencies or listeners in this slice. The version
+/// is sourced from crate metadata so it cannot drift from the artifact.
+const DESCRIPTOR: &[u8] = concat!(
+    "{\"name\":\"fr-llm\",\"version\":\"",
+    env!("CARGO_PKG_VERSION"),
+    "\",\"provide\":[\"llm\"],\"inject\":[],\"listen\":{}}"
+)
+.as_bytes();
 
 /// Serves one method invocation against the shell state: a pure
 /// (JSON-in, JSON-out) function so the shell surface stays testable.
@@ -197,11 +202,14 @@ mod tests {
 
     #[test]
     fn descriptor_declares_the_llm_service() {
-        let descriptor =
-            br#"{"name":"fr-llm","version":"0.1.0","provide":["llm"],"inject":[],"listen":{}}"#;
-        let parsed: serde_json::Value = serde_json::from_slice(descriptor).expect("json");
+        // Parses the shipped `DESCRIPTOR` constant itself, so any drift (for
+        // example a stale embedded version) fails this test.
+        let parsed: serde_json::Value = serde_json::from_slice(super::DESCRIPTOR).expect("json");
+        assert_eq!(parsed["name"], PLUGIN_NAME);
+        assert_eq!(parsed["version"], env!("CARGO_PKG_VERSION"));
         assert_eq!(parsed["provide"][0], "llm");
         assert_eq!(parsed["inject"], serde_json::json!([]));
+        assert_eq!(parsed["listen"], serde_json::json!({}));
     }
 }
 

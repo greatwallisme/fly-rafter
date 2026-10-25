@@ -149,7 +149,7 @@
       "satisfies": [
         "REQ-FR-LLM"
       ],
-      "scenario_count": 33,
+      "scenario_count": 34,
       "blocked_by": []
     },
     {

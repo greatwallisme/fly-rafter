@@ -203,16 +203,19 @@ impl BlockAssembler {
         let kept: Option<Vec<bool>> = (self.finish()
             == FinishReason::Known(FinishReasonKind::MaxTokens))
         .then(|| all.iter().map(|block| !is_tool_call(block)).collect());
-        let blocks: Vec<ContentBlock> = kept.as_ref().map_or_else(
-            || all.clone(),
-            |kept| {
-                all.iter()
-                    .zip(kept)
-                    .filter(|(_, keep)| **keep)
-                    .map(|(block, _)| block.clone())
-                    .collect()
-            },
-        );
+        let all_len = all.len();
+        let blocks: Vec<ContentBlock> = match kept.as_ref() {
+            // Without truncation the assembled vector is the output: move it
+            // instead of deep-cloning every block (large responses are
+            // multi-megabyte text).
+            None => all,
+            Some(kept) => all
+                .iter()
+                .zip(kept)
+                .filter(|(_, keep)| **keep)
+                .map(|(block, _)| block.clone())
+                .collect(),
+        };
         let envelope = &self.replay_state;
         let Some(envelope) = envelope else {
             return Ok((blocks, None));
@@ -220,13 +223,13 @@ impl BlockAssembler {
         let Some(envelope_blocks) = &envelope.blocks else {
             return Ok((blocks, Some(envelope.clone())));
         };
-        if envelope_blocks.len() != all.len() {
+        if envelope_blocks.len() != all_len {
             // A misaligned envelope cannot be pruned safely: drop it whole.
             return Ok((blocks, None));
         }
         let replay = match kept {
             None => Some(envelope.clone()),
-            Some(_) if blocks.len() == all.len() => Some(envelope.clone()),
+            Some(_) if blocks.len() == all_len => Some(envelope.clone()),
             Some(kept) => Some(ReplayEnvelope {
                 response: envelope.response.clone(),
                 blocks: Some(
