@@ -58,6 +58,10 @@ pub const TIMEOUT_CODE: &str = "TIMEOUT";
 /// socket error, truncated stream).
 pub const TRANSPORT_CODE: &str = "TRANSPORT";
 
+/// Canonical code for reusing a prepared call twice or dispatching it with a
+/// config that drifted from preparation.
+pub const INVALID_PREPARED_CALL_CODE: &str = "INVALID_PREPARED_CALL";
+
 /// Codes the default (`normal`) retry policy retries (dsh
 /// `DEFAULT_RETRYABLE_CODES` in `retry-policy.ts`).
 pub const DEFAULT_RETRYABLE_CODES: [&str; 5] = [

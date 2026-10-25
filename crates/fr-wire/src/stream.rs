@@ -98,7 +98,7 @@ pub enum StreamChunk {
 /// gaps, packed payloads); every never-packed chunk type stays a raw `chunk`
 /// record holding the exact original chunk.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
 pub enum AssistantStreamRecord {
     /// Packed visible-text delta run.
     #[serde(rename = "text-chunks")]
@@ -160,6 +160,24 @@ pub enum AssistantStreamRecord {
 mod tests {
     use super::*;
     use crate::call_config::FinishReasonKind;
+
+    /// Q61A: exact-keys at the durable boundary — a record carrying an
+    /// extra key is rejected, matching the dsh exactKeys path
+    /// (assistant-stream.ts:530-534).
+    #[test]
+    fn stream_record_rejects_unknown_keys() {
+        let raw = serde_json::json!({
+            "type": "text-chunks",
+            "time0": 1,
+            "index": 0,
+            "dt": [],
+            "texts": ["a"],
+            "bogus": 1
+        });
+        let Err(_) = serde_json::from_value::<AssistantStreamRecord>(raw) else {
+            panic!("an extra key must be rejected at the durable boundary");
+        };
+    }
 
     #[test]
     fn stream_chunk_keys_are_verbatim_camel_case() {

@@ -24,12 +24,14 @@ satisfies: [REQ-FR-LLM]
 - 其余 provider 适配语义 MUST：适配层永不中途 throw，错误以 usage + finish(kind error/aborted) 事件收尾；toolcall_end 将已解析参数 stringify 回原始串（与 deepseek 逐段拼接同契约）；toolUpdate 能力差异按 provider 固定：anthropic → in-history、openai-completions → addition-only、responses 系（openai-responses/azure-openai-responses/openai-codex-responses）在 compat 声明 supportsAdditionalTools 或 supportsToolSearch 时 → addition-only、否则无（2026-10-25 Q59-a 勘误对齐 dsh 真源，dsh llm-pi-ai/src/stream.ts:202-227、models.ts:75-92）。
 - 三 provider 形态与命名 MUST（2026-10-25 Q56A/Q57B/Q58 裁决，PRD 决策 37）：三 crate 平切维持（fr-llm-deepseek/fr-llm-openai/fr-llm-anthropic；1:1 口径=行为与协议对齐，不镜像 dsh TS 包结构——dsh 真实形态为 llm-deepseek 直连 + llm-pi-ai 库背书多路由）；fr-llm-openai MUST 实现 openai-completions 与 openai-responses 两协议，fr-llm-anthropic 实现 anthropic-messages；fr-llm-deepseek 保留 dsh 自有 DEFAULT_MODELS 内置目录（2 条目逐字），fr-llm-openai 与 fr-llm-anthropic 第一天 MUST NOT 内置模型 catalog——路由 models 全手声明、请求引用未声明模型即报错（fail-closed，19.2 条 20）；attribution User-Agent MUST 为 `fly-rafter/<version> (+<url>)` 格式（version 取 CARGO_PKG_VERSION；url = 'https://github.com/greatwallisme/fly-rafter'，2026-10-25 用户给定，去 .git 对齐 dsh attribution.ts:43 主页形态）且缺省不可抑制；重放信封 response.kind：deepseek 侧 'deepseek-messages' 逐字保留、openai 族 'fr-openai'、anthropic 族 'fr-anthropic'、不可用重放降级哨兵 'fr-foreign'（adapter 私有 durable 元数据值域=自有命名，非会话 v4 结构字段）；fr-llm-deepseek Files 上传文件名前缀逐字 'dsh-'（同 endpoint+key 命名空间与 dsh 共享上传池，配额回收互通，用户裁决接受），upload-index 路径 <FR_HOME>/llm-deepseek/files-v3.json（formatVersion 3）。
 - fr-llm 定位与形态（PRD 4.5 :167 条款执行，2026-10-25 返工裁定）：fr-llm 为 **cdylib+rlib 双输出插件工件**（PRD 4.5 「crates/ 下除 fr、fr-config、fr-wire 外全部为 cdylib 插件工件，内核家族仅依赖 dougong-abi，五步契约经 descriptor 表达」）——cdylib 面为 plugin_shell（descriptor `provide: ["llm"]`，即 fr-agent-loop PRD :336 `inject llm` 的服务提供者；宿主不含逻辑铁律下该服务只能由本工件承载）；rlib 面为行为库，供三个 provider 工件与 fr-agent-loop 工件静态链接副本（同 fr-wire 「各插件工件链接副本，指针不跨界」规则），wire 形状复用 fr-wire 不重复定义。`llm` 服务的 Invoker 方法号表与载荷 schema（PRD :131 契约框架）由 provider 与 agent-loop 消费切片细化；Q44 出站织物裁决（决策 36，Phase 15 前）管出站通路细节，不改变本工件归属。
-- LlmAdapter trait：唯一必须实现 `fn stream(&self, options: GenerateOptions) -> Pin<Box<dyn Stream<Item = StreamChunk> + Send>>`（futures-core Stream 装箱，对齐 dsh AsyncIterable<StreamChunk>）；默认方法七件 provider_info/provider_retry_policy/image_request_pricing/image_request_target/list_models/resolve_model/prepare_call 对齐 dsh llm/src/index.ts:208-303。
+- LlmAdapter trait：唯一必须实现 `fn stream(&self, options: GenerateOptions) -> Pin<Box<dyn Stream<Item = StreamChunk> + Send>>`（futures-core Stream 装箱，对齐 dsh AsyncIterable<StreamChunk>）；默认方法七件 provider_info/provider_retry_policy/image_request_pricing/image_request_target/list_models/resolve_model/prepare_call 对齐 dsh llm/src/index.ts:208-303（2026-10-25 Q62B：list_models/resolve_model/prepare_call 三件按 AFIT async 声明对齐 dsh Promise 面，trait dyn 不兼容的代价由后续 runtime 注册表切片以泛型/装箱面承载）。
 - PreparedAdapterCall 代际绑定：非 Clone（代际句柄不可复制）；内部一次性派发门（重复派发 INVALID_PREPARED_CALL）；派发时逐字段比较 LlmCallConfig（call_config_equals 含 stop 逐元素）不匹配即 INVALID_PREPARED_CALL。
 - AGENT_LOOP_REQUESTS WeakSet 对象身份标记（dsh call-config.ts:13）映射为 LlmCallConfig 的 `agent_loop: bool` 字段——Rust 值语义等价映射，内部面非协议。
 - LlmError 构造校验（dsh error.ts/index.ts:96-131）：message 与 code 非空、status 100..=599、provider_retry_after_ms 正有限、request_id 非空、offload_images 仅随 IMAGE_OFFLOAD_REQUIRED；错误码常量集为共享词汇（AUTH/QUOTA/RATE_LIMIT/CONTEXT_WINDOW_EXCEEDED/SERVER/TIMEOUT/TRANSPORT/EMPTY_RESPONSE/INVALID_CREDENTIAL/IMAGE_OFFLOAD_REQUIRED 等）。
 - attribution：APP_IDENTITY 常量（product fly-rafter / version env!("CARGO_PKG_VERSION") / url https://github.com/greatwallisme/fly-rafter）；user_agent() 渲染 `product/version (+url)`；headers() 产出小写 `user-agent` 头，无任何抑制路径。
 - assistant-stream 行为（wire record 形状已在 fr-wire）：Accumulator 打包规则（同型相邻+同 index+tool-call 同 id+name 有无一致+时间差可逆才入 run；id 空串/name 空串不打包；block-start/end、usage、finish 恒 raw）；expand 为 durable 边界验证路径（exact keys、dt.length==members-1、时间保持安全整数）。
+- 2026-10-25 Q61A（用户裁决）：`AssistantStreamRecord` 的 exact-keys 由 fr-wire serde `deny_unknown_fields` 在解析期承载（等价 dsh assistant-stream.ts:530-534 exactKeys）；Allowed 增列 crates/fr-wire/src/stream.rs 单文件。
+- 2026-10-25 Q63A（用户裁决）：Accumulator 对未知 chunk kind（`StreamChunk::Other`）落 raw record 无损保留——系 fr-wire merge-extensible 既有裁决的下游扩展语义，非 dsh 偏差，不入 19.2。
 
 ## Boundaries
 
@@ -38,6 +40,7 @@ satisfies: [REQ-FR-LLM]
 - crates/fr-llm-deepseek/**
 - crates/fr-llm-openai/**
 - crates/fr-llm-anthropic/**
+- crates/fr-wire/src/stream.rs
 
 ### Forbidden
 - Do not weaken or remove the source requirement clauses.
