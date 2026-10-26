@@ -691,3 +691,13 @@
 - 门禁事故：fn 搬移致 tests 模块丢失（计数回退 45 暴露）→ tests 重写；translate_chunk 拆 absorb_envelope 助手消 too_many_lines。
 - **workspace 四门终态（严格单跑核实）**：fmt --all --check 0 / clippy --workspace --all-targets -D warnings 0 / test --workspace 20 套件全 ok 0 failed（fr-llm-openai 56） / doc --workspace -D warnings 0。
 - **批 2 全貌（13 模块）**：compat/models/config/plugin_shell（批 1）+ json_parse(Q75-C)/hash/prompt_cache/text/usage/estimate(D14)/transcript(Q74-B)/history_transform/convert/params(十二臂)/translate（本批）。切片收口余：场景绑定（openai×2+fail_settle→pending_* 换真名）→ 合同决策块（诊断文案适配+strict 死输入+pie-ai 兼容）→ PRD 同步 → commit。
+
+## 2026-10-27 — 批 2 提交（2cae002）+ 批 3 完整收口：responses 协议双模块 + 15 钉测，四门绿 workspace 527 tests
+- 批 2 提交前四门复验（本会话实跑，严格退出码）：fmt 0 / clippy 0 / test 20 套件 512 passed（fr-llm-openai 56）/ doc 0 → 提交 2cae002（含 planning 留档；.planning 目录在 gitignore 但文件已跟踪，git add 需 -f）。
+- 绑定时机分歧裁定（源码事实）：三 pending 场景验证面（URL 构造/未声明模型拒绝/fr-error 收尾）均在批 3/4 才落——task_plan Next Step（批 3 → 批 4 绑定 → 批 5）为唯一可执行序列；progress 尾「切片收口余」行按切片收口尾项清单解读，两源调和。
+- 批 3 真源全读：api__openai-responses.ts 419 行 + api__openai-responses-shared.ts 809 行；dsh 补丁 responses hunk 实核（仅移除 delta 臂 parse 一行，.done/:666 与 output_item.done/:716 保留）；pi-ai StreamOptions 无 stop 键（types.d.ts 实查）→「采样参数透传」三 provider 勘误候选入 findings；dsh 壳 index.ts 不传 reasoningSummary/serviceTier/toolChoice（死臂证实）。
+- 批 3 落地：transform_history 加 IdNormalization 策略注入（Completions|Responses，既有调用点零语义变）+ normalize_tool_call_id_responses（补 contains('|') 门——首版丢失致无管道 id 误入管道臂，测试逮住真修）+ responses.rs（签名编解码/convert/tools/params/is_chat_gpt_sign_in，597 行）+ responses_stream.rs（ResponsesTranslator 状态机：delta_chunks/close 三助手/finalize+Azure 回填/end_of_stream 门与信封）。
+- 实现 adapted 面：arguments 字段恒串（tool_arguments→to_string，convert.rs:394 同形）；responses usage totalTokens=provider total（非四和）逐字；rawStopReason 无 fr face（批 2 同判例弃，备案）；ChatGPT sign-in 纯函数本批钉测、omit 注入留批 4 adapter。
+- 批 2 遗留发现：convert.rs tool_arguments 文档与代码不一致（文档言 raw text、代码返回 {}）——收口决策块审查项入 findings。
+- clippy ~29 项全清（拆 translate_event→delta_chunks、close_item→三助手、too_many_arguments expect 判例、map_or_else×4、identical arms 合并、deref_by_slicing 测试改形、doc_markdown、implicit_clone、lifetime elide）；事故：python 批量编辑两次模式失配中断（未写盘，读现文本重做）+ delta_chunks 抽取漏 match 开/闭括号两度（编译器逮住即修）。
+- 门禁终态（单跑核实）：fmt 0 / clippy --workspace --all-targets -D warnings 0 / test --workspace 20 套件 527 passed 0 failed（fr-llm-openai 71 = 56+15）/ doc 0。

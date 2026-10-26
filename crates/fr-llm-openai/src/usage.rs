@@ -11,7 +11,7 @@ use fr_wire::call_config::{Failure, FinishReason, FinishReasonKind, TokenUsage};
 /// absence all yield `0`. Providers do not report string counts; non-number
 /// JSON values are treated as absent (a degenerate-garbage case where JS
 /// would propagate `NaN`).
-fn truthy_count(raw: &RawObject, key: &str) -> f64 {
+pub(crate) fn truthy_count(raw: &RawObject, key: &str) -> f64 {
     raw.get(key)
         .and_then(Value::as_f64)
         .filter(|value| *value != 0.0)
@@ -22,7 +22,7 @@ fn truthy_count(raw: &RawObject, key: &str) -> f64 {
 /// `update_usage` policy.
 const SAFE_INTEGER_LIMIT: f64 = 9_007_199_254_740_991.0;
 
-fn non_negative_u64(value: f64) -> Option<u64> {
+pub(crate) fn non_negative_u64(value: f64) -> Option<u64> {
     if value.fract() != 0.0 || !(0.0..=SAFE_INTEGER_LIMIT).contains(&value) {
         // Degenerate garbage (negative or fractional counts) has no durable
         // representation; the field is dropped.

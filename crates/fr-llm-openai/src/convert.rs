@@ -21,7 +21,7 @@ use fr_wire::call_config::ToolSchema;
 /// `sanitizeSurrogates` is the identity in fr: `String` is always a valid
 /// scalar encoding and `serde_json` cannot parse lone surrogates
 /// (2026-10-27 Q75-C note; the JS-only hazard cannot reach fr history).
-const fn sanitize_surrogates(text: &str) -> &str {
+pub(crate) const fn sanitize_surrogates(text: &str) -> &str {
     text
 }
 
@@ -68,7 +68,7 @@ pub fn base64_encode(data: &[u8]) -> String {
     out
 }
 
-fn image_data_url(media_type: &str, data: &[u8]) -> String {
+pub(crate) fn image_data_url(media_type: &str, data: &[u8]) -> String {
     format!("data:{media_type};base64,{}", base64_encode(data))
 }
 
@@ -117,7 +117,7 @@ fn image_wire(media_type: &str, data: &[u8]) -> Value {
 /// re-stringified compactly (dsh `JSON.stringify(tc.arguments)` over the
 /// parsed object); unparseable history keeps its raw text
 /// ("将已解析参数 stringify 回原始串" — contract clause).
-fn tool_arguments(raw: &str) -> Value {
+pub(crate) fn tool_arguments(raw: &str) -> Value {
     match serde_json::from_str::<Value>(raw) {
         Ok(value @ Value::Object(_)) => value,
         _ => Value::Object(Map::new()),
@@ -605,7 +605,12 @@ mod tests {
             reasoning: true,
             images: &no_images,
         };
-        let turns = transform_history(&folded.messages, &ctx.route, true);
+        let turns = transform_history(
+            &folded.messages,
+            &ctx.route,
+            true,
+            crate::history_transform::IdNormalization::Completions,
+        );
         let params = convert_messages(&turns, &ctx);
         let roles: Vec<&str> = params
             .iter()

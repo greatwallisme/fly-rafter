@@ -20,6 +20,8 @@ pub mod models;
 pub mod params;
 pub mod plugin_shell;
 pub mod prompt_cache;
+pub mod responses;
+pub mod responses_stream;
 pub mod text;
 pub mod transcript;
 pub mod translate;

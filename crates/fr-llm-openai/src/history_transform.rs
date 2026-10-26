@@ -129,10 +129,98 @@ pub fn normalize_tool_call_id(id: &str, provider: &str) -> String {
     id.to_owned()
 }
 
+/// The tool-call id normalization policy (dsh `transformMessages`
+/// receives the calling pipeline's `normalizeToolCallId`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdNormalization {
+    /// The Chat Completions pipeline variant (40-character `OpenAI` limit,
+    /// `shortHash` suffix over the combined id).
+    Completions,
+    /// The Responses pipeline variant (64-character limit, `fc_` item-id
+    /// prefix, hashed ids for foreign tool calls).
+    Responses,
+}
+
+/// The providers whose Responses tool-call ids carry the
+/// `{call_id}|{item_id}` pipe pair (pi-ai `OPENAI_TOOL_CALL_PROVIDERS`,
+/// openai-responses.ts:31, verbatim).
+const RESPONSES_TOOL_CALL_PROVIDERS: [&str; 3] = ["openai", "openai-codex", "opencode"];
+
+/// One Responses id part (`normalizeIdPart`, responses-shared.ts:154-158):
+/// every character outside `[a-zA-Z0-9_-]` becomes `_`, the part caps at
+/// 64 characters, and trailing underscores strip.
+#[must_use]
+fn normalize_id_part(part: &str) -> String {
+    let sanitized: String = part
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let capped: String = sanitized.chars().take(64).collect();
+    capped.trim_end_matches('_').to_owned()
+}
+
+/// The synthetic item id for a tool call produced by another provider
+/// (`buildForeignResponsesItemId`): `fc_<shortHash>`, capped at 64
+/// characters without the trailing-underscore strip.
+#[must_use]
+fn build_foreign_responses_item_id(item_id: &str) -> String {
+    let normalized = format!("fc_{}", short_hash(item_id));
+    normalized.chars().take(64).collect()
+}
+
+/// The Responses pipeline's tool-call id normalizer
+/// (`normalizeToolCallId`, responses-shared.ts:165-177).
+///
+/// Outside the Responses tool-call provider set, or for ids without the
+/// `{call_id}|{item_id}` pipe pair, the id is a single sanitized part. A
+/// piped pair normalizes both parts; an item id from a foreign source
+/// (the producing provider differs from the route — fr route keys pin one
+/// api each, so the dsh `source.api !== model.api` disjunct is subsumed)
+/// becomes a hashed `fc_` id, and every item id must keep that prefix.
+#[must_use]
+pub fn normalize_tool_call_id_responses(
+    id: &str,
+    route_provider: &str,
+    source_provider: &str,
+) -> String {
+    if !RESPONSES_TOOL_CALL_PROVIDERS.contains(&route_provider) {
+        return normalize_id_part(id);
+    }
+    // dsh checks `!id.includes("|")` before splitting; a pipe-less id is
+    // one part even on a member route.
+    if !id.contains('|') {
+        return normalize_id_part(id);
+    }
+    let mut parts = id.split('|');
+    let (Some(call_raw), item_raw) = (parts.next(), parts.next()) else {
+        return normalize_id_part(id);
+    };
+    let call_id = normalize_id_part(call_raw);
+    let is_foreign = source_provider != route_provider;
+    let mut item_id = match item_raw {
+        Some(item) if is_foreign => build_foreign_responses_item_id(item),
+        Some(item) => normalize_id_part(item),
+        // JS destructuring of a one-element `split` leaves `itemId`
+        // undefined; the plain-part arm normalizes nothing further, but
+        // the `fc_` prefix repair still applies to the empty item id.
+        None => String::new(),
+    };
+    if !item_id.starts_with("fc_") {
+        item_id = normalize_id_part(&format!("fc_{item_id}"));
+    }
+    format!("{call_id}|{item_id}")
+}
+
 /// The assistant same-model check (transform-messages.ts:95-98): provider
 /// and model must equal the route (the `api` component is single-valued per
 /// route, so the route's api matches by construction).
-fn is_same_model(source: &MessageSource, route: &RouteIdentity<'_>) -> bool {
+pub(crate) fn is_same_model(source: &MessageSource, route: &RouteIdentity<'_>) -> bool {
     match source {
         MessageSource::Known(KnownMessageSource::Model {
             provider, model, ..
@@ -188,6 +276,8 @@ fn transform_assistant_content(
     content: &[ContentBlock],
     route: &RouteIdentity<'_>,
     same_model: bool,
+    source_provider: &str,
+    normalization: IdNormalization,
     id_map: &mut HashMap<String, String>,
 ) -> Vec<ContentBlock> {
     content
@@ -211,7 +301,16 @@ fn transform_assistant_content(
             }) => {
                 let mut call_id = id.as_str().to_owned();
                 if !same_model {
-                    let normalized = normalize_tool_call_id(&call_id, route.provider);
+                    let normalized = match normalization {
+                        IdNormalization::Completions => {
+                            normalize_tool_call_id(&call_id, route.provider)
+                        }
+                        IdNormalization::Responses => normalize_tool_call_id_responses(
+                            &call_id,
+                            route.provider,
+                            source_provider,
+                        ),
+                    };
                     if normalized != call_id {
                         id_map.insert(call_id.clone(), normalized.clone());
                         call_id = normalized;
@@ -240,6 +339,7 @@ pub fn transform_history(
     messages: &[&RequestMessage],
     route: &RouteIdentity<'_>,
     supports_images: bool,
+    normalization: IdNormalization,
 ) -> Vec<Turn> {
     let mut id_map: HashMap<String, String> = HashMap::new();
     // First pass: image downgrade and assistant normalization.
@@ -301,8 +401,20 @@ pub fn transform_history(
             } => {
                 close_pending(&mut turns, &mut pending, &mut answered);
                 let same_model = is_same_model(source, route);
-                let transformed =
-                    transform_assistant_content(content, route, same_model, &mut id_map);
+                let source_provider = match source {
+                    MessageSource::Known(KnownMessageSource::Model { provider, .. }) => {
+                        provider.as_str()
+                    }
+                    _ => "",
+                };
+                let transformed = transform_assistant_content(
+                    content,
+                    route,
+                    same_model,
+                    source_provider,
+                    normalization,
+                    &mut id_map,
+                );
                 for block in &transformed {
                     if let ContentBlock::Known(KnownContentBlock::ToolCall { id, .. }) = block {
                         pending.push(id.as_str().to_owned());
@@ -437,7 +549,12 @@ mod tests {
         let result = tool("resp_1|a");
         let foreign_msg = durable_owned(foreign);
         let result_msg = durable_owned(result);
-        let turns = transform_history(&[&foreign_msg, &result_msg], &route(), true);
+        let turns = transform_history(
+            &[&foreign_msg, &result_msg],
+            &route(),
+            true,
+            IdNormalization::Completions,
+        );
         assert_eq!(turns.len(), 2);
         let Turn::Assistant { content, .. } = &turns[0] else {
             panic!("assistant first");
@@ -462,7 +579,7 @@ mod tests {
             })],
         );
         let same_msg = durable_owned(same);
-        let turns = transform_history(&[&same_msg], &route(), true);
+        let turns = transform_history(&[&same_msg], &route(), true, IdNormalization::Completions);
         let Turn::Assistant { content, .. } = &turns[0] else {
             panic!("assistant expected");
         };
@@ -492,7 +609,12 @@ mod tests {
         let calls = assistant(model_source("p", "m"), vec![call("c1")]);
         let asks_msg = durable_owned(asks);
         let calls_msg = durable_owned(calls);
-        let turns = transform_history(&[&asks_msg, &calls_msg], &route(), false);
+        let turns = transform_history(
+            &[&asks_msg, &calls_msg],
+            &route(),
+            false,
+            IdNormalization::Completions,
+        );
         // The user turn, the assistant turn, then the synthesized result at
         // the end-of-history boundary.
         assert_eq!(turns.len(), 3);
