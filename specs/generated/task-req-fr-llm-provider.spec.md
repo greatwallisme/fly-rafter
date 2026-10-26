@@ -32,6 +32,8 @@ satisfies: [REQ-FR-LLM]
 - assistant-stream 行为（wire record 形状已在 fr-wire）：Accumulator 打包规则（同型相邻+同 index+tool-call 同 id+name 有无一致+时间差可逆才入 run；id 空串/name 空串不打包；block-start/end、usage、finish 恒 raw）；expand 为 durable 边界验证路径（exact keys、dt.length==members-1、时间保持安全整数）。
 - 2026-10-25 Q61A（用户裁决）：`AssistantStreamRecord` 的 exact-keys 由 fr-wire serde `deny_unknown_fields` 在解析期承载（等价 dsh assistant-stream.ts:530-534 exactKeys）；Allowed 增列 crates/fr-wire/src/stream.rs 单文件。
 - 2026-10-25 Q63A（用户裁决）：Accumulator 对未知 chunk kind（`StreamChunk::Other`）落 raw record 无损保留——系 fr-wire merge-extensible 既有裁决的下游扩展语义，非 dsh 偏差，不入 19.2。
+- 2026-10-26 Q66-B（用户裁决）：凭据诊断三条文案（MISSING_CREDENTIAL 一条 + INVALID_CREDENTIAL 两臂）由 dsh 的 credentials-service/web-Models-page 设施引用改为 fly-rafter configuration 自有措辞——19.2 条 21；错误码与触发语义逐字不变。
+- 2026-10-26 Q67-B（用户裁决）：deepSeekFileScope 采纳 sha2 crate（0.10.9）——Q65-A 零新增外部 crate 姿态的首个记录例外（PRD 决策 40）；Allowed 增列根 Cargo.toml 与 Cargo.lock（依赖边授权）。
 
 ## Boundaries
 
@@ -41,6 +43,8 @@ satisfies: [REQ-FR-LLM]
 - crates/fr-llm-openai/**
 - crates/fr-llm-anthropic/**
 - crates/fr-wire/src/stream.rs
+- /Cargo.toml
+- /Cargo.lock
 
 ### Forbidden
 - Do not weaken or remove the source requirement clauses.
@@ -232,31 +236,31 @@ satisfies: [REQ-FR-LLM]
 ### Rule: provider-deepseek — deepseek 协议面（provider 切片绑定）
 
 场景: deepseek 无私有 wire 扩展
-  测试: pending_req_fr_llm_deepseek_wire
+  测试: request_headers_pin_dsh_order_without_harness
   假设 使用 fr-llm-deepseek 发起请求
   当 检查发出的 HTTP 请求时
   那么 目标为 base-url 加 anthropic-version 头，且无 dsh_session_log、dsh_plugin_packages 与 x-deepseek-harness 头
 
 场景: /v1 补全与 SSE 帧校验
-  测试: pending_req_fr_llm_v1_sse
+  测试: v1_path_completion_and_sse_mismatch
   假设 配置根地址缺 /v1 且录制帧 event 名与 body.type 不一致
   当 构造请求与解析 SSE 时
   那么 请求路径强制补全 /v1，不一致帧报 MALFORMED_RESPONSE
 
 场景: message_stop 三重校验
-  测试: pending_req_fr_llm_message_stop
+  测试: message_stop_settlement_arms
   假设 stop_reason 非法、或存在未闭合块、或 tool arguments 非合法 JSON
   当 message_stop 校验时
   那么 三种情形均拒绝；正常时 stop_reason 按映射表转 finish kind、usage 以 message_start 起底被 delta 覆盖
 
 场景: 重放信封 kind 命名
-  测试: pending_req_fr_llm_kind
+  测试: replay_envelope_pins_dsh_shape
   假设 三 provider 各自产出重放信封
   当 读取 response.kind 时
   那么 deepseek 侧为 'deepseek-messages'、openai 族为 'fr-openai'、anthropic 族为 'fr-anthropic'；不可用重放降级走 'fr-foreign' 哨兵
 
 场景: Files 前缀与索引路径逐字
-  测试: pending_req_fr_llm_files
+  测试: parse_index_validates_and_names
   假设 fr-llm-deepseek 经 Files API 上传一张请求图片
   当 检查 provider 端文件名与本地索引时
   那么 文件名以 'dsh-' 开头、索引位于 <FR_HOME>/llm-deepseek/files-v3.json 且 formatVersion 为 3
@@ -286,19 +290,19 @@ satisfies: [REQ-FR-LLM]
 ### Rule: provider-shared — 三 provider 共有面（provider 切片绑定）
 
 场景: headless 与 SDK 无交互凭证库
-  测试: pending_req_fr_llm_headless_sdk
+  测试: resolve_api_key_pins_dsh_texts
   假设 headless 或 SDK 形态启动
   当 检查装配与凭证读取时
   那么 仅从环境变量与配置读取，交互式凭证库插件不在装配中
 
 场景: dsh 录制 SSE 回放产出相同 chunk 序
-  测试: pending_req_fr_llm_dsh_sse_chunk
+  测试: dsh_recorded_sse_replays_chunks
   假设 以 dsh 真实响应录制的 SSE fixture 为输入
   当 三 provider 的 SSE 解析器回放该 fixture 时
   那么 产出的 StreamChunk 序列与 dsh 解析结果一致
 
 场景: 采样参数透传 wire
-  测试: pending_req_fr_llm_wire
+  测试: projects_replay_degrade_and_request_controls
   假设 GenerateOptions 携带 temperature、max_tokens 与 stop
   当 provider 构造协议请求时
   那么 三者按协议字段透传

@@ -1,0 +1,30 @@
+[package]
+name = "fr-llm-deepseek"
+description = "Fly Rafter DeepSeek provider: Anthropic Messages protocol adapter (serialize, SSE translate, replay, credentials)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+fr-llm.workspace = true
+fr-wire.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# Namespace digest of the upload index (2026-10-26 Q67-B; the one exception
+# to the zero-new-crate posture, already in the lock graph transitively).
+sha2.workspace = true
+futures-core = "0.3"
+
+# Kernel family edge for the C-ABI dylib artifact (PRD 4.5): the plugin
+# shell links only dougong-abi across the kernel boundary.
+dougong-abi = { workspace = true }
+
+[lints]
+workspace = true

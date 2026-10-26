@@ -62,6 +62,10 @@ pub const TRANSPORT_CODE: &str = "TRANSPORT";
 /// config that drifted from preparation.
 pub const INVALID_PREPARED_CALL_CODE: &str = "INVALID_PREPARED_CALL";
 
+/// Canonical code for a provider route whose credential reference resolves
+/// to nothing (dsh `MISSING_CREDENTIAL`).
+pub const MISSING_CREDENTIAL_CODE: &str = "MISSING_CREDENTIAL";
+
 /// Codes the default (`normal`) retry policy retries (dsh
 /// `DEFAULT_RETRYABLE_CODES` in `retry-policy.ts`).
 pub const DEFAULT_RETRYABLE_CODES: [&str; 5] = [

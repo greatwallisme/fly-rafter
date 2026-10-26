@@ -7,6 +7,7 @@ members = [
     "crates/fr-wire",
     "crates/fr-session",
     "crates/fr-llm",
+    "crates/fr-llm-deepseek",
 ]
 
 [workspace.package]
@@ -34,6 +35,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 serde_yaml_ng = "0.10"
 regex = "1.13"
 indexmap = "2"
+sha2 = "0.10.9"
 
 # Internal crates
 fr-config = { path = "crates/fr-config" }

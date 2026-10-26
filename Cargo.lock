@@ -603,6 +603,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "fr-llm-deepseek"
+version = "0.1.0"
+dependencies = [
+ "dougong-abi",
+ "fr-llm",
+ "fr-wire",
+ "futures-core",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "fr-schema"
 version = "0.1.0"
 dependencies = [

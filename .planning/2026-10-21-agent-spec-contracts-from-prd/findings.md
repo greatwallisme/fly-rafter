@@ -980,3 +980,19 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - intake REQ-FR-LLM 块：新条款 REQ-FR-LLM-12 + Rule 场景 4（openai 未声明模型报错/attribution 格式不可抑制/重放 kind 命名/Files 前缀与索引路径）→ 场景 336；Source Trace 补裁决行。Q59 悬置记录在 PRD 决策 37 + 本块 Source Trace（不进 Open Questions）。
 - 排障两件：(1) Open Questions 非裸 None（带括号说明）→ work-units blocked_questions → draft-specs 跳过 LLM（19/20 份）——解析器只认裸 "None."，悬置移入 Source Trace 后 20/20 ready；(2) transition id 提取带文件名前缀致首轮全败 + README/template 两文件 id 提取空报错（非需求文件，20 真实块全过）。
 - 管线：import→accepted 20/20→work-units 全 ready→draft 20 份（LLM spec 含 LLM-12）→refine 20→depends 清理→lint-knowledge 0 errors（1092 advisory）/graph 0/plan 0→questions 40 条 0 blocking（与基线一致）→atlas build（graph 目录此前为空，重建）→bind 重放+guard（后台，结果待记）。
+
+## 2026-10-26 — Phase 13b 切片 3（fr-llm-deepseek 协议面）：Q64A/Q65A 裁决落地 + crates.io 搜索证据
+
+- 用户裁决：Q64-A 协议纯面切片（wire-types/serialize/translate/sse/transport 分类/replay/defaults/models/model-info/config resolve/凭据/请求构造 + upload-index 纯面；Files HTTP 与 adapter 网络装配后置）+ Q65-A 零新增外部 crate 路线，**附注：依赖不得盲目手写，先搜 crates.io**。
+- crates.io 搜索证据（2026-10-26，proxychains4 实查 API）：`eventsource-stream` 0.2.3（近月下载 14,074,542，2022-02 后未更，deps futures-core+nom+pin-project-lite）——src/event_stream.rs:70 `RawEventLine::Comment(_) => {}` **注释帧静默丢弃**；`sse-stream` 0.3.0（近月下载 16,587,720，2026-09 仍维护，deps bytes+futures-util+http-body(+util)+memchr+simdutf8+thiserror）——src/stream.rs:39 "Comments are ignored regardless of tracing settings" **解码侧丢弃注释**；`sse` 0.2.0（2018 死项目）；`reqwest-eventsource`（拖 reqwest，网络面被 Q64-A 后置）。SSE 家族无任何 crate 向消费者暴露注释帧。
+- 结论：dsh sse.ts:10 实证 `EventSourceParserStream({ onComment: activity })`——心跳注释喂 idle 看门狗（长推理期 keep-alive 即活动信号），系第一类可观察行为；手写 SSE 帧解析器有据（钉 eventsource-parser 语义），非盲目手写。真 HTTP 客户端选型随网络切片另裁。
+- 凭据真源（llm-deepseek-api-key/src/index.ts + config.ts）：PROVIDER='deepseek-official'；auth 头 = `x-api-key: <assertUsableApiKey(value,'llm-deepseek',ref)>`；键源 = credentials service（fr M1 无此设施）否则 launch environment 环境变量；`apiKeyEnv` 默认 `'DEEPSEEK_API_KEY'`（credential-ref role）；缺失 → MISSING_CREDENTIAL，文案 `llm-deepseek: no API key for provider route "deepseek-official"; store ${ref} through the credentials service (the web Models page writes it), or export ${ref} in the launching environment`。**分叉候选（验收时呈报）**：文案 credentials-service 子句引用 fr M1 不存在的设施（web Models page），品牌/设施适配与否待用户裁决。
+- sse.ts 全文语义（69 行）：TextDecoderStream（utf-8 流式、BOM 剥除、非法序列 U+FFFD 替换）→ EventSourceParserStream(onComment=activity)；每完整 frame 后 activity() 再 pulse；frame.data JSON 解析失败 → MALFORMED_RESPONSE 'DeepSeek Messages SSE contains invalid JSON'；`event.type` 非 string 或 frame.event!==undefined 且 ≠event.type → MALFORMED_RESPONSE 'DeepSeek Messages SSE event type mismatch'；带内 event.type==='error' → providerError(event, undefined)（transport 分类链）；未终止尾帧不当事件（eventsource-parser 语义）；message_stop 由 translate 层拥有。
+
+## 2026-10-26 批 C 下半新事实（切片 3 收口）
+- **Q66 已裁决 B（2026-10-26）**：三处凭据文案（MISSING_CREDENTIAL + INVALID_CREDENTIAL 两臂，同引不存在的 web Models page 设施）适配 fly-rafter configuration 措辞，入 PRD 19.2 条 21；错误码与触发语义逐字不变。
+- **Q67 待裁决**：deepSeekFileScope 需 SHA-256（baseURL+\0+credentials 的命名空间摘要）；workspace 无 sha2 依赖（Q65-A 零新增外部 crate），手写 SHA-256 属"依赖不得盲目手写"禁区——函数未声明（无占位），移 Files 切片随消费点落地，——**已裁决 B（2026-10-26）**：sha2 = 0.10.9 入 workspace 依赖（对齐 lock 既有传递版本），deep_seek_file_scope 落地于 upload_index.rs + 公开向量钉测（含尾部斜杠归一臂）——Q65-A 首个记录例外，PRD 决策 40。
+- dsh assertUsableApiKey 真源（llm/src/index.ts:151-165）：INVALID_CREDENTIAL 两臂文案逐字（blank/illegal characters），trim 静默；raw length>0 先过闸再 trim——空白串归 INVALID_CREDENTIAL 非 MISSING_CREDENTIAL。
+- dsh adapter.ts:132-149 请求头插入序：attribution/content-type/accept/auth/anthropic-version/anthropic-beta?/x-deepseek-harness-user-id/session-id?/compact?；fr 按 PRD 场景省略 harness 三头（19.2 记录性偏差），其余序逐字。
+- stream_idle_timeout_ms/files_api_timeout_ms 在 dsh 为正有限 Number（可小数，≤2^31-1）——fr ConnectionOptions 对应字段 u64→f64（u64 会把 0.5ms 钳成 0 破 >0 不变量）。
+- messagesApiRoot 判定用 new URL(base).pathname.endsWith('/v1')——手写实现须给 path 补前导 '/' 再 ends_with（'h/v1' 的 split 产物 'v1' 不含斜杠会误判）。

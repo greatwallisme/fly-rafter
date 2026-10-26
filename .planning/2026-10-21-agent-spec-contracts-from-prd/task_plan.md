@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-fr-llm 切片批 B + Q61A/Q62B/Q63A 裁决落地完毕：fr-wire deny_unknown_fields + LlmAdapter 三默认方法 AFIT async，四关 354 tests，lifecycle（显式 --change 变更集）0 failed/13 skipped；待用户验收提交（fr-llm 6 文件 + fr-wire stream.rs + 合同 + PRD + .planning），随后进入 fr-llm-deepseek 协议面切片（14 pending 场景）。
+切片 3 完整收口（Q66-B/Q67-B 已落地：文案适配+sha2 例外+PRD 19.2 条 21/决策 40，42 tests 四关绿 workspace 396，lifecycle 36/5/0）。待用户提交裁决后入库；下一步二选一：fr-llm-openai / fr-llm-anthropic provider crate，或网络切片（fetch/watchdog/Files HTTP 锁面）。
 
 ## Current Phase
-Phase 13b 切片 2（fr-llm seam）批 B 完成：三模块+12 钉测（合同绑定名 20/20 全落），四关全绿 workspace 353 tests，lifecycle 28 pass/13 skipped，explain 27/0/13 待用户验收提交
+Phase 13b 切片 3（fr-llm-deepseek 协议面）完整收口：批 C 下半 + Q66-B/Q67-B 裁决落地（42 tests，lifecycle 36 pass/5 skip/0 fail，PRD 19.2 条 21/决策 40 同步）；工作区待用户验收提交
 
 ## Phases
 
