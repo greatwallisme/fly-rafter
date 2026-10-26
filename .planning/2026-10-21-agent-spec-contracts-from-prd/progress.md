@@ -509,3 +509,86 @@
 - **门禁复跑全绿**：lint Quality 100% → lifecycle 36 pass/5 skip/0 fail（clippy 修复后以最终代码状态复跑）→ guard 本 spec 0 failed/5 skipped（skip 计 not passing 属既有口径；其余 19 spec 之 1 failed 各为未实现切片常态，--no-verify 惯例 progress.md:174）→ stamp dry-run Spec-Passing: false（5 skipped 无 trailer）。
 - 四关实跑全绿：fmt 0 / clippy workspace --all-targets -D warnings 0（doc 首段拆分/file_id none_or 化/redundant closure 三修）/ test --workspace 396 passed 0 failed（fr-llm-deepseek 42 = 41+1 scope 钉测）/ doc -D warnings 0。
 - 切片 3 就此完整收口：协议面全模块 + 8 场景绑定 + 两裁决落地 + PRD/合约/门禁三线同步。工作区待用户验收提交。
+
+## 2026-10-26 — 会话恢复（/clear 后）：切片 3 入库确认 + Q68 下一切片裁决呈报
+
+- 恢复核实：HEAD ed3cf97（切片 3 完整收口提交）在库，工作树净；plan 目录解析成功；task_plan/progress/findings 已读。
+- 用户已验收提交切片 3（ed3cf97）——task_plan Next Step / Current Phase 刷新；Phase 13b 勾选回填（fr-llm trait、retry_policy、deepseek 协议面三项 complete，Status 转 in_progress）。
+- Q68 事实收集（下一切片三选一，全部实查）：LLM 合约 pending 仅 5 条（specs/generated/task-req-fr-llm-provider.spec.md:271,277,285,311,317 = openai_base_url/openai/anthropic/fail_settle/toolupdate）；A fr-llm-openai 真源 = dsh packages/llm/llm-pi-ai/src 4265 行（completions+responses 双协议）；B fr-llm-anthropic = anthropic-messages 协议（协议面与切片 3 同族）；C fr-llm-deepseek 网络执行面 = llm-deepseek/src 余量 10 文件 1344 行（transport 44/files-api 262/file-store 336/host 65/images 111/image-tokens 157/request-extensions 59/request-files 158/request-pricing 111/index 41），解锁 fail_settle 绑定；toolupdate 绑定依赖 A+B 两 crate 齐。
+- 待用户裁决 Q68 后按七步合约流启动下一切片（真源全读 → Q 呈报 → 实现）。
+
+## 2026-10-26 — Q68-C 裁决落地：切片 4（fr-llm-deepseek 网络执行面）真源全读 + Q69-Q72 呈报
+- 用户裁决 Q68-C。dougong-plugin-dev 技能激活（内核事实入上下文：dylib 受信任可自有线程 I/O、HostExports.require 任意线程同步阻塞、插件自有线程空栈起）。
+- 真源全读完成（全文实读）：llm-deepseek/src 余量 11 文件 1522 行（adapter 178/files-api 262/file-store 336/request-files 158/images 111/image-tokens 157/request-pricing 111/request-extensions 59/host 65/index 41/timeout 包 212），语义要点全量入 findings「切片 4 真源全读」节。
+- 事实更正一件（自查自纠）：Q68 呈报「C 解锁 fail_settle 绑定」失真——补核 llm-pi-ai/stream.ts:222-236，error→usage+finish 结算是 pi-ai 系 adapter 行为，fail_settle 绑 A/B 切片；deepseek 系 throw 路径对应契约在 LlmRuntime（后置）。C 无新增场景绑定（LLM 合约 pending 5 条全系 A/B 与 runtime）。
+- fr 侧接缝核实：fr-llm trait 面/AbortSignal 查询面/fr-llm-deepseek 已移植清单/plugin_shell 注册协议后置声明/PRD:107 宿主 tokio 钉面。
+- 新发现：attachment 域（readImageRequest 归一化管线）在 PRD 4.5 布局与 intake 需求块双缺——PRD 覆盖缺口，归属待裁（Q71 附带呈报，M1 不阻塞）。
+- 集中呈 Q69-Q72（HTTP 缝载体 / dsh-timeout 归属 / attachment 缝 / request-extensions 处置）+ 推定项 D1-D4；待裁决后按七步合约流启动实现。
+
+## 2026-10-26 — Q70B/Q71B/Q72A 裁决落地登记 + Q69 重呈（用户纠正分期话术）
+- 用户严令（已入长期记忆 no-deferral-phasing-language）：严禁"后置/M1 验收前落地/再实现"分期话术拆分裁决；选项必须是本切片完整终态。
+- Q70B：fr-timeout 独立小 crate（dsh util/timeout 212 行同构移植；PRD 4.5 布局增行勘误随实现落地）。
+- Q71B：本切片连归一化管线一起实现（readImageRequest 解码→投影→编码；image 处理 crate 随裁决进 lock 图；真源 packages/attachment/attachment/src 6 文件动工前全读；管线落位 fr-llm-deepseek 随 request_image.rs「未来归属 attachment crate」附注既判）。
+- Q72A：request-extensions 全量移植（no-op 默认 + 碰撞/降级/accept 三语义 + host 三条首现 warn 文案）。
+- progress.md:519 垃圾行清除（上轮坏命令残迹）。
+- Q69 重呈（B ureq+rustls 插件内置 vs C 宿主网络服务），等用户显式裁决后动工。
+
+## 2026-10-26 — Q69B 裁决：四裁决齐（Q69B/Q70B/Q71B/Q72A + D1-D4），切片 4 进入七步实现
+- 用户裁决 Q69-B：ureq + rustls 阻塞式 HTTP 客户端内置 fr-llm-deepseek；插件自有工作线程阻塞读 → channel → Stream 适配；SSE 增量读 into_reader()；multipart 手拼字节；idle watchdog 竞速 + read_timeout 兜底；零 tokio 进插件；dsh fetch 注入缝保留（钉测注入）。
+- 裁决全链：Q68-C 切片 + Q69-B HTTP 载体 + Q70-B fr-timeout 独立 crate + Q71-B 归一化管线本切片实现（image crate 进 lock 图）+ Q72-A request-extensions 全量移植 + D1-D4 推定成立。
+- 实现序列：attachment 真源补读（6 文件）→ PRD 勘误（4.5 布局增 fr-timeout 行 + 决策 41）→ 合约 Decisions/Allowed 精化 → fr-timeout crate → attachment 归一化 → http transport → files-api/file-store/request-files → images/image-tokens/request-pricing/request-extensions → adapter 执行面 → 四关 + lifecycle + guard + stamp。
+
+## 2026-10-26 — 切片 4 批 0/批 1：PRD 决策 41 + 合约同步 + fr-timeout crate 四关绿
+- 依赖实查（crates.io API 经 proxychains，User-Agent 必带）：ureq 3.5.0（默认 rustls）/ image 0.25.10（webp 仅 lossless 编码）/ webp 0.3.1（薄封装不暴露 method）/ libwebp-sys 0.14.4（bindgen 静态链接，高级 API 含 WebPConfig.method）——定案 image+libwebp-sys 直用，method=0 对齐 WEBP_ENCODING_EFFORT=0。
+- PRD 落地：4.5 布局增 fr-timeout 行（宿主无关库）+ 23 节决策 41（Q68-C/Q69-B/Q70-B/Q71-B/Q72-A 五裁决全记录，含像素级字节差异定性=编解码器内部差不入 19.2、compression-limiter 不移植理由）。
+- 合约同步：LLM 合约 Decisions 补裁决行 + Allowed 增 crates/fr-timeout/**；lint 复跑 advisory-only（open-question 既有口径）。
+- fr-timeout crate 落地（dsh util/timeout 212 行阻塞面同构映射）：TimeoutReason{code,timeout_ms}+Display '{code} after {n}ms' 逐字 / MAX_TIMER_DELAY_MS 2^31-1 / assert_timer_delay+clamp_timeout 文案逐字 / DeadlineSignal（首 abort 胜，AtomicBool+Mutex<AbortKind>，AbortKind=Timeout|Upstream）/ Deadline（<=0 无计时哨兵先于断言——测试期望初版写反，对照 dsh 真源修正测试非实现）/ IdleWatchdog（构造即臂、pulse 重臂、check 融合 upstream+到期、可重臂窗口）/ timeout_of 分类面。JS 事件循环结构→阻塞面映射：dsh watchdog.next 竞速→读循环小步窗口+check()；「timer 仅 next 期间在场」→每成功读重置；disposal→drop 无需独立面（注释载明）。
+- 测试 5：display 钉文/assert 域+文案/clamp 语义+文案/deadline 哨兵+到期+融合+文案/watchdog 到期+文案。
+- 门禁实跑：fmt 0 / clippy -p fr-timeout --all-targets -D warnings 0（8 项清零：Eq 派生×2/redundant closure/collapsible if/must_use/长文档段×3/const fn）/ test 5 passed / doc 0。自纠：Mutex 不可 Clone 去 derive；map(Clone::clone) 歧义修。
+- 待续：批 2 attachment 管线（依赖入 Cargo.toml + libwebp-sys bindgen 构建验证）→ 批 3 http transport → 批 4 files 族 → 批 5 adapter 执行面 → 门禁序列。
+
+## 2026-10-26 — 切片 4 批 2：request_image_pipeline（归一化管线）落地（编译过，钉测收口中）
+- 依赖定稿入图：workspace deps 增 ureq 3.5（默认 rustls）/ image 0.25（default-features=false，png+jpeg+gif+webp 四解码 + jpeg 编码）/ libwebp-sys 0.9（fetch 走 rsproxy 镜像零代理；0.14 系 bindgen 需 libclang 本机无，0.9.6 实查含高级 API WebPConfig.method/WebPPicture/WebPMemoryWriter——薄封装 webp 0.3 不暴露 method 故直用 -sys）+ fr-timeout path 边；fr-llm-deepseek 增四依赖边。lock 实查：image 0.25.10/libwebp-sys 0.9.6/ureq 3.5.0。
+- 新模块 crates/fr-llm-deepseek/src/request_image_pipeline.rs（887 行含测试）：AttachmentError{message,code}（INVALID_IMAGE/INVALID_ATTACHMENT_REF/ATTACHMENT_WRITE_FAILED/ABORTED 四码逐字）/ detect_image（image crate 全解码：format→media、ColorType 8bit 族→Uchar、has_alpha；space 恒 Srgb 带注释——image crate 无色彩管理，dsh space 检查在真路径不可达防御）/ encoded_alpha_is_compatible 三臂逐字 / descriptor 手拼 JSON（字段序逐字）+ request_image_variant_id（sha256 hex，'sha256:' 前缀；钉测期望 python hashlib 独立预计算 be2e08ca…）/ encode_jpeg（JpegEncoder quality min u8）/ encode_webp（libwebp 高级 API unsafe：config.method=WEBP_ENCODING_EFFORT=0、ImportRGBA、MemoryWriter、每路径 PictureFree+WriterClear 单次，SAFETY 全注）/ encode_first_within_limit（first-fit else smallest，LadderOutcome）/ resized_long_edge（长边单边 resize，Lanczos3，withoutEnlargement 语义）/ encode_ladder（alpha→webp/否则 jpeg ×[85,75,60]）/ create_request_image（pass-through 臂：target≥源且 bytes≤max → 字节原样，has_alpha 由调用方以 source probe 覆写）/ cache_path（root/request-images/<hash[0..2]>/<hash>）/ read_cached（读错/解码错→miss；abort→上抛 ABORTED）/ verify_request_image（重探测五事匹配，违者 ATTACHMENT_WRITE_FAILED 文案逐字）/ write_cached（0700 目录+0600 wx tmp+rename，/dev/urandom 16B tmp 名——randomUUID 对应，fr-session urandom 决策同构）/ read_request_image_file 入口（validate_target 三段文案逐字/ensure_live 信号面）。
+- 编译自纠 10+4 项（AbortSignal 路径 fr_llm::adapter/request_image 类型导入/io::Error map_err/JPEG quality u8/ImageEncoder trait 导入/custom_ptr 双层指针 cast/imageops::resize 返回 ImageBuffer 包 Rgba8/闭包 copied+显式 Box dyn 标注/cached 部分移动先行 is_some/read_cached abort 语义修正——dsh 错误路径 abort 上抛他错 miss，初版双 None 已纠）。
+- 待：钉测 8 个运行确认 → fmt/clippy/doc 三门 → 批 3 http transport。
+
+## 2026-10-26 — 切片 4 批 2 收口 + 批 3 启动
+- rust-expert 回执：45 项 clippy 全清（只动 request_image_pipeline.rs 一个文件），我方独立复验四门：fmt 0 / clippy -p fr-llm-deepseek --all-targets -D warnings 0 / test 50 passed 0 failed / doc 0——批 2 完整收口。合规要点：13 条逐字文案零改（digest 钉测 sha256:be2e08ca… 过=descriptor 字节级未动）、零模块级 allow、仅两处 item-level expect（float→int 无败转换）、测试断言零变。FFI 修复含 i32::try_from 前置（泄漏面消除）与 checked_mul stride。
+- 批 3 事实备料：ureq 3.5 config（max_redirects(0)+3xx 判错=redirect:'error' 同构、timeout_per_read 读窗口、timeout_connect）——生产后端 + Fetch trait 注入缝（钉测注入）双面。
+- 下一步：http.rs → files-api/file-store/request-files → 呈 Q73 → adapter 执行面。
+
+## 2026-10-26 — 切片 4 批 3 收口 + 批 4a（files_api）落地
+- 事故一件（自查自纠，根因链完整留档）：files_api.rs 写完后 cargo check 屡显 Finished 0.04s 且金丝雀（SYNTAX_CANARY_BREAK 追加）不被抓——排查发现 **files_api.rs 从未注册进 lib.rs**（死文件，cargo 不编译它）；叠加另一 Claude 会话在同一仓库并行跑 cargo（ps 实证 PID 1954835）造成锁竞争与假 Finished。修复：lib.rs 注册后真错误浮出（E0432/E0603/E0425×3）逐修。教训沉淀：新模块落盘后**立即**注册 mod 并跑 check 确认「有编译动作」（看 Compiling 行而非 Finished）；rg -r 陷阱第四次复踩（仅输出失真）。
+- files_api.rs 收口（806 行）：常量五件（MIN/MAX_FILE_EXPIRY 3600/2592000、UPLOAD 128MiB、COUNT 10000、BYTES 25GiB）/ FileObject/Page/WithExpiry 类型 / FilesError{error:LlmError,detail}+from_llm+error_code/detail 访问器 / is_files_quota_error 五词查（dsh 正则的 contains 等价）/ parse_epoch_seconds（RFC3339 手解析：Hinnant days_from_civil + **-719468 civil 纪元修正**——首轮漏减致 36 倍差，测试逮住；±HH:MM 偏移应用；小数秒 floor）/ encode_segment（encodeURIComponent 等价）/ DeepSeekFilesClient（new 归一 /v1、base_headers 四序 attribution→auth→anthropic-version→anthropic-beta、request 核心：入口 abort→TRANSPORT 包装、read_to_end、非 2xx 尽力 JSON→FilesError{message??`DeepSeek Files API error (HTTP n)`,status,detail}、2xx JSON 解析 INVALID_RESPONSE 文案）/ multipart（boundary='----fr-formdata-'+urandom hex、expires_after[anchor]/[seconds]/file 三 part、Content-Type media、尾 --）/ upload 预检两文案（I/O 前置断言钉测）/ list（after_id/limit、页形校验）/ retrieve / delete（id+file_deleted 双校验）。
+- 钉测 5：parse_epoch_seconds（五时区形态+两拒）/ upload_pins_request_shape_and_deadline（URL 归一+头序五件+multipart 三 part+deadline 算术）/ upload_prechecks（两文案+I/O 前置断言）/ error_classification（401→AUTH 消息保留、400 quota→FILES_API+detail+is_files_quota_error、429→RATE_LIMIT 回退文案、503→SERVER）/ list_and_delete（游标参数、has_more 类型错拒、delete 双校验拒）。
+- 通道损坏应对：本模块多轮 heredoc/锚点插入出现块乱码（撕裂 match/臆造调用/重复 mod tests 副本 630-646/悬空 #[cfg(test)]/Rust 禁 &str 相加 concat! 补逗号）——全部锚点外科修复，最终 810 行单 mod tests。
+- 门禁：58 passed 0 failed / doc 0 / fmt 过；clippy 28 项（新增代码机械项）按新策略**中间态不追零**——批 4/5 全部写完后一次性委派 rust-expert 终清（避免逐批交替等待），切片收口时四门全绿验收。
+- 待续：file_store.rs → request_files.rs → 呈 Q73 → adapter 执行面 + request_extensions + images/image-tokens/pricing。
+
+## 2026-10-26 — Q73-A 裁决落地（PRD 决策 41 尾补 + 合约 Decisions 行）
+- 用户裁决 Q73-A：deepseek 适配器错误通道 = 执行面内部完整 Result 通道；stream() 终结前 emit Other({'type':'fr-error','message','code'}) 后终止；'fr-error' 系 adapter 私有值域（Q58-2 判例同构，非协议字段不入 19.2）；runtime 注册表切片消费映射为 throw 语义。
+- PRD 决策 41 尾补 Q73-A 句；LLM 合约 Decisions 补行。
+- 批 4b/5（file_store 主体/request_files/images/image-tokens/pricing/request_extensions）已委派后台执行（蓝图=findings「批 4b/5 实施蓝图」节，硬约束：文案逐字/禁新依赖/逐模块注册 lib.rs/编译确认有 Compiling 行）；adapter 执行面待批 4b 回执后按 Q73-A 动工（避免并行写同 crate 干扰验收）。
+
+## 2026-10-26 — 切片 4 批 4b 验收（88 tests）+ adapter 委派
+- 批 4b 委派回执验收（我方独立复验）：fr-llm-deepseek 58→**88 passed**、fr-llm 27→28（D1 projection 几何助手）、workspace 448 全绿；六新模块注册齐全（upload_index 补全 DeepSeekUploadIndex flock sidecar/family file_store/request_files/image_tokens/request_pricing/images/request_extensions）。
+- 委派方自纠亮点：upload_index commit 漏 push candidate 真 bug（索引静默清空）逮住修复；attachment id 32-hex vs 128 digest 夹具错修；fetch_sub 回绕改 compare_exchange。
+- 蓝图偏差六项均有因备案：FileStoreError 第三变体 Index{message}（dsh 无稳定码，伪造 wire 码违 19.2 治理）/ scope() 强类型 DeepSeekFileScope / UsedRequestFile 存渲染事实（免多兆字节克隆）/ flock sidecar（dsh PID-record 系 Windows 语义，19.2 条 15 POSIX-only 既判）/ deadline post-hoc（fr-timeout 阻塞面「各能力自持停止机制」设计）/ regex 依赖边（lock 图内既存）。
+- 已知中间态：files_api.rs 遗留未用导入 UreqFetch/Sha256/Digest + 3 缺 Debug + ~50 clippy pedantic——全部留给终清（未 suppress）。
+- 下一步：adapter.rs 执行面委派（Q73-A 形）→ rust-expert 终清 → 四门 + lifecycle/guard/stamp。
+
+## 2026-10-26 — 切片 4 批 5（adapter 执行面）验收：96 tests，workspace 456 绿
+- adapter 委派回执 + 我方独立复验：fr-llm-deepseek 88→**96 passed**（+8：recorded SSE 全链 9-chunk 序/传输中途失败→fr-error 单记录/头序+URL+无 harness 头泄漏/betas 双臂/idle timeout 逐字映射/prepare_call admit 拒绝零网络 I/O/未声明模型文案/host 三 warn 首现）、fmt OK、fr-error 常量/ABORTED_CODE（fr-llm error.rs:63 共享词汇表）/UNKNOWN_MODEL_CODE（codes.rs:36）全部实证在位；workspace 456 全绿。
+- adapter.rs（~1460 行，Q73-A 形）：内部 Result 通道（run_stream/run_request/request_attempt）+ stream() 终结前 Other{'type':'fr-error','message','code'}（字段序钉测）+ worker 线程 mpsc + waker 共享 ChannelStream（futures_core）+ idle_watchdog('MESSAGES_IDLE') 每读窗检查+活动脉冲 + request 循环全序（prepare_images→resolve_auth→RequestFiles inline 回退→serialize→extensions→betas→POST 头序六件零私有头→非 ok retry/error_message→ok accept→空体 EMPTY_RESPONSE→增量 UTF-8（跨块部分字节缓冲+U+FFFD）→SseParser→逐帧校验→Translator→end_of_stream STREAM_CLOSED）+ 错误映射四臂逐字（idle/aborted/LlmError 透传/TRANSPORT）+ on_request_error 映射 + HostWarnings 三文案首现协调器。
+- types.rs 扩：RequestAuth/FilesSeam（FR_HOME→~/.fly-rafter→temp 解析）/Dependencies 12 缝全形 + 10 回调别名；fr-llm error.rs 增 ABORTED_CODE；codes.rs 增 UNKNOWN_MODEL_CODE。
+- 偏差 11 项全部有因备案（要点）：trait 面无错误通道 → image_request_target 走 inherent 可败方法（registry 切片经它派发）/prepare_call admit 拒绝在派发期以 fr-error 流出（零 I/O 钉测）/connect Err 降级 options() 快照/resolve_files 载 durable 配料请求期绑 store（durable index 共享=inflight 去重请求局部，顺序阻塞面无观察差）/fetch+now_ms 两条 fr 缝（dsh 环境面的显式化）/帧校验 adapter 内重实现（validate_frame 私有+约束禁碰 sse.rs，三校验文案同）。
+- 门禁：96 passed / fmt 0 / doc（委派方自查零警告）；clippy ~40-60 pedantic + files_api 未用导入留给终清委派（已发）。
+- 终清验收标准：三 crate 四门全绿（96/5/28 不变）+ 文案逐字 + 零模块级 allow。
+
+## 2026-10-26 — 切片 4 完整收口：终清四门绿 + 门禁序列全跑 + 待验收
+- rust-expert 终清回执 + 我方独立复验终态：**fr-llm-deepseek/fr-timeout/fr-llm 三 crate 四门全绿**——fmt 0 / clippy --all-targets -D warnings 0（起点 136+4 项全清）/ 96+5+28 tests 不变 / doc 0。要点修复：result_large_err 根因修（FilesError.error → Box<LlmError>，12 处构造点）、request_attempt 190 行拆三段+AttemptContext、unused_async_trait_impl 三方法改 fn->impl Future(ready)、implicit_hasher 三处泛型化（serialize.rs 先例）、float_cmp/suboptimal_flops 项级 expect 载 JS Number parity 理由、文案零改（钉测过=字节级证明）。
+- 门禁序列全跑（终态代码）：lifecycle 显式变更集六项（crate+fr-llm error.rs/projection.rs+fr-timeout+Cargo.toml+/Cargo.lock）= **36 pass / 5 skip / 0 fail**（quality 1.0；pending 5 = openai×2/anthropic/fail_settle/toolupdate，exit 1 既有口径）→ guard（LLM spec 0 failed/5 skipped 基线一致；全仓 exit 1 系他 spec 未绑常态，--no-verify 惯例 progress.md:174）→ explain exit 0（40 场景 35/0/5）→ stamp dry-run Spec-Passing: false（5 skipped 无 trailer，既有口径）。
+- 事故一件（自查自纠）：终清并发期间首跑 lifecycle 得 40 uncertain 全场景——测试执行层被并发 cargo 干扰的假信号；识别后作废该轮，终态重跑。教训：门禁数字必须以终态代码单线程跑出。
+- 切片 4 全貌：新 crate fr-timeout（dsh-timeout 同构 5 tests）+ fr-llm-deepseek 新增 13 模块（http/files_api/file_store/request_files/images/image_tokens/request_pricing/request_extensions/request_image_pipeline/adapter/types 扩/adapter 依赖缝）+ fr-llm 增 ABORTED_CODE 与 projection 几何助手；42→96 tests；裁决链 Q68-C/Q69-B/Q70-B/Q71-B/Q72-A/D1-D4/Q73-A 全落（PRD 决策 41 尾补 + 合约 Decisions）；workspace 456 tests 全绿。
+- 工作区待用户验收提交（guard 阻断期 --no-verify 惯例）。下一切片二选一：fr-llm-openai（A，真源 llm-pi-ai 4265 行双协议，2 pending 场景）/ fr-llm-anthropic（B，anthropic-messages，1 pending 场景）。

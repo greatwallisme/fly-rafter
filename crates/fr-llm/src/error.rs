@@ -58,6 +58,10 @@ pub const TIMEOUT_CODE: &str = "TIMEOUT";
 /// socket error, truncated stream).
 pub const TRANSPORT_CODE: &str = "TRANSPORT";
 
+/// Canonical code for a request the caller cancelled before settlement
+/// (dsh `ABORTED`).
+pub const ABORTED_CODE: &str = "ABORTED";
+
 /// Canonical code for reusing a prepared call twice or dispatching it with a
 /// config that drifted from preparation.
 pub const INVALID_PREPARED_CALL_CODE: &str = "INVALID_PREPARED_CALL";

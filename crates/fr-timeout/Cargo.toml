@@ -1,0 +1,15 @@
+[package]
+name = "fr-timeout"
+description = "Fly Rafter shared timeout primitives: fused deadline signals, one-shot deadlines, and rearmable idle watchdogs (dsh util/timeout same-shape port)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+# Rust guideline compliant 2026-10-26

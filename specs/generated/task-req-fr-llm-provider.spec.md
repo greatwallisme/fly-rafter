@@ -34,6 +34,7 @@ satisfies: [REQ-FR-LLM]
 - 2026-10-25 Q63A（用户裁决）：Accumulator 对未知 chunk kind（`StreamChunk::Other`）落 raw record 无损保留——系 fr-wire merge-extensible 既有裁决的下游扩展语义，非 dsh 偏差，不入 19.2。
 - 2026-10-26 Q66-B（用户裁决）：凭据诊断三条文案（MISSING_CREDENTIAL 一条 + INVALID_CREDENTIAL 两臂）由 dsh 的 credentials-service/web-Models-page 设施引用改为 fly-rafter configuration 自有措辞——19.2 条 21；错误码与触发语义逐字不变。
 - 2026-10-26 Q67-B（用户裁决）：deepSeekFileScope 采纳 sha2 crate（0.10.9）——Q65-A 零新增外部 crate 姿态的首个记录例外（PRD 决策 40）；Allowed 增列根 Cargo.toml 与 Cargo.lock（依赖边授权）。
+- 2026-10-26 Q68-C/Q69-B/Q70-B/Q71-B/Q72-A（用户裁决，PRD 决策 41）：切片 4 = fr-llm-deepseek 网络执行面——Q69-B 生产 HTTP 载体 ureq 3.5（默认 rustls）阻塞式内置 crate（插件自有线程阻塞读 → channel → Stream 适配；dsh fetch 注入缝保留钉测）；Q70-B dsh-timeout 移植为独立 crate fr-timeout（Allowed 增列 crates/fr-timeout/**）；Q71-B request-image 归一化管线本切片实现于 fr-llm-deepseek（image 0.25 + libwebp-sys method=0 对齐 WEBP_ENCODING_EFFORT=0；wire 可见面逐字、像素级字节差异同编解码器内部差不入 19.2）；Q72-A request-extensions 全量移植（no-op 默认）。 Q73-A（用户裁决）适配器执行面错误通道：stream() 终结前 emit Other('fr-error' 记录，Q58-2 自有命名判例同构) 后终止，runtime 注册表切片消费映射。
 
 ## Boundaries
 
@@ -43,6 +44,7 @@ satisfies: [REQ-FR-LLM]
 - crates/fr-llm-openai/**
 - crates/fr-llm-anthropic/**
 - crates/fr-wire/src/stream.rs
+- crates/fr-timeout/**
 - /Cargo.toml
 - /Cargo.lock
 

@@ -5,6 +5,7 @@ members = [
     "crates/fr-config",
     "crates/fr-schema",
     "crates/fr-wire",
+    "crates/fr-timeout",
     "crates/fr-session",
     "crates/fr-llm",
     "crates/fr-llm-deepseek",
@@ -36,6 +37,11 @@ serde_yaml_ng = "0.10"
 regex = "1.13"
 indexmap = "2"
 sha2 = "0.10.9"
+# Slice 4 facility rulings (PRD decision 41): ureq blocking client (rustls
+# default), image codecs, and libwebp advanced API (method=0 ladder effort).
+ureq = "3.5"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+libwebp-sys = "0.9"
 
 # Internal crates
 fr-config = { path = "crates/fr-config" }
@@ -43,6 +49,7 @@ fr-llm = { path = "crates/fr-llm" }
 fr-schema = { path = "crates/fr-schema" }
 fr-wire = { path = "crates/fr-wire" }
 fr-session = { path = "crates/fr-session" }
+fr-timeout = { path = "crates/fr-timeout" }
 
 # Lint table aligned with the dougong workspace (PRD 21): the zero-warning
 # gates (fmt / clippy -D warnings / test / doc) must stay reproducible.

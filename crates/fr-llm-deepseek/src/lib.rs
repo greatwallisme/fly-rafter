@@ -7,17 +7,27 @@
 //! face is the plugin shell; the rlib face is the behavior library that a
 //! future network slice wires to real HTTP transport.
 
+pub mod adapter;
 pub mod auth;
 pub mod codes;
 pub mod config;
 pub mod defaults;
 pub mod file_id;
+pub mod file_store;
+pub mod files_api;
+pub mod http;
+pub mod image_tokens;
+pub mod images;
 pub mod messages_api;
 pub mod model_info;
 pub mod models;
 pub mod plugin_shell;
 pub mod replay;
+pub mod request_extensions;
+pub mod request_files;
 pub mod request_image;
+pub mod request_image_pipeline;
+pub mod request_pricing;
 pub mod serialize;
 pub mod sse;
 pub mod translate;

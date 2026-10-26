@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-切片 3 完整收口（Q66-B/Q67-B 已落地：文案适配+sha2 例外+PRD 19.2 条 21/决策 40，42 tests 四关绿 workspace 396，lifecycle 36/5/0）。待用户提交裁决后入库；下一步二选一：fr-llm-openai / fr-llm-anthropic provider crate，或网络切片（fetch/watchdog/Files HTTP 锁面）。
+切片 4（fr-llm-deepseek 网络执行面）完整收口待用户验收：四门全绿（三 crate fmt/clippy/test 96+5+28/doc）+ lifecycle 36/5/0 + guard LLM 0 failed/5 skipped + explain 35/0/5 + stamp dry-run false（5 skipped 既有口径）。裁决链 Q68-C/Q69-B/Q70-B/Q71-B/Q72-A/D1-D4/Q73-A 全落 PRD 决策 41。验收提交后下一切片二选一呈报：fr-llm-openai / fr-llm-anthropic。
 
 ## Current Phase
-Phase 13b 切片 3（fr-llm-deepseek 协议面）完整收口：批 C 下半 + Q66-B/Q67-B 裁决落地（42 tests，lifecycle 36 pass/5 skip/0 fail，PRD 19.2 条 21/决策 40 同步）；工作区待用户验收提交
+Phase 13b 切片 4 完整收口：96 tests 四关绿 + 门禁序列全跑毕，工作区待用户验收提交
 
 ## Phases
 
@@ -105,12 +105,12 @@ Phase 13b 切片 3（fr-llm-deepseek 协议面）完整收口：批 C 下半 + Q
 - **Status:** in_progress
 
 ### Phase 13b: fr-llm seam + 三 provider
-- [ ] fr-llm：LlmAdapter trait（stream 必实现 + 7 默认方法）、GenerateOptions、StreamChunk 七种、流装配结算（block-end 上 delta 忽略、重复 close 忽略、delta-only 兜底、缺 id/name 兜底 call-<index>、max-tokens 过滤、ReplayEnvelope 一致性）、prepare_call 代际绑定、toolUpdate 能力差异表
-- [ ] provider_retry_policy 结构（normal/always、maxRetries 5、retryableCodes 默认 5 类、backoff 500/10000/jitter 0.1 对称抖动；执行方 llm-retry 挂 agent 失败步扩展点，LLM 核心不自执行）
-- [ ] fr-llm-deepseek：Anthropic Messages 协议（/v1 强制补、SSE 解析、结算校验、stop_reason 映射、usage message_start 起底 message_delta 覆盖、错误分类 401/403→AUTH 等）
+- [x] fr-llm：LlmAdapter trait（stream 必实现 + 7 默认方法）、GenerateOptions、StreamChunk 七种、流装配结算（block-end 上 delta 忽略、重复 close 忽略、delta-only 兜底、缺 id/name 兜底 call-<index>、max-tokens 过滤、ReplayEnvelope 一致性）、prepare_call 代际绑定、toolUpdate 能力差异表（批 A/B 落地，36ef3c1 + 11ee0a9）
+- [x] provider_retry_policy 结构（normal/always、maxRetries 5、retryableCodes 默认 5 类、backoff 500/10000/jitter 0.1 对称抖动；执行方 llm-retry 挂 agent 失败步扩展点，LLM 核心不自执行）（批 A 落地 36ef3c1，Q60A 精化 40f1801）
+- [x] fr-llm-deepseek：Anthropic Messages 协议（/v1 强制补、SSE 解析、结算校验、stop_reason 映射、usage message_start 起底 message_delta 覆盖、错误分类 401/403→AUTH 等）（切片 3，ed3cf97；网络执行面 transport/files-api/file-store/images 族 10 文件余量待切）
 - [ ] fr-llm-openai / fr-llm-anthropic
-- [ ] 对照 REQ-FR-LLM 场景逐条落测试
-- **Status:** pending
+- [ ] 对照 REQ-FR-LLM 场景逐条落测试（36 passed / 5 skipped / 0 failed；余 openai×2 / anthropic / fail_settle / toolupdate）
+- **Status:** in_progress
 
 ### Phase 14: fr-tools + fr-approval + fr-sandbox
 - [ ] fr-tools：ToolRegistry（register：名称/JSON Schema/executionMode/presentation/section order 1000-3000）、MCP raw schema 动态注册

@@ -406,6 +406,129 @@ pub fn required_image_offload(
     offloaded_image_prefix_count(&lengths, budget)
 }
 
+/// Integer width and height of one projected image (dsh
+/// `ProjectedDimensions`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProjectedDimensions {
+    /// Projected width in pixels.
+    pub width: u32,
+    /// Projected height in pixels.
+    pub height: u32,
+}
+
+/// Convert one clamped-positive projected length to pixels; the bounded
+/// inputs keep every conversion exact.
+const fn projected_pixel(value: f64) -> u32 {
+    #[expect(
+        clippy::cast_sign_loss,
+        clippy::cast_possible_truncation,
+        reason = "callers pass max(1, ...) positive values bounded by the source dimensions"
+    )]
+    {
+        value as u32
+    }
+}
+
+/// Convert one pixel budget for the shared arithmetic; budgets are far
+/// below the f64 mantissa.
+const fn budget_pixels(max_pixels: u64) -> f64 {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "pixel budgets are far below the 2^53 f64 mantissa"
+    )]
+    {
+        max_pixels as f64
+    }
+}
+
+/// Compute aspect-preserving integer dimensions within a hard total-pixel
+/// budget (dsh `requestImageDimensions`): inward-rounded; small images are
+/// not enlarged.
+#[must_use]
+#[expect(
+    clippy::float_cmp,
+    reason = "JS Number parity: dsh compares scale === 1 exactly; the sqrt path is deterministic"
+)]
+pub fn request_image_dimensions(width: u32, height: u32, max_pixels: u64) -> ProjectedDimensions {
+    let scale = f64::min(
+        1.0,
+        (budget_pixels(max_pixels) / budget_pixels(u64::from(width) * u64::from(height))).sqrt(),
+    );
+    if scale == 1.0 {
+        return ProjectedDimensions { width, height };
+    }
+    if width >= height {
+        let mut projected_width =
+            projected_pixel(f64::max(1.0, (f64::from(width) * scale).floor()));
+        let mut projected_height = projected_pixel(f64::max(
+            1.0,
+            (f64::from(projected_width) * f64::from(height) / f64::from(width)).round(),
+        ));
+        while u64::from(projected_width) * u64::from(projected_height) > max_pixels
+            && projected_width > 1
+        {
+            projected_width -= 1;
+            projected_height = projected_pixel(f64::max(
+                1.0,
+                (f64::from(projected_width) * f64::from(height) / f64::from(width)).round(),
+            ));
+        }
+        ProjectedDimensions {
+            width: projected_width,
+            height: projected_height,
+        }
+    } else {
+        let mut projected_height =
+            projected_pixel(f64::max(1.0, (f64::from(height) * scale).floor()));
+        let mut projected_width = projected_pixel(f64::max(
+            1.0,
+            (f64::from(projected_height) * f64::from(width) / f64::from(height)).round(),
+        ));
+        while u64::from(projected_width) * u64::from(projected_height) > max_pixels
+            && projected_height > 1
+        {
+            projected_height -= 1;
+            projected_width = projected_pixel(f64::max(
+                1.0,
+                (f64::from(projected_height) * f64::from(width) / f64::from(height)).round(),
+            ));
+        }
+        ProjectedDimensions {
+            width: projected_width,
+            height: projected_height,
+        }
+    }
+}
+
+/// Compute aspect-preserving integer dimensions with an exact long edge.
+///
+/// The short edge rounds to the nearest pixel, as an encoder resize by the
+/// long edge alone (dsh `longEdgeDimensions`). A long edge at or above the
+/// source returns the source unchanged.
+#[must_use]
+pub fn long_edge_dimensions(width: u32, height: u32, long_edge: u32) -> ProjectedDimensions {
+    if u64::from(long_edge) >= u64::from(width.max(height)) {
+        return ProjectedDimensions { width, height };
+    }
+    if width >= height {
+        ProjectedDimensions {
+            width: long_edge,
+            height: projected_pixel(f64::max(
+                1.0,
+                (f64::from(long_edge) * f64::from(height) / f64::from(width)).round(),
+            )),
+        }
+    } else {
+        ProjectedDimensions {
+            width: projected_pixel(f64::max(
+                1.0,
+                (f64::from(long_edge) * f64::from(width) / f64::from(height)).round(),
+            )),
+            height: long_edge,
+        }
+    }
+}
+
 /// Replace every image occurrence for a text-only model; `None` when
 /// unchanged.
 fn replace_images_for_text_model(blocks: &[ContentBlock]) -> Option<Vec<ContentBlock>> {
@@ -791,6 +914,94 @@ mod tests {
             blocks.as_slice(),
             [ContentBlock::Known(KnownContentBlock::ToolRemoval { .. })]
         ));
+    }
+
+    /// The pure request-projection geometry pins the TS math:
+    /// `requestImageDimensions` scales down under the budget with the
+    /// decrement loop, passes small images through at scale 1, and
+    /// `longEdgeDimensions` rounds the short edge with a minimum of one.
+    #[test]
+    fn request_projection_geometry_pins_ts_math() {
+        // Scale 1: a source already within the budget is unchanged.
+        assert_eq!(
+            request_image_dimensions(100, 100, 10_000),
+            ProjectedDimensions {
+                width: 100,
+                height: 100
+            }
+        );
+        // Landscape downscale: 800x600 into 512x512.
+        assert_eq!(
+            request_image_dimensions(800, 600, 512 * 512),
+            ProjectedDimensions {
+                width: 591,
+                height: 443
+            }
+        );
+        // Wide flat image: 1000x10 into 5000 pixels.
+        assert_eq!(
+            request_image_dimensions(1000, 10, 5_000),
+            ProjectedDimensions {
+                width: 707,
+                height: 7
+            }
+        );
+        // The decrement loop: 4x3 into 3 pixels walks down to 1x1.
+        assert_eq!(
+            request_image_dimensions(4, 3, 3),
+            ProjectedDimensions {
+                width: 1,
+                height: 1
+            }
+        );
+        // Portrait branch mirrors the landscape one.
+        assert_eq!(
+            request_image_dimensions(600, 800, 512 * 512),
+            ProjectedDimensions {
+                width: 443,
+                height: 591
+            }
+        );
+
+        // Long edge at or above the source: unchanged.
+        assert_eq!(
+            long_edge_dimensions(300, 200, 400),
+            ProjectedDimensions {
+                width: 300,
+                height: 200
+            }
+        );
+        // Landscape: the short edge rounds to the nearest pixel.
+        assert_eq!(
+            long_edge_dimensions(800, 600, 400),
+            ProjectedDimensions {
+                width: 400,
+                height: 300
+            }
+        );
+        assert_eq!(
+            long_edge_dimensions(800, 601, 400),
+            ProjectedDimensions {
+                width: 400,
+                height: 301
+            }
+        );
+        // Portrait: mirrored.
+        assert_eq!(
+            long_edge_dimensions(600, 800, 400),
+            ProjectedDimensions {
+                width: 300,
+                height: 400
+            }
+        );
+        // The short edge never drops below one pixel.
+        assert_eq!(
+            long_edge_dimensions(2_000_000, 2, 1),
+            ProjectedDimensions {
+                width: 1,
+                height: 1
+            }
+        );
     }
 
     /// The bound scenario: the budget shortfall names the oldest-occurrence

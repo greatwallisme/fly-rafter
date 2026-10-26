@@ -15,6 +15,9 @@ pub const INVALID_RESPONSE_CODE: &str = "INVALID_RESPONSE";
 pub const STREAM_CLOSED_CODE: &str = "STREAM_CLOSED";
 /// `UNSUPPORTED_CONTENT`: history carries blocks this protocol cannot send.
 pub const UNSUPPORTED_CONTENT_CODE: &str = "UNSUPPORTED_CONTENT";
+
+/// Files API operation failure (dsh `DeepSeekFilesError` non-status code).
+pub const FILES_API_CODE: &str = "FILES_API";
 /// `INVALID_REPLAY_STATE`: durable replay metadata failed validation.
 pub const INVALID_REPLAY_STATE_CODE: &str = "INVALID_REPLAY_STATE";
 /// `UNSUPPORTED_REASONING_EFFORT`: the resolved effort is outside the
@@ -24,3 +27,10 @@ pub const UNSUPPORTED_REASONING_EFFORT_CODE: &str = "UNSUPPORTED_REASONING_EFFOR
 /// `MISSING_CREDENTIAL`: the route's credential reference resolves to
 /// nothing (dsh `MISSING_CREDENTIAL` in the shared taxonomy).
 pub const MISSING_CREDENTIAL_CODE: &str = "MISSING_CREDENTIAL";
+/// `REQUEST_EXTENSION`: a request extension failed to prepare, collided
+/// with the base request, or was otherwise unusable (dsh
+/// `REQUEST_EXTENSION`).
+pub const REQUEST_EXTENSION_CODE: &str = "REQUEST_EXTENSION";
+/// `UNKNOWN_MODEL`: the advisory catalog declares no image projection for
+/// the requested model (dsh `UNKNOWN_MODEL` in `adapter.ts`).
+pub const UNKNOWN_MODEL_CODE: &str = "UNKNOWN_MODEL";
