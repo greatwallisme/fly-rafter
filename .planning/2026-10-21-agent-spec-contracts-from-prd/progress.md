@@ -592,3 +592,39 @@
 - 事故一件（自查自纠）：终清并发期间首跑 lifecycle 得 40 uncertain 全场景——测试执行层被并发 cargo 干扰的假信号；识别后作废该轮，终态重跑。教训：门禁数字必须以终态代码单线程跑出。
 - 切片 4 全貌：新 crate fr-timeout（dsh-timeout 同构 5 tests）+ fr-llm-deepseek 新增 13 模块（http/files_api/file_store/request_files/images/image_tokens/request_pricing/request_extensions/request_image_pipeline/adapter/types 扩/adapter 依赖缝）+ fr-llm 增 ABORTED_CODE 与 projection 几何助手；42→96 tests；裁决链 Q68-C/Q69-B/Q70-B/Q71-B/Q72-A/D1-D4/Q73-A 全落（PRD 决策 41 尾补 + 合约 Decisions）；workspace 456 tests 全绿。
 - 工作区待用户验收提交（guard 阻断期 --no-verify 惯例）。下一切片二选一：fr-llm-openai（A，真源 llm-pi-ai 4265 行双协议，2 pending 场景）/ fr-llm-anthropic（B，anthropic-messages，1 pending 场景）。
+
+## 2026-10-26 — 切片 4 验收成立 + 切片 5 二选一呈报
+- git 核验：工作区干净，93bf613（切片 4 完整收口）已入库——Phase 13b 的切片 4 段收口成立。
+- 切片 5 呈报取证（全部实查）：LLM 合约 pending 选择器 5 个定位（task-req-fr-llm-provider.spec.md:273/279/287/313/319）：openai×2（base-url 覆盖+未声明模型报错）、anthropic×1（官方端点）、fail_settle（跨 provider 适配层结算语义）、toolupdate（跨 anthropic/openai-completions/responses 系三协议——两 provider 切片皆落后才能全绑定）；两 crate 均已在合约 Boundaries（:44-45），无需改合同即可启动。
+- 真源规模实查：llm-pi-ai 4265 行/14 文件；catalog 986+discovery 363+login 172+context 375+provider-data 71=1967 行属已裁排除/seam 面（19.2 条 20 无内置目录 + Q62B discovery seam），核心协议面约 2300 行；anthropic-messages 在 dsh 无独立包，落点为 llm-pi-ai 多路由分支点（catalog 8/discovery 3/adapter 1/stream 1/models 1/provider 2 处引用）。
+- 呈报结论：A=fr-llm-openai（双协议全新 wire 面，绑 2 场景）/ B=fr-llm-anthropic（复用 fr-llm-deepseek rlib Anthropic Messages 机制，绑 1 场景）。已呈报待用户显式裁决，未推荐未执行。
+
+## 2026-10-26 — 切片 5（fr-llm-openai）批 0：真源全读完成 + 裁决呈报
+- 用户裁决 A（fr-llm-openai）已录；切片 5 启动，dougong-plugin-dev 技能已激活（形态=cdylib+rlib+plugin_shell，fr-llm-deepseek 先例）。
+- 真源全读完成（本轮 ~14 轮读取）：llm-pi-ai 壳 14 文件全读（adapter/index/models/replay/stream/context/config/provider/auth/catalog 10 核心全文 + discovery/login 除外面定位）；pi-ai 1.1.0 npm 包取回 vendor/（sha256 在案）+ dsh 补丁 73 行（流中 parseStreamingJson 移除×6）；从 sourcemap 提取 TS 原文 17 件（openai-completions 1734/responses 419/responses-shared 809/transform-messages 235/simple-options 108/transcript 237/overflow 188/error-body 149/json-parse 124/estimate 117/provider-retry 128/text 40/sanitize 25/hash 13/prompt-cache 8/models 1263/compat 302）+ types.d.ts 关键联合。
+- 发现关键矛盾 Q74（合约 :24 vs dsh 真源）：completions toolUpdate——合约称 addition-only 固定，真源 withhold 双旗恒 {}；合约引证 stream.ts:202-227 与 toolUpdate 无关。连同 D5-D14 十项推定一并呈报。
+- 规模修正：fr 移植面 ≈6000+ 行 TS（壳核心+pi-ai 协议双件+utils），显著大于呈报时「约 2300 行」口径（当时仅计 llm-pi-ai 自身）——已入 findings 备案。
+- 测试资产定位：llm-pi-ai tests 7429 行 + dsh snapshots/session/pi-ai-*（fr 钉测录制源）。
+- 下一步：用户裁决 Q74 + 追认 D5-D14 → 合约 Decisions 落盘 → 批 1 crate 骨架。
+
+## 2026-10-26 — 切片 5 批 0 收口：Q74-B + D5-D14 全链落盘，合同+PRD 修订，门禁全绿
+- 用户终裁：Q74-B（两协议均无 toolUpdate，对齐 dsh hand-declared 真源）；D5-D14 全追认（D8/D11 系更正表述后追认）；D10c=a（文件型密钥源不做）；D10b=providers dict 多路由。
+- 合同修订三处（task-req-fr-llm-provider.spec.md）：:24「其余 provider 适配语义」toolUpdate 行重写（openai 族两协议无能力声明+基线折叠语义，载真源引证链）；:319「toolUpdate 能力差异」场景重写（anthropic in-history 不变；openai 族无能力+延迟装载不可用，选择器仍 pending）；Decisions 增三行（Q74-B / 批 0 推定追认 D5-D14+D10b/D10c / 真源勘误备案）。lint Quality 100% exit 0。
+- PRD 两处：13.2 :449 toolUpdate 行勘误重写（同步 Q74-B）；23 节追加决策 42（Q74-B 全链 + D5-D14 + 真源双层勘误备案）。
+- 门禁：spec lint 100% + 三门禁 lint-knowledge/requirements graph/requirements plan 全 exit 0（0 errors）。
+- 事故一件（自查自纠）：Decisions 追加时 old/new 参数错位致 Q68 行瞬时损坏（插入"被本行弄乱了"杂文）——下一 Edit 立即整体复原原文并完成本该追加的两行；rg 探针确认"弄乱"零残留、Q68-Q73-A 原文完整。教训：大段 Decisions 追加应整行替换而非部分 old_string 拼接。
+- 下一步：批 1 crate 骨架（fr-llm-openai：cdylib+rlib+plugin_shell+providers-dict 配置物化），待用户开工指令。
+
+## 2026-10-26 — 切片 5 批 1（fr-llm-openai crate 骨架）：代码成形 + 终清委派中
+- 已落盘：根 Cargo.toml members 注册 + crates/fr-llm-openai（cdylib+rlib，deps 仅 dougong-abi+serde_json——按需增依赖纪律）+ 四文件：lib.rs（模块注册）/plugin_shell.rs（镜像 deepseek 壳：provide [] + inject ["llm"]，dsh llm-pi-ai index.ts:94-95 同构；3 测试）/compat.rs（Api 两值枚举、五个 config 枚举、CompatProfile offered 20 键、ResolvedCompletions/ResponsesCompat（Q74-B/D8 常 false 面载明）、detect_compat 全表（~20 provider 检测逐条）、apply merge（route→model 逐字段）、门控 offer 表 + 查询函数；6 测试）/models.rs（Modality/ThinkingLevel 7 级/LevelMapping 钉死三态/ModelProfile/ModelDescriptor/resolve_route_models 无 catalog 面：per-model api/base-url 缺失文案、重复空 id、容量正值、reasoningEfforts 钉 map 四文案、compat 门控两文案（model 级 not-taken + route 级 no-taker）、configured_max_tokens；9 测试）。
+- 测试 18 passed 0 failed 首轮绿；通道乱码 4 起（垃圾路径×2/内容截断×2/杂文断言×1）全数当场探针逮住修复——分块≤40 行 + 每块 rg 探针纪律生效。
+- 委派 rust-expert 终清中（23 项 clippy：must_use/文档反引号/excessive_bools×3/可派生 Eq 等），验收钉死：四门绿 + 18 tests 不变 + 诊断文案逐字节不动。
+- 批 1 待续：config.rs（profile 标量校验族 + providers dict 解析 + api-key-env）随批 2。
+
+## 2026-10-26 — 切片 5 批 1 完整收口（亲手干 + config.rs 提前）：workspace 481 tests 四门绿
+- 用户裁决执行：subagent 中途叫停（当时其已完成 clippy 清理，正跑 doc 门），余下全部亲手干——此后规则：闲则亲做，委派仅用于确有并行工作之时。
+- 亲手完成：compat.rs 追加解析层（WITHHELD 兼容键表 + 五枚举字面量解析 + chat-template 值解析含 $var 三键 + parse_compat_profile 主函数：词表检查前置（withheld/未声明/空值三文案）+ apply_compat_member 拆分 + fail-closed 防 defect 臂（panic→Err，hook 合拍））+ config.rs 全新（六默认常量/CacheRetention/ThinkingBudgets/ResolvedRouteProfile/reject_removed_keys 三拒绝键/model-overrides 拒绝（Q74-B 无 catalog 面）/逐键分派解析（20 键 kebab）/标量校验链（stream-idle f64 口径承切片 3 既裁 + 正整数 + 安全整数族 + default-input 非空）/retry-policy 经 fr_llm::retry_policy 共享词汇表（normal/always/backoff 三旋钮）/headers Fetch 校验/解析四块抽辅助 + expect(too_many_lines) 载真源形状理由）+ Cargo.toml 增 fr-llm/fr-wire 依赖 + lib.rs 注册。
+- 门禁终态（严格退出码）：clippy -D warnings 0 / fmt 0 / test 25 passed（18→25，+7 config）/ doc 0；workspace 全量：fmt 0 / clippy 0 / 481 passed 0 failed（456→481）/ doc 0。
+- 自纠与事故（全数当场逮住）：python 重构脚本两度自爆（先用后定义）——弃脚本改手动两步操作；match 块删除后 76 行臂一度无法从 git 恢复（未跟踪文件），凭上下文逐臂重建并补建缺陷防御臂；测试期望写反一处（supports-additional-tools 系 withheld 键——恰是 Q74-B 裁决面，非 undeclared）；文档乱码/占位写法/臆造方法各一处当场修。
+- 诊断文案适配备案（切片收口时入决策块）：兼容键 withheld 文案（dsh 指 catalog 改写为 fr 无 catalog 事实）/空值文案（去 catalog/Next 层引用改 detection）/max-retries 移除文案（executor 名改 provider retry-policy executor）/配置键全 kebab 化。
+- 批 2 余量：completions 协议 wire 面（buildParams/convertMessages/SSE 消费/usage/stop 映射）——蓝图已在 findings。

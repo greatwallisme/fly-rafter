@@ -1,0 +1,27 @@
+[package]
+name = "fr-llm-openai"
+description = "Fly Rafter OpenAI-compatible provider: chat-completions and responses wire protocols over hand-declared provider routes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Kernel family edge for the C-ABI dylib artifact (PRD 4.5): the plugin
+# shell links only dougong-abi across the kernel boundary.
+dougong-abi = { workspace = true }
+# Shared LLM vocabulary: the retry-policy input and frozen policy
+# (fr-llm retry_policy; deepseek-crate precedent).
+fr-llm.workspace = true
+# Safe-integer gate shared with the retry ceiling (fr-wire ids).
+fr-wire.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

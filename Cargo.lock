@@ -677,6 +677,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fr-llm-openai"
+version = "0.1.0"
+dependencies = [
+ "dougong-abi",
+ "fr-llm",
+ "fr-wire",
+ "serde_json",
+]
+
+[[package]]
 name = "fr-schema"
 version = "0.1.0"
 dependencies = [

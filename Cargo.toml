@@ -9,6 +9,7 @@ members = [
     "crates/fr-session",
     "crates/fr-llm",
     "crates/fr-llm-deepseek",
+    "crates/fr-llm-openai",
 ]
 
 [workspace.package]
