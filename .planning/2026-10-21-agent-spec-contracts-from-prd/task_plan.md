@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-切片 5 批 1 完整收口（亲手）：compat 解析层 + config.rs 全量 + fr-llm/fr-wire 依赖接入，workspace 四门绿（481 tests，+25）。工作区待用户验收提交（含批 0 合约/PRD 决策 42）。批 2 = completions 协议 wire 面（蓝图在 findings）。
+切片 5 批 0+1 已提交（5703c03，工作区干净）。批 2 = completions 协议 wire 面（buildParams 字段序/convertMessages 臂/SSE 消费/usage 与 stop 映射/错误分类链——蓝图在 findings 批 2 节）；批 3 = responses 协议；批 4 = adapter 壳 + 场景绑定（openai×2 + fail_settle）；批 5 = 终清 + 门禁序列。
 
 ## Current Phase
-Phase 13b 切片 5 批 1 完结，待验收提交
+Phase 13b 切片 5 批 2（completions wire 面）待启动
 
 ## Phases
 

@@ -11,5 +11,16 @@
 
 pub mod compat;
 pub mod config;
+pub mod convert;
+pub mod estimate;
+pub mod hash;
+pub mod history_transform;
+pub mod json_parse;
 pub mod models;
+pub mod params;
 pub mod plugin_shell;
+pub mod prompt_cache;
+pub mod text;
+pub mod transcript;
+pub mod translate;
+pub mod usage;
