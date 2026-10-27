@@ -11,6 +11,7 @@
 //! the plugin shell; the rlib face is the behavior library the network
 //! slices wire to real HTTP transport.
 
+pub mod adapter;
 pub mod codes;
 pub mod compat;
 pub mod config;
@@ -22,6 +23,7 @@ pub mod json_parse;
 pub mod models;
 pub mod overflow;
 pub mod params;
+pub mod plugin_shell;
 pub mod settle;
 pub mod sse;
 pub mod text;

@@ -203,6 +203,18 @@ impl AnthropicTranslator {
         }
     }
 
+    /// The merged usage snapshot (the failure face's settle input).
+    #[must_use]
+    pub const fn usage_snapshot(&self) -> TokenUsage {
+        self.usage.token_usage()
+    }
+
+    /// How many real blocks opened (the failure face's settle input).
+    #[must_use]
+    pub const fn blocks_len(&self) -> usize {
+        self.emitted_blocks
+    }
+
     /// The response ids echoed back for durable metadata.
     #[must_use]
     pub const fn response_ids(&self) -> (&Option<String>, &Option<String>) {
