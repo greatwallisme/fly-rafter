@@ -731,3 +731,4 @@
 - translate.rs/responses_stream.rs：usage() const 访问器（错误路径结算 usage+finish(Error) 序供数；TokenUsage Copy）。
 - 事故与自纠：settle 首版臆造引用（codes_ref/EMPTY_RESPONSE_FALLBACK）表驱动重写；FinishReason 是 enum（Known 包裹）+Failure 六字段展开；测试 helper blocks_len=1 与空停断言自相矛盾（纠：blocks_len=0 单独构造）；sse 块 1 笔误 1'（字符字面量）；accessor 插入切断 new 原文档（顺序对调恢复+补文档+删误加 must_use）；fmt 重排致 From impl replace 两度失配（读现文本重做纪律×2）；clippy 29 项四轮清（backticks×8/doc 段长×4/cast expect 判例/map_or_else/collapsible let-chains/unnested or-pattern/死别名/const fn/结构名重复助手/assert-empty 显式消息×3/Eq derive）。
 - 门禁终态（单跑核实）：fmt 0 / clippy --workspace --all-targets -D warnings 0 / test --workspace 547 passed 0 failed（fr-llm-openai 85=71+14）/ doc 0。工作树未提交（批 4b 整批一提交惯例，adapter 壳完成后一并）。
+- 批 4b 中期经用户 /commit 指令提前提交（9121c03，13 文件 +1251 行；文档归属修正随提交）；余 adapter 壳+批 4c 绑定后续会话续。
