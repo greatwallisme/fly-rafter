@@ -747,3 +747,4 @@
 - 场景绑定（批 4c）：pending_req_fr_llm_openai_base_url→openai_base_url_overrides_endpoint；pending_req_fr_llm_openai→openai_undeclared_model_refuses_without_catalog；pending_req_fr_llm_fail_settle→openai_fail_settle_emits_usage_and_error_finish。lifecycle task-req-fr-llm-provider：38/40 passing（余 2=anthropic 官方端点+toolUpdate 差异——anthropic crate 未建，本切片预期）。spec lint Quality 100%（0.7 门过）。requirements plan --gate 0 errors。
 - 门禁终态（单跑核实）：fmt 0 / clippy --workspace --all-targets -D warnings 0 / test --workspace 564 passed 0 failed（fr-llm-openai 102=85+17）/ doc 0。
 - 批 4b/4c 完整收口。批 5=终清+合同决策块（convert.rs tool_arguments 文档/代码不一致+采样参数透传勘误+SDK 遥测头 19.2 候选）+PRD 同步（Q76B 19.2 条目）+七步流 4-7。
+- 追加修正（批 5 首日核实 x-stainless 答疑时发现）：SDK 无条件发 Accept: application/json（client.js:1206，流式亦然——服务端按 body stream 参数回 SSE，无 text/event-stream 协商），adapter 补发该头+头序钉测更新（user-agent→authorization→accept→content-type→route），四门复跑绿 564。

@@ -1125,9 +1125,12 @@ fn has_auth_header(headers: &[(String, String)]) -> bool {
 /// The request headers (dsh `createClient` plus the SDK's own auth and
 /// content negotiation): attribution first and collision-immune, the
 /// session-affinity trio per protocol gate, the bearer credential, the
-/// JSON content type, and the route headers merged last so they override
-/// everything but attribution. No `x-stainless-*` telemetry (19.2 batch
-/// 5 candidate) and no `github-copilot` dynamic headers (D9).
+/// JSON content negotiation and content type, and the route headers
+/// merged last so they override everything but attribution. The accept
+/// value is the SDK's unconditional `application/json` (it never
+/// negotiates `text/event-stream`: the body's `stream` flag decides the
+/// response face, client.js:1206). No `x-stainless-*` telemetry (19.2
+/// batch 5 candidate) and no `github-copilot` dynamic headers (D9).
 fn build_headers(
     api: Api,
     send_session_affinity_headers: bool,
@@ -1165,6 +1168,7 @@ fn build_headers(
     if let KeyFace::Bearer(key) = key_face {
         headers.push(("authorization".to_owned(), format!("Bearer {key}")));
     }
+    headers.push(("accept".to_owned(), "application/json".to_owned()));
     headers.push(("content-type".to_owned(), "application/json".to_owned()));
     for (name, value) in route_headers {
         if !name.eq_ignore_ascii_case("user-agent") {
@@ -2273,11 +2277,18 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            ["user-agent", "authorization", "content-type", "x-route"]
+            [
+                "user-agent",
+                "authorization",
+                "accept",
+                "content-type",
+                "x-route"
+            ]
         );
         assert!(request.headers[0].1.starts_with("fly-rafter/"));
         assert_eq!(request.headers[1].1, "Bearer sk-test");
         assert_eq!(request.headers[2].1, "application/json");
+        assert_eq!(request.headers[3].1, "application/json");
         assert!(
             !request
                 .headers
