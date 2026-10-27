@@ -12,6 +12,7 @@ members = [
     "crates/fr-llm",
     "crates/fr-llm-deepseek",
     "crates/fr-llm-openai",
+    "crates/fr-llm-anthropic",
 ]
 
 [workspace.package]

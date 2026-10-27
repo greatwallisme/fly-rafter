@@ -672,6 +672,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fr-llm-anthropic"
+version = "0.1.0"
+dependencies = [
+ "fr-llm",
+ "fr-wire",
+ "regex",
+ "serde_json",
+]
+
+[[package]]
 name = "fr-llm-deepseek"
 version = "0.1.0"
 dependencies = [

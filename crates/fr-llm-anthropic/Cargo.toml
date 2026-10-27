@@ -1,0 +1,27 @@
+[package]
+name = "fr-llm-anthropic"
+description = "Fly Rafter Anthropic provider: the anthropic-messages wire protocol over hand-declared provider routes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Shared LLM vocabulary: error codes, retry-policy input, and the frozen
+# policy (fr-llm; deepseek/openai-crate precedent).
+fr-llm.workspace = true
+# Safe-integer gate and failure/finish vocabulary (fr-wire ids).
+fr-wire.workspace = true
+# Overflow pattern family (pi-ai utils/overflow.ts; regex is already in
+# the workspace lock graph via fr-llm).
+regex.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

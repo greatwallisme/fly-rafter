@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-切片 5（fr-llm-openai）批 0-5 全部收口关闭（24 模块、fr-llm-openai 103 tests、四门绿 565、PRD 决策 44 + 19.2 条 22/23、三场景绑定、explain 已出；provider 合同整体 stamp 留待 anthropic 场景闭环）。下一片按 PRD 20 节序：切片 6 = fr-agent-loop 主循环装配（PRD :336 inject llm 服务消费面）或先 fr-llm-anthropic（provider 合同收尾 anthropic×2 场景）——顺序分叉呈用户裁决后开新切片批 0（真源全读先行）。
+批 0 裁决已落地（A1/A2 合同勘误 + D16-D24/C1 追认；spec/PRD/intake 三处同步，PRD 决策 45）。**D15（OAuth stealth 值检测面）待用户单裁**后开批 1：crate 骨架（cdylib+rlib）+ 纯函数层（config/compat/models 复制适配、transcript/estimate/text 复制、convert 消息转换、params buildParams、sse pi-ai 语义解码器、translate wire→StreamChunk、usage、settle）→ 批 2 执行壳 adapter（client 头构造/URL /v1/messages?beta=true/watchdog/错误双面/图链）→ 批 3 场景绑定（pending_req_fr_llm_anthropic + pending_req_fr_llm_toolupdate）+ 四门 + agent-spec 三开关 + lifecycle 40/40 + explain + stamp + 提交。
 
 ## Current Phase
-Phase 13b 切片 5 关闭；下一切片待用户定序（fr-agent-loop 装配 vs fr-llm-anthropic 收尾）
+Phase 13b 切片 6（fr-llm-anthropic）批 1 收口提交中；下一批 2 = 执行壳 adapter.rs
 
 ## Phases
 
@@ -108,8 +108,9 @@ Phase 13b 切片 5 关闭；下一切片待用户定序（fr-agent-loop 装配 v
 - [x] fr-llm：LlmAdapter trait（stream 必实现 + 7 默认方法）、GenerateOptions、StreamChunk 七种、流装配结算（block-end 上 delta 忽略、重复 close 忽略、delta-only 兜底、缺 id/name 兜底 call-<index>、max-tokens 过滤、ReplayEnvelope 一致性）、prepare_call 代际绑定、toolUpdate 能力差异表（批 A/B 落地，36ef3c1 + 11ee0a9）
 - [x] provider_retry_policy 结构（normal/always、maxRetries 5、retryableCodes 默认 5 类、backoff 500/10000/jitter 0.1 对称抖动；执行方 llm-retry 挂 agent 失败步扩展点，LLM 核心不自执行）（批 A 落地 36ef3c1，Q60A 精化 40f1801）
 - [x] fr-llm-deepseek：Anthropic Messages 协议（切片 3，ed3cf97）+ 网络执行面 13 模块 + fr-timeout 新 crate（切片 4，93bf613；96 tests，三 crate 四门绿 + 门禁序列全跑毕）
-- [ ] fr-llm-openai / fr-llm-anthropic
-- [ ] 对照 REQ-FR-LLM 场景逐条落测试（36 passed / 5 skipped / 0 failed；余 openai×2 / anthropic / fail_settle / toolupdate）
+- [x] fr-llm-openai（切片 5 收口 5671260：24 模块 103 tests，三场景绑定，PRD 决策 44 + 19.2 条 22/23）
+- [ ] fr-llm-anthropic（切片 6，2026-10-27 定序：anthropic-messages 协议 client、无内置 catalog（19.2 条 20）、attribution、重放 kind 'fr-anthropic'、toolUpdate in-history、官方端点/协议头 + toolupdate 两 pending 场景绑定、provider 合同 40/40 后整体 stamp）
+- [ ] 对照 REQ-FR-LLM 场景逐条落测试（38 passed / 2 skipped / 0 failed；余 anthropic×2 本切片绑定）
 - **Status:** in_progress
 
 ### Phase 14: fr-tools + fr-approval + fr-sandbox
