@@ -1122,6 +1122,65 @@ fn has_auth_header(headers: &[(String, String)]) -> bool {
     })
 }
 
+/// The `x-stainless-*` telemetry family the openai-node SDK sends on
+/// every request (client.js:1205-1213 + detect-platform.ts, verdict 3
+/// "补齐对发", 2026-10-27): same header names and the same conditional
+/// set — retry count always, the timeout only when one was configured,
+/// seconds-truncated like `Math.trunc(timeout / 1000)`. The values carry
+/// fr's own client facts rather than a fabricated js/node environment
+/// (the decision-37-3 attribution principle; the value-domain deviation
+/// is registered as PRD 19.2 item 23): `rust` as the language, this
+/// crate's version as the package, the true host OS and CPU mapped onto
+/// the SDK's spellings, `fly-rafter` as the runtime, and the single
+/// network attempt of D11 pins the retry count at zero.
+fn stainless_headers(timeout_ms: Option<u64>) -> Vec<(String, String)> {
+    let mut headers = vec![("x-stainless-retry-count".to_owned(), "0".to_owned())];
+    if let Some(milliseconds) = timeout_ms {
+        headers.push((
+            "x-stainless-timeout".to_owned(),
+            (milliseconds / 1000).to_string(),
+        ));
+    }
+    headers.push(("x-stainless-lang".to_owned(), "rust".to_owned()));
+    headers.push((
+        "x-stainless-package-version".to_owned(),
+        env!("CARGO_PKG_VERSION").to_owned(),
+    ));
+    headers.push(("x-stainless-os".to_owned(), stainless_os()));
+    headers.push(("x-stainless-arch".to_owned(), stainless_arch()));
+    headers.push(("x-stainless-runtime".to_owned(), "fly-rafter".to_owned()));
+    headers.push((
+        "x-stainless-runtime-version".to_owned(),
+        env!("CARGO_PKG_VERSION").to_owned(),
+    ));
+    headers
+}
+
+/// The host OS on the SDK's `PlatformName` vocabulary
+/// (`MacOS`/`Linux`/`Windows`/... , else `Other:<raw>`).
+fn stainless_os() -> String {
+    match std::env::consts::OS {
+        "macos" => "MacOS".to_owned(),
+        "linux" => "Linux".to_owned(),
+        "windows" => "Windows".to_owned(),
+        "freebsd" => "FreeBSD".to_owned(),
+        "openbsd" => "OpenBSD".to_owned(),
+        raw => format!("Other:{raw}"),
+    }
+}
+
+/// The host CPU on the SDK's `Arch` vocabulary (`x32`/`x64`/`arm`/
+/// `arm64`, else `Other:<raw>`).
+fn stainless_arch() -> String {
+    match std::env::consts::ARCH {
+        "x86" => "x32".to_owned(),
+        "x86_64" => "x64".to_owned(),
+        "aarch64" => "arm64".to_owned(),
+        "arm" => "arm".to_owned(),
+        raw => format!("Other:{raw}"),
+    }
+}
+
 /// The request headers (dsh `createClient` plus the SDK's own auth and
 /// content negotiation): attribution first and collision-immune, the
 /// session-affinity trio per protocol gate, the bearer credential, the
@@ -1129,14 +1188,15 @@ fn has_auth_header(headers: &[(String, String)]) -> bool {
 /// merged last so they override everything but attribution. The accept
 /// value is the SDK's unconditional `application/json` (it never
 /// negotiates `text/event-stream`: the body's `stream` flag decides the
-/// response face, client.js:1206). No `x-stainless-*` telemetry (19.2
-/// batch 5 candidate) and no `github-copilot` dynamic headers (D9).
+/// response face, client.js:1206), the `x-stainless-*` telemetry family
+/// with fr's own facts, and no `github-copilot` dynamic headers (D9).
 fn build_headers(
     api: Api,
     send_session_affinity_headers: bool,
     session_affinity_format: SessionAffinityFormat,
     cache_session_id: Option<&str>,
     key_face: &KeyFace<'_>,
+    timeout_ms: Option<u64>,
     route_headers: &[(String, String)],
 ) -> Vec<(String, String)> {
     let mut headers: Vec<(String, String)> = attribution_headers()
@@ -1169,6 +1229,7 @@ fn build_headers(
         headers.push(("authorization".to_owned(), format!("Bearer {key}")));
     }
     headers.push(("accept".to_owned(), "application/json".to_owned()));
+    headers.extend(stainless_headers(timeout_ms));
     headers.push(("content-type".to_owned(), "application/json".to_owned()));
     for (name, value) in route_headers {
         if !name.eq_ignore_ascii_case("user-agent") {
@@ -1306,6 +1367,7 @@ fn run_completions(
         compat.session_affinity_format,
         cache_session_id,
         key_face,
+        plan.profile.timeout_ms,
         &plan.profile.headers,
     );
     // The request deadline starts when the runner takes the request,
@@ -1424,6 +1486,7 @@ fn run_responses(
         compat.session_affinity_format,
         cache_session_id,
         key_face,
+        plan.profile.timeout_ms,
         &plan.profile.headers,
     );
     // The request deadline starts when the runner takes the request,
@@ -2281,20 +2344,20 @@ mod tests {
                 "user-agent",
                 "authorization",
                 "accept",
+                "x-stainless-retry-count",
+                "x-stainless-lang",
+                "x-stainless-package-version",
+                "x-stainless-os",
+                "x-stainless-arch",
+                "x-stainless-runtime",
+                "x-stainless-runtime-version",
                 "content-type",
-                "x-route"
+                "x-route",
             ]
         );
         assert!(request.headers[0].1.starts_with("fly-rafter/"));
         assert_eq!(request.headers[1].1, "Bearer sk-test");
         assert_eq!(request.headers[2].1, "application/json");
-        assert_eq!(request.headers[3].1, "application/json");
-        assert!(
-            !request
-                .headers
-                .iter()
-                .any(|(name, _)| name.starts_with("x-stainless-"))
-        );
 
         // The affinity trio: a session id rides the default openai format
         // only when the compat switch sends it (the default openai
@@ -2311,6 +2374,77 @@ mod tests {
                 .any(|(name, _)| name == "x-client-request-id"),
             "the default openai endpoint sends no affinity headers"
         );
+    }
+
+    /// The telemetry family carries fr's own facts (verdict 3): the
+    /// language and runtime identity, this crate's version twice, the
+    /// true host OS and CPU on the SDK spellings, the D11 single attempt
+    /// as a zero retry count, and the seconds-truncated timeout only
+    /// when the route configured one.
+    #[test]
+    fn telemetry_family_pins_fr_facts_and_conditionals() {
+        let fetch = RecordedFetch::new(200, RECORDED_TOOL_RUN);
+        let adapter = OpenAiAdapter::new(keyed_options(
+            Arc::clone(&fetch) as Arc<dyn Fetch>,
+            vec![with_key(
+                route_profile("openai-completions", "https://gw.example/v1"),
+                "ACME_KEY",
+            )],
+            BTreeMap::from([("ACME_KEY".to_owned(), "sk-test".to_owned())]),
+        ));
+        let mut stream = adapter.stream(bare_options("acme", "acme-large"));
+        collect(&mut stream);
+        let request = &fetch.requests()[0];
+        let header = |name: &str| {
+            request
+                .headers
+                .iter()
+                .find(|(candidate, _)| candidate == name)
+                .map(|(_, value)| value.as_str())
+        };
+        assert_eq!(header("x-stainless-retry-count"), Some("0"));
+        assert_eq!(header("x-stainless-timeout"), None);
+        assert_eq!(header("x-stainless-lang"), Some("rust"));
+        assert_eq!(
+            header("x-stainless-package-version"),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+        let expected_os = match std::env::consts::OS {
+            "macos" => "MacOS",
+            "linux" => "Linux",
+            "windows" => "Windows",
+            "freebsd" => "FreeBSD",
+            "openbsd" => "OpenBSD",
+            raw => raw,
+        };
+        assert_eq!(header("x-stainless-os"), Some(expected_os));
+        assert!(header("x-stainless-arch").is_some_and(|arch| !arch.is_empty()));
+        assert_eq!(header("x-stainless-runtime"), Some("fly-rafter"));
+        assert_eq!(
+            header("x-stainless-runtime-version"),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+
+        // The timeout header rides seconds-truncated when configured.
+        let mut profile = with_key(
+            route_profile("openai-completions", "https://gw.example/v1"),
+            "ACME_KEY",
+        );
+        profile.timeout_ms = Some(1_500);
+        let adapter = OpenAiAdapter::new(keyed_options(
+            Arc::clone(&fetch) as Arc<dyn Fetch>,
+            vec![profile],
+            BTreeMap::from([("ACME_KEY".to_owned(), "sk-test".to_owned())]),
+        ));
+        let mut stream = adapter.stream(bare_options("acme", "acme-large"));
+        collect(&mut stream);
+        let request = &fetch.requests()[1];
+        let timeout = request
+            .headers
+            .iter()
+            .find(|(name, _)| name == "x-stainless-timeout")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(timeout, Some("1"));
     }
 
     /// The affinity faces: the responses client gates on the session id

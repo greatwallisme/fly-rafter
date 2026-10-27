@@ -310,7 +310,7 @@ satisfies: [REQ-FR-LLM]
   测试: projects_replay_degrade_and_request_controls
   假设 GenerateOptions 携带 temperature、max_tokens 与 stop
   当 provider 构造协议请求时
-  那么 三者按协议字段透传
+  那么 fr-llm-deepseek 三者按协议字段透传（stop→stop_sequences）；fr-llm-openai 透传 temperature 与 max_tokens（D14 恒发送）并拒绝 stop（UNSUPPORTED_OPTION，openai 族协议无 stop 字段——2026-10-27 裁决 2A 勘误：pi-ai StreamOptions 无 stop 键，原「三者透传」与真源相悖）
 
 场景: 错误不中途抛出
   测试: openai_fail_settle_emits_usage_and_error_finish

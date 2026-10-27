@@ -748,3 +748,11 @@
 - 门禁终态（单跑核实）：fmt 0 / clippy --workspace --all-targets -D warnings 0 / test --workspace 564 passed 0 failed（fr-llm-openai 102=85+17）/ doc 0。
 - 批 4b/4c 完整收口。批 5=终清+合同决策块（convert.rs tool_arguments 文档/代码不一致+采样参数透传勘误+SDK 遥测头 19.2 候选）+PRD 同步（Q76B 19.2 条目）+七步流 4-7。
 - 追加修正（批 5 首日核实 x-stainless 答疑时发现）：SDK 无条件发 Accept: application/json（client.js:1206，流式亦然——服务端按 body stream 参数回 SSE，无 text/event-stream 协商），adapter 补发该头+头序钉测更新（user-agent→authorization→accept→content-type→route），四门复跑绿 564。
+
+## 2026-10-27 — 批 5 收口：三裁决落地（1A/2A/3）+ PRD 同步 + 七步流 4-6，四门绿 565 tests
+- 1A：convert.rs tool_arguments 文档从代码（失败臂→`{}`）——单一宽容解析规则（Q75-C 同构）+对象类型契约，批 2 遗留发现关闭。
+- 2A：provider 合约「采样参数透传 wire」Then 勘误按 provider 分述（deepseek 三者透传 stop→stop_sequences；fr-llm-openai 透传 temperature/max_tokens+拒绝 stop UNSUPPORTED_OPTION；pi-ai StreamOptions 无 stop 键实证注记）。spec Quality 100% 复核过。
+- 3（补齐对发）：stainless_headers() 落地——头族同名+条件集逐位同形（retry-count 恒 0=D11；timeout 仅显式 timeout_ms 时秒取整），值域=fr 真值（Lang=rust/Package-Version/Runtime-Version=CARGO_PKG_VERSION/OS+Arch=真机映射 SDK 词表含 Other:<raw> 兜底/Runtime=fly-rafter），37-3 归因原则不伪造 js/node；build_headers 增 timeout_ms 参（7 参内）；头序钉测扩至 12 段+新 telemetry 钉测（值/条件性/秒截断）。
+- PRD：19.2 增条 22（Q76-B 品牌文案适配全清单）+23（x-stainless 值域偏离及理由）；决策 44（批 5 三裁决+Accept 修正+批 4b 两真 bug 入档）。
+- 门禁：四门全绿（fmt 0/clippy 0/test 565=+1 telemetry/doc 0）；agent-spec 三开关 0 errors；lifecycle provider spec 0 failed 2 skipped（anthropic 待建）；explain 已出（第 6 步）；stamp --dry-run 如实 38/40——合同整体盖章留待 anthropic 切片（2 skip 系其场景），本切片不强盖。
+- 切片 5（fr-llm-openai）就此关闭：24 模块（codes/compat/config/convert/error_body/estimate/hash/history_transform/json_parse/models/overflow/params/plugin_shell/prompt_cache/responses/responses_stream/settle/sse/text/transcript/translate/usage/adapter + lib）全落地，565 tests 中 fr-llm-openai 103。

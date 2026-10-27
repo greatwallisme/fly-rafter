@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-批 4b/4c 已完整收口（adapter.rs 执行壳 + 三场景绑定，四门绿 564 tests，lifecycle 38/40——余 2 待 anthropic crate）。切片 5 批 5 终清：合同决策块审查项呈用户裁决（三项：convert.rs tool_arguments 文档「raw text」vs 代码「{}」不一致——dsh 两态不可达 fr 自由度备案；spec「采样参数透传」场景 Then 与 dsh 真源相悖——pi-ai StreamOptions 无 stop 键、openai 族丢 GenerateOptions.stop，需勘误合同（改合同先沟通纪律）；SDK 遥测头 x-stainless-* 不发——19.2 条目登记）→ PRD 同步（Q76B 19.2 条目 + 决策 44 切片 5 收口）→ 七步流 4-7（lifecycle/guard/explain/stamp/archive）→ 切片 5 关闭，转切片 6（fr 主循环装配/runtime-registry 按 PRD 20 节序）。
+切片 5（fr-llm-openai）批 0-5 全部收口关闭（24 模块、fr-llm-openai 103 tests、四门绿 565、PRD 决策 44 + 19.2 条 22/23、三场景绑定、explain 已出；provider 合同整体 stamp 留待 anthropic 场景闭环）。下一片按 PRD 20 节序：切片 6 = fr-agent-loop 主循环装配（PRD :336 inject llm 服务消费面）或先 fr-llm-anthropic（provider 合同收尾 anthropic×2 场景）——顺序分叉呈用户裁决后开新切片批 0（真源全读先行）。
 
 ## Current Phase
-Phase 13b 切片 5 批 5（终清+合同决策块+PRD 同步+七步流收口）
+Phase 13b 切片 5 关闭；下一切片待用户定序（fr-agent-loop 装配 vs fr-llm-anthropic 收尾）
 
 ## Phases
 

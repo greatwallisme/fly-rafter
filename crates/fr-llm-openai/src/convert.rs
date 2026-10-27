@@ -115,8 +115,10 @@ fn image_wire(media_type: &str, data: &[u8]) -> Value {
 
 /// Tool-call arguments history: the durable raw string is parsed and
 /// re-stringified compactly (dsh `JSON.stringify(tc.arguments)` over the
-/// parsed object); unparseable history keeps its raw text
-/// ("将已解析参数 stringify 回原始串" — contract clause).
+/// parsed object); unparseable history degrades to the empty object —
+/// one uniform lenient-parse rule with the Q75-C streaming face (verdict
+/// 1A, 2026-10-27: the field's wire contract wants an object, and a
+/// corrupt string would fail the whole request).
 pub(crate) fn tool_arguments(raw: &str) -> Value {
     match serde_json::from_str::<Value>(raw) {
         Ok(value @ Value::Object(_)) => value,
