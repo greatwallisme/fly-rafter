@@ -23,6 +23,7 @@ pub mod loop_inbox;
 pub mod outbound;
 pub mod phase;
 pub mod plugin_shell;
+pub mod prompt_client;
 pub mod runtime_context;
 pub mod session_client;
 pub mod turn_boundary;

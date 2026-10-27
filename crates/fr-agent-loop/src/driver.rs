@@ -153,6 +153,35 @@ pub trait SystemPromptFace: Send {
     fn refresh_context(&mut self, assembly: &PromptAssembly) -> Result<PromptAssembly, String>;
 }
 
+/// The loop-side workspace-instructions bridge (Q88-A): one compose
+/// call per step boundary (dsh `agent-instructions`).
+///
+/// Each call receives the claimed batch, the pending instruction
+/// projection, the fs-tool touch list, and the session surface, and
+/// returns the desired instruction message (dsh `compose`,
+/// agent-instructions/src/index.ts:110-244).
+///
+/// Present exactly when the `'system-prompt'` service is wired into the
+/// assembly (dsh mounts the plugin unconditionally; a providerless
+/// filesystem makes `compose` a no-op — the fr seam injection carries the
+/// same judgment).
+pub trait InstructionsBridge: Send {
+    /// Composes the desired workspace-instruction user message, or none
+    /// when nothing is due (dsh `compose` returning `undefined`).
+    ///
+    /// # Errors
+    ///
+    /// Returns the compose failure text.
+    fn compose(
+        &mut self,
+        next_id: &dyn Fn() -> MessageId,
+        claimed: &[Message],
+        pending: &[Message],
+        touched: &[String],
+        surface: &[Message],
+    ) -> Result<Option<Message>, String>;
+}
+
 /// The driver-visible facts of one prepared call (dsh `PreparedLlmCall`
 /// minus the stream closure, which the B2 face carries by generation id).
 #[derive(Debug, Clone)]
@@ -605,6 +634,10 @@ pub struct DriverDeps {
     pub llm: Box<dyn LlmFace>,
     /// The tools scheduling face.
     pub tools: Box<dyn ToolsFace>,
+    /// The workspace-instructions bridge, when the assembly wires the
+    /// `'system-prompt'` service (dsh mounts `agent-instructions`; absent
+    /// here means the compose endpoint is not wired).
+    pub instructions: Option<Box<dyn InstructionsBridge>>,
     /// The wall clock for stream chunk timestamps.
     pub clock: Box<dyn Fn() -> i64 + Send>,
     /// The stable identity source for created messages.
@@ -636,6 +669,13 @@ pub struct LoopDriver {
     prompt: Box<dyn SystemPromptFace>,
     llm: Box<dyn LlmFace>,
     tools: Box<dyn ToolsFace>,
+    instructions: Option<Box<dyn InstructionsBridge>>,
+    /// Paths the fs tools touched since the last compose (dsh
+    /// `executionTouches` collapsed into the pre-step call; the
+    /// asynchronous projection tail is a structural absence under the
+    /// single-threaded loop — the next pre-step recomposes over the same
+    /// paths either way).
+    touched_paths: Vec<String>,
     clock: Box<dyn Fn() -> i64 + Send>,
     next_id: Box<dyn Fn() -> MessageId + Send>,
     max_parallel_tool_calls: Box<dyn Fn() -> usize + Send>,
@@ -709,6 +749,7 @@ impl LoopDriver {
             prompt,
             llm,
             tools,
+            instructions,
             clock,
             next_id,
             max_parallel_tool_calls,
@@ -726,6 +767,8 @@ impl LoopDriver {
             prompt,
             llm,
             tools,
+            instructions,
+            touched_paths: Vec::new(),
             clock,
             next_id,
             max_parallel_tool_calls,
@@ -1241,6 +1284,9 @@ impl LoopDriver {
         let claimed = self.inbox.claim(target, turn).map_err(DriverError::Inbox)?;
         let assembly = self.prompt.assemble().map_err(DriverError::Prompt)?;
         self.poll()?;
+        // The instructions fold needs the claimed batch after the
+        // waterfall consumed it (dsh's listener closes over `messages`).
+        let claimed_copy = self.instructions.is_some().then(|| claimed.clone());
         let runtime_context = &self.runtime_context;
         let next_id = &self.next_id;
         let joined = assembly.joined_sections.clone();
@@ -1264,6 +1310,19 @@ impl LoopDriver {
             }),
         );
         self.poll()?;
+        let decision = match self.instructions.take() {
+            None => decision,
+            Some(mut bridge) => {
+                let folded = self.instructions_fold(
+                    bridge.as_mut(),
+                    claimed_copy.as_deref().unwrap_or_default(),
+                    decision,
+                    step,
+                );
+                self.instructions = Some(bridge);
+                folded?
+            }
+        };
         Ok(match decision {
             PreStepDecision::Reject => PreparedStep::Reject,
             PreStepDecision::Enter {
@@ -1275,6 +1334,153 @@ impl LoopDriver {
                 assembly,
             }),
         })
+    }
+
+    /// The workspace-instructions pre-step fold (dsh the
+    /// `agent/pre-step` listener, agent-instructions/src/index.ts:334-360):
+    /// compose against the claimed batch and the pending projection, then
+    /// either keep the context pending (reject or an empty first entry) or
+    /// settle it — removed from the inbox, and folded right after the
+    /// claimed batch so the direct prompt precedes it and the
+    /// driver-appended runtime context follows it.
+    fn instructions_fold(
+        &mut self,
+        bridge: &mut dyn InstructionsBridge,
+        claimed: &[Message],
+        decision: PreStepDecision,
+        step: u64,
+    ) -> Result<PreStepDecision, DriverError> {
+        let pending = pending_instructions(&self.inbox);
+        let surface: Vec<Message> = self
+            .reads
+            .derive_messages()
+            .into_iter()
+            .filter(|message| message_role(message).is_some_and(|role| role == "user"))
+            .collect();
+        let touched = std::mem::take(&mut self.touched_paths);
+        let desired = bridge
+            .compose(&self.next_id, claimed, &pending, &touched, &surface)
+            .map_err(DriverError::Prompt)?;
+        let keep_pending = matches!(decision, PreStepDecision::Reject)
+            || (matches!(
+                decision,
+                PreStepDecision::Enter { ref messages, .. } if messages.is_empty()
+            ) && step == 1);
+        if keep_pending {
+            self.sync_instructions(claimed, &surface, desired)?;
+            return Ok(decision);
+        }
+        for message in &pending {
+            // dsh removes by id without checking the result; a miss means
+            // the batch mutated concurrently, which the single-threaded
+            // loop never does.
+            self.inbox
+                .remove(instruction_id(message))
+                .map_err(DriverError::Inbox)?;
+        }
+        let PreStepDecision::Enter {
+            mut messages,
+            starts_request_series,
+        } = decision
+        else {
+            return Ok(decision);
+        };
+        let Some(desired) = desired else {
+            return Ok(PreStepDecision::Enter {
+                messages,
+                starts_request_series,
+            });
+        };
+        if messages
+            .iter()
+            .any(|message| same_instruction_payload(message, &desired))
+        {
+            return Ok(PreStepDecision::Enter {
+                messages,
+                starts_request_series,
+            });
+        }
+        let claimed_ids: Vec<&MessageId> = claimed
+            .iter()
+            .filter_map(crate::inbox::message_id)
+            .collect();
+        let insert_at = messages
+            .iter()
+            .rposition(|message| {
+                crate::inbox::message_id(message).is_some_and(|id| claimed_ids.contains(&id))
+            })
+            .map_or(0, |index| index + 1);
+        messages.insert(insert_at, desired);
+        Ok(PreStepDecision::Enter {
+            messages,
+            starts_request_series,
+        })
+    }
+
+    /// Settles the pending instruction projection against one composed
+    /// desired message (dsh `syncInbox`, agent-instructions/src/index.ts:246-271):
+    /// already-supplied or no-longer-due contexts clear the pending
+    /// entries, a still-due one keeps a reusable twin and otherwise
+    /// replaces the first pending entry in place.
+    fn sync_instructions(
+        &mut self,
+        claimed: &[Message],
+        surface: &[Message],
+        desired: Option<Message>,
+    ) -> Result<(), DriverError> {
+        let pending = pending_instructions(&self.inbox);
+        let already_supplied = desired.as_ref().is_some_and(|desired| {
+            claimed
+                .iter()
+                .chain(surface)
+                .any(|message| same_instruction_payload(message, desired))
+        });
+        let Some(desired) = desired else {
+            for message in &pending {
+                self.inbox
+                    .remove(instruction_id(message))
+                    .map_err(DriverError::Inbox)?;
+            }
+            return Ok(());
+        };
+        if already_supplied {
+            for message in &pending {
+                self.inbox
+                    .remove(instruction_id(message))
+                    .map_err(DriverError::Inbox)?;
+            }
+            return Ok(());
+        }
+        let reusable = pending
+            .iter()
+            .find(|message| same_instruction_payload(message, &desired));
+        if let Some(kept) = reusable {
+            for message in &pending {
+                if !std::ptr::eq(message, kept) {
+                    self.inbox
+                        .remove(instruction_id(message))
+                        .map_err(DriverError::Inbox)?;
+                }
+            }
+        } else {
+            match pending.first() {
+                None => self
+                    .inbox
+                    .prepend(InboxTarget::NextStep, desired)
+                    .map_err(DriverError::Inbox)?,
+                Some(replaced) => {
+                    self.inbox
+                        .replace(instruction_id(replaced), desired)
+                        .map_err(DriverError::Inbox)?;
+                }
+            }
+            for message in pending.iter().skip(1) {
+                self.inbox
+                    .remove(instruction_id(message))
+                    .map_err(DriverError::Inbox)?;
+            }
+        }
+        Ok(())
     }
 
     /// Whether the assembled tool schemas differ from the logged request
@@ -1921,6 +2127,91 @@ fn is_runtime_context_message(message: &Message) -> bool {
     }
 }
 
+/// The workspace-instructions source kind (dsh
+/// `agent-instructions/src/state.ts:122`; the provider crate's wire
+/// vocabulary checks the same literal).
+const INSTRUCTIONS_SOURCE_KIND: &str = "agent-instructions";
+
+/// The fs tools whose successful results touch workspace instructions
+/// (dsh `FILE_TOUCH_TOOL_NAMES`).
+const FILE_TOUCH_TOOLS: [&str; 3] = ["read", "write", "edit"];
+
+/// The instruction-relevant view of one message: its source document and
+/// content, the pair dsh `sameContextPayload` deep-compares.
+fn instruction_view(message: &Message) -> Option<(serde_json::Value, serde_json::Value)> {
+    let value = serde_json::to_value(message).ok()?;
+    let object = value.as_object()?;
+    Some((
+        object
+            .get("source")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+        object
+            .get("content")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+    ))
+}
+
+/// Whether one message carries the workspace-instructions source (dsh
+/// `isAgentInstructionsMessage`).
+fn is_agent_instructions_message(message: &Message) -> bool {
+    match message {
+        Message::Known(known) => matches!(
+            known.source(),
+            MessageSource::Other(map) if map.get("kind").and_then(|v| v.as_str()) == Some(INSTRUCTIONS_SOURCE_KIND)
+        ),
+        Message::Other(_) => false,
+    }
+}
+
+/// Whether two messages share the instruction payload (dsh
+/// `sameContextPayload`: deep-equal content and source; the id is not
+/// part of the identity).
+fn same_instruction_payload(left: &Message, right: &Message) -> bool {
+    match (instruction_view(left), instruction_view(right)) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
+    }
+}
+
+/// The pending workspace-instruction messages of the next-step queue, in
+/// order (dsh `agent.inbox.nextStep.filter(isAgentInstructionsMessage)`).
+fn pending_instructions(inbox: &LoopInbox) -> Vec<Message> {
+    inbox
+        .next_step()
+        .iter()
+        .filter(|message| is_agent_instructions_message(message))
+        .cloned()
+        .collect()
+}
+
+/// One pending instruction message's id (every inbox message carries a
+/// readable identity by the splice contract).
+fn instruction_id(message: &Message) -> &MessageId {
+    crate::inbox::message_id(message)
+        .expect("an inbox-resident message carries a readable id by the splice contract")
+}
+
+/// The wire `role` tag of one message, when the shape carries one.
+fn message_role(message: &Message) -> Option<&'static str> {
+    match message {
+        Message::Known(known) => Some(known.role_name()),
+        Message::Other(_) => None,
+    }
+}
+
+/// The path one successful fs-tool execution touched, when its arguments
+/// carry one (dsh `filePathFromExecution`: read/write/edit only, a
+/// trimmed non-empty string `file_path`).
+fn touched_path(exec: &ToolExecution) -> Option<String> {
+    if !FILE_TOUCH_TOOLS.contains(&exec.name.as_str()) {
+        return None;
+    }
+    let path = exec.arguments.get("file_path")?.as_str()?.trim();
+    (!path.is_empty()).then(|| path.to_owned())
+}
+
 /// Builds one assistant message from assembled blocks (dsh
 /// `createAssistantMessage`): the source carries the producing route and
 /// the replay envelope when one survived assembly.
@@ -2209,6 +2500,16 @@ impl LoopDriver {
             } else {
                 self.tools.finish(&slot.exec, slot.result)
             };
+            // A successful, un-aborted fs-tool touch feeds the next
+            // compose (dsh the `tools/result` listener; the nested
+            // execution ancestry is a Phase 18 structural absence — the
+            // M1 tools face carries no parent chain to float).
+            if !result.is_error
+                && self.abort_cause().is_none()
+                && let Some(path) = touched_path(&slot.exec)
+            {
+                self.touched_paths.push(path);
+            }
             let call_seq =
                 state.call_seqs[state.committed].expect("a started slot carries its tool/call seq");
             self.append_tool_result(turn, step, call, &result, call_seq)?;
@@ -2305,10 +2606,10 @@ impl LoopDriver {
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentOptions, DrainedGeneration, DriverDeps, DriverError, LoopDriver, PreparedCall,
-        PromptAssembly, RestoreView, SessionReads, SystemPromptFace, TOOL_ABORTED_BEFORE_DISPATCH,
-        ToolExecution, ToolExecutionMode, ToolExecutionResult, ToolPrepared, ToolSettlement,
-        ToolsFace,
+        AgentOptions, DrainedGeneration, DriverDeps, DriverError, InstructionsBridge, LoopDriver,
+        PreparedCall, PromptAssembly, RestoreView, SessionReads, SystemPromptFace,
+        TOOL_ABORTED_BEFORE_DISPATCH, ToolExecution, ToolExecutionMode, ToolExecutionResult,
+        ToolPrepared, ToolSettlement, ToolsFace,
     };
     use crate::agent_events::AgentEvents;
     use crate::outbound::Outbound;
@@ -2984,6 +3285,7 @@ mod tests {
             Vec::new(),
             10,
             |_| {},
+            None,
         )
     }
 
@@ -2994,6 +3296,7 @@ mod tests {
         tool_results: Vec<ToolExecutionResult>,
         max_parallel: usize,
         setup: impl FnOnce(&mut AgentEvents),
+        instructions: Option<Box<dyn InstructionsBridge>>,
     ) -> Harness {
         let session = Arc::new(Mutex::new(TestSession::new()));
         let session_handle = Box::into_raw(Box::new(Arc::clone(&session)));
@@ -3047,6 +3350,7 @@ mod tests {
                 prompt: Box::new(FixedPrompt { text: "system" }),
                 llm: Box::new(SharedLlm(Arc::clone(&llm))),
                 tools: Box::new(SharedTools(Arc::clone(&tools))),
+                instructions,
                 clock: Box::new(|| 1_700_000_000_000),
                 next_id,
                 max_parallel_tool_calls: Box::new(move || max_parallel),
@@ -3179,6 +3483,7 @@ mod tests {
                     }
                 }));
             },
+            None,
         );
         let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
         harness.mailbox.enqueue(InboundCommand::Input {
@@ -3215,6 +3520,7 @@ mod tests {
                     crate::agent_events::PreStepDecision::Reject
                 }));
             },
+            None,
         );
         let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
         harness.mailbox.enqueue(InboundCommand::Input {
@@ -3408,6 +3714,7 @@ mod tests {
             Vec::new(),
             1,
             |_| {},
+            None,
         );
         // The pool window of one plus a cancel on the first dispatch
         // leaves the second call unstarted: it must receive the
@@ -3560,6 +3867,7 @@ mod tests {
             vec![result.clone(), result],
             10,
             |_| {},
+            None,
         );
         let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
         harness.mailbox.enqueue(InboundCommand::Input {
@@ -3590,6 +3898,281 @@ mod tests {
             serde_json::json!({ "turn": 1, "reason": { "kind": "completed" } })
         );
         drop(thread);
+    }
+
+    /// One recorded `compose` call (claimed, pending, touched).
+    struct RecordedCompose {
+        claimed: Vec<Message>,
+        pending: Vec<Message>,
+        touched: Vec<String>,
+    }
+
+    /// The instructions-bridge double: returns a fixed desired message
+    /// and records every call's inputs.
+    struct RecordingBridge {
+        desired: Option<Message>,
+        calls: Arc<Mutex<Vec<RecordedCompose>>>,
+    }
+
+    impl InstructionsBridge for RecordingBridge {
+        fn compose(
+            &mut self,
+            _next_id: &dyn Fn() -> fr_wire::ids::MessageId,
+            claimed: &[Message],
+            pending: &[Message],
+            touched: &[String],
+            _surface: &[Message],
+        ) -> Result<Option<Message>, String> {
+            self.calls
+                .lock()
+                .expect("test bridge lock")
+                .push(RecordedCompose {
+                    claimed: claimed.to_vec(),
+                    pending: pending.to_vec(),
+                    touched: touched.to_vec(),
+                });
+            Ok(self.desired.clone())
+        }
+    }
+
+    fn instruction_message(id: &str) -> Message {
+        serde_json::from_value(serde_json::json!({
+            "role": "user",
+            "id": id,
+            "content": [{ "type": "text", "text": "workspace guide" }],
+            "source": {
+                "kind": "agent-instructions",
+                "form": "instructions",
+                "baseline": true,
+                "changes": []
+            },
+        }))
+        .expect("fixture message")
+    }
+
+    /// The durable inbox state, folded from the committed splice events
+    /// (the restore path; the live driver owns its copy until teardown).
+    fn folded_inbox(session: &Arc<Mutex<TestSession>>) -> crate::inbox::InboxState {
+        let locked = session.lock().expect("test session lock");
+        let mut state = crate::inbox::InboxState::default();
+        for event in &locked.events {
+            if event.event_type() != "agent/inbox/spliced" {
+                continue;
+            }
+            let fr_wire::event::SessionEventData::Unknown(unknown) = &event.data else {
+                continue;
+            };
+            let splice: crate::inbox::InboxSplice =
+                serde_json::from_value(serde_json::Value::Object(unknown.data.clone()))
+                    .expect("fixture splices carry the payload shape");
+            state = crate::inbox::fold_inbox(&state, event.seq.get(), &splice)
+                .expect("fixture splices fold");
+        }
+        drop(locked);
+        state
+    }
+
+    /// One message's source kind, when its shape carries one.
+    fn kinds_of(message: &Message) -> String {
+        serde_json::to_value(message).expect("message serializes")["source"]["kind"]
+            .as_str()
+            .expect("a fixture source kind")
+            .to_owned()
+    }
+
+    /// The kinds of the committed `user/message` events, in order.
+    fn user_message_kinds(session: &Arc<Mutex<TestSession>>) -> Vec<String> {
+        let locked = session.lock().expect("test session lock");
+        locked
+            .events
+            .iter()
+            .filter(|event| event.event_type() == "user/message")
+            .map(|event| {
+                let data = serde_json::to_value(&event.data).expect("event data serializes");
+                data["source"]["kind"]
+                    .as_str()
+                    .expect("a user/message source kind")
+                    .to_owned()
+            })
+            .collect()
+    }
+
+    /// The workspace-instructions fold admits the desired message right
+    /// after the claimed batch (dsh the `agent/pre-step` listener's
+    /// `findLastIndex` insert) and leaves nothing pending.
+    #[test]
+    fn instructions_fold_admits_desired_after_the_claimed_batch() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let bridge = RecordingBridge {
+            desired: Some(instruction_message("i1")),
+            calls: Arc::clone(&calls),
+        };
+        let harness = harness_with(
+            vec![ScriptedLlm::text_generation("done")],
+            ToolExecutionMode::Parallel,
+            false,
+            Vec::new(),
+            10,
+            |_| {},
+            Some(Box::new(bridge)),
+        );
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the folded turn ends",
+        );
+        drop(thread);
+        let calls = calls.lock().expect("test bridge lock");
+        assert_eq!(calls.len(), 1, "one compose per step boundary");
+        assert_eq!(calls[0].claimed, [user_message("m1", "task")]);
+        assert_eq!(calls[0].pending, []);
+        assert_eq!(calls[0].touched, Vec::<String>::new());
+        drop(calls);
+        assert_eq!(
+            user_message_kinds(&harness.session),
+            ["user".to_owned(), "agent-instructions".to_owned()],
+            "the desired message follows the claimed batch"
+        );
+        assert!(
+            folded_inbox(&harness.session)
+                .next_step
+                .iter()
+                .all(|message| kinds_of(message) != "agent-instructions")
+        );
+    }
+
+    /// A no-step first boundary keeps the desired context pending instead
+    /// of turning it into a standalone request (dsh
+    /// agent-instructions/src/index.ts:343-348).
+    #[test]
+    fn instructions_stay_pending_on_an_empty_first_boundary() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let bridge = RecordingBridge {
+            desired: Some(instruction_message("i1")),
+            calls: Arc::clone(&calls),
+        };
+        let harness = harness_with(
+            Vec::new(),
+            ToolExecutionMode::Parallel,
+            false,
+            Vec::new(),
+            10,
+            |events| {
+                events.on_pre_step(Box::new(|_payload, _next| {
+                    crate::agent_events::PreStepDecision::Enter {
+                        messages: Vec::new(),
+                        starts_request_series: false,
+                    }
+                }));
+            },
+            Some(Box::new(bridge)),
+        );
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the empty boundary turn ends",
+        );
+        drop(thread);
+        assert_eq!(
+            user_message_kinds(&harness.session),
+            Vec::<String>::new(),
+            "the desired message never admits on a no-step turn"
+        );
+        assert_eq!(
+            folded_inbox(&harness.session).next_step,
+            [instruction_message("i1")],
+            "the context stays pending for the next boundary"
+        );
+    }
+
+    /// One `read` tool call whose result settles cleanly: the touched
+    /// path feeds the next step's compose (dsh the `tools/result`
+    /// listener collapsed into the pre-step call).
+    #[test]
+    fn fs_tool_touches_feed_the_next_compose() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let bridge = RecordingBridge {
+            desired: None,
+            calls: Arc::clone(&calls),
+        };
+        let harness = harness_with(
+            vec![read_call_script(), ScriptedLlm::text_generation("done")],
+            ToolExecutionMode::Parallel,
+            false,
+            Vec::new(),
+            10,
+            |_| {},
+            Some(Box::new(bridge)),
+        );
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the tool turn ends",
+        );
+        drop(thread);
+        let calls = calls.lock().expect("test bridge lock");
+        assert_eq!(calls.len(), 2, "one compose per step boundary");
+        assert_eq!(calls[0].touched, Vec::<String>::new());
+        assert_eq!(calls[1].touched, ["/proj/AGENTS.md".to_owned()]);
+        drop(calls);
+        let tools = harness.tools.lock().expect("tools lock");
+        assert_eq!(tools.dispatches.len(), 1);
+        assert_eq!(tools.dispatches[0].name, "read");
+    }
+
+    /// One scripted generation requesting a single `read` call with a
+    /// `file_path` argument.
+    fn read_call_script() -> Script {
+        let arguments = r#"{"file_path":"/proj/AGENTS.md"}"#.to_owned();
+        Script {
+            chunks: vec![
+                StreamChunk::Known(KnownStreamChunk::BlockStart {
+                    index: 0,
+                    block_type: "tool-call".to_owned(),
+                }),
+                StreamChunk::Known(KnownStreamChunk::ToolCallDelta {
+                    index: 0,
+                    id: ToolCallId::new("call-0".to_owned()),
+                    name: Some("read".to_owned()),
+                    arguments_delta: arguments.clone(),
+                }),
+                StreamChunk::Known(KnownStreamChunk::BlockEnd {
+                    index: 0,
+                    block: fr_wire::ContentBlock::Known(fr_wire::KnownContentBlock::ToolCall {
+                        id: ToolCallId::new("call-0".to_owned()),
+                        name: "read".to_owned(),
+                        arguments,
+                    }),
+                }),
+                StreamChunk::Known(KnownStreamChunk::Finish {
+                    reason: fr_wire::FinishReason::Known(
+                        fr_wire::call_config::FinishReasonKind::ToolCalls,
+                    ),
+                    replay_state: None,
+                }),
+            ],
+            cancel_after_first_batch: false,
+            followup_after_cancel: false,
+            prepare_no_adapter: false,
+        }
     }
 
     /// A `max-tokens` finish sticks: the step ends on the sticky reason
@@ -3656,6 +4239,7 @@ mod tests {
                     Ok(())
                 }));
             },
+            None,
         );
         let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
         harness.mailbox.enqueue(InboundCommand::Input {
@@ -3730,6 +4314,7 @@ mod tests {
                     Some(crate::driver::RequestErrorAction::Retry)
                 }));
             },
+            None,
         );
         let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
         harness.mailbox.enqueue(InboundCommand::Input {

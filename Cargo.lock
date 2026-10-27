@@ -640,6 +640,7 @@ dependencies = [
  "dougong-abi",
  "fr-llm",
  "fr-session",
+ "fr-system-prompt",
  "fr-wire",
  "futures-core",
  "serde",

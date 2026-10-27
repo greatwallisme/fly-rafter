@@ -18,6 +18,10 @@ dougong-abi = { workspace = true }
 # (dsh agent.ts imports both from the dsh-session package; linked-copy rule,
 # no service state crosses artifacts).
 fr-llm = { workspace = true }
+# Wire DTOs and the render vocabulary of the consumed 'system-prompt'
+# service stay single-sourced in the provider crate (the llm_client
+# judgment; PRD 8.1 injects system-prompt into this plugin).
+fr-system-prompt = { workspace = true }
 futures-core = "0.3"
 fr-session = { workspace = true }
 fr-wire = { workspace = true }

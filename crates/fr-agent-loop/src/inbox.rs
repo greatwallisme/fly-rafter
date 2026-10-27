@@ -130,7 +130,7 @@ impl Error for InboxFoldError {
 ///
 /// Known-role messages always do; an unknown-shape entry cannot participate
 /// in cross-queue uniqueness, so the fold rejects it instead of trusting it.
-fn message_id(message: &Message) -> Option<&MessageId> {
+pub(crate) fn message_id(message: &Message) -> Option<&MessageId> {
     match message {
         Message::Known(known) => Some(known.id()),
         Message::Other(_) => None,

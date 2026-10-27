@@ -18,6 +18,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use fr_wire::event::SessionEventData;
+use fr_wire::ids::MessageId;
 use fr_wire::message::Message;
 
 use crate::agent_events::{AgentEvents, InboxClaimedPayload, InboxMessagePayload};
@@ -174,6 +175,71 @@ impl LoopInbox {
             });
         }
         Ok(claimed)
+    }
+
+    /// Inserts one message at the head of a pending list (dsh `prepend`).
+    ///
+    /// # Errors
+    ///
+    /// Returns the splice failure.
+    pub fn prepend(&mut self, target: InboxTarget, message: Message) -> Result<(), InboxError> {
+        self.splice(target, 0, 0, vec![message])?;
+        Ok(())
+    }
+
+    /// Replaces one pending message in place, searching next-turn before
+    /// next-step (dsh `replace`); returns whether the id was still
+    /// pending.
+    ///
+    /// # Errors
+    ///
+    /// Returns the splice failure.
+    pub fn replace(
+        &mut self,
+        message_id: &MessageId,
+        new_message: Message,
+    ) -> Result<bool, InboxError> {
+        match self.locate(message_id) {
+            Some((target, index)) => {
+                self.splice(target, index, 1, vec![new_message])?;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
+    /// Removes one pending message, searching next-turn before next-step
+    /// (dsh `remove`); returns whether the id was still pending.
+    ///
+    /// # Errors
+    ///
+    /// Returns the splice failure.
+    pub fn remove(&mut self, message_id: &MessageId) -> Result<bool, InboxError> {
+        match self.locate(message_id) {
+            Some((target, index)) => {
+                self.splice(target, index, 1, Vec::new())?;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
+    /// Where one id pends, next-turn first (dsh `locate`).
+    fn locate(&self, message_id: &MessageId) -> Option<(InboxTarget, i64)> {
+        for (target, list) in [
+            (InboxTarget::NextTurn, &self.state.next_turn),
+            (InboxTarget::NextStep, &self.state.next_step),
+        ] {
+            if let Some(index) = list
+                .iter()
+                .position(|message| crate::inbox::message_id(message) == Some(message_id))
+            {
+                let index = i64::try_from(index)
+                    .expect("an in-memory list length fits i64 on every supported target");
+                return Some((target, index));
+            }
+        }
+        None
     }
 
     /// Applies standard splice semantics with the removed messages
@@ -517,6 +583,63 @@ mod tests {
             .expect_err("duplicate id refuses");
         assert!(matches!(error, InboxError::Plan(_)));
         assert!(error.to_string().contains("already pending"));
+    }
+
+    #[test]
+    fn prepend_inserts_at_the_queue_head() {
+        let mut harness = harness();
+        harness
+            .inbox
+            .splice(InboxTarget::NextStep, i64::MAX, 0, vec![user_message("s1")])
+            .expect("seed step queue");
+        harness
+            .inbox
+            .prepend(InboxTarget::NextStep, user_message("head"))
+            .expect("prepend");
+        assert_eq!(
+            harness.inbox.next_step(),
+            &[user_message("head"), user_message("s1")]
+        );
+    }
+
+    #[test]
+    fn replace_and_remove_locate_next_turn_before_next_step() {
+        let mut harness = harness();
+        harness
+            .inbox
+            .splice(InboxTarget::NextTurn, 0, 0, vec![user_message("t1")])
+            .expect("seed turn queue");
+        harness
+            .inbox
+            .splice(InboxTarget::NextStep, 0, 0, vec![user_message("s1")])
+            .expect("seed step queue");
+        // Both queues would match by position; the id decides, and the
+        // turn queue is searched first (dsh `locate`).
+        let replaced = harness
+            .inbox
+            .replace(&message_id_of(&user_message("t1")), user_message("t2"))
+            .expect("replace");
+        assert!(replaced);
+        assert_eq!(harness.inbox.next_turn(), &[user_message("t2")]);
+        assert_eq!(harness.inbox.next_step(), &[user_message("s1")]);
+        let removed = harness
+            .inbox
+            .remove(&message_id_of(&user_message("s1")))
+            .expect("remove");
+        assert!(removed);
+        assert_eq!(harness.inbox.next_step(), []);
+        let missing = harness
+            .inbox
+            .remove(&message_id_of(&user_message("gone")))
+            .expect("remove");
+        assert!(!missing);
+    }
+
+    fn message_id_of(message: &Message) -> fr_wire::ids::MessageId {
+        match message {
+            Message::Known(known) => known.id().clone(),
+            Message::Other(_) => panic!("fixture messages are known-shape"),
+        }
     }
 
     #[test]

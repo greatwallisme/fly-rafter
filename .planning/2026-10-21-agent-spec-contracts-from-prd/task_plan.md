@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-切片 8 批 2b：fr-agent-loop 桥（prompt_client.rs=SystemPromptFace over Outbound + InstructionsBridge trait 进 driver pre_step + loop_inbox 增 prepend/replace/remove + touched 收集 + 跨 crate 往返钉测）。已落：批 0（五裁决 Q86-A/87-A/88-A/89-A/90-A+真源全读 findings 切片 8 节）；批 1a（extract-prompts 脚本+prompts.rs 27 常量+orders.rs 32/7 全表+逐字钉测）；批 1b（interpolate/tool_order/registry=Q86-A 端点+Q87-A waterfall 缝）；批 1c（instructions config/digest/render/files/state 五模块=dsh 2035 行全 Rust 化）；批 2a（service.rs 方法族 2-9+compose 逐段+plugin_shell）。crate 107 tests/workspace 847 tests 四门绿。批 3：spec 47 场景绑定+七步流 4-7。
+切片 8 批 3（收口）：PROMPT spec 47 场景绑定（Q90-A 表值绑全表钉测+行为独立短名）+七步流 4-7（lifecycle/guard/explain/stamp）+CLAUDE.md/PRD 补档评估+progress/task_plan 收口。已落：批 0-2b（五裁决+extract-prompts+纯层与域五模块+服务面与壳+loop 桥）。crate 107 tests/workspace 856 四门绿。
 
 ## Current Phase
 Phase 15（切片 8 = fr-system-prompt）
@@ -125,7 +125,7 @@ Phase 15（切片 8 = fr-system-prompt）
 ### Phase 15: fr-system-prompt + fr-agent-loop
 - [x] 提示词抽取脚本（scripts/extract-prompts，从 dsh 源文件生成常量，禁手抄）——批 1a 落（FR_DSH_SOURCE 必需+--check 钉测+生成管道内嵌 rustfmt）
 - [x] fr-system-prompt 纯层与域（有序 section/context 注册、SECTION_ORDERS/CONTEXT_ORDERS 全表生成、{{var}} 校验四文案逐字、tool-order 五态、complete 至多一个+waterfall 恢复、AGENTS.md 域五模块全量）——批 1b/1c 落；服务面+壳——批 2a 落
-- [ ] loop 桥（批 2b：prompt_client+InstructionsBridge+loop_inbox 增面+touched 收集+往返钉测）
+- [x] loop 桥（批 2b：prompt_client+InstructionsBridge+loop_inbox 增面+touched 收集+往返钉测）——2026-10-28 落，crate 82/workspace 856 四门绿
 - [ ] fr-agent-loop：inbox（claim 语义/一次 next-turn/next-step 全取/splice 规范化）、turn/preStep/step 控制流、waterfall 提案、流结算与重试、工具执行分组调度、状态机三相位、abort 补偿两级
 - [ ] 对照 REQ-FR-PROMPT/AGENT-LOOP 场景逐条落测试
 - **Status:** pending
