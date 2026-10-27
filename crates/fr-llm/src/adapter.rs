@@ -511,7 +511,8 @@ impl PreparedAdapterCall {
 /// The config view of one request (dsh compares the request structurally
 /// against the prepared config; the agent-loop mark is identity and never
 /// part of the comparison).
-fn call_config_of(options: &GenerateOptions) -> LlmCallConfig {
+#[must_use]
+pub fn call_config_of(options: &GenerateOptions) -> LlmCallConfig {
     LlmCallConfig {
         provider: options.provider.clone(),
         model: options.model.clone(),

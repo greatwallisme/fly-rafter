@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-切片 7 批 3：三 provider B2 增量（'llm' 服务 begin/drain/abort 三方法 + llm/chunk-ready 通知发射 + fr-llm rlib per-generation FIFO 共享助手，Q84-B2 裁决与 provider spec Decisions 末行既载）→ fr-agent-loop 侧 llm_client.rs 消费端 require 面替换 LlmFace 测试桩 → 七步流 4-7（AGENT-LOOP 26 场景绑定 + assistant-stream 批分发基准 + stamp）。批 2 已闭合（2a 四模块 + 2b driver.rs 控制线程体全控制流，四缝 Q81-A 桩驱动，workspace 四门绿 710 tests）。切片 8 = fr-system-prompt 含 scripts/extract-prompts。
+切片 8：fr-system-prompt（Q83-A 既裁：scripts/extract-prompts 抽取脚本先行落地 + agent-instructions 域；有序 section/context 注册、SECTION_ORDERS/CONTEXT_ORDERS 全表、{{var}} 校验、complete section 至多一个、AGENTS.md/CLAUDE.md 注入）。切片 7 已闭合（批 0-3：裁决链+骨架+四模块+驱动体+B2 两面落+llm_client+批分发基准；AGENT-LOOP lifecycle 23/26 passed 3 skipped（fiber_realm=Phase 18/provider_retry=llm-retry 外/header_reason=fr-session 侧）；workspace 四门绿 740 tests）。
 
 ## Current Phase
-Phase 15（切片 7 = fr-agent-loop）批 3 provider B2 增量
+Phase 15（切片 8 = fr-system-prompt）
 
 ## Phases
 

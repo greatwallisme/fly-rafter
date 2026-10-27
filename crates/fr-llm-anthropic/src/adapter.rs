@@ -1798,6 +1798,50 @@ mod tests {
     /// The official endpoint: the beta-qualified path and the full
     /// header order (SDK `buildHeaders` wire order, attribution UA,
     /// unconditional stainless timeout at the SDK default).
+    /// The B2 hookup (Q84-B2/Q85-C): the real adapter drives one
+    /// generation through the shared fr-llm hub; the settle drain pulls
+    /// the recorded run and its terminal settlement.
+    #[test]
+    fn generation_hub_drives_the_recorded_run() {
+        let fetch = FakeFetch::with(
+            200,
+            sse_body(&[
+                START,
+                TEXT_BLOCK,
+                TEXT_DELTA,
+                TEXT_STOP,
+                END_TURN,
+                MESSAGE_STOP,
+            ]),
+        );
+        let adapter = Arc::new(AnthropicAdapter::new(options(
+            Arc::clone(&fetch) as Arc<dyn Fetch>,
+            "https://api.anthropic.com",
+            Some("sk-test"),
+        )));
+        let service =
+            fr_llm::generation::GenerationService::new(fr_llm::generation::quiet_notify());
+        service.register_source(
+            "anthropic",
+            Arc::new(fr_llm::generation::AdapterSource::new(adapter)),
+        );
+        let id = service
+            .begin(request("claude-test"), None)
+            .expect("begin starts without waiting on the network");
+        let mut chunks = Vec::new();
+        for _ in 0..2_000 {
+            let batch = service.drain(&id).expect("drain settles");
+            chunks.extend(batch.chunks);
+            if batch.done {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(chunks.len() > 1, "the recorded run flows");
+        let last = serde_json::to_value(&chunks[chunks.len() - 1]).expect("last chunk json");
+        assert_eq!(last["type"], "finish", "terminal settlement lands");
+    }
+
     #[test]
     fn official_endpoint_pins_path_and_header_order() {
         let fetch = FakeFetch::with(

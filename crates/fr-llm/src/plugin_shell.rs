@@ -8,10 +8,10 @@
 //!
 //! The shell provides the `llm` service (PRD 4.5/:336 — fr-agent-loop
 //! injects `llm`, and the host contains no loop logic, so the service
-//! lives in this artifact). The service's method-number table (the
-//! Invoker-face of dsh's `LlmRuntime`) is refined by the consumer slices
-//! under the PRD :131 contract framework; this M1 shell carries the
-//! descriptor and a metadata echo only.
+//! lives in this artifact). The B2 generation trio (Q84-B2, Q85-C) is
+//! live: `prepare_call`/`begin`/`drain`/`abort` serve the shared
+//! [`crate::generation`] hub; the adapter registry starts empty and the
+//! channel-side registration protocol is the runtime-registry slice.
 
 use dougong_abi::{
     ABI_VERSION, HostExports, PluginExports, STATUS_CAPACITY, STATUS_FAILED, STATUS_OK, write_out,
@@ -26,6 +26,8 @@ pub const PLUGIN_NAME: &str = "fr-llm";
 /// Method selector: shell metadata echo (`{}`).
 pub const METHOD_DESCRIBE: u32 = 1;
 
+pub use crate::generation::{METHOD_ABORT, METHOD_BEGIN, METHOD_DRAIN, METHOD_PREPARE_CALL};
+
 /// The descriptor the loader consumes: the `llm` service over the dynamic
 /// channel, no injected dependencies or listeners in this slice. The version
 /// is sourced from crate metadata so it cannot drift from the artifact.
@@ -36,13 +38,59 @@ const DESCRIPTOR: &[u8] = concat!(
 )
 .as_bytes();
 
+/// The shell state: the generation service plus the copied emit vtable
+/// its notification seam publishes `llm/chunk-ready` through.
+pub struct ShellState {
+    service: crate::generation::GenerationService,
+}
+
+impl std::fmt::Debug for ShellState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ShellState")
+            .field("service", &self.service)
+            .finish()
+    }
+}
+
+impl ShellState {
+    /// Assembles the state over one copied vtable (the emit seam; a null
+    /// host keeps the quiet seam).
+    #[must_use]
+    pub fn new(host: Option<crate::generation::EmitVtable>) -> Self {
+        let notify = host.map_or_else(crate::generation::quiet_notify, |vtable| {
+            vtable.notify_seam()
+        });
+        Self {
+            service: crate::generation::GenerationService::new(notify),
+        }
+    }
+
+    /// The hosted service (tests register sources and drive the trio).
+    #[must_use]
+    pub const fn service(&self) -> &crate::generation::GenerationService {
+        &self.service
+    }
+}
+
+/// One failed method call: `Llm` carries the taxonomy document the
+/// shell replies as the `STATUS_FAILED` body verbatim; `Text` failures
+/// wrap as `{"error": ...}` — the two reply shapes the loop's client
+/// decodes.
+#[derive(Debug)]
+pub enum ShellFailure {
+    /// The `{"llmError": ...}` document (already JSON bytes).
+    Llm(Vec<u8>),
+    /// A fabric protocol failure.
+    Text(String),
+}
+
 /// Serves one method invocation against the shell state: a pure
 /// (JSON-in, JSON-out) function so the shell surface stays testable.
 ///
 /// # Errors
 ///
-/// Returns the failure text the host surfaces as `STATUS_FAILED`.
-pub fn dispatch(method: u32, payload: &[u8]) -> Result<Vec<u8>, String> {
+/// Returns the failure the host surfaces as `STATUS_FAILED`.
+pub fn dispatch(state: &ShellState, method: u32, payload: &[u8]) -> Result<Vec<u8>, ShellFailure> {
     match method {
         METHOD_DESCRIBE => {
             let _ = payload;
@@ -53,11 +101,25 @@ pub fn dispatch(method: u32, payload: &[u8]) -> Result<Vec<u8>, String> {
             }))
             .unwrap_or_default())
         }
-        _ => Err(format!("unknown fr-llm method {method}")),
+        METHOD_PREPARE_CALL | METHOD_BEGIN | METHOD_DRAIN | METHOD_ABORT => {
+            match crate::generation::serve(&state.service, method, payload) {
+                Ok(reply) => Ok(reply),
+                Err(crate::generation::ServiceError::Llm(failure)) => {
+                    // The failure IS the reply body (STATUS_FAILED).
+                    match serde_json::to_vec(&serde_json::json!({ "llmError": failure.failure() }))
+                    {
+                        Ok(body) => Err(ShellFailure::Llm(body)),
+                        Err(error) => Err(ShellFailure::Text(error.to_string())),
+                    }
+                }
+                Err(crate::generation::ServiceError::Text(text)) => Err(ShellFailure::Text(text)),
+            }
+        }
+        _ => Err(ShellFailure::Text(format!(
+            "unknown fr-llm method {method}"
+        ))),
     }
 }
-
-struct ShellState;
 
 unsafe extern "C" fn plugin_name(out: *mut u8, cap: usize, len: *mut usize) -> i32 {
     // SAFETY: the host guarantees a `cap`-sized out-buffer and a writable
@@ -78,13 +140,19 @@ unsafe extern "C" fn descriptor(out: *mut u8, cap: usize, len: *mut usize) -> i3
     }
 }
 
-// ABI v3 hands the outbound `HostExports` vtable here. The `llm` service
-// shell consumes no outbound capability in this slice, so the pointer is
-// dropped unstashed: per the export-table contract it is valid for this
-// call only, and copying it would extend its lifetime toward the
-// documented UB window past `teardown`.
-unsafe extern "C" fn setup(_host: *const HostExports) -> *mut std::os::raw::c_void {
-    Box::into_raw(Box::new(ShellState)).cast::<std::ffi::c_void>()
+// ABI v3 hands the outbound `HostExports` vtable here. The generation
+// hub's workers publish `llm/chunk-ready` through a copy of it (the
+// outbound.rs judgment: the copy stays valid until this activation's
+// `teardown` returns, and the hub joins every worker before then).
+unsafe extern "C" fn setup(host: *const HostExports) -> *mut std::os::raw::c_void {
+    let emit = if host.is_null() {
+        None
+    } else {
+        // SAFETY: the vtable contract guarantees validity for this call;
+        // copying by value is the sanctioned pattern (dylib-plugin.md).
+        Some(crate::generation::EmitVtable::new(unsafe { *host }))
+    };
+    Box::into_raw(Box::new(ShellState::new(emit))).cast::<std::ffi::c_void>()
 }
 
 unsafe extern "C" fn call(
@@ -110,9 +178,17 @@ unsafe extern "C" fn call(
         // `in_len` readable bytes per the host contract.
         unsafe { std::slice::from_raw_parts(in_data, in_len) }
     };
-    let reply = match dispatch(method, payload) {
+    // SAFETY: the handle was produced by `setup` and is valid until the
+    // matching `teardown`, which the host never overlaps with a call.
+    let state = unsafe { &*(handle.cast::<ShellState>()) };
+    let reply = match dispatch(state, method, payload) {
         Ok(reply) => reply,
-        Err(message) => {
+        Err(ShellFailure::Llm(body)) => {
+            // SAFETY: host buffer contract.
+            let _ = unsafe { write_out(&body, out, cap, out_len) };
+            return STATUS_FAILED;
+        }
+        Err(ShellFailure::Text(message)) => {
             let body = serde_json::json!({ "error": message }).to_string();
             // SAFETY: host buffer contract.
             let _ = unsafe { write_out(body.as_bytes(), out, cap, out_len) };
@@ -160,8 +236,11 @@ unsafe extern "C" fn teardown(handle: *mut std::os::raw::c_void) {
     if handle.is_null() {
         return;
     }
+    // Join every hub worker before the vtable lifetime ends (the dylib
+    // thread discipline), then reclaim the state.
     // SAFETY: the handle was produced by `setup` and torn down exactly once.
-    drop(unsafe { Box::from_raw(handle.cast::<ShellState>()) });
+    let state = unsafe { Box::from_raw(handle.cast::<ShellState>()) };
+    state.service.shutdown();
 }
 
 /// Export table for the fr-llm dylib artifact; the host resolves this
@@ -180,11 +259,16 @@ pub static DOUGONG_PLUGIN_EXPORTS: PluginExports = PluginExports {
 
 #[cfg(test)]
 mod tests {
-    use super::{METHOD_DESCRIBE, PLUGIN_NAME, SERVICE_NAME, dispatch};
+    use super::{METHOD_BEGIN, METHOD_DESCRIBE, PLUGIN_NAME, SERVICE_NAME, ShellState, dispatch};
+
+    fn quiet_state() -> ShellState {
+        ShellState::new(None)
+    }
 
     #[test]
     fn describe_reports_the_shell_metadata() {
-        let reply = dispatch(METHOD_DESCRIBE, b"{}").expect("describe");
+        let state = quiet_state();
+        let reply = dispatch(&state, METHOD_DESCRIBE, b"{}").expect("describe");
         let reply: serde_json::Value = serde_json::from_slice(&reply).expect("json");
         assert_eq!(reply["name"], PLUGIN_NAME);
         assert_eq!(reply["service"], SERVICE_NAME);
@@ -193,10 +277,29 @@ mod tests {
 
     #[test]
     fn unknown_methods_fail_with_text() {
+        let state = quiet_state();
+        let failure = dispatch(&state, 9, b"{}").expect_err("unknown method");
         assert!(
-            dispatch(9, b"{}")
-                .expect_err("unknown method")
-                .contains("unknown fr-llm method 9")
+            matches!(failure, super::ShellFailure::Text(ref text) if text.contains("unknown fr-llm method 9"))
+        );
+    }
+
+    /// The trio reaches the hub through the shell dispatch and the
+    /// llm-shaped failure carries the taxonomy document (the shape the
+    /// loop's client decodes).
+    #[test]
+    fn begin_without_a_route_replies_the_llm_error_document() {
+        let state = quiet_state();
+        let begin = br#"{"request":{"provider":"missing","model":"m","messages":[]}}"#;
+        let body = match dispatch(&state, METHOD_BEGIN, begin).expect_err("llm failure") {
+            super::ShellFailure::Llm(body) => body,
+            super::ShellFailure::Text(_) => panic!("expected the llm error document"),
+        };
+        let parsed: serde_json::Value = serde_json::from_slice(&body).expect("error json");
+        assert_eq!(parsed["llmError"]["code"], "NO_ADAPTER");
+        assert_eq!(
+            parsed["llmError"]["message"],
+            "no adapter registered for provider \"missing\""
         );
     }
 

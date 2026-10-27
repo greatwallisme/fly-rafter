@@ -42,7 +42,7 @@ fly-rafter 是字面全插件系统：agent 主循环不是宿主内置，而是
 ## Completion Criteria
 
 Scenario: agent 服务四入口入 inbox
-  Test: pending_req_fr_agent_loop_agent_inbox
+  Test: four_entries_queue_inputs_with_their_targets
   假设 会话循环运行中
   当 调用 agent 服务的 send、steer、inject 或 followup 时
   那么 输入进入 inbox 并唤醒 driver
@@ -54,36 +54,36 @@ Scenario: 每会话循环 fiber 置于会话 realm
   那么 fiber 置于该会话 realm，循环实现仅存在于 fr-agent-loop dylib 工件，宿主代码不含循环实现
 
 Scenario: 完整 turn 无工具调用
-  Test: pending_req_fr_agent_loop_turn
+  Test: full_turn_commits_the_boundary_shape
   假设 headless 任务提交后模型返回纯文本
   当 turn 结束时
   那么 会话日志含 turn/start、step/start、user/message、assistant/message、step/end、turn/end 且 reason 为 completed
 
 Scenario: 含工具调用的 turn
-  Test: pending_req_fr_agent_loop_turn
+  Test: tool_round_settles_calls_and_completes_the_turn
   假设 模型请求调用 bash 工具
   当 工具结果回填后继续下一 step
   那么 会话日志含模型序的 tool/call 与 tool/result，且无更多 tool-call 时 turn 为 completed
 
 Scenario: max-tokens 粘滞结束
-  Test: pending_req_fr_agent_loop_max_tokens
+  Test: max_tokens_finish_sticks_the_turn_reason
   假设 流结算 finish kind 为 max-tokens
   当 结算完成时
   那么 step 粘滞结束且 turn reason 为 max-tokens
 
 Scenario: steer 输入排队开新 turn
-  Test: pending_req_fr_agent_loop_steer_turn
+  Test: steer_during_a_turn_feeds_the_next_step
   当 turn 进行中调用 steer 时
   那么 输入入 inbox，当前 turn 正常收尾后开启下一 turn
 
 Scenario: 冻结请求拒绝内存改动
-  Test: pending_req_fr_agent_loop_requirement
+  Test: derive_messages_skips_empty_and_log_only_and_caches_tail_growth
   假设 deriveMessages 已产出冻结请求
   当 尝试在内存中修改请求内容时
   那么 修改被拒绝，请求仍与日志投影一致
 
 Scenario: step 抛错补齐缺失 tool/result
-  Test: pending_req_fr_agent_loop_step_tool_result
+  Test: tool_abort_records_synthetic_results_for_unstarted_calls
   假设 step 抛错时存在未结算的工具调用
   当 失败恢复运行时
   那么 缺失的 tool/result 被补齐且重放合法
@@ -95,37 +95,37 @@ Scenario: provider 重试策略生效
   那么 按策略重试，超限后向循环抛错
 
 Scenario: assistant-stream 批量分发基准
-  Test: pending_req_fr_agent_loop_assistant_stream
+  Test: stream_dispatch_meets_the_m1_benchmark_floor
   假设 会话内 assistant-stream chunk 高频到达
   当 运行 M1 验收的分发开销基准时
   那么 chunk 经批量分发送达监听者且基准达标
 
 Scenario: pre-step 拒绝或空输入收尾 turn
-  Test: pending_req_fr_agent_loop_pre_step_turn
+  Test: pre_step_reject_ends_the_turn_blocked
   假设 agent/pre-step waterfall 拒绝输入或 inbox 无可领取输入
   当 preStep 结算时
   那么 不发起请求，turn 直接收尾并 append turn/end
 
 Scenario: turn 收尾前派发 turn-stopping
-  Test: pending_req_fr_agent_loop_turn_turn_stopping
+  Test: turn_stopping_dispatches_before_the_end_event
   假设 turn 即将正常结束
   当 收尾时
   那么 先以 serial 语义派发 agent/turn-stopping，再 append turn/end
 
 Scenario: 无适配器时中间件路由容忍
-  Test: pending_req_fr_agent_loop_requirement
+  Test: no_adapter_prepare_call_falls_back_to_the_proposal
   假设 agent/request waterfall 提出的配置无绑定适配器
   当 调用 prepare_call 时
   那么 容忍中间件路由不报错，由后续件决定行为
 
 Scenario: 多输入按入队顺序 claim
-  Test: pending_req_fr_agent_loop_claim
+  Test: claim_takes_the_step_batch_then_one_turn_message
   假设 inbox 中排队多个输入
   当 preStep claim 时
   那么 按入队顺序消费
 
 Scenario: incapable 模型走归一化路由
-  Test: pending_req_fr_agent_loop_incapable
+  Test: normalization_empties_tail_and_rewrites_head
   假设 当前模型不支持提示词缓存增量
   当 提交 system prompt surface 时
   那么 走归一化路由整段重写首节点
@@ -137,61 +137,61 @@ Scenario: header reason 判定
   那么 reason 分别为 initial、change、series；工具 schema 仅顺序不同的相等比较按顺序敏感判定
 
 Scenario: 策略变化不打破前缀
-  Test: pending_req_fr_agent_loop_requirement
+  Test: capable_series_appends_changed_text
   假设 会话中途审批策略变化
   当 构造下一请求时
   那么 历史前缀逐字节不变，新 runtime-context 快照追加在保留历史之后
 
 Scenario: claim 队列语义
-  Test: pending_req_fr_agent_loop_claim
+  Test: claim_takes_the_step_batch_then_one_turn_message
   假设 inbox 中有两条 next-step 与一条 next-turn 输入
   当 preStep claim 时
   那么 next-step 全部取走、next-turn 至多取一条，且变更产生 inbox/spliced 事件
 
 Scenario: 新 turn 旧信号失效
-  Test: pending_req_fr_agent_loop_turn
+  Test: waking_input_after_abort_starts_the_next_turn
   假设 上一 turn 的 AbortController 已触发
   当 开启新 turn 时
   那么 换新 controller，旧信号上的闩不再影响新 turn
 
 Scenario: 中断保留部分内容
-  Test: pending_req_fr_agent_loop_requirement
+  Test: cancel_mid_stream_settles_the_interrupted_prefix
   假设 流 aborted 时已积累非空白文本与 reasoning 内容
   当 结算该 attempt 时
   那么 追加 assistant/message 且 interrupted:true，中断内容进入历史
 
 Scenario: 重试不重复 user/message
-  Test: pending_req_fr_agent_loop_user_message
+  Test: retry_ruling_keeps_one_user_message
   假设 首次 attempt 失败进入重试
   当 第二次 attempt 发起请求时
   那么 user/message 仅存在 firstAttempt 的一条，未重复注入
 
 Scenario: 错误 attempt 走 waterfall 裁决
-  Test: pending_req_fr_agent_loop_attempt_waterfall
+  Test: error_attempt_settles_and_reports_the_failure
   假设 流以 error 结束
   当 结算时
   那么 追加 assistant/attempt 并交 agent/request-error waterfall 裁决，默认不重试则抛错
 
 Scenario: step0 空输入不花模型调用
-  Test: pending_req_fr_agent_loop_step0
+  Test: step0_empty_turn_completes_without_model_calls
   假设 turn 开启后 preStep 无可领取输入
   当 step0 结算时
   那么 turn reason 为 completed 且未发起任何模型请求
 
 Scenario: pre-step reject 置 blocked
-  Test: pending_req_fr_agent_loop_pre_step_reject_blocked
+  Test: pre_step_reject_ends_the_turn_blocked
   假设 agent/pre-step waterfall 以 reject 裁决
   当 结算时
   那么 turnEnds 置为 blocked 并收尾 turn
 
 Scenario: 维护相位不接受新步
-  Test: pending_req_fr_agent_loop_requirement
+  Test: maintenance_refuses_active_work_and_replays_a_latched_wake
   假设 循环处于 maintenance 相位
   当 请求发起新 step 时
   那么 该请求不被执行，循环仅在恢复 running 后继续
 
 Scenario: runtime-context 恰好 admitted 一次
-  Test: pending_req_fr_agent_loop_runtime_context_admitted
+  Test: observe_follows_events
   假设 某步因流错误重试
   当 重试请求组装时
   那么 本步已注入的 runtime-context 快照不重复出现

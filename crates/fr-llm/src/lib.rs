@@ -13,8 +13,9 @@ pub mod assembler;
 pub mod assistant_stream;
 pub mod attribution;
 pub mod error;
+pub mod generation;
 pub mod plugin_shell;
 pub mod projection;
 pub mod retry_policy;
 
-// Rust guideline compliant 2026-10-25
+// Rust guideline compliant 2026-10-28

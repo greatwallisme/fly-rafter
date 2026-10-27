@@ -18,6 +18,7 @@ dougong-abi = { workspace = true }
 # (dsh agent.ts imports both from the dsh-session package; linked-copy rule,
 # no service state crosses artifacts).
 fr-llm = { workspace = true }
+futures-core = "0.3"
 fr-session = { workspace = true }
 fr-wire = { workspace = true }
 serde = { workspace = true }

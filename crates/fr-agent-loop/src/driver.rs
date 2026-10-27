@@ -157,6 +157,9 @@ pub trait SystemPromptFace: Send {
 /// minus the stream closure, which the B2 face carries by generation id).
 #[derive(Debug, Clone)]
 pub struct PreparedCall {
+    /// The service-minted binding id `begin` references (the in-process
+    /// stubs carry none).
+    pub prepared_id: Option<String>,
     /// The frozen config this generation was prepared with.
     pub config: LlmCallConfig,
     /// The exact-route model metadata (context window, prompt and tool
@@ -422,7 +425,7 @@ impl From<InboxError> for DriverError {
 /// Rebuilds the [`LlmError`] a failed finish throws (dsh `new
 /// LlmError(message, code, failure)`): the failure already passed the
 /// constructor's validation when the adapter produced it.
-fn llm_error(failure: &fr_wire::Failure) -> LlmError {
+pub(crate) fn llm_error(failure: &fr_wire::Failure) -> LlmError {
     LlmError::try_new(
         &failure.message,
         &failure.code,
@@ -745,6 +748,7 @@ impl LoopDriver {
     /// Panics if a mailbox lock is poisoned (a holder panicked).
     pub fn run(&mut self) {
         loop {
+            self.events.flush_stream_mirror();
             self.mailbox.wait_idle();
             if self.mailbox.is_shutdown() {
                 return;
@@ -1738,6 +1742,8 @@ impl LoopDriver {
                 // dsh checks the signal once more after the loop ends.
                 return self.poll();
             }
+            // No frame waits on a parked loop (PRD 22 batching).
+            self.events.flush_stream_mirror();
             self.mailbox.wait_step();
         }
     }
@@ -2067,6 +2073,7 @@ impl LoopDriver {
         };
         self.group_fill(turn, step, group, mode, max_parallel, &mut state)?;
         while !state.in_flight.is_empty() {
+            self.events.flush_stream_mirror();
             self.mailbox.wait_step();
             self.apply_commands();
             if self.abort_cause().is_some() {
@@ -2620,6 +2627,9 @@ mod tests {
         /// A waking input injected right after the cancel (the
         /// waking-after-abort classification probe).
         followup_after_cancel: bool,
+        /// Fail `prepare_call` with `NO_ADAPTER` (the middleware-route
+        /// tolerance probe).
+        prepare_no_adapter: bool,
     }
 
     /// The LLM double (Q84-B2 face over scripted generations).
@@ -2643,6 +2653,7 @@ mod tests {
                 ],
                 cancel_after_first_batch: false,
                 followup_after_cancel: false,
+                prepare_no_adapter: false,
             }
         }
     }
@@ -2680,6 +2691,7 @@ mod tests {
             chunks,
             cancel_after_first_batch: false,
             followup_after_cancel: false,
+            prepare_no_adapter: false,
         }
     }
 
@@ -2709,7 +2721,23 @@ mod tests {
     impl super::LlmFace for ScriptedLlm {
         fn prepare_call(&mut self, config: &LlmCallConfig) -> Result<PreparedCall, LlmError> {
             self.prepared.push(config.clone());
+            if self
+                .scripts
+                .front()
+                .is_some_and(|script| script.prepare_no_adapter)
+            {
+                return Err(LlmError::try_new(
+                    "no adapter registered for provider \"p\"",
+                    "NO_ADAPTER",
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .expect("the static no-adapter rejection is impossible"));
+            }
             Ok(PreparedCall {
+                prepared_id: None,
                 config: config.clone(),
                 model: ResolvedModelInfo {
                     system_prompt_update: self
@@ -3215,6 +3243,7 @@ mod tests {
             chunks: vec![finish_error("boom")],
             cancel_after_first_batch: false,
             followup_after_cancel: false,
+            prepare_no_adapter: false,
         }]);
         let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
         harness.mailbox.enqueue(InboundCommand::Input {
@@ -3258,6 +3287,7 @@ mod tests {
             ],
             cancel_after_first_batch: true,
             followup_after_cancel: false,
+            prepare_no_adapter: false,
         }]);
         let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
         harness.mailbox.enqueue(InboundCommand::Input {
@@ -3302,6 +3332,7 @@ mod tests {
                 })],
                 cancel_after_first_batch: true,
                 followup_after_cancel: true,
+                prepare_no_adapter: false,
             },
             ScriptedLlm::text_generation("second"),
         ]);
@@ -3445,6 +3476,7 @@ mod tests {
             // stream wait until the shutdown broadcast aborts it.
             cancel_after_first_batch: false,
             followup_after_cancel: false,
+            prepare_no_adapter: false,
         }]);
         let exited = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let exited_for_thread = Arc::clone(&exited);
@@ -3500,6 +3532,228 @@ mod tests {
         // logged exactly one request/header (the initial).
         assert_eq!(session.typed("turn/end").len(), 2);
         assert_eq!(session.typed("request/header").len(), 1);
+        drop(session);
+        drop(thread);
+    }
+
+    /// The tool-turn shape: model-ordered tool/call and tool/result
+    /// pairs, then the follow-up answer, then `completed` (dsh
+    /// `executeToolCalls` over the happy path).
+    #[test]
+    fn tool_round_settles_calls_and_completes_the_turn() {
+        let result = ToolExecutionResult {
+            content: vec![fr_wire::ContentBlock::Known(
+                fr_wire::KnownContentBlock::Text {
+                    text: "ok".to_owned(),
+                },
+            )],
+            is_error: false,
+            error: None,
+            meta: None,
+            additional_contexts: Vec::new(),
+            concludes_turn: false,
+        };
+        let harness = harness_with(
+            vec![with_tool_calls(2), ScriptedLlm::text_generation("done")],
+            ToolExecutionMode::Parallel,
+            false,
+            vec![result.clone(), result],
+            10,
+            |_| {},
+        );
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the tool turn ends",
+        );
+        let session = harness.session.lock().expect("test session lock");
+        let calls = session.typed("tool/call");
+        let results = session.typed("tool/result");
+        assert_eq!(calls.len(), 2);
+        assert_eq!(results.len(), 2);
+        // Model order: each result references its call's seq, in order.
+        let pairs: Vec<(u64, u64)> = calls
+            .iter()
+            .zip(results.iter())
+            .map(|(call, result)| (call.seq.get(), result.seq.get()))
+            .collect();
+        assert!(pairs.iter().all(|(call, result)| call < result));
+        drop(session);
+        assert_eq!(
+            turn_end_reason(&harness.session, 0),
+            serde_json::json!({ "turn": 1, "reason": { "kind": "completed" } })
+        );
+        drop(thread);
+    }
+
+    /// A `max-tokens` finish sticks: the step ends on the sticky reason
+    /// and the turn reports `max-tokens` (never downgraded to
+    /// `completed`).
+    #[test]
+    fn max_tokens_finish_sticks_the_turn_reason() {
+        let harness = harness(vec![Script {
+            chunks: vec![
+                StreamChunk::Known(KnownStreamChunk::TextDelta {
+                    index: 0,
+                    text: "over".to_owned(),
+                }),
+                StreamChunk::Known(KnownStreamChunk::Finish {
+                    reason: fr_wire::FinishReason::Known(
+                        fr_wire::call_config::FinishReasonKind::MaxTokens,
+                    ),
+                    replay_state: None,
+                }),
+            ],
+            cancel_after_first_batch: false,
+            followup_after_cancel: false,
+            prepare_no_adapter: false,
+        }]);
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the max-tokens turn ends",
+        );
+        assert_eq!(
+            turn_end_reason(&harness.session, 0),
+            serde_json::json!({ "turn": 1, "reason": { "kind": "max-tokens" } })
+        );
+        drop(thread);
+    }
+
+    /// The serial `agent/turn-stopping` dispatch runs before the
+    /// `turn/end` append (dsh ordering).
+    #[test]
+    fn turn_stopping_dispatches_before_the_end_event() {
+        // The dispatch recorder: the serial dispatch observes the turn it
+        // closes (the before-turn/end ordering is the turn-loop structure
+        // the dispatch site pins in code review).
+        let dispatched: Arc<Mutex<Vec<u64>>> = Arc::new(Mutex::new(Vec::new()));
+        let recorder = Arc::clone(&dispatched);
+        let harness = harness_with(
+            vec![ScriptedLlm::text_generation("hello")],
+            ToolExecutionMode::Parallel,
+            false,
+            Vec::new(),
+            10,
+            |events| {
+                events.on_turn_stopping(Box::new(move |payload| {
+                    recorder
+                        .lock()
+                        .expect("dispatch recorder")
+                        .push(payload.turn);
+                    Ok(())
+                }));
+            },
+        );
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the turn ends",
+        );
+        assert_eq!(*dispatched.lock().expect("dispatch recorder"), [1_u64]);
+        drop(thread);
+    }
+
+    /// `NO_ADAPTER` from `prepare_call` is tolerated (the middleware
+    /// route): the request proceeds on the proposal and the model call
+    /// happens (dsh agent.ts:157-159).
+    #[test]
+    fn no_adapter_prepare_call_falls_back_to_the_proposal() {
+        let harness = harness(vec![Script {
+            chunks: ScriptedLlm::text_generation("routed").chunks,
+            cancel_after_first_batch: false,
+            followup_after_cancel: false,
+            prepare_no_adapter: true,
+        }]);
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the middleware-routed turn ends",
+        );
+        let session = harness.session.lock().expect("test session lock");
+        assert!(
+            !session.typed("assistant/message").is_empty(),
+            "the model call ran on the proposal config"
+        );
+        drop(session);
+        assert_eq!(
+            turn_end_reason(&harness.session, 0),
+            serde_json::json!({ "turn": 1, "reason": { "kind": "completed" } })
+        );
+        drop(thread);
+    }
+
+    /// A retry ruling re-issues the request without re-admitting the
+    /// `user/message` (first-attempt-only admission).
+    #[test]
+    fn retry_ruling_keeps_one_user_message() {
+        let harness = harness_with(
+            vec![
+                Script {
+                    chunks: vec![finish_error("boom")],
+                    cancel_after_first_batch: false,
+                    followup_after_cancel: false,
+                    prepare_no_adapter: false,
+                },
+                ScriptedLlm::text_generation("recovered"),
+            ],
+            ToolExecutionMode::Parallel,
+            false,
+            Vec::new(),
+            10,
+            |events| {
+                events.on_request_error(Box::new(|_payload, _next| {
+                    Some(crate::driver::RequestErrorAction::Retry)
+                }));
+            },
+        );
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the retried turn ends",
+        );
+        let session = harness.session.lock().expect("test session lock");
+        assert_eq!(session.typed("user/message").len(), 1, "admitted once");
+        assert_eq!(
+            session.typed("assistant/attempt").len(),
+            1,
+            "the failed attempt settles"
+        );
+        assert_eq!(
+            session.typed("assistant/message").len(),
+            1,
+            "the retry answers"
+        );
         drop(session);
         drop(thread);
     }

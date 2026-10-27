@@ -1,4 +1,4 @@
-// Rust guideline compliant 2026-10-27
+// Rust guideline compliant 2026-10-28
 //! fr-agent-loop: the dougong plugin that drives agent sessions.
 //!
 //! One plugin instance maintains one loop driver per session — a dedicated
@@ -18,6 +18,7 @@ pub mod agent_events;
 pub mod assistant_stream;
 pub mod driver;
 pub mod inbox;
+pub mod llm_client;
 pub mod loop_inbox;
 pub mod outbound;
 pub mod phase;

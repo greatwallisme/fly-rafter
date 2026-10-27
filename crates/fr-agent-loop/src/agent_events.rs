@@ -59,6 +59,13 @@ pub const EVENT_REQUEST_ERROR: &str = "agent/request-error";
 /// Middleware event (serial): a turn is about to end.
 pub const EVENT_TURN_STOPPING: &str = "agent/turn-stopping";
 
+/// The mirror batch ceiling.
+///
+/// A full buffer flushes regardless of frame kind, so a mid-attempt
+/// chunk stream never waits past this many frames for its boundary
+/// crossing (start and end frames flush immediately).
+pub const STREAM_MIRROR_BATCH: usize = 32;
+
 /// A listener failure as the dispatch faces report it.
 pub type ListenerError = Box<dyn Error + Send + Sync>;
 
@@ -71,6 +78,16 @@ pub type WarnSink = Arc<dyn Fn(&str) + Send + Sync>;
 pub struct StatusPayload {
     /// The loop's status.
     pub status: AgentStatus,
+}
+
+/// The batched `agent/assistant-stream` mirror payload: every bus
+/// crossing carries a batch (PRD 22 hot-path countermeasure — the
+/// in-process listeners stay per-frame, the boundary batches).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssistantStreamBatchPayload {
+    /// The frames, in emission order.
+    pub frames: Vec<AssistantStreamFrame>,
 }
 
 /// The `agent/error` payload: the failure at its live boundary.
@@ -241,6 +258,7 @@ where
 pub struct AgentEvents {
     outbound: Outbound,
     warn: WarnSink,
+    pending_frames: std::sync::Mutex<Vec<AssistantStreamPayload>>,
     status: Vec<StatusListener>,
     error: Vec<ErrorListener>,
     assistant_stream: Vec<AssistantStreamListener>,
@@ -278,6 +296,7 @@ impl AgentEvents {
         Self {
             outbound,
             warn,
+            pending_frames: std::sync::Mutex::new(Vec::new()),
             status: Vec::new(),
             error: Vec::new(),
             assistant_stream: Vec::new(),
@@ -370,13 +389,56 @@ impl AgentEvents {
     }
 
     /// Publishes one assistant attempt frame.
+    ///
+    /// The in-process listeners receive every frame (dsh parity); the bus
+    /// mirror batches — one `{"frames": [...]}` crossing per full buffer,
+    /// attempt boundary, or explicit flush (PRD 22 hot-path
+    /// countermeasure; the driver flushes at its park points).
     pub fn emit_assistant_stream(&self, payload: &AssistantStreamPayload) {
         for listener in &self.assistant_stream {
             if let Err(error) = listener(payload) {
                 self.warn_listener_failure(EVENT_ASSISTANT_STREAM, &error);
             }
         }
-        self.mirror(EVENT_ASSISTANT_STREAM, payload);
+        let boundary = matches!(
+            payload.frame,
+            AssistantStreamFrame::Start { .. } | AssistantStreamFrame::End { .. }
+        );
+        let mut pending = self
+            .pending_frames
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        pending.push(payload.clone());
+        if boundary || pending.len() >= STREAM_MIRROR_BATCH {
+            let batch = AssistantStreamBatchPayload {
+                frames: std::mem::take(&mut *pending)
+                    .into_iter()
+                    .map(|p| p.frame)
+                    .collect(),
+            };
+            drop(pending);
+            self.mirror(EVENT_ASSISTANT_STREAM, &batch);
+        }
+    }
+
+    /// Flushes the pending stream frames through the bus mirror (the
+    /// driver's park points: no frame waits on a parked loop).
+    pub fn flush_stream_mirror(&self) {
+        let mut pending = self
+            .pending_frames
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if pending.is_empty() {
+            return;
+        }
+        let batch = AssistantStreamBatchPayload {
+            frames: std::mem::take(&mut *pending)
+                .into_iter()
+                .map(|p| p.frame)
+                .collect(),
+        };
+        drop(pending);
+        self.mirror(EVENT_ASSISTANT_STREAM, &batch);
     }
 
     /// Publishes one inbox claim.
@@ -848,5 +910,192 @@ mod tests {
                 step: 1,
             },
         };
+    }
+
+    /// One recording bus mirror: `(event, payload)` per crossing.
+    type MirrorLog = Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
+    /// The mirror's inner log (the raw handle's pointee — `Arc::into_raw`
+    /// hands out the inner allocation, not the `Arc` header).
+    type MirrorEntry = std::sync::Mutex<Vec<(String, Vec<u8>)>>;
+
+    /// The mirror host's require arm: the mirror never requires.
+    unsafe extern "C" fn recording_require(
+        _host: *mut std::ffi::c_void,
+        _service: *const u8,
+        _service_len: usize,
+        _method: u32,
+        _in_data: *const u8,
+        _in_len: usize,
+        _out_buf: *mut u8,
+        _cap: usize,
+        _out_len: *mut usize,
+    ) -> i32 {
+        panic!("the mirror host never requires");
+    }
+
+    /// The mirror host's emit arm: appends `(event, payload)` to the
+    /// handle's log.
+    ///
+    /// # Safety
+    ///
+    /// `host` must alias a live [`MirrorEntry`] for the call; the slices
+    /// must be valid for their lengths per the vtable contract.
+    unsafe extern "C" fn recording_emit(
+        host: *mut std::ffi::c_void,
+        event: *const u8,
+        event_len: usize,
+        payload: *const u8,
+        payload_len: usize,
+    ) -> i32 {
+        // SAFETY: the caller (the vtable test double) passes the handle
+        // this fn documents.
+        let log = unsafe { &*(host.cast::<MirrorEntry>()) };
+        // SAFETY: same contract for the slices.
+        let event = unsafe {
+            String::from_utf8_lossy(std::slice::from_raw_parts(event, event_len)).into_owned()
+        };
+        // SAFETY: same contract for the payload slice.
+        let payload = unsafe { std::slice::from_raw_parts(payload, payload_len) }.to_vec();
+        log.lock().expect("mirror log").push((event, payload));
+        STATUS_OK
+    }
+
+    fn recording_events() -> (AgentEvents, MirrorLog) {
+        let log: MirrorLog = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let handle = Arc::into_raw(Arc::clone(&log));
+        let events = AgentEvents::new(
+            crate::outbound::Outbound::new(HostExports {
+                host_handle: handle.cast_mut().cast::<std::ffi::c_void>(),
+                require: recording_require,
+                emit: recording_emit,
+            }),
+            Arc::new(|_warning: &str| {}),
+        );
+        (events, log)
+    }
+
+    /// The batching mirror: chunks accumulate, a full buffer or an
+    /// attempt boundary flushes, and the batch payload preserves emission
+    /// order — the PRD 22 hot-path countermeasure.
+    #[test]
+    fn stream_mirror_batches_frames_across_the_boundary() {
+        use crate::assistant_stream::AssistantStreamFrame;
+        use fr_wire::StreamChunk;
+        let (events, log) = recording_events();
+        let frame = |index: u64| AssistantStreamFrame::Chunk {
+            attempt_id: fr_wire::ids::LlmAttemptId::new("s1:1"),
+            revision: 1,
+            index,
+            time: 1_700_000_000_000,
+            chunk: Box::new(StreamChunk::Known(
+                fr_wire::stream::KnownStreamChunk::TextDelta {
+                    index: 0,
+                    text: format!("chunk {index}"),
+                },
+            )),
+        };
+        // Fill below the ceiling, then flush explicitly.
+        for index in 0..super::STREAM_MIRROR_BATCH - 1 {
+            events.emit_assistant_stream(&AssistantStreamPayload {
+                frame: frame(index as u64),
+            });
+        }
+        assert!(
+            log.lock().expect("mirror log").is_empty(),
+            "below the ceiling nothing crosses"
+        );
+        events.flush_stream_mirror();
+        let crossings = log.lock().expect("mirror log").clone();
+        assert_eq!(crossings.len(), 1, "one batched crossing");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&crossings[0].1).expect("batch json");
+        assert_eq!(
+            payload["frames"].as_array().map(Vec::len),
+            Some(super::STREAM_MIRROR_BATCH - 1)
+        );
+        assert_eq!(
+            payload["frames"][0]["chunk"]["text"], "chunk 0",
+            "emission order preserved"
+        );
+
+        // The ceiling flushes without an explicit call; the end frame
+        // flushes the remainder immediately.
+        for index in 0..super::STREAM_MIRROR_BATCH {
+            events.emit_assistant_stream(&AssistantStreamPayload {
+                frame: frame(index as u64),
+            });
+        }
+        assert_eq!(
+            log.lock().expect("mirror log").len(),
+            2,
+            "the explicit batch plus the full-buffer flush"
+        );
+        events.emit_assistant_stream(&AssistantStreamPayload {
+            frame: AssistantStreamFrame::End {
+                attempt_id: fr_wire::ids::LlmAttemptId::new("s1:1"),
+                revision: 1,
+                index: 0,
+                outcome: crate::assistant_stream::FrameOutcome::Abandoned,
+            },
+        });
+        let crossings = log.lock().expect("mirror log").clone();
+        assert_eq!(crossings.len(), 3, "the end frame flushed the remainder");
+        assert_eq!(crossings[1].0, "agent/assistant-stream");
+    }
+
+    /// The M1 dispatch benchmark floor: the in-process registry plus the
+    /// batched mirror sustain a chunk rate far above any provider's with
+    /// margin (a generous CI-safe floor — the recorded figure prints for
+    /// the acceptance review).
+    #[test]
+    fn stream_dispatch_meets_the_m1_benchmark_floor() {
+        use crate::assistant_stream::AssistantStreamFrame;
+        use fr_wire::StreamChunk;
+        use std::time::Instant;
+        let (mut events, log) = recording_events();
+        let seen = Arc::new(std::sync::Mutex::new(0_u64));
+        let sink = Arc::clone(&seen);
+        events.on_assistant_stream(Box::new(move |_payload| {
+            *sink.lock().expect("counter") += 1;
+            Ok(())
+        }));
+        let chunks = 100_000_u64;
+        let payload = AssistantStreamPayload {
+            frame: AssistantStreamFrame::Chunk {
+                attempt_id: fr_wire::ids::LlmAttemptId::new("s1:1"),
+                revision: 1,
+                index: 0,
+                time: 1_700_000_000_000,
+                chunk: Box::new(StreamChunk::Known(
+                    fr_wire::stream::KnownStreamChunk::TextDelta {
+                        index: 0,
+                        text: "x".to_owned(),
+                    },
+                )),
+            },
+        };
+        let started = Instant::now();
+        for _ in 0..chunks {
+            events.emit_assistant_stream(&payload);
+        }
+        events.flush_stream_mirror();
+        let elapsed = started.elapsed();
+        assert_eq!(
+            *seen.lock().expect("counter"),
+            chunks,
+            "the listener saw every frame"
+        );
+        // The floor: 100k frames must dispatch (listener + batched mirror)
+        // well inside five seconds — three orders of magnitude above a
+        // generous provider chunk rate, safe on loaded CI runners.
+        assert!(
+            elapsed.as_secs_f64() < 5.0,
+            "100k frames dispatched in {elapsed:?}"
+        );
+        let crossings = log.lock().expect("mirror log").len();
+        println!(
+            "assistant-stream dispatch: {chunks} frames in {elapsed:?} ({:.0} frames/s, {crossings} mirror crossings)",
+            f64::from(u32::try_from(chunks).expect("fits u32")) / elapsed.as_secs_f64()
+        );
     }
 }

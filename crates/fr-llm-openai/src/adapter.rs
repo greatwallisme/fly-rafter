@@ -2088,6 +2088,43 @@ mod tests {
         }
     }
 
+    /// The B2 hookup (Q84-B2/Q85-C): the real adapter drives one
+    /// generation through the shared fr-llm hub; the settle drain pulls
+    /// the recorded tool run and its terminal settlement.
+    #[test]
+    fn generation_hub_drives_the_recorded_run() {
+        let fetch = RecordedFetch::new(200, RECORDED_TOOL_RUN);
+        let adapter = Arc::new(OpenAiAdapter::new(keyed_options(
+            Arc::clone(&fetch) as Arc<dyn Fetch>,
+            vec![with_key(
+                route_profile("openai-completions", "https://gw.example/v1"),
+                "ACME_KEY",
+            )],
+            BTreeMap::from([("ACME_KEY".to_owned(), "sk-test".to_owned())]),
+        )));
+        let service =
+            fr_llm::generation::GenerationService::new(fr_llm::generation::quiet_notify());
+        service.register_source(
+            "acme",
+            Arc::new(fr_llm::generation::AdapterSource::new(adapter)),
+        );
+        let id = service
+            .begin(bare_options("acme", "acme-large"), None)
+            .expect("begin starts without waiting on the network");
+        let mut chunks = Vec::new();
+        for _ in 0..2_000 {
+            let batch = service.drain(&id).expect("drain settles");
+            chunks.extend(batch.chunks);
+            if batch.done {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(chunks.len() > 1, "the recorded run flows");
+        let last = serde_json::to_value(&chunks[chunks.len() - 1]).expect("last chunk json");
+        assert_eq!(last["type"], "finish", "terminal settlement lands");
+    }
+
     /// The base-url override scenario: a custom endpoint receives the
     /// request at the joined completions resource path — never a
     /// hard-coded provider address.

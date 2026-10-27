@@ -1442,3 +1442,36 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - **pre-step Enter{messages: []} = step0 空输入 completed 路径的正测法**：cancel-before-turn 在 dsh 也不落 turn/end（早 poll 逃逸在 try 外）——首版测试预期错误，测试逮住真语义（与 findings:1258 一致，代码无改）。
 - 依赖晋升：fr-agent-loop +fr-session（rlib 正式依赖；canonical_header + ToolCallRecovery 两纯函数，dsh agent.ts 同样 import 自 dsh-session 包；链接副本判例 spec 决策 37 既载）。
 - 门禁：crate 四门绿（fmt 0/clippy -D warnings 0/62 tests/doc 0）；workspace 四门绿（fmt OK/clippy Finished/710 passed 0 failed（699→710，fr-agent-loop 62=11 模块）/doc 0）。批 2（2a+2b）就此闭合。
+
+## 2026-10-27 — 切片 7 批 3 预研（B2 三方法落点实施前事实全钉）
+
+### 服务面现状（descriptor 实读）
+- **fr-llm 壳 provide 'llm'**（plugin_shell.rs DESCRIPTOR `provide:["llm"]`；注释「the service lives in this artifact」）；三 provider 壳 `provide:[] inject:["llm"]`（对齐 dsh llm-pi-ai inject=['llm']；注册协议由 runtime-registry 切片精炼，anthropic 壳注释明示）。fr-agent-loop 壳 listen `{"llm/chunk-ready":1}` 既钉——事件名不可漂移。
+- 方法号现状：各壳仅 METHOD_DESCRIBE=1（元数据回声）。B2 三方法号 + prepare_call 号位归 fr-llm rlib 单一真源（服务词汇）；wire 载荷 camelCase（fr-session service.rs 判例）。
+
+### dylib v3 出站契约（dougong-plugin-dev/references/dylib-plugin.md 核实）
+- setup 收 HostExports vtable「valid only for that call — copy it into your state」（:144-146）= 拷贝入壳状态合法、teardown 返回前有效；teardown 后调用 = 文档化 UB（:246 join 纪律）。
+- require/emit 任意插件线程并发可调（:179）；emit = enqueue-and-return 永不环（:190-191）；teardown 返回前必须 join 全部自有线程（:246）。fr-agent-loop outbound.rs 既判例（Copy+unsafe Send/Sync 分立 SAFETY）——provider 壳批 3 需同型 stash + teardown abort-all→join-all。
+
+### 三 provider stream 面同构（adapter.rs 实读）
+- 三者同一形态：`stream()` → plan/connection 快照 → `spawn_generation`（自有 worker 线程跑执行面 + mpsc + Waker 唤醒 ChannelStream）；失败 → terminal_error_stream（预缓冲单 fr-error 记录）。ChannelStream poll = 注册 waker 后 try_recv（Empty→Pending/Disconnected→None）。
+- 推论：fr-llm rlib 一份共享阻塞桥（`std::task::Wake`（stable）+ Condvar 谓词等待）可在 hub worker 线程驱动任意 provider 的 `Pin<Box<dyn Stream + Send>>`；唤醒竞态由 condvar 谓词闭包覆盖（wake 在 poll 与 wait 之间到达则 flag 已置不睡）。
+- Q73-A fr-error 终态记录经 FIFO 透传不转换（throw 语义映射归 runtime-registry 切片既裁）。
+
+### 载荷与缝设计事实（机械推导，非分叉）
+- `GenerateOptions.signal: Option<AbortSignal>`（Arc<AtomicBool>）不可序列化——wire begin 载荷不含 signal；hub 侧自建 AbortSignal 注入 options 后喂 adapter.stream()，dsh caller-abort 结算语义由 adapter 既有 abort 映射承载（三 provider 切片 4-6 逐字移植件）。
+- chunk-ready 载荷 {sessionId, generationId}（决策 46 极小通知；乱序/重复/丢失无害）。drain 返 {sessionId, generationId, chunks, done}；空批=空 chunks+done:false。
+- generation 生命周期：begin 注册 → worker 追加即发射通知（含终态结算批）→ drain 批量拉走 → done:true 的 drain 后条目移除（后续 drain = unknown generation 错）；abort 幂等（unknown/done 均 no-op Ok，驱动体 best-effort abort 判例 `drop(self.llm.abort(..))`）。
+- teardown 序：stop-new → abort-all → join-all（join 无界既裁 Q84-B2 代价 2；卡流由 provider 自有 watchdog/timeout 自终局）。
+- spec 边界：provider Allowed = fr-llm/** + 三 provider + fr-wire/src/stream.rs + fr-timeout；AGENT-LOOP Allowed = crates/fr-agent-loop/**。llm_client.rs 对真 dispatch 往返钉测需 fr-agent-loop→fr-llm 依赖（已存在，批 2 既裁）。
+
+### 待裁决 Q85（B2 三方法 artifact 落点——决策文本两句的并集读法）
+- 决策文本（provider spec Decisions 末行）：「'llm' 服务面流式消费三方法 + 通知事件……共享实现落 fr-llm rlib 助手……逐 provider plugin_shell 挂接」——两个落点子句（'llm' 服务面 = fr-llm 壳；逐 provider 壳）可读作并集或各自独占，呈报裁决。
+
+### Q85 裁决（2026-10-28）：C — 两面都落
+- 用户裁决 Q85=C。fr-llm 'llm' 服务面 trio（llm_client 对真 dispatch 往返钉测）+ 三 provider 壳挂同一 fr-llm rlib 助手（in-crate 真适配器驱动测试）；生产 'llm'→provider 转接归 runtime-registry 切片。provider 壳 descriptor 不动（provide 维持 []）。
+
+### 批 3 收口新事实（2026-10-28）
+- **assistant-stream 批分发**（PRD 22 对策落地形态）：dsh 无批量面（进程内 emit 廉价）；fr 批的是**总线镜像**（跨边界热路径）——进程内听者逐帧不变，镜像缓冲 32 帧/attempt 起止立即/停靠点显式冲刷。基准实测 247k frames/s、100k 帧 3125 次跨边界。
+- **AGENT-LOOP 3 skip 的归属**：fiber_realm（realm 装配 Phase 18）/provider_retry（llm-retry 插件在 M1 crate 清单外，findings:1379 既载）/header_reason（canonical initial/change/series 判定真源在 fr-session，SESSION spec 同名 pending）——三者均跨切片依赖，落位方在各自切片。
+- lifecycle 对「同 pending 名多场景」按场景逐行 Test 独立绑定（含工具调用 turn 曾漏绑——绑定脚本按场景序号处理同名 pending 的判例）。

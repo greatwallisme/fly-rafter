@@ -1260,6 +1260,66 @@ data: {"type":"message_stop"}
         }
     }
 
+    /// The B2 hookup (Q84-B2/Q85-C): the real adapter drives one
+    /// generation through the shared fr-llm hub — begin returns before
+    /// any network wait, the settle drain pulls the recorded run's
+    /// chunks in delivery order, and the terminal batch settles.
+    #[test]
+    fn generation_hub_drives_the_recorded_run() {
+        let fetch = RecordedFetch::new(200, RECORDED_RUN_BODY);
+        let adapter = Arc::new(adapter_with(Arc::clone(&fetch)));
+        let service =
+            fr_llm::generation::GenerationService::new(fr_llm::generation::quiet_notify());
+        service.register_source(
+            "deepseek-official",
+            Arc::new(fr_llm::generation::AdapterSource::new(adapter)),
+        );
+        let id = service
+            .begin(bare_options("deepseek-official", "deepseek-flash"), None)
+            .expect("begin starts without waiting on the network");
+        let mut chunks = Vec::new();
+        for _ in 0..2_000 {
+            let batch = service.drain(&id).expect("drain settles");
+            chunks.extend(batch.chunks);
+            if batch.done {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let tags: Vec<String> = chunks
+            .iter()
+            .map(|chunk| match chunk {
+                StreamChunk::Known(known) => serde_json::to_value(known)
+                    .expect("known chunk serializes")
+                    .get("type")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                StreamChunk::Other(record) => record
+                    .get("type")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+            })
+            .collect();
+        // The recorded run's full tag sequence (the bound scenario's
+        // contract): settle drain preserves delivery order exactly.
+        assert_eq!(
+            tags.iter().map(String::as_str).collect::<Vec<_>>(),
+            [
+                "block-start",
+                "text-delta",
+                "block-end",
+                "block-start",
+                "tool-call-delta",
+                "tool-call-delta",
+                "block-end",
+                "usage",
+                "finish"
+            ]
+        );
+    }
+
     /// The bound scenario: one recorded SSE body replays through
     /// serialize, POST, SSE framing, and translation as the recorded
     /// chunk sequence, ending in the settled finish.
