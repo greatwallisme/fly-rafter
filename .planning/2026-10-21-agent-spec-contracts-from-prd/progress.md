@@ -947,3 +947,12 @@
 - clippy 零妥协清 16 项：doc 首段拆/单一模式 match→if let/collapsible→let 链/significant_drop 显式 drop/assert_is_empty×3→assert_eq（Vec::<String> 注记）/assertions_on_result→unwrap_err/cloned_ref_to_slice/from_ref/Copy clone/doc_markdown×2/SAFETY 注释移位。
 - 门禁：crate 四门绿（fmt 0/clippy -D warnings 0/82 tests/doc 0）+workspace 四门绿（fmt OK/clippy --workspace --all-targets -D warnings 0/856 passed 0 failed（FR_DSH_SOURCE=本机 dsh checkout 必需——缺席时 prompts_verify 按设计 fail）/doc 0）。
 - 批 3 余：PROMPT spec 47 场景绑定（Q90-A：表值场景绑全表钉测+行为场景独立短名）+七步流 4-7（lifecycle/guard/explain/stamp）+CLAUDE.md/PRD 如需补档+progress/task_plan 收口。
+
+## 2026-10-28 — 切片 8 批 3（收口）：PROMPT 47 场景绑定 46 真实+七步流 4-7，workspace 856→862 四门绿，切片 8 闭环
+- 组合测试 +6（纪律第 1 条：多条款 Then 须单测试全断言）：registry 三件（interpolation_and_tool_order_recompose_the_assembly=变量替换+toolOrder 重排+rest 插入 / equal_orders_and_unlisted_tools_sort_deterministically=同 order 码元序+未列字典序 rest 位 / complete_conflict_and_refresh_context_only=双 complete 拒+waterfall 恢复唯一+refresh 只重跑 context）+files 一件（loader_enforces_size_budget_dedup_and_root_markers=超限整跳+maxBytes 截断+同组去重+.git 标记）+state 一件（touched_changes_reinject_and_deletions_remove=Set→Replace/Updated 文案→Remove 三段生命周期，surface 播种前次变更）+service 补断言（compose 帧首行 Instructions from）。
+- 全表钉测 orders_tables_match_the_dsh_values：首版落 src/orders.rs 触发 extract-prompts --check 漂移（生成器独占该文件）→迁 tests/prompts_verify.rs→再迁 src/verify.rs（lifecycle 测试发现只达 lib 目标，集成二进制选择器零匹配——新判例档载）；四件校验测试（漂移/brand/间距/全表）随之整迁 lib（#[cfg(test)] mod verify），删 tests/prompts_verify.rs。
+- scripts/bind-prompt-tests.py（判例同款幂等回放+AUTHORISED 前缀校验）：46 绑定（32 表值场景→全表钉测=Q90-A；提示词常量+plan-mode→--check 漂移钉测；项目指令+帧注入→compose_emits_the_baseline_frame；行为场景独立短名）；1 留 pending=working-directory context 跟随 cwd（注册者=working-directory 插件，Phase 18 装配，纪律第 7 条不绑）。doc/binding-audit.md 第十节=逐映射核验记录（纪律第 6 条）。
+- 夹具校准自纠三（loader 组合件）：跨组去重前提错（组=目录非候选名，candidate_group :195-201——改同目录 AGENTS/CLAUDE 孪生）；预算未计 INTRO 262B+帧开闭行（全量 344，预算 340 方入截断腿且 truncated 非空）；overcap 阈值须同时满足孪生 40≤48<local 64。
+- 七步流 4-7：lifecycle 46/0/1（带 FR_DSH_SOURCE；skip 计 not passing→exit 1=AGENT-LOOP 判例同形）；guard 全仓重跑（首跑与编辑竞态弃用）；explain 97.9%（46/0/1）；stamp --dry-run Spec-Passing:false（1 skip）。
+- CLAUDE.md 当前阶段补档（原文停在 fr-config/7f8948c）：切片 1-8 状态+四基线（82/0/26、60/0/259、23/0/3、46/0/1）+绑定回放脚本三件+FR_DSH_SOURCE 注意项；绑定面核实后修正 bind-tools-*.py 虚引（其余切片内联维护）。
+- 门禁：workspace 四门绿（fmt OK/clippy --workspace --all-targets -D warnings 0/862 passed 0 failed/doc 0）。切片 8（Phase 15 fr-system-prompt+loop 桥+AGENT-LOOP 补强）闭环。

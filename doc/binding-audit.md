@@ -186,3 +186,15 @@
 - [x] F19 [009] 补 tool/ptc-dispatch-start 记录（-start 与结算记录同测）。
 - [x] F20 [010] 补 from_seed 重放合法断言（修复后日志过构造器校验）。
 - [x] 附带：row_admission_defers_ignorable_unknown_developer_rows 的 assert!(is_err()) 弱断言改为钉死结构化拒绝文案（"developer message requires id, role, content"），同测内死代码清掉。
+
+## 十、PROMPT 绑定审计（切片 8 批 3，2026-10-28）
+
+47 场景：46 绑真实选择器、1 留 pending。逐映射核验（纪律七条全程适用）：
+
+- **32 项表值场景 → `orders_tables_match_the_dsh_values`（src/verify.rs）**：Q90-A 用户裁决（表值场景绑少量全表钉测）。该测试逐项断言 SECTION_ORDERS 32 项与 CONTEXT_ORDERS 7 项的完整数值表（源序），每场景的 Then「序值与 dsh index.ts:131 全表一致」由全表断言覆盖；`--check` 钉测（`generated_constants_match_the_dsh_sources`）对 dsh 源再钉一层（生成器漂移检测）。注意：该全表测试首版落在 src/orders.rs 触发 extract-prompts --check 漂移（生成器独占该文件），移居 src/verify.rs lib 测试（lifecycle 测试发现只达 lib 目标——集成二进制选择器零匹配；兼免 checkout 常开孪生）。
+- **`提示词常量与 dsh 源逐字一致`/`plan-mode 文案与 base patch 逐字` → `generated_constants_match_the_dsh_sources`**：两场景 Then 均为「逐字一致」，该测试跑 `extract-prompts --check` 对全部生成常量（27 文本常量含 PLAN_MODE 六段与 base patch maxBytes）做 unified diff 漂移检测，任一常量偏离 dsh 源即 fail（Q89-A：FR_DSH_SOURCE 缺席即 fail 带指引——环境门槛是设计行为）。
+- **`项目指令进入 agent-instructions`/`注入为 user 消息 system-reminder 帧` → `compose_emits_the_baseline_frame`**：后者断言 content 含 guidance 文本 + 首行 `Instructions from: AGENTS.md` + `<system-reminder>` 帧三处 + source.baseline=true + changes 非空（批 3 补首行断言）；「user 消息而非 system section」由 InstructionMessage 形态（content blocks + agent-instructions source）证。前场景 Then（内容进入 agent-instructions）同断言覆盖。
+- **多条款组合测试五件（本批新增，每件单测试断言其场景 Then 全部条款）**：`interpolation_and_tool_order_recompose_the_assembly`（变量替换为运行时值 + 工具按 toolOrder 重排+rest 插入）、`equal_orders_and_unlisted_tools_sort_deterministically`（同 order 按码元序 + 未列字典序插 rest 位）、`loader_enforces_size_budget_dedup_and_root_markers`（超限整文件跳过 + maxBytes 截断恰好适配 + 同组去重保最早 + projectRoot 向上找 .git）、`complete_conflict_and_refresh_context_only`（双 complete 拒 + waterfall 后恢复唯一 + refresh 只重跑 context）、`touched_changes_reinject_and_deletions_remove`（Set→touched 改写 Replace/Updated 文案→touched 删除 Remove 三段生命周期，surface 播种前次变更+dsh state 语义）。
+- **单映射**：`身份句默认渲染`→constructor_registers_identity_and_both_personas（断言 identity 节在序+文本==HARNESS_IDENTITY_TEXT+序值 -1000；常量逐字由 brand 钉测再钉）；`身份句可关闭与前缀`→constructor_omits_identity_when_disabled（断言仅剩两节+前缀居首=原身份句位）；`无 AGENTS.md 不产生空 section`→compose_without_instructions_returns_none；`同序…` 与 `变量插值…` 见组合件；`interpolate false 保留字面`→interpolate_false_keeps_literal_text。
+- **留 pending（1）**：`working-directory context 跟随 cwd`——WORKING_DIRECTORY context 的注册者是 working-directory 插件（dsh working-directory:90），M1 当前无该 crate（Phase 18 装配）；CONTEXT_ORDERS 表值半边已由全表钉测覆盖，行为半边（跟随 cwd）无证明测试，纪律第 7 条不绑。
+- 夹具校准自纠三（loader 组合件）：首版全局/项目同内容跨组去重前提错（组=目录非候选名，改同目录 AGENTS/CLAUDE 孪生）；预算未计 INTRO 262 字节与 system-reminder 帧开闭行（全量=344，预算 340 方入截断腿且 truncated 非空）；overcap 阈值须同时满足三类文件（孪生 40≤48<local 64）。

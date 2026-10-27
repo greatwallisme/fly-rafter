@@ -683,4 +683,64 @@ mod tests {
         assert_eq!(project.absolute_path, "/w/proj/pkg/AGENTS.md");
         assert_eq!(project.display_path, "pkg/AGENTS.md");
     }
+    /// Scenario: size gating and deduplication — one loader pass asserting
+    /// every clause: overcap sources skip whole files, the byte budget
+    /// truncates to fit, same-group duplicates keep the earliest
+    /// candidate, and the project root walks up to the `.git` marker.
+    #[test]
+    fn loader_enforces_size_budget_dedup_and_root_markers() {
+        let resolved = discovery("/home/u");
+        let mut seam = MemoryFs::new();
+        seam.add_directory("/w");
+        seam.add_directory("/w/proj");
+        seam.write("/w/proj/.git", "");
+        seam.write("/w/proj/AGENTS.md", &"g".repeat(40));
+        // The same directory's CLAUDE.md carries identical content: the
+        // candidate group keeps the earliest discovery, the twin drops.
+        seam.write("/w/proj/CLAUDE.md", &"g".repeat(40));
+        seam.write("/w/proj/AGENTS.local.md", &"x".repeat(64));
+        // The project root resolves by walking up from a nested cwd to
+        // the `.git` marker.
+        let project_root =
+            find_project_root("/w/proj/sub", &markers(), &mut seam).expect("marker walk");
+        assert_eq!(project_root, "/w/proj");
+        let set = load_baseline_instruction_set(
+            &resolved,
+            "/w/proj/sub",
+            &project_root,
+            340,
+            48,
+            false,
+            &mut seam,
+        )
+        .expect("a baseline set loads");
+        let included: Vec<&str> = set
+            .included
+            .iter()
+            .map(|file| file.display_path.as_str())
+            .collect();
+        assert_eq!(
+            included,
+            ["AGENTS.md"],
+            "the group twin drops; the overcap local file never loads"
+        );
+        assert!(
+            set.deduped
+                .iter()
+                .any(|file| file.display_path == "CLAUDE.md")
+        );
+        assert!(
+            !set.observed
+                .iter()
+                .any(|file| file.display_path == "AGENTS.local.md"),
+            "the overcap source skips whole"
+        );
+        assert!(
+            !set.rendered.text.is_empty()
+                && set.rendered.text.len() <= 340
+                && !set.rendered.truncated.is_empty(),
+            "the budget truncates the winner to fit: {:?}",
+            set.rendered.text.len()
+        );
+    }
 }

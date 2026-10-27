@@ -15,3 +15,6 @@ pub mod prompts;
 pub mod registry;
 pub mod service;
 pub mod tool_order;
+
+#[cfg(test)]
+mod verify;

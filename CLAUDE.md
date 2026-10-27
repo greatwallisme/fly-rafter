@@ -10,9 +10,9 @@ Fly Rafter（飞椽，命令 `fr`）：以 Dougong 为基座的 Rust 版 agent h
 - dougong：crates.io https://crates.io/crates/dougong ，本机 `~/project/dougong`（内核设计裁决见其 `doc/research/dougong-design.md`）
 - deepseek-harness：https://github.com/deepseek-ai/deepseek-harness.git ，本机 `~/project/reference/cordis/deepseek-harness`（行为权威规格：其 `docs/architecture.md`、`docs/tool-catalog.md`、`docs/config-catalog.md`）
 
-## 当前阶段（2026-10-22）
+## 当前阶段（2026-10-28）
 
-M1 实现进行中：workspace 骨架与质量门基线已落；fr-config 分层编译进行中（合并器 compose、装载栈、cond 求值器、fr-schema 声明框架、.env 分层已提交至 `7f8948c`）。合约体系（KLL 需求 + 任务合约草稿）门禁全绿。2026-10-22 起所有实现任务必须按下方「开发工作流」七步合约流执行，此前已完成的切片按同一七步回补验证。入口顺序 headless → TUI → ACP → SDK → web（PRD 第 20 节里程碑 M1-M5）。
+M1 实现进行中，已落切片（均按七步合约流闭环、四门全绿）：fr-config 分层编译（切片 1-6，dump-config 系 CLI 前置）；fr-session v4 全量（SESSION 82 真实/0/26）；fr-llm seam+三 provider（B2 通知拉取流消费）；fr-tools+fr-approval+fr-sandbox（TOOLS/APPROVAL/SANDBOX 绑定）；fr-agent-loop（AGENT-LOOP 23 真实+3 跨切片 skip：fiber_realm Phase 18/provider_retry llm-retry 外/header_reason fr-session 侧）；fr-system-prompt+loop 桥（切片 8 闭环：PROMPT 46 真实+1 跨切片 skip=working-directory context Phase 18；测试基线 lifecycle 82/0/26、CONFIG 60/0/259、AGENT-LOOP 23/0/3、PROMPT 46/0/1，workspace 862 tests）。绑定回放脚本：`scripts/bind-session-tests.py` / `bind-config-tests.py` / `bind-prompt-tests.py`（draft-specs 全量重生成后必须重放，其余切片的绑定随各切片提交内联维护）。注意：workspace 测试门与 PROMPT lifecycle 需 `FR_DSH_SOURCE=<本机 dsh checkout>`（缺席时 extract-prompts --check 钉测按设计 fail）。下一片：fr-tools-builtin + fr-shell（Phase 16）。入口顺序 headless → TUI → ACP → SDK → web（PRD 第 20 节里程碑 M1-M5）。
 
 ## 文档地图（真源优先级）
 

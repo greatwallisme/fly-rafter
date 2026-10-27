@@ -1159,6 +1159,13 @@ mod tests {
             Some(&serde_json::json!(true))
         );
         assert!(message.content[0].text.contains("project guidance"));
+        assert!(
+            message.content[0]
+                .text
+                .contains("Instructions from: AGENTS.md"),
+            "the first line names the path: {:?}",
+            message.content[0].text
+        );
         assert!(message.content[0].text.contains("<system-reminder>"));
         assert!(
             message

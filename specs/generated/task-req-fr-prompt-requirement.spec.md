@@ -34,47 +34,47 @@ satisfies: [REQ-FR-PROMPT]
 ## Completion Criteria
 
 Scenario: 变量插值与 tool-order 重排
-  Test: pending_req_fr_prompt_tool_order
+  Test: interpolation_and_tool_order_recompose_the_assembly
   假设 section 文本含占位变量且注册工具集变化
   当 组装提示词时
   那么 占位变量替换为运行时值，工具说明 section 按当前工具集与 tool-order 重排
 
 Scenario: section 全序与 dsh 源一致
-  Test: pending_req_fr_prompt_section_dsh
+  Test: orders_tables_match_the_dsh_values
   当 组装默认装配提示词时
   那么 section 顺序符合 SECTION_ORDERS 与 CONTEXT_ORDERS（HARNESS_IDENTITY 最前、TOOLS_SDK 位于 5000），全集与 dsh 源文件一致
 
 Scenario: 身份句默认渲染
-  Test: pending_req_fr_prompt_requirement
+  Test: constructor_registers_identity_and_both_personas
   假设 include-harness-identity 保持默认 true
   当 组装提示词时
   那么 section 序列含 You are an AI agent powered by Fly Rafter.
 
 Scenario: 身份句可关闭与前缀
-  Test: pending_req_fr_prompt_requirement
+  Test: constructor_omits_identity_when_disabled
   假设 include-harness-identity 为 false 且 persona-prefix 非空
   当 组装提示词时
   那么 无身份句 section，前缀文本按序出现在原身份句位置
 
 Scenario: 项目指令进入 agent-instructions
-  Test: pending_req_fr_prompt_agent_instructions
+  Test: compose_emits_the_baseline_frame
   假设 工作目录存在 AGENTS.md
   当 组装提示词时
   那么 其内容进入 agent-instructions section
 
 Scenario: 提示词常量与 dsh 源逐字一致
-  Test: pending_req_fr_prompt_dsh
+  Test: generated_constants_match_the_dsh_sources
   当 以抽取脚本生成提示词常量并与 dsh 源文件比对时
   那么 除身份句外逐字一致
 
 Scenario: plan-mode 文案与 base patch 逐字
-  Test: pending_req_fr_prompt_plan_mode_base_patch
+  Test: generated_constants_match_the_dsh_sources
   假设 计划模式启用
   当 组装计划模式 section 时
   那么 文案与 dsh base patch 的 plan-mode 行逐字一致
 
 Scenario: 无 AGENTS.md 不产生空 section
-  Test: pending_req_fr_prompt_agents_md_section
+  Test: compose_without_instructions_returns_none
   假设 工作目录无 AGENTS.md
   当 组装提示词时
   那么 不存在空的 agent-instructions section
@@ -86,229 +86,229 @@ Scenario: working-directory context 跟随 cwd
   那么 WORKING_DIRECTORY context 反映新 cwd
 
 Scenario: 同序工具名排序与未列工具
-  Test: pending_req_fr_prompt_requirement
+  Test: equal_orders_and_unlisted_tools_sort_deterministically
   假设 两个 section 同 order、工具集含 toolOrder 未列出项
   当 组装时
   那么 同 order 按 name 码元序排列，未列工具按字典序插入 unlisted 标记位
 
 Scenario: section HARNESS_IDENTITY 序值
-  Test: pending_req_fr_prompt_section_harness_identity
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 HARNESS_IDENTITY 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section DEPLOYMENT_PERSONA_PREFIX 序值
-  Test: pending_req_fr_prompt_section_deployment_persona_prefix
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 DEPLOYMENT_PERSONA_PREFIX 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section PLAN_POLICY 序值
-  Test: pending_req_fr_prompt_section_plan_policy
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 PLAN_POLICY 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TEAM_POLICY 序值
-  Test: pending_req_fr_prompt_section_team_policy
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TEAM_POLICY 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section PTC_ONLY 序值
-  Test: pending_req_fr_prompt_section_ptc_only
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 PTC_ONLY 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section FILE_REFERENCE 序值
-  Test: pending_req_fr_prompt_section_file_reference
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 FILE_REFERENCE 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOL_BASH 序值
-  Test: pending_req_fr_prompt_section_tool_bash
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOL_BASH 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOL_PWSH 序值
-  Test: pending_req_fr_prompt_section_tool_pwsh
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOL_PWSH 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOL_READ 序值
-  Test: pending_req_fr_prompt_section_tool_read
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOL_READ 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOL_WRITE 序值
-  Test: pending_req_fr_prompt_section_tool_write
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOL_WRITE 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOL_EDIT 序值
-  Test: pending_req_fr_prompt_section_tool_edit
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOL_EDIT 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOL_GLOB 序值
-  Test: pending_req_fr_prompt_section_tool_glob
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOL_GLOB 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOL_GREP 序值
-  Test: pending_req_fr_prompt_section_tool_grep
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOL_GREP 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOL_JOBS 序值
-  Test: pending_req_fr_prompt_section_tool_jobs
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOL_JOBS 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOL_PTY 序值
-  Test: pending_req_fr_prompt_section_tool_pty
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOL_PTY 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOL_WEB_SEARCH 序值
-  Test: pending_req_fr_prompt_section_tool_web_search
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOL_WEB_SEARCH 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOL_WEB_FETCH 序值
-  Test: pending_req_fr_prompt_section_tool_web_fetch
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOL_WEB_FETCH 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOL_LSP 序值
-  Test: pending_req_fr_prompt_section_tool_lsp
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOL_LSP 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOL_SESSION_QUERY 序值
-  Test: pending_req_fr_prompt_section_tool_session_query
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOL_SESSION_QUERY 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOL_GOAL 序值
-  Test: pending_req_fr_prompt_section_tool_goal
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOL_GOAL 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOL_WORKFLOW 序值
-  Test: pending_req_fr_prompt_section_tool_workflow
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOL_WORKFLOW 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOL_RALPH 序值
-  Test: pending_req_fr_prompt_section_tool_ralph
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOL_RALPH 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOL_SUBAGENT 序值
-  Test: pending_req_fr_prompt_section_tool_subagent
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOL_SUBAGENT 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOL_REPORT 序值
-  Test: pending_req_fr_prompt_section_tool_report
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOL_REPORT 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOL_COMPUTER_USE 序值
-  Test: pending_req_fr_prompt_section_tool_computer_use
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOL_COMPUTER_USE 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section MCP_SERVERS 序值
-  Test: pending_req_fr_prompt_section_mcp_servers
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 MCP_SERVERS 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section TOOLS_SDK 序值
-  Test: pending_req_fr_prompt_section_tools_sdk
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 TOOLS_SDK 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section DELIVERABLE_FILE_REFERENCES 序值
-  Test: pending_req_fr_prompt_section_deliverable_file_references
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 DELIVERABLE_FILE_REFERENCES 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section STRUCTURED_OUTPUT 序值
-  Test: pending_req_fr_prompt_section_structured_output
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 STRUCTURED_OUTPUT 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section HARNESS_SOURCE 序值
-  Test: pending_req_fr_prompt_section_harness_source
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 HARNESS_SOURCE 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section WEB_SURFACE 序值
-  Test: pending_req_fr_prompt_section_web_surface
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 WEB_SURFACE 时
   那么 序值与 dsh index.ts:131 全表一致
 
 Scenario: section DEPLOYMENT_PERSONA_SUFFIX 序值
-  Test: pending_req_fr_prompt_section_deployment_persona_suffix
+  Test: orders_tables_match_the_dsh_values
   假设 读取 SECTION_ORDERS 常量表
   当 查 DEPLOYMENT_PERSONA_SUFFIX 时
   那么 序值与 REQ-FR-PROMPT-7 全表逐字一致
 
 Scenario: 注入为 user 消息 system-reminder 帧
-  Test: pending_req_fr_prompt_user_system_reminder
+  Test: compose_emits_the_baseline_frame
   假设 工作目录存在 AGENTS.md
   当 组装提示词时
   那么 内容渲染为 user 消息、包裹 system-reminder 帧、首行 "Instructions from: <path>"，而非 system section
 
 Scenario: 变更与删除再注入
-  Test: pending_req_fr_prompt_requirement
+  Test: touched_changes_reinject_and_deletions_remove
   假设 会话中 AGENTS.md 被修改或删除
   当 fs 工具触碰该嵌套指令文件后组装时
   那么 以 Updated/removed 语义再注入且触发再投影
 
 Scenario: 尺寸门控与去重
-  Test: pending_req_fr_prompt_requirement
+  Test: loader_enforces_size_budget_dedup_and_root_markers
   假设 指令文件超 maxSourceBytes 1MiB 或同组重复
   当 加载候选 AGENTS.md/CLAUDE.md 与 local 变体时
   那么 超限整文件跳过、maxBytes 二分截断恰好适配、同组去重、projectRoot 自 cwd 向上找 .git 标记
 
 Scenario: complete section 唯一
-  Test: pending_req_fr_prompt_complete_section
+  Test: complete_conflict_and_refresh_context_only
   假设 多个提供者竞逐 complete section
   当 waterfall 结算时
   那么 至多一个生效且恢复唯一 prompt section；refreshContext 仅重跑 context 节
 
 Scenario: interpolate false 保留字面
-  Test: pending_req_fr_prompt_interpolate_false
+  Test: interpolate_false_keeps_literal_text
   假设 section 声明 interpolate:false 且文本含 {{var}}
   当 组装时
   那么 {{var}} 按字面保留不替换

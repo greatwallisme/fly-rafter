@@ -1110,4 +1110,53 @@ mod tests {
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].scope, "pkg\u{0}AGENTS.md");
     }
+    /// Scenario: change and deletion reinjection — one scope walked
+    /// through its whole lifecycle: first sight sets, a touched
+    /// modification reinjects under the replace semantics, and a touched
+    /// deletion removes.
+    #[test]
+    fn touched_changes_reinject_and_deletions_remove() {
+        let resolved = discovery();
+        let mut seam = MemoryFs::new();
+        seam.write("/w/proj/AGENTS.md", "first");
+        let mut versions = VersionCache::new();
+        let empty: Vec<VisibleMessage> = Vec::new();
+        let first = reconcile_instruction_context(
+            &baseline_input(&resolved, &empty, &[], true),
+            &mut versions,
+            &mut seam,
+        )
+        .expect("first pass sets");
+        assert_eq!(first.changes[0].action, InstructionChangeAction::Set);
+        apply_instruction_version_updates(&mut versions, &first.version_updates);
+
+        // The set change is now surface-visible; a touched rewrite
+        // reinjects under the replace semantics.
+        let after_set = [source_with(&first.changes)];
+        seam.write("/w/proj/AGENTS.md", "second");
+        let touched = ["/w/proj/AGENTS.md".to_string()];
+        let second = reconcile_instruction_context(
+            &baseline_input(&resolved, &after_set, &touched, true),
+            &mut versions,
+            &mut seam,
+        )
+        .expect("second pass replaces");
+        assert_eq!(second.changes[0].action, InstructionChangeAction::Replace);
+        assert!(second.text.contains("Updated instructions from: AGENTS.md"));
+        assert!(second.text.contains("second"));
+        apply_instruction_version_updates(&mut versions, &second.version_updates);
+
+        // The replaced change is surface-visible; a touched deletion
+        // removes the scope.
+        let after_replace = [source_with(&second.changes)];
+        seam.remove("/w/proj/AGENTS.md");
+        let third = reconcile_instruction_context(
+            &baseline_input(&resolved, &after_replace, &touched, true),
+            &mut versions,
+            &mut seam,
+        )
+        .expect("third pass removes");
+        assert_eq!(third.changes[0].action, InstructionChangeAction::Remove);
+        assert!(third.text.contains("removed"));
+    }
 }

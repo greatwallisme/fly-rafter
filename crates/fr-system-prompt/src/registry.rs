@@ -1361,4 +1361,165 @@ mod tests {
             .expect("assemble");
         assert!(!assembly.sections.iter().any(|s| s.name == "gone"));
     }
+    /// Scenario: variable interpolation and tool-order reordering — one
+    /// assembly asserting both halves of the Then (variables take their
+    /// runtime values, and the tool sections re-order under the
+    /// configured `toolOrder` with the rest insertion).
+    #[test]
+    fn interpolation_and_tool_order_recompose_the_assembly() {
+        let mut registry = SystemPromptRegistry::new(&RegistryConfig {
+            tool_order: Some(vec!["z".to_string(), "<unlisted-tools>".to_string()]),
+            ..RegistryConfig::default()
+        })
+        .expect("config");
+        registry
+            .register_section(literal_section("greet", 10, "working at {{cwd}}"))
+            .expect("register");
+        registry
+            .register_variable(
+                "cwd",
+                VariableSource::Literal {
+                    value: "/w".to_string(),
+                },
+            )
+            .expect("register");
+        registry.register_tools(ToolProviderRegistration {
+            provider: endpoint("tools", 6),
+        });
+        let schema = |name: &str| fr_wire::call_config::ToolSchema {
+            defer_loading: None,
+            name: name.to_string(),
+            description: "tool".to_string(),
+            parameters: serde_json::Map::new(),
+        };
+        let mut resolver = FakeResolver {
+            texts: HashMap::new(),
+            variables: HashMap::new(),
+            tools: HashMap::from([(
+                endpoint("tools", 6),
+                ToolProviderResult {
+                    // Delivered out of order; the configured order with
+                    // the rest marker must recompose them.
+                    schemas: vec![schema("a"), schema("z")],
+                    known_names: Some(vec!["a".to_string(), "z".to_string()]),
+                },
+            )]),
+        };
+        let assembly = registry
+            .assemble(&WireAssembleContext::default(), &mut resolver)
+            .expect("assemble");
+        assert_eq!(assembly.variables.get("cwd"), Some(&Some("/w".to_string())));
+        let names: Vec<&str> = assembly.tools.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["z", "a"]);
+        let rendered = render_prompt(&assembly).expect("render");
+        assert!(rendered.contains("working at /w"), "{rendered}");
+    }
+
+    /// Scenario: equal-order name sorting and unlisted tools — equal-order
+    /// sections fall back to code-unit name order while unlisted tools
+    /// insert lexicographically at the rest marker.
+    #[test]
+    fn equal_orders_and_unlisted_tools_sort_deterministically() {
+        let mut registry = SystemPromptRegistry::new(&RegistryConfig {
+            tool_order: Some(vec!["m".to_string(), "<unlisted-tools>".to_string()]),
+            ..RegistryConfig::default()
+        })
+        .expect("config");
+        registry
+            .register_section(literal_section("b-second", 10, "b text"))
+            .expect("register");
+        registry
+            .register_section(literal_section("a-first", 10, "a text"))
+            .expect("register");
+        registry.register_tools(ToolProviderRegistration {
+            provider: endpoint("tools", 6),
+        });
+        let schema = |name: &str| fr_wire::call_config::ToolSchema {
+            defer_loading: None,
+            name: name.to_string(),
+            description: "tool".to_string(),
+            parameters: serde_json::Map::new(),
+        };
+        let mut resolver = FakeResolver {
+            texts: HashMap::new(),
+            variables: HashMap::new(),
+            tools: HashMap::from([(
+                endpoint("tools", 6),
+                ToolProviderResult {
+                    schemas: vec![schema("x"), schema("m"), schema("b")],
+                    known_names: Some(vec!["x".to_string(), "m".to_string(), "b".to_string()]),
+                },
+            )]),
+        };
+        let assembly = registry
+            .assemble(&WireAssembleContext::default(), &mut resolver)
+            .expect("assemble");
+        let pair: Vec<&str> = assembly
+            .sections
+            .iter()
+            .map(|s| s.name.as_str())
+            .filter(|name| *name != "harness:identity")
+            .filter(|name| !name.starts_with("deployment:"))
+            .collect();
+        assert_eq!(pair, ["a-first", "b-second"]);
+        let tools: Vec<&str> = assembly.tools.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(tools, ["m", "b", "x"]);
+    }
+
+    /// Scenario: complete section is unique — two effective complete
+    /// sections fail, one survives the waterfall as the sole section, and
+    /// a refresh reruns only the context providers.
+    #[test]
+    fn complete_conflict_and_refresh_context_only() {
+        let mut registry = SystemPromptRegistry::new(&RegistryConfig::default()).expect("config");
+        let mut first = literal_section("first", 10, "the whole prompt");
+        first.complete = Some(true);
+        let mut second = literal_section("second", 20, "another whole");
+        second.complete = Some(true);
+        registry.register_section(first).expect("register");
+        registry.register_section(second).expect("register");
+        let mut resolver = blank_resolver();
+        let conflict = registry
+            .assemble(&WireAssembleContext::default(), &mut resolver)
+            .expect_err("two complete sections refuse");
+        assert!(conflict.0.contains("complete"), "{}", conflict.0);
+        registry.unregister_section("second");
+        registry
+            .register_context(PromptContextSpec {
+                name: "volatile".to_string(),
+                order: 100.0,
+                text: SectionText::Endpoint {
+                    text_provider: endpoint("env", 2),
+                },
+                interpolate: None,
+                required: None,
+            })
+            .expect("register");
+        registry.on_assemble(Arc::new(|mut assembly, _context, next| {
+            assembly.sections.push(AssembledSection {
+                name: "listener".to_string(),
+                text: String::new(),
+                interpolate: None,
+            });
+            next(assembly)
+        }));
+        let mut resolver = FakeResolver {
+            texts: HashMap::from([(endpoint("env", 2), "first".to_string())]),
+            variables: HashMap::new(),
+            tools: HashMap::new(),
+        };
+        let accepted = registry
+            .assemble(&WireAssembleContext::default(), &mut resolver)
+            .expect("assemble");
+        assert_eq!(accepted.sections.len(), 1);
+        assert_eq!(accepted.sections[0].name, "first");
+        resolver
+            .texts
+            .insert(endpoint("env", 2), "second".to_string());
+        let refreshed = registry
+            .refresh_context(&accepted, &WireAssembleContext::default(), &mut resolver)
+            .expect("refresh");
+        assert_eq!(refreshed.contexts[0].text, "second");
+        assert_eq!(refreshed.sections, accepted.sections);
+    }
 }

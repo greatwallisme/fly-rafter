@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-切片 8 批 3（收口）：PROMPT spec 47 场景绑定（Q90-A 表值绑全表钉测+行为独立短名）+七步流 4-7（lifecycle/guard/explain/stamp）+CLAUDE.md/PRD 补档评估+progress/task_plan 收口。已落：批 0-2b（五裁决+extract-prompts+纯层与域五模块+服务面与壳+loop 桥）。crate 107 tests/workspace 856 四门绿。
+Phase 16：fr-tools-builtin + fr-shell（bash 执行 seam、子进程/作业管理、第 17 节工具：shell 组/文件组 7 件/web 2 件/todo/goal/jobs/schedule/交互 2 件（headless fail-closed）/会话查询 5 件/PTY 6 件（opt-in）/skill 2 件/lsp/working_directory/内省 3 件；参数 schema 对照 dsh tool-catalog.md 逐字冻结）。切片 8 已闭环（PROMPT 46/0/1，workspace 862 tests 四门绿）。
 
 ## Current Phase
-Phase 15（切片 8 = fr-system-prompt）
+Phase 16（fr-tools-builtin + fr-shell）——切片 8 已闭环
 
 ## Phases
 
@@ -122,13 +122,13 @@ Phase 15（切片 8 = fr-system-prompt）
 - [ ] 对照 REQ-FR-TOOLS/APPROVAL/SANDBOX 场景逐条落测试
 - **Status:** pending
 
-### Phase 15: fr-system-prompt + fr-agent-loop
+### Phase 15: fr-system-prompt + fr-agent-loop（切片 7/8，已闭环）
 - [x] 提示词抽取脚本（scripts/extract-prompts，从 dsh 源文件生成常量，禁手抄）——批 1a 落（FR_DSH_SOURCE 必需+--check 钉测+生成管道内嵌 rustfmt）
 - [x] fr-system-prompt 纯层与域（有序 section/context 注册、SECTION_ORDERS/CONTEXT_ORDERS 全表生成、{{var}} 校验四文案逐字、tool-order 五态、complete 至多一个+waterfall 恢复、AGENTS.md 域五模块全量）——批 1b/1c 落；服务面+壳——批 2a 落
 - [x] loop 桥（批 2b：prompt_client+InstructionsBridge+loop_inbox 增面+touched 收集+往返钉测）——2026-10-28 落，crate 82/workspace 856 四门绿
-- [ ] fr-agent-loop：inbox（claim 语义/一次 next-turn/next-step 全取/splice 规范化）、turn/preStep/step 控制流、waterfall 提案、流结算与重试、工具执行分组调度、状态机三相位、abort 补偿两级
-- [ ] 对照 REQ-FR-PROMPT/AGENT-LOOP 场景逐条落测试
-- **Status:** pending
+- [x] fr-agent-loop 全量（切片 7 落：AGENT-LOOP 23 真实+3 跨切片 skip）
+- [x] 对照 REQ-FR-PROMPT/AGENT-LOOP 场景逐条落测试（PROMPT 46 真实+1 skip=working-directory Phase 18，2026-10-28 批 3）
+- **Status:** complete
 
 ### Phase 16: fr-tools-builtin + fr-shell
 - [ ] fr-shell：bash 执行 seam、子进程/作业管理（job_kill/list/output）、沙箱策略执行体对接
