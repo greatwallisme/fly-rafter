@@ -14,13 +14,14 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 dougong-abi = { workspace = true }
+# rlib face only: the pure folds `canonical_header` and `ToolCallRecovery`
+# (dsh agent.ts imports both from the dsh-session package; linked-copy rule,
+# no service state crosses artifacts).
 fr-llm = { workspace = true }
+fr-session = { workspace = true }
 fr-wire = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-
-[dev-dependencies]
-fr-session = { workspace = true }
 
 [lints]
 workspace = true

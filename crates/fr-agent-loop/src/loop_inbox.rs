@@ -83,6 +83,33 @@ impl LoopInbox {
         }
     }
 
+    /// Restores the inbox by folding the committed event log (dsh restores
+    /// through the same projection the live mutations write). The fold is
+    /// silent: restore emits no lifecycle events.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first splice payload or fold failure in the log.
+    pub fn restored(
+        client: SessionClient,
+        events: Arc<AgentEvents>,
+        log: &[fr_wire::event::SessionEvent],
+    ) -> Result<Self, InboxError> {
+        let mut state = InboxState::default();
+        for event in log {
+            if event.event_type() != EVENT_INBOX_SPLICED {
+                continue;
+            }
+            let committed = committed_splice(event).map_err(InboxError::SpliceDecode)?;
+            state = fold_inbox(&state, event.seq.get(), &committed).map_err(InboxError::Fold)?;
+        }
+        Ok(Self {
+            client,
+            events,
+            state,
+        })
+    }
+
     /// The bound session id.
     #[must_use]
     pub fn session_id(&self) -> &str {

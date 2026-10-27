@@ -1405,3 +1405,40 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - AgentEvents 听者必须 +Send+Sync：`Box<dyn Fn + Send>` 非 Sync → `Arc<AgentEvents>` 无法移入 spawn 线程（Arc<T>: Send 需 T: Send+Sync）；批 2b 驱动线程 spawn 直接消费此判例。
 - Vec→slice 与 String→str 的 deref 在 const fn 不稳定（E0658/E0015）：next_step/next_turn/session_id 保持普通 fn；clippy missing_const_for_fn 对此类会误荐，编译器为真源。
 - 跨 crate 钉测形态：fr-session dev-dep + 假 vtable host_handle 指向 Box<Mutex<SessionService>>，require 走真 `fr_session::service::dispatch`；EventVocabulary::core() 后 declare("agent/inbox/spliced") 即过 admission（declare 面即激活期类型申报的测试侧等价）。
+
+## 2026-10-27 — 切片 7 批 2b 设计钉（driver.rs 控制线程体实施前）
+
+### 范围与缝（Q81-A 消费端封装，测试桩驱动）
+- 四缝全落 driver.rs：`SessionReads`（restore 视图 + request_header/request_context/derive_messages/tool_history/surface_generation/system_prompt_nodes 七读面；wire 读面形状本批定义，fr-session 服务面扩展随其合同后续切片）、`SystemPromptFace`（assemble/refresh_context → PromptAssembly{rendered_prompt, context_sections, joined_sections, tools}）、`LlmFace`（B2：prepare_call → PreparedCall{config, model: ResolvedModelInfo, adapter_defaults, retry_policy} + begin/drain/abort；drain 返 {chunks, done}）、`ToolsFace`（execution_mode/prepare/dispatch/settled/finalize/finish 六面；dispatch 快路径入队即返，settle 经 ToolSettled 通知）。
+- 依赖晋升：fr-agent-loop +fr-session（rlib 正式依赖，dev-dep → dep）——仅链纯函数 canonical_header 与 ToolCallRecovery（dsh agent.ts 本身 import 自 dsh-session 包，同构；「链接副本指针不跨界」判例 = fr-llm rlib 先例，spec 决策 37 既载 fr-agent-loop 为链接方）。状态性 fold（derive_messages 等）仍走读缝不本地折（findings:1379 单一真源理据不变）。
+
+### 邮箱演化（plugin_shell.rs，批 2a 代码本切片自有）
+- 通知道泛化 `DriverNotification::{Chunks(String), ToolSettled(ToolCallId)}`——决策 46 快路径不变量的工具侧应用（工具执行=慢工作=自有 worker+通知/拉取；B2 同构）。notify_chunks 保留 API 包装 Chunks；新增 notify_tool_settled。
+- `SessionMailbox.status: StatusCell` → `Arc<StatusCell>` + `status_cell()` 访问器：批 2a 缺口——METHOD_STATUS 读邮箱自有 cell 而 PhaseMachine 写自己的 Arc cell，两者从未连通；驱动构造 PhaseMachine 必须用邮箱的同一 cell。
+- 两个停靠面：`wait_idle()`（命令/停机才醒，通知道醒后复停靠）与 `wait_step()`（命令/通知/停机任一即醒）——dsh throwIfAborted 点=批间 poll（drain 命令+应用+查闩）。
+
+### 驱动体结构钉
+- `kick_pending: bool` 替代 dsh 异步 spawn（wakeDriver idle 臂置相位+标旗；run 循环消费）；kick finally 的 wake 重放经同旗再入。
+- poll 点（throwIfAborted 等价）：drain+apply 命令 → 停机观察=闩 Disposed（teardown 语义映射 dsh ownership abort 'agent loop is not active'；满足「假 provider 永不返 chunk 的 teardown 即时收敛」钉测）→ 闩已置则 Err(Aborted(cause))。
+- turn() Rust 映射：早 poll 逃逸在 try 外（无 turn/end）；turnEnds 经 Option<TurnEndReason> 贯穿；外层 catch 规则=cause 先 → aborted；LlmError 保 failure；他错 errorChain+UNKNOWN（errorChain=Display 链 ": " 连接）；finally 必落 turn/end（append 失败=throwError 等价 emit+Err）。静默空步沿用原因；step0 空=completed 零模型调用；粘滞 max-tokens。
+- step()：renderedPrompt 每 step 一次；firstAttempt user/message 落盘一次（重试不重复）；context admitted-once 双臂（首遇槽位+循环后补）；in_history=ResolvedModelInfo.system_prompt_update==InHistory；startsSeries 三析取（decision||surface 代际变化||（tool_update 缺席 && toolsChanged））。
+- 流消费循环：begin → poll → live.start → loop{poll; drain; push×n; done 即出}→done 后再 poll 一次（dsh 循环后 throwIfAborted 位）。三分支结算逐字：aborted+中断内容>0 → assistant/message{interrupted:true}；否则 assistant/attempt；结算 append 失败 → AggregateError 文案逐字 'Assistant stream failed and its durable settlement was rejected'。!started 臂=begin 后 poll 逃逸无结算。adapter 中途 throw 臂结构性缺席（三 provider 永以 finish 块收尾，spec 决策既载）——载档。
+- run_maintenance：同步 job 形态（FnOnce(&AbortLatch)→Result）；busy 期 cancel 落步尾应用（单线程结构性差异，dsh 同步信号面消失既档）；wake 重放语义照 dsh（cause≠disposed && wakeRequested && hasPending）。
+- 工具调度器（tool-calls.ts 逐段）：分组（parallel 全进组/他型独占屏障）+ fillPool 重分类 + 模型序 commit（连续槽位推进）+ 池窗=max_parallel 缝（每组重读）+ abort 会计（started 先结算提交、unstarted 合成对、consumed=组全长）+ 'tool-call scheduler: uncommitted settled calls' 不变量；调度器失败 `?` 直抛（在飞 dispatch 弃置后 ToolCallRecovery 补结算闭环——dsh「owning step 补恢复结果」同构；stale settle 无害载档）。parseArguments：空→{}、合法 JSON→值、失败→原文（serde_json::Value 双态）。acceptContext=next-step 尾插（splice at len）。
+- ToolCallRecovery：驱动字段 `step_recovery: Option<…>` 注册制（dsh ctx.on 观察者=turn 内注册/finally 注销的等价）；append 助手统一喂 runtime_context.observe + step_recovery.observe——驱动自有 append 全覆盖两观察者；跨写者观察（compaction 替换 retained）=Phase 18 织物 listen 面补，载档。
+- 逐字文案钉：no provider/model 错、'Step failed and its pending tool results could not be recorded'、'tool call aborted before dispatch'（content 前缀 'Error: '）、AbortError/TOOL_ABORTED_BEFORE_DISPATCH、skip 合成对、agent/error 载荷 turn/step 取相位列。
+- 结构性缺席载档：deepFreeze/WeakSet（Rust 值语义）、activityDone/whenIdle do-while（决策 46 status 面）、initiator 作用域（载荷显式携带）、markAgentLoopRequest（LlmCallConfig.agent_loop 值域标记；GenerateOptions 无此字段且 call_config_of 恒 false——M1 请求路径无消费者）、send 应用期错误（入队已确认， splice 失败落 agent/error+warn，dsh 同步抛 callers 臂结构性消失）。
+- 计数器：assistant_attempt_counter u64（驱动直有）；assistant_stream_revision Arc<AtomicU64>（RevisionAllocator 闭包需拥有态）。clock/next_id/max_parallel 三注入缝（fr-session 时钟缝判例延续）。
+
+## 2026-10-27 — 切片 7 批 2b 实施记录（driver.rs 落地新事实）
+
+- **批 2a 缺口逮住即修**：SessionMailbox.status 原为自有 StatusCell 值字段，PhaseMachine 写自己的 Arc cell——METHOD_STATUS 查询面与驱动提交从不连通。修为 `Arc<StatusCell>` + `status_cell()` 访问器，驱动构造 PhaseMachine 必须取邮箱同一 cell。
+- **通知道泛化落地**：`DriverNotification::{Chunks(String), ToolSettled(ToolCallId)}`；notify_chunks 保留包装、新增 notify_tool_settled；两停靠面 wait_idle（命令/停机）/wait_step（命令/通知/停机）；守卫跨 condvar wait 显式 drop（significant_drop_tightening）。
+- **run_maintenance 入口 = 命令应用点**（fr 特有语义补钉）：入口先 apply_commands——dsh 的 send/cancel 在调用线程同步生效，fr 排队形态下入队先于 maintenance 的唤醒在入口应用才能闩上 wake_requested（测试实证：入口不 apply 则重放永不触发）。档载 module doc。
+- **settle 闭包重借判例**：`live.settle(type, move || driver.commit(...))` 中 driver 与 live 为不同局部——但闭包 move 捕获 &mut self 会终结后续 self 使用；正形 = `let driver = &mut *self;` 重借移入闭包，settle 返回后 self 复可用（三处 settle 面同判例）。
+- **LlmError 无 from_failure 构造**：request-error 不重试臂按 try_new(message, code, status, retry_after, request_id(as_str), offload) 逐字段重建（failure 生于已验证构造，expect 理由载明）；ProviderRequestId 经 as_str 换手。
+- **测试假桩判例**：agent/inbox/spliced 在 append 回读解码为 UnknownEventData 需合成 type_name（UnknownEventData{type_name, data} 的拆分发生在持久层，append 载荷的 data 就是 splice 本体）；ScriptedLlm 的 cancel 注入点 = 首批 drain 返回前（注入在 done 时两批间隔会死等永不来的唤醒——B2 双桩形态：预缓冲或注入即醒）；ScriptedTools dispatch 内同步 settle + notify_tool_settled（通知已停泊则 wait_step 不停靠直接推进）。
+- **假桩 Mutex 包装判例**：Box<dyn Trait> 面无法从测试侧检视——SharedLlm/SharedTools 以 Arc<Mutex<double>> 实现接口转发（driver 拥 Box 面、测试持 Arc 检视），替代裸指针双持有。
+- **pre-step Enter{messages: []} = step0 空输入 completed 路径的正测法**：cancel-before-turn 在 dsh 也不落 turn/end（早 poll 逃逸在 try 外）——首版测试预期错误，测试逮住真语义（与 findings:1258 一致，代码无改）。
+- 依赖晋升：fr-agent-loop +fr-session（rlib 正式依赖；canonical_header + ToolCallRecovery 两纯函数，dsh agent.ts 同样 import 自 dsh-session 包；链接副本判例 spec 决策 37 既载）。
+- 门禁：crate 四门绿（fmt 0/clippy -D warnings 0/62 tests/doc 0）；workspace 四门绿（fmt OK/clippy Finished/710 passed 0 failed（699→710，fr-agent-loop 62=11 模块）/doc 0）。批 2（2a+2b）就此闭合。

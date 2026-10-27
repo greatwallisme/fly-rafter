@@ -97,6 +97,20 @@ const DESCRIPTOR: &[u8] = concat!(
 /// authority is the fr-session slice A/B event vocabulary.
 pub use fr_wire::event::CancelCause;
 
+/// One parked wake source besides inbound commands (decision 46: slow work
+/// lives on provider-owned worker threads and announces itself; the loop
+/// thread parks on this mailbox and pulls).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DriverNotification {
+    /// `llm/chunk-ready`: the named generation's FIFO buffer has new
+    /// chunks (Q84-B2; ordering, duplication, and loss are all harmless).
+    Chunks(String),
+    /// A dispatched tool call settled; poll the tools face for its outcome
+    /// (the Phase 14 bridge shape — tool execution is slow work on the
+    /// tools plugin's worker threads).
+    ToolSettled(fr_wire::ToolCallId),
+}
+
 /// One queued inbound command. Durable application — the inbox splice via
 /// [`crate::inbox::plan_splice`], its persistence, abort-latch arming —
 /// belongs to the session's loop thread; the shell only enqueues.
@@ -131,9 +145,10 @@ pub struct SessionMailbox {
     /// The activation's outbound seam copy the driver thread uses for
     /// `require`/`emit` (handed over at creation; `Copy`).
     outbound: Outbound,
-    /// The loop's status snapshot the query face reads (decision 46);
-    /// the driver's phase commits keep it current.
-    status: crate::phase::StatusCell,
+    /// The loop's status snapshot the query face reads (decision 46); the
+    /// driver's phase machine commits through this same shared cell, so
+    /// the query face and the driver can never disagree.
+    status: std::sync::Arc<crate::phase::StatusCell>,
     inner: Mutex<MailboxInner>,
     wake: Condvar,
 }
@@ -141,15 +156,15 @@ pub struct SessionMailbox {
 #[derive(Debug)]
 struct MailboxInner {
     commands: VecDeque<InboundCommand>,
-    notifications: VecDeque<String>,
+    notifications: VecDeque<DriverNotification>,
     shutdown: bool,
 }
 
 impl SessionMailbox {
-    const fn new(outbound: Outbound) -> Self {
+    fn new(outbound: Outbound) -> Self {
         Self {
             outbound,
-            status: crate::phase::StatusCell::new(),
+            status: std::sync::Arc::new(crate::phase::StatusCell::new()),
             inner: Mutex::new(MailboxInner {
                 commands: VecDeque::new(),
                 notifications: VecDeque::new(),
@@ -163,6 +178,13 @@ impl SessionMailbox {
     #[must_use]
     pub const fn outbound(&self) -> Outbound {
         self.outbound
+    }
+
+    /// The shared status snapshot the driver's phase machine commits
+    /// through (the query face reads the same cell).
+    #[must_use]
+    pub fn status_cell(&self) -> std::sync::Arc<crate::phase::StatusCell> {
+        std::sync::Arc::clone(&self.status)
     }
 
     /// Reads the loop's status snapshot (the query face's answer).
@@ -203,9 +225,28 @@ impl SessionMailbox {
     ///
     /// Panics if the mailbox lock is poisoned (a holder panicked).
     pub fn notify_chunks(&self, generation_id: String) {
+        self.notify(DriverNotification::Chunks(generation_id));
+    }
+
+    /// Parks one tool-settle notification and wakes the driver (a polled
+    /// dispatch may now have its outcome).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mailbox lock is poisoned (a holder panicked).
+    pub fn notify_tool_settled(&self, call_id: fr_wire::ToolCallId) {
+        self.notify(DriverNotification::ToolSettled(call_id));
+    }
+
+    /// Parks one notification and wakes the driver.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mailbox lock is poisoned (a holder panicked).
+    fn notify(&self, notification: DriverNotification) {
         {
             let mut inner = self.inner.lock().expect("mailbox lock poisoned");
-            inner.notifications.push_back(generation_id);
+            inner.notifications.push_back(notification);
         }
         self.wake.notify_all();
     }
@@ -239,9 +280,40 @@ impl SessionMailbox {
     /// # Panics
     ///
     /// Panics if the mailbox lock is poisoned (a holder panicked).
-    pub fn drain_notifications(&self) -> Vec<String> {
+    pub fn drain_notifications(&self) -> Vec<DriverNotification> {
         let mut inner = self.inner.lock().expect("mailbox lock poisoned");
         inner.notifications.drain(..).collect()
+    }
+
+    /// Parks the calling driver thread until an inbound command or the
+    /// shutdown flag arrives (the idle wait point). A stray notification
+    /// wakes the thread, which finds no command and parks again — a
+    /// notification no live step consumes is lost by design (Q84-B2).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mailbox lock is poisoned (a holder panicked).
+    pub fn wait_idle(&self) {
+        let mut inner = self.inner.lock().expect("mailbox lock poisoned");
+        while inner.commands.is_empty() && !inner.shutdown {
+            inner = self.wake.wait(inner).expect("mailbox wait");
+        }
+        drop(inner);
+    }
+
+    /// Parks the calling driver thread until any wake source arrives — a
+    /// command, a notification, or the shutdown flag (the in-step wait
+    /// point: chunk batches, tool settlements, and cancels all proceed).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mailbox lock is poisoned (a holder panicked).
+    pub fn wait_step(&self) {
+        let mut inner = self.inner.lock().expect("mailbox lock poisoned");
+        while inner.commands.is_empty() && inner.notifications.is_empty() && !inner.shutdown {
+            inner = self.wake.wait(inner).expect("mailbox wait");
+        }
+        drop(inner);
     }
 
     /// Reports whether shutdown was requested.
@@ -846,11 +918,15 @@ mod tests {
 
         assert_eq!(
             session_mailbox(&map, "s7").drain_notifications(),
-            vec!["g1".to_owned(), "g1".to_owned(), "g2".to_owned()]
+            vec![
+                super::DriverNotification::Chunks("g1".to_owned()),
+                super::DriverNotification::Chunks("g1".to_owned()),
+                super::DriverNotification::Chunks("g2".to_owned()),
+            ]
         );
         assert_eq!(
             session_mailbox(&map, "s8").drain_notifications(),
-            vec!["g9".to_owned()]
+            vec![super::DriverNotification::Chunks("g9".to_owned())]
         );
         assert_eq!(super::EV_CHUNK_READY, 1);
         assert_eq!(super::EVENT_CHUNK_READY, "llm/chunk-ready");

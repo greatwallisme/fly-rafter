@@ -16,6 +16,7 @@
 
 pub mod agent_events;
 pub mod assistant_stream;
+pub mod driver;
 pub mod inbox;
 pub mod loop_inbox;
 pub mod outbound;
