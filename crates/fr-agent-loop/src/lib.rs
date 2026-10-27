@@ -14,9 +14,13 @@
 //! the driver body running against test doubles for the tools and
 //! system-prompt seams (Q81-A). Real services attach in Phases 14/15.
 
+pub mod agent_events;
 pub mod assistant_stream;
 pub mod inbox;
+pub mod loop_inbox;
 pub mod outbound;
+pub mod phase;
 pub mod plugin_shell;
 pub mod runtime_context;
+pub mod session_client;
 pub mod turn_boundary;

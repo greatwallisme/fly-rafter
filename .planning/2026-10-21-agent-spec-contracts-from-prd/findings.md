@@ -1371,3 +1371,37 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - fr-llm accumulator 差异：push(TimedStreamChunk 按值)→Result<TimedStreamChunk,StreamRejection>（返回脱离快照）；BlockAssembler 面 usage()/finish()（缺省 Stop）/replay_state()/blocks()->Result/interrupted_blocks()->Vec 全备（assembler.rs:256-321）。
 - 时间戳：dsh AssistantStreamAttempt.push 用 Date.now()——fr 化 = time 参数注入（fr-session 时钟缝判例，测试确定性）。
 - 依赖裁决：fr-agent-loop 增 fr-llm.workspace 依赖（三 provider crate 判例「fr-llm rlib 共享助手」，provider spec Decisions 既载）；不引 fr-session（投影纯函数走 fr-wire 事件面，驱动体批次经 ABI 字节消费 session 服务）。
+
+## 2026-10-27 — 切片 7 批 2 预研（批 2a 实施前设计事实全钉）
+
+### fr-session 服务面实况（service.rs 实读）
+- 方法 2-8：create `{id?,meta?,seed?,inheritedEventCount?}`→`{sessionId}`；append `{id,type,data,surfaceOp?,sourceEventSeqs?}`→`{event: 落盘事件}`（time 服务侧时钟注入）；flush→`{participated}`；fork/resume/restore/drain。dylib 壳接线 = Phase 18（Q44-B fabric）；服务名终装配定，循环侧 descriptor inject 钉 'session-persistence'（PRD 8.1）。
+- **读面缺口**：request_header/derive_messages/request_context/tool_history/surface.contentGeneration 仅 fr-session rlib API，wire 服务面无。批 2 按 Q81-A 模式建循环侧消费端封装（wire 形状本批定义、测试桩驱动），fr-session 服务面扩展随其合同后续切片落。架构理据：requestSurfaceGeneration 必须看见他插件表面变更（压缩 replace 事件），循环本地 fold 结构性错误——wire 读面是唯一正确形态（单写者假设对 requestHeader 成立但内容生成计数不成立）。
+- agent/inbox/spliced 走 Unknown 事件臂（from_parts；非 `plugin:` 记录语法）。
+
+### dispatch.ts（176 行全读）移植语义钉
+- emit：逐听者包容；文案 `agent event "<name>" listener rejected/threw: <error>`（Rust 同步闭包仅 threw 臂，rejected 异步臂结构性缺席载档）。fr 侧 emit 面 = 进程内听者集（Result 通道包容）+ Outbound::emit 总线镜像（决策 46 观测面；镜像失败经 warn 汇包含）。
+- serial：顺序执行，听者错误中断链上抛（turn-stopping 错误入 turn 的 error 收尾）；kernel bus 无 serial 返回径，serial 不镜像总线。
+- waterfall：continuation 链注册序外层优先；next(payload') 可变换载荷（model-selection pre-step prepend 判例 findings:1319）；不拉 next = 否决整链（值即结果）。pre-step/request/request-error 三 typed face。
+- **跨插件 waterfall 结构性不可能走 kernel bus**（emit 无返回径；CPS waterfall 是听者侧专有）→ 进程内注册表 = M1 正确形态；llm-retry 不在 M1 crate 清单（task_plan M1 范围核过），跨插件中间件注册面 = Phase 14/18 装配议题。
+
+### inbox.ts 95-244 行复读钉（claim/mutate/clear 精确语义）
+- claim(target,turn)：mutate next-step 全取（discard=false）→ target=next-turn 再 mutate next-turn(0,1) → **两批合并后**统一逐条 emit agent/inbox/claimed {message,turn}（次序 = next-step 批后随 turn 消息）。
+- clear：splice next-step 全量 → next-turn 全量（splice=discard true）；次序钉。
+- mutate：no-op 短路；跨队查重抛 `message "<id>" is already pending`；outcome canceled 仅 discardRemoved&&delete>0；removedCount 仅 >0；append 后 discarded 逐条（仅 discardRemoved）→ inserted 逐条**从落盘事件 data 读**。
+
+### 相位机/abort/查询面设计钉
+- Phase 三态 idle{last_turn}/maintenance{abort,last_turn,wake_requested}/running{abort,turn,step,wake_requested}；status 派生 idle|maintenance→Idle、running→Running；commit_phase 单点仅跨值 emit agent/status。
+- AbortLatch = 驱动线程自有 `cause: Option<CancelCause>`；abort 首因胜出（已 abort 再 abort = no-op，dsh AbortController 语义 + findings「cancel 首因胜出」）；dsh throwIfAborted 点 = 驱动线程邮箱轮询点。
+- **fr_wire::event::CancelCause 已存在**（user/parent/hook{reason}/disposed，wire 权威切片 A/B 落；tag kind + 单词 renames）——plugin_shell.rs 批 1b 本地重复定义（kebab-case tag 同形），批 2a 合并为 re-export。
+- whenIdle 跨 ABI（决策 46）：agent/status 事件 + 查询型 require → agent 服务加 METHOD_STATUS=6（mailbox 携带 StatusCell=AtomicU8，commit_phase 更新，dispatch 读回 {status}）。
+
+### 类型对接面（编译前核实）
+- fr_wire::Failure（Debug+Clone+PartialEq+Serialize，call_config.rs:12）；fr_llm::adapter::LlmCallConfig（Debug+Clone+Default，无 PartialEq——相等比较另有 call_config_equals）；fr_llm::error::LlmError{code()/message()}；fr_llm::retry_policy::RetryPolicy。crate 内 AssistantStreamFrame（Debug+Clone+PartialEq+Serialize）。
+- agent.ts 705 行再全读（本轮）：相位机/四入口/cancel/runMaintenance/wakeDriver/whenIdle/throwError/kick/preStep/turn/step/prepareRequest/buildRequest 逐段与 findings:1249-1262 一致，无新矛盾。
+
+### 批 2a 实施新事实（2026-10-27）
+- **fr-session 真 store 事件 seq 0 起**（跨 crate 往返钉测实证：首 append 回 seq=0；turn 编号仍 1 起，两域不同）。dsh JS 侧 seq 语义对齐点：fold/claim 不依赖具体起点。
+- AgentEvents 听者必须 +Send+Sync：`Box<dyn Fn + Send>` 非 Sync → `Arc<AgentEvents>` 无法移入 spawn 线程（Arc<T>: Send 需 T: Send+Sync）；批 2b 驱动线程 spawn 直接消费此判例。
+- Vec→slice 与 String→str 的 deref 在 const fn 不稳定（E0658/E0015）：next_step/next_turn/session_id 保持普通 fn；clippy missing_const_for_fn 对此类会误荐，编译器为真源。
+- 跨 crate 钉测形态：fr-session dev-dep + 假 vtable host_handle 指向 Box<Mutex<SessionService>>，require 走真 `fr_session::service::dispatch`；EventVocabulary::core() 后 declare("agent/inbox/spliced") 即过 admission（declare 面即激活期类型申报的测试侧等价）。

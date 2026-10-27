@@ -66,6 +66,14 @@ pub const METHOD_CANCEL: u32 = 4;
 /// Method selector: shell metadata echo (`{}`).
 pub const METHOD_DESCRIBE: u32 = 5;
 
+/// Method selector: query the session's loop status
+/// (`{sessionId}` → `{status}`).
+///
+/// Decision 46: the non-blocking query face `whenIdle` reconstructs from;
+/// a blocking wait-for-idle require would violate the fast-path
+/// invariant.
+pub const METHOD_STATUS: u32 = 6;
+
 /// Event id the descriptor's listen map binds to `llm/chunk-ready`.
 pub const EV_CHUNK_READY: u32 = 1;
 
@@ -85,22 +93,9 @@ const DESCRIPTOR: &[u8] = concat!(
 .as_bytes();
 
 /// The durable abort-cause taxonomy (dsh agent.ts `abortedCancelCause`):
-/// the four shapes a cancel cause takes on the session log.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum CancelCause {
-    /// The user asked to stop.
-    User,
-    /// A parent scope is winding down.
-    Parent,
-    /// The agent instance is being disposed.
-    Disposed,
-    /// A hook vetoed the run.
-    Hook {
-        /// Why the hook vetoed.
-        reason: String,
-    },
-}
+/// the four shapes a cancel cause takes on the session log. The wire
+/// authority is the fr-session slice A/B event vocabulary.
+pub use fr_wire::event::CancelCause;
 
 /// One queued inbound command. Durable application — the inbox splice via
 /// [`crate::inbox::plan_splice`], its persistence, abort-latch arming —
@@ -136,6 +131,9 @@ pub struct SessionMailbox {
     /// The activation's outbound seam copy the driver thread uses for
     /// `require`/`emit` (handed over at creation; `Copy`).
     outbound: Outbound,
+    /// The loop's status snapshot the query face reads (decision 46);
+    /// the driver's phase commits keep it current.
+    status: crate::phase::StatusCell,
     inner: Mutex<MailboxInner>,
     wake: Condvar,
 }
@@ -151,6 +149,7 @@ impl SessionMailbox {
     const fn new(outbound: Outbound) -> Self {
         Self {
             outbound,
+            status: crate::phase::StatusCell::new(),
             inner: Mutex::new(MailboxInner {
                 commands: VecDeque::new(),
                 notifications: VecDeque::new(),
@@ -164,6 +163,12 @@ impl SessionMailbox {
     #[must_use]
     pub const fn outbound(&self) -> Outbound {
         self.outbound
+    }
+
+    /// Reads the loop's status snapshot (the query face's answer).
+    #[must_use]
+    pub fn status(&self) -> crate::phase::AgentStatus {
+        self.status.load()
     }
 
     /// Queues one inbound command and wakes the driver when the command
@@ -320,6 +325,13 @@ struct CancelRequest {
     keep_inbox: bool,
 }
 
+/// `status` payload (the decision-46 query face).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StatusRequest {
+    session_id: String,
+}
+
 fn parse<T: serde::de::DeserializeOwned>(payload: &[u8], entry: &str) -> Result<T, String> {
     serde_json::from_slice(payload).map_err(|error| format!("{entry} payload is invalid: {error}"))
 }
@@ -381,6 +393,13 @@ pub fn dispatch(method: u32, payload: &[u8], sessions: &SessionMap) -> Result<Ve
                 "abiVersion": ABI_VERSION,
             }))
             .unwrap_or_default());
+        }
+        METHOD_STATUS => {
+            let request: StatusRequest = parse(payload, "status")?;
+            let status = session_mailbox(sessions, &request.session_id).status();
+            return Ok(
+                serde_json::to_vec(&serde_json::json!({ "status": status })).unwrap_or_default()
+            );
         }
         _ => return Err(format!("unknown agent method {method}")),
     }
@@ -619,7 +638,7 @@ pub static DOUGONG_PLUGIN_EXPORTS: PluginExports = PluginExports {
 mod tests {
     use super::{
         CancelCause, InboundCommand, METHOD_CANCEL, METHOD_DESCRIBE, METHOD_FOLLOWUP,
-        METHOD_INJECT, METHOD_SEND, METHOD_STEER, PLUGIN_NAME, SessionMap, dispatch,
+        METHOD_INJECT, METHOD_SEND, METHOD_STATUS, METHOD_STEER, PLUGIN_NAME, SessionMap, dispatch,
         handle_chunk_ready, session_mailbox, shutdown_and_join,
     };
     use crate::inbox::InboxTarget;
@@ -789,6 +808,26 @@ mod tests {
             dispatch(METHOD_SEND, b"not json", &map)
                 .expect_err("bad json")
                 .contains("send payload is invalid")
+        );
+    }
+
+    #[test]
+    fn status_query_reads_the_shared_snapshot() {
+        let map = empty_map();
+        let payload = serde_json::json!({ "sessionId": "s1" });
+        let reply = dispatch(METHOD_STATUS, payload.to_string().as_bytes(), &map).expect("status");
+        let reply: serde_json::Value = serde_json::from_slice(&reply).expect("json");
+        assert_eq!(reply, serde_json::json!({ "status": "idle" }));
+        // A fresh session answers without materializing a driver: the cell
+        // is seeded by the mailbox itself.
+        let fresh = serde_json::json!({ "sessionId": "never-seen" });
+        let reply = dispatch(METHOD_STATUS, fresh.to_string().as_bytes(), &map).expect("status");
+        let reply: serde_json::Value = serde_json::from_slice(&reply).expect("json");
+        assert_eq!(reply, serde_json::json!({ "status": "idle" }));
+        assert!(
+            dispatch(METHOD_STATUS, b"not json", &map)
+                .expect_err("bad json")
+                .contains("status payload is invalid")
         );
     }
 

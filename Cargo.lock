@@ -639,6 +639,7 @@ version = "0.1.0"
 dependencies = [
  "dougong-abi",
  "fr-llm",
+ "fr-session",
  "fr-wire",
  "serde",
  "serde_json",

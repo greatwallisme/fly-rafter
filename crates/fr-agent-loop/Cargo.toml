@@ -19,5 +19,8 @@ fr-wire = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
+[dev-dependencies]
+fr-session = { workspace = true }
+
 [lints]
 workspace = true
