@@ -1360,3 +1360,14 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - 代价 2（join 等待 vs 慢模型）解答要点：慢模型不进入该风险面——模型的慢在 provider worker 线程（锁外），循环线程长等待只在自有 condvar 上（B2 的 begin/drain/abort 全快路径），teardown 唤醒路径不经过 provider；卡流由 provider 内已实现的 idle watchdog + timeout-ms 自终局（切片 4-6 逐字移植）。残余风险仅"第一方服务方法实现慢"（bug）：防线 = 合约快路径不变量（已入 PRD 决策 46 + AGENT-LOOP Decisions）+ 假 provider 永不返 chunk 的 teardown 即时收敛钉测（批 1 测试清单项）+ 评审。join 保持无界（超时 detach = vtable UB，不可取）。
 - 文档落地：PRD 8.1 勘误（fiber 句→循环线程驱动体）+ 19.2 条 24 + 23 决策 46；AGENT-LOOP spec Decisions 增四行（Q79-A 形态/Q80-B+B2 流消费/快路径不变量与 on_event 禁令/切片边界），lint Quality 100% PASS。
 - 待呈阅（未落）：provider 合同 Decisions 增行草稿（'llm' 服务 begin/drain/abort + `llm/chunk-ready` 通知事件 + 快路径不变量随载 + 共享实现归 fr-llm rlib 助手）。
+
+### 批 1c 研读补充（2026-10-27，投影层/流框架对接面核实）
+- 真源路径勘正：agent-loop 七件在 `packages/core/agent-loop/src/`（非 packages/agent-loop）；runtime-context.ts 164 行 / assistant-stream.ts 140 行 / index.ts:46-95 turnBoundary 投影已逐行复读。
+- **fr-wire 无 runtime-context source 变体**（message.rs KnownMessageSource 仅 user/model/tool/system-prompt）——dsh 的 declare module 增广在 fr 落为 MessageSource::Other 兜底骑乘：isOwned 读 Other.get("kind")=="runtime-context"；创建快照消息构造 Other map {kind, form?, sections?}（键序 kind→form→sections 同 dsh 插入序）。
+- **fr-session admission 对 user/developer 角色不约束 source kind**（admission.rs:177 `KnownMessage::User { .. } | KnownMessage::Developer { .. } => {}`）——runtime-context 快照可作 user/message 落盘，无需 fr-session 改动；AGENT-LOOP 合同 Allowed Changes 限 crates/fr-agent-loop/**，本批全落 crate 内（intent 本地类型 over fr-wire SurfaceOp，不引 fr-session SurfaceIntent）。
+- createSystemMessage（dsh-llm message.ts:279-283）：content 空串→[] 否则单 text 块，source {kind:'system-prompt'}，id=randomUUID——fr 化 = id 注入参数（fr-session 时钟缝同判例）；createUserMessage 同构（:246-256）。
+- isReplacementSurfaceEvent（dsh session surface.ts:102-106）= surfaceOp !== 'append'——fr = matches!(surface_op, Some(SurfaceOp::Replace(_)))。
+- AssistantStreamFrame wire（dsh-agent runtime-types.ts:128-161）：type 内标 start/chunk/end，字段 attemptId/revision/(index/time/chunk)/(index/outcome)；outcome kind 内标 committed{eventType:'assistant/message'|'assistant/attempt', seq}|abandoned；revision 注释=attached 生命周期内单调、replacement 重起 1（dsh 进程级 nextRevision() 注入，fr = Box<dyn FnMut()->u64> 缝）。
+- fr-llm accumulator 差异：push(TimedStreamChunk 按值)→Result<TimedStreamChunk,StreamRejection>（返回脱离快照）；BlockAssembler 面 usage()/finish()（缺省 Stop）/replay_state()/blocks()->Result/interrupted_blocks()->Vec 全备（assembler.rs:256-321）。
+- 时间戳：dsh AssistantStreamAttempt.push 用 Date.now()——fr 化 = time 参数注入（fr-session 时钟缝判例，测试确定性）。
+- 依赖裁决：fr-agent-loop 增 fr-llm.workspace 依赖（三 provider crate 判例「fr-llm rlib 共享助手」，provider spec Decisions 既载）；不引 fr-session（投影纯函数走 fr-wire 事件面，驱动体批次经 ABI 字节消费 session 服务）。

@@ -638,6 +638,7 @@ name = "fr-agent-loop"
 version = "0.1.0"
 dependencies = [
  "dougong-abi",
+ "fr-llm",
  "fr-wire",
  "serde",
  "serde_json",
