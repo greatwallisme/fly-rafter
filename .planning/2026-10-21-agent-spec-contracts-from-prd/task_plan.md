@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-批 4a 已提交（fr-net/fr-attachment 设施插件 + deepseek 机械改引，四门绿 533 tests，PRD 决策 43）。批 4b = fr-llm-openai 执行壳：vendor openai npm SDK 7.19.0（proxychains4，行为真源+钉测锚点）→ codes（openai 自有码：UNKNOWN_MODEL/NO_ADAPTER/UNSUPPORTED_OPTION/UNSUPPORTED_CONTENT/UNSUPPORTED_REASONING_EFFORT/INVALID_CONFIG/PI_AI_ERROR/STREAM_CLOSED）+ error_body（fr 无 SDK 退化 status+body 直通）+ overflow（25 正则族+三案）+ sse（openai SDK 语义 [DONE]）+ adapter 执行壳（Q76B 品牌适配文案表、session affinity 三格式、终结门与 catch、usage+finish(Error) 结算、translator usage 访问器）→ 批 4c 场景绑定 openai×2+fail_settle → 四门。
+批 4b 纯函数层 5/6 落地（codes/error_body/overflow/sse/settle+usage 访问器，547 tests 四门绿，工作树未提交）。余 adapter.rs 执行壳（真源+蓝图全在 findings「批 4b 真源读数」+「批 4b 实施蓝图」节）：OpenAiAdapterOptions 缝（profiles/resolve_api_key/fetch=Arc<dyn fr_net::http::Fetch>/attachments=Option<Arc<dyn fr_attachment::AttachmentRead>>）→ admit 门序（stop→UNSUPPORTED_OPTION（Q76B 适配文案 'fr-llm-openai does not support GenerateOptions.stop'）/NO_ADAPTER/UNKNOWN_MODEL+INVALID_CONFIG（适配）/图门 UNSUPPORTED_CONTENT/reasoning UNSUPPORTED_REASONING_EFFORT）→ 凭据（named env miss→MISSING_CREDENTIAL Q66B 措辞；unnamed→'No API key for provider: X' 逐字）→ 既有管线（fold→transform→convert→build_params 两协议）→ 头构造（attribution 胜+Bearer+亲和三格式 completions 门=sendSessionAffinityHeaders+responses 门=仅 sessionId+x-session-affinity 仅 completions+config headers 最后合并）→ URL（{base}/chat/completions|{base}/responses，缺省 https://api.openai.com/v1）→ POST via Fetch→非 2xx 读 body→format_provider_error（responses 前缀 '<OpenAI|provider> API error'+ChatGPT usage URL 臂；completions 无前缀，OpenRouter raw 追加死臂注释）→ SSE 循环（worker 线程 mpsc+ChannelStream 承 deepseek adapter.rs:250 判例；SseParser+Translator/ResponsesTranslator）→ done→end_of_stream→Finish；异常→catch 链（caller abort→settle aborted；settle_failure（settle.rs 已落）→usage+finish(Error{failure}) 结算=fail_settle 场景面）→ idle watchdog（fr-timeout，code LLM_STREAM_IDLE_TIMEOUT，文案适配）→ 批 4c 场景绑定 openai×2+fail_settle → 四门+批 4b+4c 一并提交。
 
 ## Current Phase
-Phase 13b 切片 5 批 4b（openai 执行壳）——4a 已收口
+Phase 13b 切片 5 批 4b（openai 执行壳）——纯函数层 5/6 落地，adapter 壳续写
 
 ## Phases
 

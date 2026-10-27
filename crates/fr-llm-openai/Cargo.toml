@@ -22,6 +22,9 @@ fr-llm.workspace = true
 # Safe-integer gate shared with the retry ceiling (fr-wire ids).
 fr-wire.workspace = true
 serde_json.workspace = true
+# Overflow pattern family (pi-ai utils/overflow.ts; regex is already in
+# the workspace lock graph via fr-llm).
+regex.workspace = true
 
 [lints]
 workspace = true

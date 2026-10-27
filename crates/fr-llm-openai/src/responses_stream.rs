@@ -77,8 +77,15 @@ pub struct ResponsesTranslator {
 }
 
 impl ResponsesTranslator {
-    /// A translator for one request of `model`; the model id rides the
-    /// durable replay envelope of the terminal finish.
+    /// The usage accumulated so far (the error-path settlement emits it
+    /// before the terminal finish, dsh `toStreamChunks` error arm).
+    #[must_use]
+    pub const fn usage(&self) -> TokenUsage {
+        self.usage
+    }
+
+    /// Creates a translator for one request of `model`; the model id rides
+    /// the durable replay envelope of the terminal finish.
     #[must_use]
     pub fn new(model: impl Into<String>) -> Self {
         Self {

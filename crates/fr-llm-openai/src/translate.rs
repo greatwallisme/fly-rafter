@@ -77,9 +77,17 @@ pub struct Translator {
 
 impl Translator {
     /// A translator for one request of `model`; the model id is stored in
-    /// the durable replay state of the terminal finish and gates the
-    /// `responseModel` face. The compat flag drives the terminal-inference
-    /// arm (`supports-finish-reason`).
+    /// The usage accumulated so far (the error-path settlement emits it
+    /// before the terminal finish, dsh `toStreamChunks` error arm).
+    #[must_use]
+    pub const fn usage(&self) -> TokenUsage {
+        self.usage
+    }
+
+    /// Creates a translator for one request against the route model; the
+    /// response id and model ride the durable replay state of the terminal
+    /// finish, and the compat flag drives the terminal-inference arm
+    /// (`supports-finish-reason`) when the provider never sends it.
     #[must_use]
     pub fn new(model: impl Into<String>, supports_finish_reason: bool) -> Self {
         Self {

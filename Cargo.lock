@@ -695,6 +695,7 @@ dependencies = [
  "dougong-abi",
  "fr-llm",
  "fr-wire",
+ "regex",
  "serde_json",
 ]
 
