@@ -290,7 +290,7 @@ impl DeepSeekUploadIndex {
             .unwrap_or("files-v3.json");
         let staging = self.path.with_file_name(format!(
             "{stem}.{}.tmp",
-            crate::request_image_pipeline::random_hex_suffix()
+            fr_attachment::request_image_pipeline::random_hex_suffix()
         ));
         let write = std::fs::OpenOptions::new()
             .write(true)
@@ -572,7 +572,7 @@ mod tests {
         let directory = std::env::temp_dir().join(format!(
             "fr-upload-index-{tag}-{}-{}",
             std::process::id(),
-            crate::request_image_pipeline::random_hex_suffix()
+            fr_attachment::request_image_pipeline::random_hex_suffix()
         ));
         DeepSeekUploadIndex::new(directory.join("llm-deepseek").join("files-v3.json"))
     }

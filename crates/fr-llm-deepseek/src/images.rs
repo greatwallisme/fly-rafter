@@ -9,10 +9,10 @@
 use crate::codes::UNSUPPORTED_CONTENT_CODE;
 use crate::file_id::DeepSeekFileId;
 use crate::request_files::{FileResolutionFailure, ImageWireLocation, RequestFiles};
-use crate::request_image::RequestImageAttachment;
-use crate::request_image_pipeline::AttachmentError;
 use crate::request_pricing::resolve_request_image_target;
-use fr_llm::adapter::{AbortSignal, ImageRequestTarget, RequestMessage};
+use fr_attachment::AttachmentError;
+use fr_attachment::request_image::RequestImageAttachment;
+use fr_llm::adapter::{AbortSignal, RequestMessage};
 use fr_llm::error::{IMAGE_OFFLOAD_REQUIRED_CODE, LlmError};
 use fr_llm::projection::{
     ImageRepresentation, ImageRequestBudget, content_has_image, offloaded_image_text,
@@ -21,25 +21,7 @@ use fr_llm::projection::{
 use fr_wire::{AttachmentId, ContentBlock, ImageAttachmentRef, KnownContentBlock};
 use std::collections::HashMap;
 
-/// The attachment-store seam (Q71-B): reads one route-chosen request
-/// image for a retained reference.
-///
-/// The canonical fr home is the future
-/// attachment crate; until then the adapter implements this over the
-/// request-image pipeline and tests inject fixtures.
-pub trait AttachmentRead {
-    /// Read or produce one deterministic request image under the target.
-    ///
-    /// # Errors
-    /// [`AttachmentError`] for malformed inputs, failed normalization, or
-    /// caller cancellation.
-    fn read_image_request(
-        &self,
-        reference: &ImageAttachmentRef,
-        target: ImageRequestTarget,
-        signal: Option<&AbortSignal>,
-    ) -> Result<RequestImageAttachment, AttachmentError>;
-}
+use fr_attachment::AttachmentRead;
 
 /// Any image preparation failure (dsh throws either a raw `LlmError` or
 /// the attachment store's `AttachmentError`).
@@ -321,7 +303,7 @@ pub fn prepare_file_ids<S: ::std::hash::BuildHasher>(
 mod tests {
     use super::*;
     use crate::types::ConnectionOptions;
-    use fr_llm::adapter::ModelModality;
+    use fr_llm::adapter::{ImageRequestTarget, ModelModality};
     use fr_wire::message::{KnownMessage, Message, MessageSource};
     use fr_wire::{KnownMessageSource, MessageId, RawObject, TrueOnly};
 
@@ -411,8 +393,8 @@ mod tests {
             bytes: 512,
             width: 320,
             height: 200,
-            depth: crate::request_image::ImageSampleDepth::Uchar,
-            space: crate::request_image::ImageColorSpace::Srgb,
+            depth: fr_attachment::request_image::ImageSampleDepth::Uchar,
+            space: fr_attachment::request_image::ImageColorSpace::Srgb,
             has_alpha: false,
         }
     }
@@ -593,7 +575,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!(
             "fr-images-ids-{}-{}",
             std::process::id(),
-            crate::request_image_pipeline::random_hex_suffix()
+            fr_attachment::request_image_pipeline::random_hex_suffix()
         ));
         std::fs::create_dir_all(&root).expect("scratch");
         let fetch = RecordingFetchForIds::default();
@@ -654,20 +636,20 @@ mod tests {
         }
     }
 
-    impl crate::http::Fetch for RecordingFetchForIds {
+    impl fr_net::http::Fetch for RecordingFetchForIds {
         fn fetch(
             &self,
-            request: crate::http::HttpRequest,
-        ) -> Result<crate::http::HttpResponse, crate::http::TransportError> {
+            request: fr_net::http::HttpRequest,
+        ) -> Result<fr_net::http::HttpResponse, fr_net::http::TransportError> {
             let send = |status: u16, body: String| {
-                Ok(crate::http::HttpResponse {
+                Ok(fr_net::http::HttpResponse {
                     status,
                     headers: Vec::new(),
                     body: Box::new(std::io::Cursor::new(body.into_bytes())),
                 })
             };
             if request.url.ends_with("/v1/files")
-                && matches!(request.method, crate::http::HttpMethod::Post)
+                && matches!(request.method, fr_net::http::HttpMethod::Post)
             {
                 self.uploads
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);

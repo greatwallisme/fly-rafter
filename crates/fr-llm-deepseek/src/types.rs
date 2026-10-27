@@ -14,11 +14,11 @@ use fr_llm::retry_policy::RetryPolicy;
 use fr_wire::ImageAttachmentRef;
 use std::sync::Arc;
 
-use crate::http::Fetch;
-use crate::images::AttachmentRead;
 use crate::models::CatalogModel;
 use crate::request_extensions::{ExtensionRequest, PreparedExtensions};
 use crate::upload_index::DeepSeekUploadIndex;
+use fr_attachment::AttachmentRead;
+use fr_net::http::Fetch;
 
 /// Thinking toggle for request defaults (dsh `'enabled' | 'disabled'`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

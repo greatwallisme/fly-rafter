@@ -2,9 +2,9 @@
 //! `request-image.ts` + `encoding.ts` + `image.ts`, the request-image face
 //! of the Q71-B ruling).
 //!
-//! The canonical fr home is the future attachment crate (the same note as
-//! [`crate::request_image`]); until that crate lands, the pipeline lives
-//! beside its only consumer. The wire-visible facts are verbatim to dsh:
+//! The fr home is the fr-attachment plugin (2026-10-27 Q78-A): the
+//! pipeline is the attachment domain's normalization face. The
+//! wire-visible facts are verbatim to dsh:
 //! the transform version, the descriptor fields, the quality ladder, the
 //! alpha-to-WebP / opaque-to-JPEG codec order, the pass-through rule, the
 //! verify contract, and the cache layout. Pixel-level encoder output is
@@ -19,9 +19,15 @@ use crate::request_image::{ImageColorSpace, ImageSampleDepth, RequestImageAttach
 use fr_llm::adapter::AbortSignal;
 use fr_wire::{ImageAttachmentRef, ImageMediaType};
 use image::ColorType;
+use image::ImageEncoder as _;
 use image::ImageReader;
 use sha2::{Digest, Sha256};
+use std::fmt::Write as _;
 use std::io::Cursor;
+use std::io::Read as _;
+use std::io::Write as _;
+use std::os::unix::fs::OpenOptionsExt as _;
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 
 /// Stable attachment failure code: a malformed or unsupported raster.
@@ -228,7 +234,6 @@ pub fn request_image_variant_id(
     let mut hex = String::with_capacity(64 + 7);
     hex.push_str("sha256:");
     for byte in digest {
-        use std::fmt::Write as _;
         let _ = write!(hex, "{byte:02x}");
     }
     hex
@@ -254,7 +259,6 @@ fn encode_jpeg(
     height: u32,
     quality: u32,
 ) -> Result<EncodedImage, AttachmentError> {
-    use image::ImageEncoder as _;
     let mut data = Vec::new();
     let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(
         &mut data,
@@ -378,7 +382,9 @@ pub fn encode_first_within_limit(
     let Some(first) = attempts.next() else {
         // Internal invariant: the ladder always builds one candidate per
         // quality entry, and the quality table is non-empty.
-        unreachable!("image encoding requires at least one candidate");
+        unreachable!(
+            "image encoding requires at least one candidate; the quality ladder constant is non-empty by construction"
+        )
     };
     let mut smallest = first()?;
     if smallest.data.len() as u64 <= max_bytes {
@@ -693,13 +699,14 @@ fn verify_request_image(
     })
 }
 
-/// Read 16 random bytes for one temporary file name (dsh `randomUUID`;
-/// M1 is POSIX-only per PRD 19.2 item 15, so `/dev/urandom` is the
-/// single source, mirroring the fr-session decision).
-/// Shared random hex suffix source for temporary or boundary names (the
-/// upload multipart boundary and the cache temporary suffix read the
-/// same `/dev/urandom` source).
-pub(crate) fn random_hex_suffix() -> String {
+/// Shared random hex suffix source for scratch or boundary names (the
+/// upload multipart boundary and the cache scratch suffix).
+///
+/// The bytes come from `/dev/urandom` (dsh `randomUUID`; M1 is POSIX-only
+/// per PRD 19.2 item 15, so `/dev/urandom` is the single source, mirroring
+/// the fr-session decision).
+#[must_use]
+pub fn random_hex_suffix() -> String {
     random_tmp_suffix()
 }
 
@@ -707,10 +714,8 @@ fn random_tmp_suffix() -> String {
     let mut bytes = [0u8; 16];
     // Read failures degrade to a counter-stable suffix; the name only has
     // to be unique among concurrent writers of this process.
-    let source = std::fs::File::open("/dev/urandom").and_then(|mut file| {
-        use std::io::Read as _;
-        file.read_exact(&mut bytes)
-    });
+    let source =
+        std::fs::File::open("/dev/urandom").and_then(|mut file| file.read_exact(&mut bytes));
     if source.is_err() {
         static FALLBACK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let seq = FALLBACK.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -718,23 +723,19 @@ fn random_tmp_suffix() -> String {
     }
     let mut hex = String::with_capacity(32);
     for byte in bytes {
-        use std::fmt::Write as _;
         let _ = write!(hex, "{byte:02x}");
     }
     hex
 }
 
-/// Publish one variant atomically: a `0600` temporary file plus rename
+/// Publish one variant atomically: a `0600` scratch file plus rename
 /// under a `0700` directory (dsh `writeCached`; the `finally` cleanup of
-/// the temporary name maps to the best-effort removal below).
+/// the scratch name maps to the best-effort removal below).
 fn write_cached(
     path: &Path,
     data: &[u8],
     signal: Option<&AbortSignal>,
 ) -> Result<(), AttachmentError> {
-    use std::io::Write as _;
-    use std::os::unix::fs::OpenOptionsExt as _;
-    use std::os::unix::fs::PermissionsExt as _;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|_error| {
             AttachmentError::new(
@@ -744,7 +745,7 @@ fn write_cached(
         })?;
         let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
     }
-    let temporary = path.with_file_name(format!(
+    let scratch = path.with_file_name(format!(
         "{}.{}.tmp",
         path.file_name()
             .and_then(std::ffi::OsStr::to_str)
@@ -755,12 +756,12 @@ fn write_cached(
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .open(&temporary)
+        .open(&scratch)
         .and_then(|mut file| file.write_all(data));
-    if write.is_ok() && std::fs::rename(&temporary, path).is_ok() {
+    if write.is_ok() && std::fs::rename(&scratch, path).is_ok() {
         return Ok(());
     }
-    let _ = std::fs::remove_file(&temporary);
+    let _ = std::fs::remove_file(&scratch);
     ensure_live(signal)?;
     Err(AttachmentError::new(
         "Image normalization did not produce a single-frame 8-bit sRGB image with matching metadata.",

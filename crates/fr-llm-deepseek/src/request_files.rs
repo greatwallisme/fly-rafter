@@ -4,9 +4,9 @@
 
 use crate::file_id::DeepSeekFileId;
 use crate::file_store::{DeepSeekFileStore, FileConnection, FileStoreError};
-use crate::request_image::RequestImageAttachment;
 use crate::types::FilePolicy;
 use crate::upload_index::Invalidation;
+use fr_attachment::request_image::RequestImageAttachment;
 use fr_llm::adapter::AbortSignal;
 use fr_llm::error::{LlmError, TIMEOUT_CODE};
 use fr_wire::ImageMediaType;
@@ -463,9 +463,9 @@ impl<'a> RequestFiles<'a> {
 mod tests {
     use super::*;
     use crate::file_store::FileStoreOptions;
-    use crate::http::HttpRequest;
     use crate::upload_index::DeepSeekUploadIndex;
     use fr_llm::adapter::AbortSignal as AdapterSignal;
+    use fr_net::http::HttpRequest;
     use fr_wire::ids::AttachmentId;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
@@ -493,8 +493,8 @@ mod tests {
             bytes: 64,
             width: 16,
             height: 16,
-            depth: crate::request_image::ImageSampleDepth::Uchar,
-            space: crate::request_image::ImageColorSpace::Srgb,
+            depth: fr_attachment::request_image::ImageSampleDepth::Uchar,
+            space: fr_attachment::request_image::ImageColorSpace::Srgb,
             has_alpha: false,
         }
     }
@@ -566,23 +566,23 @@ mod tests {
         }
     }
 
-    impl crate::http::Fetch for RecordingFetch {
+    impl fr_net::http::Fetch for RecordingFetch {
         fn fetch(
             &self,
             request: HttpRequest,
-        ) -> Result<crate::http::HttpResponse, crate::http::TransportError> {
+        ) -> Result<fr_net::http::HttpResponse, fr_net::http::TransportError> {
             if self.sleep_ms > 0 {
                 std::thread::sleep(std::time::Duration::from_millis(self.sleep_ms));
             }
             let send = |status: u16, body: String| {
-                Ok(crate::http::HttpResponse {
+                Ok(fr_net::http::HttpResponse {
                     status,
                     headers: Vec::new(),
                     body: Box::new(std::io::Cursor::new(body.into_bytes())),
                 })
             };
             if request.url.ends_with("/v1/files")
-                && matches!(request.method, crate::http::HttpMethod::Post)
+                && matches!(request.method, fr_net::http::HttpMethod::Post)
             {
                 self.recorded
                     .lock()
@@ -612,7 +612,7 @@ mod tests {
                     ),
                 );
             }
-            if matches!(request.method, crate::http::HttpMethod::Delete) {
+            if matches!(request.method, fr_net::http::HttpMethod::Delete) {
                 let id = request.url.rsplit('/').next().unwrap_or_default();
                 self.recorded
                     .lock()
@@ -651,7 +651,7 @@ mod tests {
         let directory = std::env::temp_dir().join(format!(
             "fr-request-files-{tag}-{}-{}",
             std::process::id(),
-            crate::request_image_pipeline::random_hex_suffix()
+            fr_attachment::request_image_pipeline::random_hex_suffix()
         ));
         std::fs::create_dir_all(&directory).expect("scratch dir");
         directory

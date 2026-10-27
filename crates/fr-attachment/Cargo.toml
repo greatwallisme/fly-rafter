@@ -1,0 +1,31 @@
+[package]
+name = "fr-attachment"
+description = "Fly Rafter attachment facility plugin: the AttachmentRead contract, RequestImageAttachment, and the request-image normalization pipeline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Contract vocabulary: the target/abort types come from the LlmAdapter seam
+# (fr-llm), the attachment reference from the shared wire shapes.
+fr-llm.workspace = true
+fr-wire.workspace = true
+# Normalization pipeline codecs (Q71-B facility set, PRD decision 41).
+image.workspace = true
+libwebp-sys.workspace = true
+sha2.workspace = true
+serde_json.workspace = true
+
+# Kernel family edge for the C-ABI dylib artifact (PRD 4.5): the plugin
+# shell links only dougong-abi across the kernel boundary.
+dougong-abi = { workspace = true }
+
+[lints]
+workspace = true

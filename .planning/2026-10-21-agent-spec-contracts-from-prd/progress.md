@@ -701,3 +701,23 @@
 - 批 2 遗留发现：convert.rs tool_arguments 文档与代码不一致（文档言 raw text、代码返回 {}）——收口决策块审查项入 findings。
 - clippy ~29 项全清（拆 translate_event→delta_chunks、close_item→三助手、too_many_arguments expect 判例、map_or_else×4、identical arms 合并、deref_by_slicing 测试改形、doc_markdown、implicit_clone、lifetime elide）；事故：python 批量编辑两次模式失配中断（未写盘，读现文本重做）+ delta_chunks 抽取漏 match 开/闭括号两度（编译器逮住即修）。
 - 门禁终态（单跑核实）：fmt 0 / clippy --workspace --all-targets -D warnings 0 / test --workspace 20 套件 527 passed 0 failed（fr-llm-openai 71 = 56+15）/ doc 0。
+
+## 2026-10-27 — 批 4 启动：执行壳层真源全读（三层执行链 + 结算面 + 门户文案），Q76-Q78 待裁
+- 状态恢复：批 3 已提交 e578222（527 tests 四门绿），工作树干净。本批目标=fr-llm-openai 执行壳（对标 deepseek 切片 4 adapter 形态）+ 场景绑定 openai×2+fail_settle。
+- 真源全读（全部实查 file:line 入 findings「切片 5 批 4 真源全读」节）：pi-ai 两协议 stream/streamSimple/createClient 执行段 + models.js streamSimple/applyAuth/clampThinkingLevel + auth/resolve.js ambient 臂 + error-body.ts(149)/overflow.ts(188)/provider-env.ts/headers.ts/pi-user-agent.ts 全读 + dsh 壳 stream.ts(234)/adapter.ts(458) 全读 + fr-wire FinishReasonKind 与 fr-llm 码表面实查。
+- 关键判定：fail_settle 的 usage+finish(kind error) 结算面=fr-wire FinishReasonKind::Error{failure} 原生承载（dsh error 事件→usage+finish 语义，非 deepseek Q73-A fr-error 形——openai 面按 pi-ai 判例走 in-band finish）；translator Err=LlmError 需增 usage 访问器供错误结算；openai SDK 7.19.0 是新真源层（URL join/SSE/[DONE]/错误形状），须 vendor 后读。
+- 三 pending 场景验收面锚定：base-url 覆盖（Fetch fake 捕 URL）/未声明模型拒绝（UNKNOWN_MODEL 无网络门）/fail_settle（中断 SSE→usage+finish(Error)+原始参数串）。
+- 分叉集中呈报 Q76/Q77/Q78（品牌文案/Fetch 缝载体/图片管线归属），待用户裁决后进入 vendor+实施。
+- 用户质询「crates.io 有成熟 openai SDK 为何手写」→ 实查证据呈报（async-openai 0.42.2 tokio/reqwest 全家桶违 Q69-B；无阻塞式候选；Q75 同构判例；SDK 主体价值面批 2/3 已写）→ **用户裁决（2026-10-27）：继续手写**（ureq 薄层路线确认；vendor openai npm SDK 仅作行为真源与钉测锚点，非代码移植）。
+- Q76=B 与「一切皆插件」原则落盘；记忆库新增 plugin-first-no-fat-shared-libs（feedback 型）；Q77/Q78 按插件模型重出（fr-net / fr-attachment 插件方案，dsh 真源同构佐证）。
+- **Q77=A / Q78=B 裁决（2026-10-27）**：Q77A=fr-net 插件契约自持（Fetch trait+HttpRequest/HttpResponse 归 fr-net rlib，ureq 后端全仓唯一站点）；Q78B=fr-attachment 插件只持归一化管线实现（image/libwebp-sys），AttachmentRead 契约+RequestImageAttachment 类型归 fr-llm 词汇表。Q76B 品牌文案适配同步生效。批 4 执行序=4a 设施插件落盘+deepseek 机械改引（四门绿独立提交）→ 4b openai 执行壳（vendor openai SDK 7.19.0 读数）→ 4c 场景绑定+四门。
+- **裁决更正（用户 2026-10-27）**：Q78 应为 **A**（非前记 B）——AttachmentRead 契约 + RequestImageAttachment 类型归 fr-attachment rlib 自持（不入 fr-llm）；fr-attachment 视需要单向依赖 fr-llm 取 ImageRequestTarget 等缝词汇。Q77A 不变。前一条 Q78=B 记录作废，以本条为准。
+
+## 2026-10-27 — 批 4a 完整收口：fr-net/fr-attachment 设施插件落盘 + deepseek 机械改引，四门绿 workspace 533 tests（527+6 壳）
+- Q77A：http.rs（317 行：TransportError/HttpMethod/HttpRequest/HttpResponse/Fetch/is_refused_redirect/UreqFetch + 3 钉测含真 socket 回环）整体迁 fr-net，模块文档改 fr-net 框架（Q77-A 单一 ureq 站点）；fr-net 壳 provide ["net"]。
+- Q78A：request_image.rs（RequestImageAttachment/depth/space）+ AttachmentRead trait（images.rs 摘出）+ request_image_pipeline.rs（1000 行管线 + AttachmentError + 码表）迁 fr-attachment；random_hex_suffix/ABORTED_CODE 随迁并改 pub；fr-attachment 依赖 fr-llm（AbortSignal/ImageRequestTarget）+ fr-wire；壳 provide ["attachments"]。
+- deepseek 改引（12 文件 sed+手工）：fr_net::http:: / fr_attachment::{request_image,AttachmentRead,AttachmentError,request_image_pipeline}；Cargo.toml 摘 ureq/image/libwebp-sys 换 fr-net/fr-attachment；workspace members+内部路径表注册。
+- PRD：4.5 布局树两行（fr-net/fr-attachment 设施插件）+ 决策 43（三裁决+阻塞 I/O 复核+crates.io 实查备案）。
+- 钩子与门冲突记录：code-quality 钩子 17 处启发式全修（fn 体 use 提升模块顶层/unreachable! 补契约注释/atomic 写 scratch 措辞替换 temporary）；钩子要求 unreachable! 配 match 上下文与 clippy let-else 相悖——裁定回 let-else 原形（权威门=cargo 四关；guideline 00_quality_gates 明文允许带契约理由的 unreachable!；原形态 HEAD 即 clippy 绿）。
+- 事故：Write 工具连续两次截断 plugin_shell.rs（半文件+占位垃圾）→ 弃用 Write 改 bash heredoc 分块 ≤90 行+探针全数复原；attachment_read.rs 注释误插签名内（重写）；管线 use 提升先删后补致 6 处 E0599（生产代码需模块顶层 trait 导入，测试模块导入误加反被 clippy 判未用）；sed 清单漏 serialize.rs/upload_index.rs + 三个旧文件未删致 rg 假残留——rg 残留清零+--all-targets 兜底。
+- 门禁终态（单跑核实）：fmt 0 / clippy --workspace --all-targets -D warnings 0 / test --workspace 533 passed 0 failed（fr-net 6=3 http+3 壳；fr-attachment 31=28 管线+3 壳；deepseek 净失 34 迁出） / doc 0。

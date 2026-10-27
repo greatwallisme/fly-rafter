@@ -6,16 +6,16 @@ use crate::file_id::{DeepSeekFileId, DeepSeekFileScope};
 use crate::files_api::{
     DeepSeekFilesClient, FilesApiOptions, FilesError, UploadInput, is_files_quota_error,
 };
-use crate::http::Fetch;
 use crate::messages_api::messages_api_root;
-use crate::request_image::RequestImageAttachment;
-use crate::request_image_pipeline::ABORTED_CODE;
 use crate::types::FilePolicy;
 use crate::upload_index::{
     DeepSeekUploadIndex, DeepSeekUploadRecord, Invalidation, deep_seek_file_scope,
 };
+use fr_attachment::request_image::RequestImageAttachment;
+use fr_attachment::request_image_pipeline::ABORTED_CODE;
 use fr_llm::adapter::AbortSignal;
 use fr_llm::error::LlmError;
+use fr_net::http::Fetch;
 use fr_wire::ImageMediaType;
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -156,7 +156,7 @@ pub enum FileStoreError {
     /// A provider-neutral LLM failure.
     Llm(LlmError),
     /// An attachment-pipeline failure.
-    Attachment(crate::request_image_pipeline::AttachmentError),
+    Attachment(fr_attachment::AttachmentError),
     /// A local index read/lock/write failure.
     Index {
         /// The rendered failure text.
@@ -170,8 +170,8 @@ impl From<LlmError> for FileStoreError {
     }
 }
 
-impl From<crate::request_image_pipeline::AttachmentError> for FileStoreError {
-    fn from(error: crate::request_image_pipeline::AttachmentError) -> Self {
+impl From<fr_attachment::AttachmentError> for FileStoreError {
+    fn from(error: fr_attachment::AttachmentError) -> Self {
         Self::Attachment(error)
     }
 }
@@ -622,7 +622,7 @@ impl<'a> DeepSeekFileStore<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http::{HttpMethod, HttpRequest, TransportError};
+    use fr_net::http::{HttpMethod, HttpRequest, TransportError};
     use fr_wire::ids::AttachmentId;
     use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
     use std::sync::mpsc;
@@ -655,8 +655,8 @@ mod tests {
             bytes: wide,
             width: 16,
             height: 16,
-            depth: crate::request_image::ImageSampleDepth::Uchar,
-            space: crate::request_image::ImageColorSpace::Srgb,
+            depth: fr_attachment::request_image::ImageSampleDepth::Uchar,
+            space: fr_attachment::request_image::ImageColorSpace::Srgb,
             has_alpha: false,
         }
     }
@@ -760,7 +760,7 @@ mod tests {
 
         /// Serve the `GET /v1/files?` listing from the stored fixtures
         /// (cursor `after_id`, page `limit`, null-cursor omission).
-        fn list_page(&self, url: &str) -> crate::http::HttpResponse {
+        fn list_page(&self, url: &str) -> fr_net::http::HttpResponse {
             let query = url.split('?').nth(1).unwrap_or_default();
             let limit: usize = query
                 .split('&')
@@ -795,7 +795,7 @@ mod tests {
                     .map_or_else(|| "null".to_owned(), |file| format!("\"{}\"", file.id)),
                 last.map_or(String::new(), |value| format!("{value},"))
             );
-            crate::http::HttpResponse {
+            fr_net::http::HttpResponse {
                 status: 200,
                 headers: Vec::new(),
                 body: Box::new(std::io::Cursor::new(body.into_bytes())),
@@ -804,10 +804,13 @@ mod tests {
     }
 
     impl Fetch for RouterFetch {
-        fn fetch(&self, request: HttpRequest) -> Result<crate::http::HttpResponse, TransportError> {
+        fn fetch(
+            &self,
+            request: HttpRequest,
+        ) -> Result<fr_net::http::HttpResponse, TransportError> {
             let url = request.url.clone();
             let send = |status: u16, body: String| {
-                Ok(crate::http::HttpResponse {
+                Ok(fr_net::http::HttpResponse {
                     status,
                     headers: Vec::new(),
                     body: Box::new(std::io::Cursor::new(body.into_bytes())),
@@ -918,7 +921,7 @@ mod tests {
         let directory = std::env::temp_dir().join(format!(
             "fr-file-store-{tag}-{}-{}",
             std::process::id(),
-            crate::request_image_pipeline::random_hex_suffix()
+            fr_attachment::request_image_pipeline::random_hex_suffix()
         ));
         std::fs::create_dir_all(&directory).expect("scratch dir");
         directory

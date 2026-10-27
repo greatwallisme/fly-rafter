@@ -9,11 +9,11 @@
 
 use crate::codes::{FILES_API_CODE, INVALID_REQUEST_CODE, INVALID_RESPONSE_CODE};
 use crate::file_id::DeepSeekFileId;
-use crate::http::{Fetch, HttpMethod, HttpRequest};
 use crate::messages_api::{MESSAGES_FILES_BETA, messages_api_root};
 use fr_llm::adapter::AbortSignal;
 use fr_llm::attribution::attribution_headers;
 use fr_llm::error::{AUTH_CODE, LlmError, RATE_LIMIT_CODE, SERVER_CODE, TRANSPORT_CODE};
+use fr_net::http::{Fetch, HttpMethod, HttpRequest};
 use fr_wire::ImageMediaType;
 use std::fmt::Write as _;
 use std::io::Read as _;
@@ -447,7 +447,7 @@ impl<'a> DeepSeekFilesClient<'a> {
 fn abort_error() -> LlmError {
     LlmError::try_new(
         "DeepSeek Files API request aborted",
-        crate::request_image_pipeline::ABORTED_CODE,
+        fr_attachment::request_image_pipeline::ABORTED_CODE,
         None,
         None,
         None,
@@ -475,7 +475,7 @@ pub struct UploadInput {
 fn multipart(input: &UploadInput) -> (String, Vec<u8>) {
     let boundary = format!(
         "----fr-formdata-{}",
-        crate::request_image_pipeline::random_hex_suffix()
+        fr_attachment::request_image_pipeline::random_hex_suffix()
     );
     let media = match input.media_type {
         ImageMediaType::Png => "image/png",
@@ -691,7 +691,7 @@ impl DeepSeekFilesClient<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http::TransportError;
+    use fr_net::http::TransportError;
 
     /// The provider timestamp shape parses to the epoch second dsh's
     /// `Date.parse` yields, including fractional seconds and offsets.
@@ -741,9 +741,12 @@ mod tests {
     }
 
     impl Fetch for RecordedFetch {
-        fn fetch(&self, request: HttpRequest) -> Result<crate::http::HttpResponse, TransportError> {
+        fn fetch(
+            &self,
+            request: HttpRequest,
+        ) -> Result<fr_net::http::HttpResponse, TransportError> {
             self.recorded.lock().expect("recorded lock").push(request);
-            Ok(crate::http::HttpResponse {
+            Ok(fr_net::http::HttpResponse {
                 status: self.status,
                 headers: Vec::new(),
                 body: Box::new(std::io::Cursor::new(self.body.clone().into_bytes())),

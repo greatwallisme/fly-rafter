@@ -1,9 +1,9 @@
 //! One request image version (dsh `RequestImageAttachment` from
 //! `dsh-attachment`).
 //!
-//! The canonical fr home is the future attachment crate; until that slice
-//! lands, the request surface of the provider consumes this verbatim shape
-//! from here.
+//! The fr home is the fr-attachment plugin (2026-10-27 Q78-A contract
+//! home); provider adapters consume this verbatim shape through the
+//! plugin's rlib.
 
 use fr_wire::{ImageAttachmentRef, ImageMediaType};
 

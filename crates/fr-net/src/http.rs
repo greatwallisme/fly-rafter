@@ -1,5 +1,6 @@
-//! HTTP transport seam (dsh `fetch?: typeof fetch`) and the production
-//! ureq backend (PRD decision 41, Q69-B).
+//! The fr-net `Fetch` transport contract (dsh `fetch?: typeof fetch` seam
+//! shape) and the production ureq backend (Q69-B carrier; 2026-10-27
+//! Q77-A plugin home: the workspace's single ureq site).
 //!
 //! Callers classify outcomes; the seam carries transport failures
 //! verbatim from the HTTP layer (dsh `fetch` throws a `TypeError` whose

@@ -634,6 +634,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "fr-attachment"
+version = "0.1.0"
+dependencies = [
+ "dougong-abi",
+ "fr-llm",
+ "fr-wire",
+ "image",
+ "libwebp-sys",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "fr-config"
 version = "0.1.0"
 dependencies = [
@@ -663,17 +676,16 @@ name = "fr-llm-deepseek"
 version = "0.1.0"
 dependencies = [
  "dougong-abi",
+ "fr-attachment",
  "fr-llm",
+ "fr-net",
  "fr-timeout",
  "fr-wire",
  "futures-core",
- "image",
- "libwebp-sys",
  "regex",
  "serde",
  "serde_json",
  "sha2",
- "ureq",
 ]
 
 [[package]]
@@ -684,6 +696,15 @@ dependencies = [
  "fr-llm",
  "fr-wire",
  "serde_json",
+]
+
+[[package]]
+name = "fr-net"
+version = "0.1.0"
+dependencies = [
+ "dougong-abi",
+ "serde_json",
+ "ureq",
 ]
 
 [[package]]

@@ -24,11 +24,12 @@ regex.workspace = true
 # Namespace digest of the upload index (2026-10-26 Q67-B; the one exception
 # to the zero-new-crate posture, already in the lock graph transitively).
 sha2.workspace = true
-# Slice 4 facility rulings (PRD decision 41, 2026-10-26 Q69-B/Q71-B).
-ureq.workspace = true
-image.workspace = true
-libwebp-sys.workspace = true
 futures-core = "0.3"
+# Facility plugins (2026-10-27 Q77-A/Q78-A): the transport contract and the
+# production backend live in fr-net; the attachment contract and the
+# normalization pipeline live in fr-attachment.
+fr-net.workspace = true
+fr-attachment.workspace = true
 
 # Kernel family edge for the C-ABI dylib artifact (PRD 4.5): the plugin
 # shell links only dougong-abi across the kernel boundary.

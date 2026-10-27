@@ -6,6 +6,8 @@ members = [
     "crates/fr-schema",
     "crates/fr-wire",
     "crates/fr-timeout",
+    "crates/fr-net",
+    "crates/fr-attachment",
     "crates/fr-session",
     "crates/fr-llm",
     "crates/fr-llm-deepseek",
@@ -51,6 +53,8 @@ fr-schema = { path = "crates/fr-schema" }
 fr-wire = { path = "crates/fr-wire" }
 fr-session = { path = "crates/fr-session" }
 fr-timeout = { path = "crates/fr-timeout" }
+fr-net = { path = "crates/fr-net" }
+fr-attachment = { path = "crates/fr-attachment" }
 
 # Lint table aligned with the dougong workspace (PRD 21): the zero-warning
 # gates (fmt / clippy -D warnings / test / doc) must stay reproducible.

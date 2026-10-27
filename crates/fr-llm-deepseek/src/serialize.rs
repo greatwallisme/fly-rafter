@@ -19,13 +19,13 @@ use crate::codes::{
 };
 use crate::file_id::DeepSeekFileId;
 use crate::replay::{content_type_name, read_replay, static_error};
-use crate::request_image::RequestImageAttachment;
 use crate::types::{ConnectionOptions, EffortLevel, ThinkingMode};
 use crate::wire_types::{
     ImageSource, OutputConfig, OutputEffort, ThinkingBlock, ThinkingConfig, ThinkingKind,
     ToolReference, ToolReferenceKind, ToolResultBlock, ToolUseBlock, WireBlock, WireInput,
     WireMessage, WireRequest, WireRole, WireTool,
 };
+use fr_attachment::request_image::RequestImageAttachment;
 
 /// One durable message classified by the role serialize dispatches on; the
 /// unknown-role forward-compat face classifies to `None` and is skipped
@@ -1253,8 +1253,8 @@ mod tests {
             bytes: 4,
             width: 2,
             height: 2,
-            depth: crate::request_image::ImageSampleDepth::Uchar,
-            space: crate::request_image::ImageColorSpace::Srgb,
+            depth: fr_attachment::request_image::ImageSampleDepth::Uchar,
+            space: fr_attachment::request_image::ImageColorSpace::Srgb,
             has_alpha: false,
         };
         let mut images = HashMap::new();

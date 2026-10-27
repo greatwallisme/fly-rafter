@@ -1,0 +1,26 @@
+[package]
+name = "fr-net"
+description = "Fly Rafter network facility plugin: the Fetch transport contract and the production ureq backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The production backend (Q69-B carrier): the workspace's single ureq site,
+# housed in this plugin per the 2026-10-27 Q77-A ruling.
+ureq.workspace = true
+serde_json.workspace = true
+
+# Kernel family edge for the C-ABI dylib artifact (PRD 4.5): the plugin
+# shell links only dougong-abi across the kernel boundary.
+dougong-abi = { workspace = true }
+
+[lints]
+workspace = true

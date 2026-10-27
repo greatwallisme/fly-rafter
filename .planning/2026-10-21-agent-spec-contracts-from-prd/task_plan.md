@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-切片 5 批 3 已提交（responses 协议双模块落地，四门全绿 527 tests）。批 4 = adapter 壳 + URL 面（{base}/responses、session-affinity 头、formatProviderError 面、CHATGPT_USAGE_URL 提示臂）+ 场景绑定（openai×2 + fail_settle，findings:1021 既裁）；批 5 = 终清 + 合同决策块（诊断文案适配+strict 死输入+pie-ai 兼容+stop 透传勘误候选+tool_arguments 文档失谐+rawStopReason 无面备案）+ PRD 同步 + 七步流 4-7 + 门禁序列。
+批 4a 已提交（fr-net/fr-attachment 设施插件 + deepseek 机械改引，四门绿 533 tests，PRD 决策 43）。批 4b = fr-llm-openai 执行壳：vendor openai npm SDK 7.19.0（proxychains4，行为真源+钉测锚点）→ codes（openai 自有码：UNKNOWN_MODEL/NO_ADAPTER/UNSUPPORTED_OPTION/UNSUPPORTED_CONTENT/UNSUPPORTED_REASONING_EFFORT/INVALID_CONFIG/PI_AI_ERROR/STREAM_CLOSED）+ error_body（fr 无 SDK 退化 status+body 直通）+ overflow（25 正则族+三案）+ sse（openai SDK 语义 [DONE]）+ adapter 执行壳（Q76B 品牌适配文案表、session affinity 三格式、终结门与 catch、usage+finish(Error) 结算、translator usage 访问器）→ 批 4c 场景绑定 openai×2+fail_settle → 四门。
 
 ## Current Phase
-Phase 13b 切片 5 批 4（adapter 壳 + 场景绑定）待启动
+Phase 13b 切片 5 批 4b（openai 执行壳）——4a 已收口
 
 ## Phases
 

@@ -26,7 +26,6 @@
 
 use crate::codes::{MALFORMED_RESPONSE_CODE, UNKNOWN_MODEL_CODE};
 use crate::file_store::{DeepSeekFileStore, FileConnection, FileStoreError, FileStoreOptions};
-use crate::http::{HttpMethod, HttpRequest, is_refused_redirect};
 use crate::images::{PrepareImagesError, inline_images, prepare_file_ids, prepare_images};
 use crate::messages_api::{ANTHROPIC_VERSION, messages_api_root, request_betas};
 use crate::model_info::model_info;
@@ -50,6 +49,7 @@ use fr_llm::adapter::{
 use fr_llm::attribution::attribution_headers;
 use fr_llm::error::{ABORTED_CODE, EMPTY_RESPONSE_CODE, LlmError, TIMEOUT_CODE, TRANSPORT_CODE};
 use fr_llm::retry_policy::RetryPolicy;
+use fr_net::http::{HttpMethod, HttpRequest, is_refused_redirect};
 use fr_timeout::{IdleWatchdog, idle_watchdog, timeout_of};
 use fr_wire::call_config::CallControls;
 use fr_wire::{ContentBlock, ImageAttachmentRef, StreamChunk};
@@ -463,9 +463,9 @@ fn request_attempt(
     sender: &Sender<StreamChunk>,
 ) -> Result<(), RequestFailure> {
     let access = image_access_view(dependencies);
-    let attachments: Option<&dyn crate::images::AttachmentRead> =
+    let attachments: Option<&dyn fr_attachment::AttachmentRead> =
         dependencies.attachments.as_ref().map(|store| {
-            let read: &dyn crate::images::AttachmentRead = store.as_ref();
+            let read: &dyn fr_attachment::AttachmentRead = store.as_ref();
             read
         });
     let prepared = prepare_images(
@@ -525,7 +525,7 @@ struct AttemptContext<'a> {
     messages: &'a [fr_llm::adapter::RequestMessage],
     versions: &'a std::collections::HashMap<
         fr_wire::ids::AttachmentId,
-        crate::request_image::RequestImageAttachment,
+        fr_attachment::request_image::RequestImageAttachment,
     >,
 }
 
@@ -675,7 +675,7 @@ fn post_messages(
     betas: &[&str],
     base_url: &str,
     body: Vec<u8>,
-) -> Result<crate::http::HttpResponse, RequestFailure> {
+) -> Result<fr_net::http::HttpResponse, RequestFailure> {
     let mut headers: Vec<(String, String)> = Vec::new();
     for (name, value) in attribution_headers() {
         headers.push((name.to_owned(), value));
@@ -1045,10 +1045,10 @@ impl HostWarnings {
 mod tests {
     use super::*;
     use crate::codes::INVALID_REQUEST_CODE;
-    use crate::http::{Fetch, HttpResponse, TransportError};
     use crate::messages_api::{MESSAGES_FILES_BETA, MESSAGES_TOOL_CHANGES_BETA};
     use crate::types::{FilePolicy, OptionsCallback, RequestDefaults, ResolveAuthCallback};
     use fr_llm::retry_policy::Backoff;
+    use fr_net::http::{Fetch, HttpResponse, TransportError};
     use fr_wire::RawObject;
     use fr_wire::content::ImageMediaType;
     use fr_wire::ids::{AttachmentId, MessageId};
