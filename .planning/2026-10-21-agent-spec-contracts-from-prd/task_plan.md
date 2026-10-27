@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-切片 6（fr-llm-anthropic）全收口：19 模块、四门绿 648（crate 83 tests）、provider 合同 lifecycle **40/40 passed 0 skipped** 全闭环（两 pending 场景绑定 official_endpoint_pins_path_and_header_order + toolupdate_absent_baseline_folding）、stamp --dry-run Spec-Passing true、PRD 决策 45 入档。Phase 13b（fr-llm seam + 三 provider）就此完成。下一片按 PRD 20 节序：切片 7 = fr-agent-loop 主循环装配（PRD :336 inject llm 服务消费面；提示词抽取脚本随 Phase 15 组合落地或先行——开片批 0 真源全读）。
+切片 7 批 1 余（批 1a/1b 已落：inbox 纯函数层 6 tests + plugin_shell/outbound 10 tests，workspace 四门绿 664 tests）：runtime-context/turn-boundary 两投影 + assistant-stream 框架（fr-session Session 面 + fr-llm accumulator 对接）→ 控制线程体（消费 SessionMailbox 命令/通知 + Outbound 缝）→ 三 provider B2 增量（begin/drain/abort + llm/chunk-ready 通知）→ 七步流 4-7（AGENT-LOOP 26 场景绑定 + 批分发基准）。切片 8 = fr-system-prompt 含 scripts/extract-prompts。
 
 ## Current Phase
-Phase 13b 完成（三 provider 全交付）；切片 7 = fr-agent-loop 待开
+Phase 15（切片 7 = fr-agent-loop）批 0 真源全读
 
 ## Phases
 

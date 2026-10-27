@@ -634,6 +634,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fr-agent-loop"
+version = "0.1.0"
+dependencies = [
+ "dougong-abi",
+ "fr-wire",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fr-attachment"
 version = "0.1.0"
 dependencies = [

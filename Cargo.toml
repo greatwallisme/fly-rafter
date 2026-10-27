@@ -13,6 +13,7 @@ members = [
     "crates/fr-llm-deepseek",
     "crates/fr-llm-openai",
     "crates/fr-llm-anthropic",
+    "crates/fr-agent-loop",
 ]
 
 [workspace.package]

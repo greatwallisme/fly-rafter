@@ -22,6 +22,10 @@ fly-rafter 是字面全插件系统：agent 主循环不是宿主内置，而是
 - 长任务维持 MUST：每 turn 换新 AbortController 使旧信号闩失效；max-tokens 粘滞不得被 completed 降级；turn-stopping 仅 turnEnds 已设且 nextStep 空时派发；NO_ADAPTER 容忍中间件路由；缺 provider/model 配置 MUST 直接报错（dsh agent.ts:154-161,319-397,573-610）。
 - attempt 结算 MUST 三分支：流 aborted 且中断内容非空白 → assistant/message 且 interrupted:true；error/aborted → assistant/attempt 并交 agent/request-error waterfall 裁决重试或抛错；正常 → assistant/message；user/message 仅 firstAttempt 落盘，重试 MUST NOT 重复注入（dsh agent.ts:425-441,464-545）。
 - turn/step 状态机 MUST：相位 idle/maintenance/running；pre-step reject 置 turnEnds={blocked}；step0 无可领取输入 → turn reason completed 且不发起模型调用；turnEnds 已设后的空步静默收尾（dsh agent.ts:154-161,298-397）。
+- fr-agent-loop 形态 MUST（2026-10-27 Q79-A 裁决，PRD 决策 46）：单实例为每会话维持一个循环线程跑自然阻塞控制流；入站五入口（send/steer/inject/followup/cancel）= 宿主 call() 快速入队 + condvar 唤醒即返；出站 = dougong v3 require（请求响应面）+ emit（事件面）；插件线程 teardown 返回前 join（v3 UB 纪律）；dsh「每会话一个循环插件 fiber」按 19.2 条 24 勘误为循环线程驱动体。
+- LLM 流消费 MUST（2026-10-27 Q80-B/Q84-B2 裁决）：provider 侧 per-generation FIFO 缓冲 + 极小通知事件 {session_id, generation_id}（乱序/重复/丢失无害，丢失由下次通知或步边界兜底补偿）；循环线程非阻塞 require('llm','drain') 批量拉取（次序由 provider 缓冲保证，绕开 emit 次序无承诺契约）。
+- 服务方法快路径不变量 MUST（全仓纪律，Q79-A/Q84-B2 推论）：服务方法 = 内存操作级快路径，慢工作（网络流/长 I/O）= 插件自有 worker 线程 + 通知/拉取；on_event 处理器内禁止 require、禁止阻塞（只入信箱/置唤醒标志）；whenIdle 跨 ABI 重建 = agent/status 事件 + 查询型 require（禁止阻塞等 idle 的 require）；initiator 因果归因 = 载荷显式携带（dsh AsyncLocalStorage 面结构性消失，行为等价；PRD 决策 46）。
+- 切片边界（2026-10-27 Q81-A/Q83-A 裁决）：本切片循环侧建 tools/system-prompt 消费端封装（fr-wire 编解码 + 类型），以测试桩驱动全控制流；真 crate 随 Phase 14/15 装配对接；fr-system-prompt 含 scripts/extract-prompts 抽取脚本为切片 8。
 
 ## Boundaries
 

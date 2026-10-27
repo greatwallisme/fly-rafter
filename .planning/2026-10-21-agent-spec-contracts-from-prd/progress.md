@@ -802,3 +802,39 @@
 - 七步流终态：lifecycle **40/40 passed / 0 failed / 0 skipped**（provider 合同全闭环——切片 5 留置的最后 2 skip 清零）；三开关 0 errors；explain 已出；stamp --dry-run Spec-Passing: true / 40/40（destructive stamp 工具未支持——trailer 随提交消息携带，同切片 5 惯例）；archive --dry-run 无选择（合同仍活跃留验）。
 - 门禁终态：fmt --check 0 / clippy --workspace --all-targets -D warnings 0 / test --workspace **648 passed 0 failed**（fr-llm-anthropic 83）/ doc 0。
 - Phase 13b（fr-llm seam + 三 provider）完成；切片 7 = fr-agent-loop。
+
+## 2026-10-27 — 切片 7（fr-agent-loop）批 0 启动：状态恢复 + 真源定量
+- 状态恢复：HEAD 41fdf7c 工作树净；plan 目录解析成功；dougong 0.3.0 ABI v3 采纳事实复核（findings 2026-10-25 节）——出站通路（HostExports require/emit、插件自有线程同步调用）已落地，Q44 织物分叉升级为「Phase 15 动工前集中呈报项」= 本切片批 0 呈报义务。
+- 真源定量：core/agent-loop 2478 行（agent 705/index 929/tool-calls 290/inbox 244/runtime-context 164/assistant-stream 140/constants 6）+ core/agent 1656 行（index 691/runtime-types 395/dispatch 176/model-selection 132/consumed-work 109/types 104/archive-admission 38/projection 11）+ 关联件 363 行（agent-default-model 97/agent-tool-presentation 72/testkit 194）+ agent-instructions 2035 行（fr-system-prompt 域，提示词脚本分叉相关面）。
+- AGENT-LOOP 合约现状：26 场景全 pending（草稿态预期）；Boundaries Allowed = crates/fr-agent-loop/**。
+- 批 0 呈报清单五项：织物 44-A/B/C / 循环线程模型 / PRD 4.3 fiber 措辞 / steer-abort 入站通路 / 提示词脚本时机。
+
+## 2026-10-27 — 切片 7 批 0 真源全读完成 + Q79-Q83 集中呈报
+- 真源全读毕（本会话 ~20 轮读取，file:line 证据全入 findings「切片 7 批 0」节）：agent-loop 七件 2478 行 + core/agent 八件 1656 行 + headless bundle 420 行 + testkit 194 行 + agent-default-model 97 + agent-tool-presentation 72 + dsh-system-prompt 定量 691 行 + dougong 0.3.0 HostExports v3 契约终核。
+- 关键架构事实三条：① dsh 循环深度依赖 cordis 运行时（Service/fiber/effect/scope 事件/initiator/注册表），dougong 对应物 = v3 require/emit + 宿主泵五模式；② dougong require 同步且宿主在提供方实例锁下服务——提供方 call 内阻塞等待会锁死该实例（含 abort 与事件派发），跨插件流消费必须轮询或事件推送；③ dougong 激活 = 每插件实例一次，无每会话 realm——PRD 8.1 fiber 句需勘误。
+- 五分叉集中呈报：Q79 循环线程模型（推荐 A 自持线程）/ Q80 流消费子模式（推荐 B 事件推送+内部信箱）/ Q81 桩面边界（推荐 A 循环侧消费端封装+桩）/ Q82 PRD 勘误（推荐 A）/ Q83 提示词脚本时序（推荐 A fr-system-prompt 独立成片后置）。待用户裁决后按七步流批 1 动工。
+
+## 2026-10-27 — Q79-Q83 裁决落地（79A/80B/81A/82A/83A）+ 代价解析 + Q84 呈报
+- 用户裁决五项全录（findings 裁决记录节）；代价解析义务触发，本轮新核实 dougong 事件面三事实：① emit 次序无承诺（dylib-plugin.md:174-176 文档契约）；② 事件队列双车道（无损无界 C7 lane 缺省 / 有界丢弃策略自选；固定 4 worker 池、就绪事件名 FIFO 调度、同名并发缺省仅受池上限）；③ emit 不取发射方实例锁（provider 工作线程恒无环）。
+- 次序无承诺事实揭示 Q80-B 内部实现分叉 → Q84 呈报：B1 每 chunk 事件带载荷（需循环侧重排缓冲+无界积压风险）vs B2 通知+批量拉取（推荐：次序由 provider FIFO 保证、背压天然、通知乱序无害）。
+- 代价解析六面（线程与生命周期/锁与重入/事件道/流消费/1:1 保真/工程合同）随本轮消息全文呈报。
+
+## 2026-10-27 — Q84-B2 裁决 + 代价 2 解答 + Q82-A/裁决链文档落地
+- Q84-B2 录；代价 2（慢模型 vs join）解答：慢活在 provider worker 锁外、循环线程只睡自有 condvar、teardown 唤醒不经过 provider、卡流由 provider watchdog 自终局——残余风险=服务方法慢 bug，防线三道（不变量/钉测/评审）已入 PRD 决策 46 与 AGENT-LOOP Decisions。
+- 落地：PRD 8.1 勘误 + 19.2 条 24 + 23 决策 46；AGENT-LOOP spec Decisions +4 行，lint Quality 100%（两 open-question advisory 非门禁）。
+- provider 合同 Decisions 增行草稿呈阅中（未落）；批准后批 1 动工（crate 骨架 + 纯函数层）。
+
+## 2026-10-27 — 切片 7 批 1a：provider Decisions 落行 + fr-agent-loop crate 骨架 + inbox 纯函数层
+- provider 合同 Decisions 增行照批准稿落地（begin/drain/abort + llm/chunk-ready 通知 + 快路径不变量 + fr-llm rlib 共享助手；仅 Decisions，40 场景零触碰），lint Quality 100%。
+- 新 crate crates/fr-agent-loop（cdylib+rlib，deps fr-wire/serde/serde_json，workspace 第 13 成员）：lib.rs（Q79-A/Q84-B2 形态载档）+ inbox.rs——InboxSplice 载荷（camelCase，removedCount/outcome 缺席语义逐字 dsh inbox.ts:198-207）/InboxTarget kebab/InboxState/fold_inbox（边界校验 + 跨队列 id 唯一，错误文案逐字 'invalid inbox splice'、'message "<id>" is already pending'、'invalid persisted inbox splice at session seq <n>' + source 链）/normalize_splice（JS Array.splice 语义：负 start 回数/clamp；NaN 臂结构性缺席载档）/plan_splice（no-op 不落盘 + canceled 仅 discard 时盖 + removed 返还）；6 钉测（wire 形状/双边界拒/跨队重复拒文案/删除应用/canceled 往返/JS 归一五臂/no-op 与盖章规则）。
+- 编译自纠：Message 仅 PartialEq（Other 兜底嵌 f64 Value，fr-wire 判例）去 Eq derive 两处；# Panics 段三补 + assert_is_empty 改 assert_eq 形 + normalize_splice 首段拆分（too_long_first_doc_paragraph，fmt 重排后浮出——教训：fmt 后必须复跑 clippy 再断言）。
+- 门禁：crate 四门绿（fmt/clippy -D warnings/6 tests/doc）；workspace 四门绿（fmt OK/clippy Finished/全 suite 0 failed/doc 生成）。
+- 批 1 余：plugin_shell（v3 HostExports 拷贝存续 + descriptor provide agent/inject 四服务/listen llm/chunk-ready + teardown join 纪律）→ runtime-context/turn-boundary 两投影 + assistant-stream 框架（fr-session Session 面 + fr-llm accumulator 对接研读先行）。
+
+## 2026-10-27 — 切片 7 批 1b：plugin_shell + outbound 出站类型层（v3 vtable 存续落地）
+- outbound.rs：`Outbound`（Copy + unsafe Send/Sync，ABI 契约「任意插件线程并发调用」正当性入 SAFETY 注释）——`require` 可增长缓冲（4096 起、翻倍、16 MiB 上界源自 dylib-plugin.md 文档契约）+ `emit` 入队即返；RequireError{status,detail}（宿主 JSON detail 透传）/EmitError{status}。3 钉测用假 vtable（fn 指针 + host_handle 指回测试结构）：CAPACITY 翻倍真路径/UNDECLARED 逐 detail/emit 记录与 INVALID_PAYLOAD 拒。
+- plugin_shell.rs：descriptor（provide ["agent"]、inject 四服务序钉 ["llm","tools","system-prompt","session-persistence"]、listen {"llm/chunk-ready":1}、版本 env! 防漂移）；五入口 dispatch（send 全参/steer next-step+wake/inject next-step+no-wake/followup next-turn+wake——dsh 四入口语义 findings:1250 逐字；cancel {cause 四型 kind: user/parent/disposed/hook{reason}, keepInbox 缺省 false}）；`SessionMailbox`（单 Mutex+单 Condvar：命令/通知/停机共一等待点；enqueue 唤醒规则 = wakeup:true 或 Cancel 才 notify——dsh inject 不唤醒驱动；fr 侧 Cancel 必须唤醒因 abort 闩循环线程自有，Q79-A 结构性推论载档）；`SessionMap`（激活域注册表：vtable 拷贝以 Outbound 缝形态承载 + 每会话邮箱 get-or-create，邮箱携带同一出站缝——驱动体批次的真消费面，全链路 live 无 dead_code）；on_event 快路径（EV_CHUNK_READY → 解析 {session_id,generation_id} snake_case → 入信箱+唤醒；禁 require/禁阻塞，PRD 决策 46 不变量）；shutdown_and_join（广播停机→join 全驱动，join 失败不二连 panic——greeter 判例）；setup 空指针拒活。
+- 7 钉测：descriptor 面/四入口目标与唤醒序钉（含 inject wakeup:false）/cancel 四型载荷/describe+未知方法+坏 JSON 文案/chunk-ready 双会话路由+重复容忍+缺字段拒/邮箱同键同指+出站缝传递/shutdown 唤醒并 join 真驻留线程（condvar 停机等待形状）。
+- 自纠六（clippy 全逮）：裸类型上 dead_code（vtable 存续首版存 ShellState.host 无消费者——重构为 SessionMap/邮箱携带 Outbound 缝，pub API 天然 live）；clone_on_ref_ptr 与 significant_drop_tightening 三角拉扯（终形：entry 取 &mut Arc → Arc::clone → 显式 drop 守卫）；HashMap::new 非 const 去 const；锁守卫先释再 notify 三处；&raw const 替借用转指针；rustdoc 私有项链接。
+- 门禁：crate 四门绿（fmt/clippy -D warnings/16 tests/doc 0）；workspace 四门绿（fmt OK/clippy Finished/664 passed 0 failed（654→664）/doc 生成）。
+- 批 1 余：runtime-context/turn-boundary 投影 + assistant-stream 框架 → 控制线程体 → 三 provider B2 增量 → 七步流 4-7。
