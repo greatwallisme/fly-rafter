@@ -795,3 +795,10 @@
 - 事故簿：无新增。
 - 门禁：fmt --check 0 / clippy --workspace --all-targets -D warnings 0 / test --workspace 647 passed 0 failed（fr-llm-anthropic 82）/ doc 0。
 - 批 3 待办：场景绑定（pending_req_fr_llm_anthropic→官方端点头钉测、pending_req_fr_llm_toolupdate→基线折叠钉测（三 provider 无 toolUpdate+全集重发））+spec 绑定编辑+lifecycle 40/40+guard+explain+stamp+archive+PRD/进度收口+提交。
+
+## 2026-10-27 — 切片 6 批 3 收口：场景绑定 + 七步流 4-7 + Phase 13b 完成
+- toolupdate_absent_baseline_folding 钉测（resolve 元数据 tool_update None + 两请求各自全集重发 + wire 无 tool_addition/tool_removal 块；第二组改 [beta,gamma] 保数组定长——语义不变）；FakeFetch 改 FIFO 队列+pair 助手；adapter_options_profiles 助手 Arc::clone（clone_on_ref_ptr 清零）。
+- spec 绑定：pending_req_fr_llm_anthropic→official_endpoint_pins_path_and_header_order；pending_req_fr_llm_toolupdate→toolupdate_absent_baseline_folding。lint Quality 100%。
+- 七步流终态：lifecycle **40/40 passed / 0 failed / 0 skipped**（provider 合同全闭环——切片 5 留置的最后 2 skip 清零）；三开关 0 errors；explain 已出；stamp --dry-run Spec-Passing: true / 40/40（destructive stamp 工具未支持——trailer 随提交消息携带，同切片 5 惯例）；archive --dry-run 无选择（合同仍活跃留验）。
+- 门禁终态：fmt --check 0 / clippy --workspace --all-targets -D warnings 0 / test --workspace **648 passed 0 failed**（fr-llm-anthropic 83）/ doc 0。
+- Phase 13b（fr-llm seam + 三 provider）完成；切片 7 = fr-agent-loop。

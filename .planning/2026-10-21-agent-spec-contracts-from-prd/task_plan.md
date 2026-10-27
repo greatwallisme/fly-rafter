@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-批 0 裁决已落地（A1/A2 合同勘误 + D16-D24/C1 追认；spec/PRD/intake 三处同步，PRD 决策 45）。**D15（OAuth stealth 值检测面）待用户单裁**后开批 1：crate 骨架（cdylib+rlib）+ 纯函数层（config/compat/models 复制适配、transcript/estimate/text 复制、convert 消息转换、params buildParams、sse pi-ai 语义解码器、translate wire→StreamChunk、usage、settle）→ 批 2 执行壳 adapter（client 头构造/URL /v1/messages?beta=true/watchdog/错误双面/图链）→ 批 3 场景绑定（pending_req_fr_llm_anthropic + pending_req_fr_llm_toolupdate）+ 四门 + agent-spec 三开关 + lifecycle 40/40 + explain + stamp + 提交。
+切片 6（fr-llm-anthropic）全收口：19 模块、四门绿 648（crate 83 tests）、provider 合同 lifecycle **40/40 passed 0 skipped** 全闭环（两 pending 场景绑定 official_endpoint_pins_path_and_header_order + toolupdate_absent_baseline_folding）、stamp --dry-run Spec-Passing true、PRD 决策 45 入档。Phase 13b（fr-llm seam + 三 provider）就此完成。下一片按 PRD 20 节序：切片 7 = fr-agent-loop 主循环装配（PRD :336 inject llm 服务消费面；提示词抽取脚本随 Phase 15 组合落地或先行——开片批 0 真源全读）。
 
 ## Current Phase
-Phase 13b 切片 6（fr-llm-anthropic）批 1 收口提交中；下一批 2 = 执行壳 adapter.rs
+Phase 13b 完成（三 provider 全交付）；切片 7 = fr-agent-loop 待开
 
 ## Phases
 
@@ -109,9 +109,9 @@ Phase 13b 切片 6（fr-llm-anthropic）批 1 收口提交中；下一批 2 = �
 - [x] provider_retry_policy 结构（normal/always、maxRetries 5、retryableCodes 默认 5 类、backoff 500/10000/jitter 0.1 对称抖动；执行方 llm-retry 挂 agent 失败步扩展点，LLM 核心不自执行）（批 A 落地 36ef3c1，Q60A 精化 40f1801）
 - [x] fr-llm-deepseek：Anthropic Messages 协议（切片 3，ed3cf97）+ 网络执行面 13 模块 + fr-timeout 新 crate（切片 4，93bf613；96 tests，三 crate 四门绿 + 门禁序列全跑毕）
 - [x] fr-llm-openai（切片 5 收口 5671260：24 模块 103 tests，三场景绑定，PRD 决策 44 + 19.2 条 22/23）
-- [ ] fr-llm-anthropic（切片 6，2026-10-27 定序：anthropic-messages 协议 client、无内置 catalog（19.2 条 20）、attribution、重放 kind 'fr-anthropic'、toolUpdate in-history、官方端点/协议头 + toolupdate 两 pending 场景绑定、provider 合同 40/40 后整体 stamp）
-- [ ] 对照 REQ-FR-LLM 场景逐条落测试（38 passed / 2 skipped / 0 failed；余 anthropic×2 本切片绑定）
-- **Status:** in_progress
+- [x] fr-llm-anthropic（切片 6 收口 2026-10-27：19 模块 83 tests，两场景绑定，PRD 决策 45 + D15-a stealth 移植 + A2 勘误 in-history 结构性不可达三 provider 基线折叠）
+- [x] 对照 REQ-FR-LLM 场景逐条落测试（provider 合约 lifecycle 40/40 passed / 0 skipped / 0 failed 全闭环；stamp --dry-run Spec-Passing true）
+- **Status:** complete
 
 ### Phase 14: fr-tools + fr-approval + fr-sandbox
 - [ ] fr-tools：ToolRegistry（register：名称/JSON Schema/executionMode/presentation/section order 1000-3000）、MCP raw schema 动态注册

@@ -288,7 +288,7 @@ satisfies: [REQ-FR-LLM]
 ### Rule: provider-anthropic — anthropic 协议面（provider 切片绑定）
 
 场景: anthropic 官方端点
-  测试: pending_req_fr_llm_anthropic
+  测试: official_endpoint_pins_path_and_header_order
   假设 使用 fr-llm-anthropic
   当 发起请求时
   那么 请求发往 Anthropic 官方端点且协议头正确
@@ -320,7 +320,7 @@ satisfies: [REQ-FR-LLM]
   那么 发 usage 与 finish(kind error) 收尾而非 panic；toolcall_end 参数串与 provider 原始串逐字节一致
 
 场景: toolUpdate 能力差异
-  测试: pending_req_fr_llm_toolupdate
+  测试: toolupdate_absent_baseline_folding
   假设 同一工具更新分别路由到 anthropic 与 fr-llm-openai 两协议模型（2026-10-26 Q74-B + 2026-10-27 A2 修订）
   当 应用更新时
   那么 三 provider 均无 toolUpdate 能力——anthropic 的 in-history 需双 compat 旗标（ANTHROPIC_COMPAT_GATE withhold，手声明路由不可配）叠加内置 catalog，fr 无 catalog 结构性不可达（19.2 条 20）；fr-llm-openai 维持 Q74-B 无能力判定；不产生中途工具变更历史块，走基线折叠语义（工具全集每请求重发），延迟装载不可用

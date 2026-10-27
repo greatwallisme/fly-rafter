@@ -1614,6 +1614,29 @@ mod tests {
             })
         }
 
+        fn pair(first: Vec<u8>, second: Vec<u8>) -> Arc<Self> {
+            Arc::new(Self {
+                requests: StdMutex::new(Vec::new()),
+                responses: StdMutex::new(vec![
+                    HttpResponse {
+                        status: 200,
+                        headers: Vec::new(),
+                        body: Box::new(std::io::Cursor::new(first)),
+                    },
+                    HttpResponse {
+                        status: 200,
+                        headers: Vec::new(),
+                        body: Box::new(std::io::Cursor::new(second)),
+                    },
+                ]),
+                delay: None,
+            })
+        }
+
+        fn requests(&self) -> Vec<HttpRequest> {
+            self.requests.lock().expect("test lock").clone()
+        }
+
         fn single_request(&self) -> HttpRequest {
             self.requests
                 .lock()
@@ -1630,12 +1653,15 @@ mod tests {
             if let Some(delay) = self.delay {
                 std::thread::sleep(delay);
             }
-            Ok(self
-                .responses
-                .lock()
-                .expect("test lock")
-                .pop()
-                .expect("one preset response per request"))
+            let mut queue = self.responses.lock().expect("test lock");
+            if queue.is_empty() {
+                return Ok(HttpResponse {
+                    status: 200,
+                    headers: Vec::new(),
+                    body: Box::new(std::io::Cursor::new(Vec::new())),
+                });
+            }
+            Ok(queue.remove(0))
         }
     }
 
@@ -1733,6 +1759,10 @@ mod tests {
             session_id: None,
             purpose: None,
         }
+    }
+
+    fn adapter_options_profiles(adapter: &AnthropicAdapter) -> crate::adapter::ProfilesCallback {
+        Arc::clone(&adapter.options.profiles)
     }
 
     fn sse_body(frames: &[(&str, &str)]) -> Vec<u8> {
@@ -2159,6 +2189,59 @@ mod tests {
         let chunks = collect(adapter.stream(stream_request));
         let finish = chunk_json(chunks.last().expect("finish"));
         assert_eq!(finish["reason"]["kind"], "aborted");
+    }
+
+    /// The toolUpdate face (A2): the adapter declares no mid-conversation
+    /// tool capability, and every request carries the full declared tool
+    /// set — the baseline folding the seam's projection performs — with
+    /// no in-history tool-change blocks on the wire.
+    #[test]
+    fn toolupdate_absent_baseline_folding() {
+        let stream = sse_body(&[START, TEXT_BLOCK, TEXT_STOP, END_TURN, MESSAGE_STOP]);
+        let fetch = FakeFetch::pair(stream.clone(), stream);
+        let adapter = AnthropicAdapter::new(options(
+            Arc::clone(&fetch) as Arc<dyn Fetch>,
+            "https://api.anthropic.com",
+            Some("sk-test"),
+        ));
+        // No capability in the resolved metadata.
+        let profiles = (adapter_options_profiles(&adapter))();
+        let (profile, model) = snapshot_of(&profiles, "anthropic", "claude-test").expect("route");
+        let resolved = model_info(profile, model);
+        assert!(resolved.tool_update.is_none());
+        // Two requests with two different full sets: each body carries
+        // exactly the set it was given, and no wire system block appears.
+        for names in [["alpha", "beta"], ["beta", "gamma"]] {
+            let mut stream_request = request("claude-test");
+            stream_request.tools = Some(
+                names
+                    .iter()
+                    .map(|name| fr_wire::call_config::ToolSchema {
+                        defer_loading: None,
+                        name: (*name).to_owned(),
+                        description: String::new(),
+                        parameters: fr_wire::RawObject::new(),
+                    })
+                    .collect(),
+            );
+            collect(adapter.stream(stream_request));
+        }
+        let requests = fetch.requests();
+        assert_eq!(requests.len(), 2);
+        for (index, expected) in [(0usize, ["alpha", "beta"]), (1, ["beta", "gamma"])] {
+            let body: Value =
+                serde_json::from_slice(requests[index].body.as_deref().unwrap_or_default())
+                    .expect("body parses");
+            let wire_names: Vec<&str> = body["tools"]
+                .as_array()
+                .expect("tools")
+                .iter()
+                .map(|tool| tool["name"].as_str().expect("name"))
+                .collect();
+            assert_eq!(wire_names, expected);
+            assert!(!body["messages"].to_string().contains("\"tool_addition\""));
+            assert!(!body["messages"].to_string().contains("\"tool_removal\""));
+        }
     }
 
     /// The assistant-image history gate.
