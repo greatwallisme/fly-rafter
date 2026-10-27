@@ -1475,3 +1475,45 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - **assistant-stream 批分发**（PRD 22 对策落地形态）：dsh 无批量面（进程内 emit 廉价）；fr 批的是**总线镜像**（跨边界热路径）——进程内听者逐帧不变，镜像缓冲 32 帧/attempt 起止立即/停靠点显式冲刷。基准实测 247k frames/s、100k 帧 3125 次跨边界。
 - **AGENT-LOOP 3 skip 的归属**：fiber_realm（realm 装配 Phase 18）/provider_retry（llm-retry 插件在 M1 crate 清单外，findings:1379 既载）/header_reason（canonical initial/change/series 判定真源在 fr-session，SESSION spec 同名 pending）——三者均跨切片依赖，落位方在各自切片。
 - lifecycle 对「同 pending 名多场景」按场景逐行 Test 独立绑定（含工具调用 turn 曾漏绑——绑定脚本按场景序号处理同名 pending 的判例）。
+
+## 切片 8（fr-system-prompt）批 0 真源全读（2026-10-28）
+
+### dsh system-prompt/src/index.ts（691 行全读）
+- orders 表：SECTION_ORDERS 32 项 :131-165、CONTEXT_ORDERS 7 项 :170-179（spec Decisions 全表一致）；PERSONA_PREFIX_SECTION 'deployment:persona-prefix' :190、PERSONA_SUFFIX_SECTION :193（同名遮蔽=替换槽机制）
+- interpolate 严格语义 :340-377：indexOf('{{') 扫描 + GROUP_AT 完整组；「{{ 后无 }} = 字面散文」:351-357；VARIABLE_NAME ^[a-z][a-z0-9_]*$ :196；未注册（hasOwn 防 prototype）:365-367 文案含 registered variables 全列；有注册无值 :369-371；替换值不二次扫描（last 跳过 group）
+- orderTools :226-240：reserved 名抛 :227-229；无 toolOrder=字典序 :231；unknown 名抛（复数 s、known 全列排序）:232-234；rest=未列出字典序插入 :236-239；validateToolOrder :208-219（重复抛 + 缺 rest 抛，load 时校验）
+- 排序：comparePromptSections order 升序 || name code-unit 序 :248-250；compareNames locale 无关 :243-245
+- render 家族：renderPrompt :290-295（interpolate===false 保留、空段滤除、'\n\n' join）；renderContextSnapshot :302-304；joinContextSections :314-318（空体 ''；前缀行 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.'）；renderContextSections :330-337（逐 context 归因）
+- assemble :614-688：变量求值 global 先 scope 链远→近 :620-629；scoped sections/contexts 遮蔽后排序 :630-631；tools provider 全收集+structuredClone+knownNames 并集 :634-651；complete>1 抛 :653-655；waterfall :677-680；complete 恢复=唯一 section :681-687；runtimeContextSuppressed 滤 optional（required 保留）:670-673/:686
+- refreshContext :582-602：只重跑 context provider；accepted contexts 顺序保序重求值 :588-593；缺失 required 注册按序回插 :594-600；suppression 现值生效 :591
+- 构造期 :445-468：validateToolOrder；includeHarnessIdentity ?? true → 'harness:identity' 节 order HARNESS_IDENTITY text 'You are an AI agent powered by DeepSeek Harness.'（fr 品牌映射）；persona 前后缀两节（空串默认）；includeRuntimeContext false → suppressRuntimeContext
+- 注册面 API：section :478-487（非有限 order TypeError）；context :513-522；tools :545-551；variable :561-570（名校验）；suppressRuntimeContext :530-536；重名文案全局层含 'agent.ctx' 指引 :407-415
+- dsh 测试行为面（三 spec 1174 行扫读）：placement 唯一+整数+两两间距 ≥10（system-prompt.spec.ts:151）；等 order code-unit 序 :305；waterfall 前工具序已规范化 :81(tool-order)；scoped 遮蔽含「遮蔽先于 text provider 求值」:66(scoped)；refresh 不重算 accepted sections/variables/waterfall 增量 :54；抑制不评估 optional provider :103
+
+### dsh agent-instructions（packages/context/agent-instructions 2035 行全读）
+- config.ts：默认 projectRootMarkers ['.git']、candidates AGENTS.md/CLAUDE.md、local AGENTS.local.md/CLAUDE.local.md、maxSourceBytes 1MiB :11-14；候选名过滤（保留段/含路径分隔符拒）:132-136；workspaceBaselineIdentity=JSON 序列化 {projectRoot 相对,markers,maxBytes,maxSourceBytes,candidates,local} :67-80
+- digest.ts：SHA-1 hex；trimmed=trim 后哈希（同组去重身份）
+- files.ts：findProjectRoot 自 cwd 向上首 marker 目录、无 marker=cwd :232-247；ancestorChain root→cwd 广→特定 :255-268；descendantDirsBetween（越界/.. 返空）:276-283；discover 序=user-global 双根（dshHome 先 agentsHome）→ root→cwd 链逐目录 base 后 local :323-367；statFile 三态 present/absent/unavailable（symlink 尾段跟随，非文件=absent）:153-198；readBounded=size 预判+逐块累计超限 undefined+读失败 undefined :387-417；dedupInstructionFilesByCandidateGroup=组内 trimmed 去重保最早 :430-446；loadBaselineInstructionSet（kept 空+replacePrevious → 空渲染集）:469-516；probeScopeInstruction/readScopeInstruction :550-602
+- render.ts：六文案常量 :16-25（INTRO/REPLACEMENT_INTRO/EMPTY_REPLACEMENT_INTRO/COMPACT_INTRO）；truncateUtf8 续字节回退 :75-85；escapeInstructionFrameBody（</system-reminder> → <\/system-reminder>）:87-89；sectionText 'Instructions from: {path}\n\n{content}' :91-93；user-global 双 scope 目录 + 组归并（agents-global 并入 user-global 组）:96-158；escapeProjectDisplayPath（首段撞保留目录加 ./）:173-177；candidateScopeKey=dir\0name :192-215；additionalSectionText（'Additional instructions from: '+applicability 两态+GUIDANCE）:220-234；changedSectionText 三臂（set→additional/removed 两行文案/updated 三行文案）:248-261；markerText 'Workspace instruction budget N bytes: omitted …; truncated … from X to Y bytes' :292-302；buildInstructionText=[open, escape(join), close] 三行帧 :304-316；truncateToFit 二分最大适配 :322-346；renderInstructionContext 预算梯=全量→逐前缀 omit→最特文件二分截断→COMPACT intro 复试→空题头→纯 notice 截断 :348-405；represented 语义（空文件题头算 represented）
+- state.ts：AgentInstructionSource {kind:'agent-instructions',form:'instructions',baseline?,baselineIdentity?,changes[]} :40-49；baselineInstructionState（set 变更+version 元数据）:168-193；visibleInstructionChanges=_surface nodes 扫描+authority 覆盖（scope 后写胜）:140-161；reconcileInstructionContext :251-456 五 scope 源（baseline 含否/scopeMessages/effective/touched descendant）；scopesByGroup 处理+组级回滚（unavailable/read 失败整组回滚+seenAbsolutePaths 补全+keptTrimmed 撤）:331-370；metadata fast path（path+version 同→免读；rendered 判定 digest 同；重复 trimmed→pushRemoval）:386-405；新读（registerKeptTrimmed 先占；重复→remove 或仅存元数据；digest 同+path 同→无变更）:407-444；渲染后 text 空/changes 空→不发射不提交 :447-455
+- index.ts 集成：无 ctx.fs provider→compose 返 undefined（no-op mount）:121-122；pre-step 监听：decision 后 waitForProjections、reject/step1 空批→syncInbox 留 pending、否则 pending 清除+desired 折叠在 claimed 批尾（findLastIndex includes）:334-360；tools/result 触碰（read/write/edit 的 file_path 参数、error/abort 排除、父链上浮）:362-378；step 开→暂存 step/end 再投影 :305-332；projection tails 串行化（emit 不 await 故组合对齐）:285-303；syncInbox（alreadySupplied=claimed/surface 同载荷→清 pending；reusable 保一；否则 prepend/replace）:246-271
+- dsh 测试行为面（spec 1087 行扫读）：ENOTDIR=absent、symlink 跟随、同版本同尺寸重写仍重读（:494）、双根先 home、CLAUOWND 排除配置、目录候选忽略、字节预算梯全链、空题头 represented、</system-reminder> 中和三处（内容/路径/marker）
+
+### 注册面全景（谁经 systemPrompt.* 注册什么）
+- tools 插件：tools provider + collapse/sdk 两 section（tools/src/index.ts:857-860）；tool 插件各注册静态 section（bash:251/pwsh:266/read:69/write:63/edit:77/glob:297/grep:275/jobs:251/lsp:102/web fetch:448/search:315/goal:189/workflow:326/subagent:368/mcp×2）
+- agent-loop 自身注册 provider/model 两变量（agent-loop/src/index.ts:389-390，context.agent?.options.*）→ AssembleContext 含 agent 扩展面
+- plan-mode 动态 section（text provider 按 pending 状态返全文或 ''，plan-mode/src/index.ts:216-222）
+- context 注册者：working-directory:90、user-approval:163、subagent:382、harness-dev-context
+- system-prompt/assemble waterfall 监听者：model-selection（注入 variables+request 施加）、harness-dev-context、session-reference、browser-use —— M1 范围外（无对应 fr crate）
+
+### base patch（packages/bundle/base/cordis.patch.yml 529 行）
+- agent-instructions maxBytes 65536 :303-305；plan-mode section 全文（6 段）:332-353；system-prompt personaPrefix '' :504-507
+
+### fr 侧缝现状（对接面）
+- driver SystemPromptFace：assemble/refresh_context 两方法、PromptAssembly{rendered_prompt,context_sections,joined_sections,tools} 四字段（fr-agent-loop/src/driver.rs:122-154）；pre_step 默认链=claimed→waterfall→runtime-context 折叠加尾（driver.rs:1234-1291）——dsh 指令消息插入位=claimed 批后、runtime-context 前
+- loop_inbox 现面：new/restored/claim/clear/splice/queue_len——无 prepend/replace/remove（dsh syncInbox 需要的三原语）
+- agent_events waterfall=进程内 Box<dyn Fn> 缝（agent_events.rs:235-249）+ 总线镜像观测（决策 46）
+- 跨插件消费判例：llm_client.rs（LlmFace over Outbound::require，wire DTO 归提供方 crate 单源、消费端类型转换）
+- 方法号惯例：2 起（fr-session CREATE=2..DRAIN=8；fr-llm PREPARE=2..ABORT=5）；壳级 describe/未知方法/坏 JSON 文案面
+- fs 服务/working-directory 服务 M1 当前缺席——dsh 判例：ctx.fs 缺席 agent-instructions mount 为 no-op（index.ts:6-7,121-122）
+- fr-llm Cargo.toml 判例：cdylib+rlib 双产物、dougong-abi 仅壳链接

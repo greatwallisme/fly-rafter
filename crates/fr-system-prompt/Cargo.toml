@@ -1,0 +1,27 @@
+[package]
+name = "fr-system-prompt"
+description = "Fly Rafter system-prompt service artifact: ordered section/context assembly, strict interpolation, tool ordering, and the AGENTS.md workspace-instruction domain (dsh system-prompt + agent-instructions parity)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+fr-wire.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+indexmap.workspace = true
+sha1.workspace = true
+
+# Kernel family edge for the C-ABI dylib artifact (PRD 4.5): the plugin
+# shell links only dougong-abi across the kernel boundary.
+dougong-abi = { workspace = true }
+
+[lints]
+workspace = true

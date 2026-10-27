@@ -14,6 +14,7 @@ members = [
     "crates/fr-llm-openai",
     "crates/fr-llm-anthropic",
     "crates/fr-agent-loop",
+    "crates/fr-system-prompt",
 ]
 
 [workspace.package]
@@ -40,8 +41,9 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util", "fs"] }
 serde_yaml_ng = "0.10"
 regex = "1.13"
-indexmap = "2"
+indexmap = { version = "2", features = ["serde"] }
 sha2 = "0.10.9"
+sha1 = "0.10"
 # Slice 4 facility rulings (PRD decision 41): ureq blocking client (rustls
 # default), image codecs, and libwebp advanced API (method=0 ladder effort).
 ureq = "3.5"
@@ -57,6 +59,7 @@ fr-session = { path = "crates/fr-session" }
 fr-timeout = { path = "crates/fr-timeout" }
 fr-net = { path = "crates/fr-net" }
 fr-attachment = { path = "crates/fr-attachment" }
+fr-system-prompt = { path = "crates/fr-system-prompt" }
 
 # Lint table aligned with the dougong workspace (PRD 21): the zero-warning
 # gates (fmt / clippy -D warnings / test / doc) must stay reproducible.
