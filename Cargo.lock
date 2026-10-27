@@ -693,8 +693,12 @@ name = "fr-llm-openai"
 version = "0.1.0"
 dependencies = [
  "dougong-abi",
+ "fr-attachment",
  "fr-llm",
+ "fr-net",
+ "fr-timeout",
  "fr-wire",
+ "futures-core",
  "regex",
  "serde_json",
 ]

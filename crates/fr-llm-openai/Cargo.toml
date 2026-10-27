@@ -21,6 +21,17 @@ dougong-abi = { workspace = true }
 fr-llm.workspace = true
 # Safe-integer gate shared with the retry ceiling (fr-wire ids).
 fr-wire.workspace = true
+# Transport seam (Q77-A): the Fetch contract the execution shell posts
+# through; the production ureq backend stays inside fr-net.
+fr-net.workspace = true
+# Attachment seam (Q78-A): the durable request-image reads the image
+# preparation resolves through; the normalization pipeline stays inside
+# fr-attachment.
+fr-attachment.workspace = true
+# Idle watchdog of the streaming read loop (dsh `LLM_STREAM_IDLE_TIMEOUT`).
+fr-timeout.workspace = true
+# The stream face the worker channel exposes (deepseek-crate precedent).
+futures-core = "0.3"
 serde_json.workspace = true
 # Overflow pattern family (pi-ai utils/overflow.ts; regex is already in
 # the workspace lock graph via fr-llm).

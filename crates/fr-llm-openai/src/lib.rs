@@ -9,6 +9,7 @@
 //! folding semantics). The cdylib face is the plugin shell; the rlib face
 //! is the behavior library the network slices wire to real HTTP transport.
 
+pub mod adapter;
 pub mod codes;
 pub mod compat;
 pub mod config;

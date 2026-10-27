@@ -273,13 +273,13 @@ satisfies: [REQ-FR-LLM]
 ### Rule: provider-openai — openai 协议面（provider 切片绑定）
 
 场景: openai base-url 覆盖
-  测试: pending_req_fr_llm_openai_base_url
+  测试: openai_base_url_overrides_endpoint
   假设 配置了自定义 base-url
   当 fr-llm-openai 发起请求时
   那么 请求发往配置端点而非硬编码地址
 
 场景: openai 路由未声明模型报错
-  测试: pending_req_fr_llm_openai
+  测试: openai_undeclared_model_refuses_without_catalog
   假设 fr-llm-openai 路由未声明 models
   当 请求引用任一模型 id 时
   那么 请求被拒且错误指名未声明模型，不回退任何内置目录
@@ -313,7 +313,7 @@ satisfies: [REQ-FR-LLM]
   那么 三者按协议字段透传
 
 场景: 错误不中途抛出
-  测试: pending_req_fr_llm_fail_settle
+  测试: openai_fail_settle_emits_usage_and_error_finish
   假设 上游连接中途失败
   当 适配层结算时
   那么 发 usage 与 finish(kind error) 收尾而非 panic；toolcall_end 参数串与 provider 原始串逐字节一致

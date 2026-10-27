@@ -143,9 +143,16 @@ pub fn settle_failure(settlement: &Settlement) -> FinishReason {
         });
     }
     // Overflow, both sources: the pi-ai pattern family over the message
-    // and usage, and the harness context-window error text.
+    // and usage, and the harness context-window error text. The stop face
+    // rides the actual stop (dsh passes `message.stopReason`), so the
+    // silent-stop and length-stop cases fire on the done path too.
+    let kind = match settlement.stop {
+        "stop" => OverflowStopKind::Stop,
+        "length" => OverflowStopKind::Length,
+        _ => OverflowStopKind::Error,
+    };
     let overflow = is_context_overflow(
-        OverflowStopKind::Error,
+        kind,
         settlement.error_message.as_deref(),
         &settlement.provider,
         settlement.input_tokens,

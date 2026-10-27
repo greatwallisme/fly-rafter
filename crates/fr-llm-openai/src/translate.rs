@@ -84,6 +84,13 @@ impl Translator {
         self.usage
     }
 
+    /// How many content blocks the stream produced so far (the settlement's
+    /// empty-stop face, dsh `event.message.content.length`).
+    #[must_use]
+    pub const fn blocks_len(&self) -> usize {
+        self.blocks.len()
+    }
+
     /// Creates a translator for one request against the route model; the
     /// response id and model ride the durable replay state of the terminal
     /// finish, and the compat flag drives the terminal-inference arm

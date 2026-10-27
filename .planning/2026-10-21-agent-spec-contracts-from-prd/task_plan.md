@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-批 4b 纯函数层 5/6 已提交（9121c03，547 tests 四门绿）。余 adapter.rs 执行壳（真源+蓝图全在 findings「批 4b 真源读数」+「批 4b 实施蓝图」节）：OpenAiAdapterOptions 缝（profiles/resolve_api_key/fetch=Arc<dyn fr_net::http::Fetch>/attachments=Option<Arc<dyn fr_attachment::AttachmentRead>>）→ admit 门序（stop→UNSUPPORTED_OPTION（Q76B 适配文案 'fr-llm-openai does not support GenerateOptions.stop'）/NO_ADAPTER/UNKNOWN_MODEL+INVALID_CONFIG（适配）/图门 UNSUPPORTED_CONTENT/reasoning UNSUPPORTED_REASONING_EFFORT）→ 凭据（named env miss→MISSING_CREDENTIAL Q66B 措辞；unnamed→'No API key for provider: X' 逐字）→ 既有管线（fold→transform→convert→build_params 两协议）→ 头构造（attribution 胜+Bearer+亲和三格式 completions 门=sendSessionAffinityHeaders+responses 门=仅 sessionId+x-session-affinity 仅 completions+config headers 最后合并）→ URL（{base}/chat/completions|{base}/responses，缺省 https://api.openai.com/v1）→ POST via Fetch→非 2xx 读 body→format_provider_error（responses 前缀 '<OpenAI|provider> API error'+ChatGPT usage URL 臂；completions 无前缀，OpenRouter raw 追加死臂注释）→ SSE 循环（worker 线程 mpsc+ChannelStream 承 deepseek adapter.rs:250 判例；SseParser+Translator/ResponsesTranslator）→ done→end_of_stream→Finish；异常→catch 链（caller abort→settle aborted；settle_failure（settle.rs 已落）→usage+finish(Error{failure}) 结算=fail_settle 场景面）→ idle watchdog（fr-timeout，code LLM_STREAM_IDLE_TIMEOUT，文案适配）→ 批 4c 场景绑定 openai×2+fail_settle → 四门 → adapter+绑定一并提交。
+批 4b/4c 已完整收口（adapter.rs 执行壳 + 三场景绑定，四门绿 564 tests，lifecycle 38/40——余 2 待 anthropic crate）。切片 5 批 5 终清：合同决策块审查项呈用户裁决（三项：convert.rs tool_arguments 文档「raw text」vs 代码「{}」不一致——dsh 两态不可达 fr 自由度备案；spec「采样参数透传」场景 Then 与 dsh 真源相悖——pi-ai StreamOptions 无 stop 键、openai 族丢 GenerateOptions.stop，需勘误合同（改合同先沟通纪律）；SDK 遥测头 x-stainless-* 不发——19.2 条目登记）→ PRD 同步（Q76B 19.2 条目 + 决策 44 切片 5 收口）→ 七步流 4-7（lifecycle/guard/explain/stamp/archive）→ 切片 5 关闭，转切片 6（fr 主循环装配/runtime-registry 按 PRD 20 节序）。
 
 ## Current Phase
-Phase 13b 切片 5 批 4b（openai 执行壳）——纯函数层 5/6 落地，adapter 壳续写
+Phase 13b 切片 5 批 5（终清+合同决策块+PRD 同步+七步流收口）
 
 ## Phases
 
