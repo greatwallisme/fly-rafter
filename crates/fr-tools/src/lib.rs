@@ -8,5 +8,13 @@
 //! (`oneOf`, `additionalProperties`, ...) keep the dsh protocol shapes
 //! verbatim; Rust identifiers stay `snake_case`.
 
+pub mod definition;
 pub mod json_schema;
+pub mod presentation;
+pub mod registry;
 pub mod schema;
+pub mod signal;
+pub mod types;
+
+#[cfg(test)]
+mod pipeline_tests;

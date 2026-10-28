@@ -61,6 +61,7 @@ fr-timeout = { path = "crates/fr-timeout" }
 fr-net = { path = "crates/fr-net" }
 fr-attachment = { path = "crates/fr-attachment" }
 fr-system-prompt = { path = "crates/fr-system-prompt" }
+fr-tools = { path = "crates/fr-tools" }
 
 # Lint table aligned with the dougong workspace (PRD 21): the zero-warning
 # gates (fmt / clippy -D warnings / test / doc) must stay reproducible.
