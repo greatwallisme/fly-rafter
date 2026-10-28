@@ -1236,4 +1236,30 @@ mod tests {
             failure.0
         );
     }
+    #[test]
+    fn service_face_constants_match_the_wire_table() {
+        use fr_wire::services::system_prompt as wire;
+        assert_eq!(super::SERVICE_NAME, wire::SERVICE_NAME);
+        assert_eq!(super::METHOD_DESCRIBE, wire::METHOD_DESCRIBE);
+        assert_eq!(super::METHOD_ASSEMBLE, wire::METHOD_ASSEMBLE);
+        assert_eq!(super::METHOD_REFRESH_CONTEXT, wire::METHOD_REFRESH_CONTEXT);
+        assert_eq!(
+            super::METHOD_REGISTER_SECTION,
+            wire::METHOD_REGISTER_SECTION
+        );
+        assert_eq!(
+            super::METHOD_REGISTER_CONTEXT,
+            wire::METHOD_REGISTER_CONTEXT
+        );
+        assert_eq!(
+            super::METHOD_REGISTER_VARIABLE,
+            wire::METHOD_REGISTER_VARIABLE
+        );
+        assert_eq!(super::METHOD_REGISTER_TOOLS, wire::METHOD_REGISTER_TOOLS);
+        assert_eq!(super::METHOD_UNREGISTER, wire::METHOD_UNREGISTER);
+        assert_eq!(
+            super::METHOD_COMPOSE_INSTRUCTIONS,
+            wire::METHOD_COMPOSE_INSTRUCTIONS
+        );
+    }
 }

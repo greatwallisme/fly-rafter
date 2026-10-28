@@ -17,6 +17,19 @@
       name: fr-sandbox
       config:
         mode: !!js "env.FR_PERMISSION_MODE ?? 'workspace-write'"
+    - id: permission-presets
+      name: fr-permission-presets
+      config:
+        presets:
+          read-only:
+            sandbox: read-only
+            approval: ask
+          workspace-write:
+            sandbox: workspace-write
+            approval: ask
+          danger-full-access:
+            sandbox: danger-full-access
+            approval: never
     - id: session-persistence
       name: fr-session
     - id: agent-loop

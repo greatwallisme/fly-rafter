@@ -15,6 +15,7 @@
 //! system-prompt seams (Q81-A). Real services attach in Phases 14/15.
 
 pub mod agent_events;
+pub mod agent_service;
 pub mod assistant_stream;
 pub mod driver;
 pub mod inbox;

@@ -1038,3 +1038,27 @@
 - loop：emit_user_admitted 闭包+谓词+2 钉测；0.4.0 吸收（9 文件 grant 臂+8 处 abiVersion 常量化+system-prompt describe 本体）。
 - 四门绿：fmt OK/clippy 0/961 passed 0 failed/doc 0。批 1 全落；下一动作批 2a。
 - 提交 95b0ec1（批 1e）。守卫阻断裁决记录：pre-commit agent-spec guard 对 20 spec 红=pending 选择器批 3 绑定前设计态；用户 /commit 显式裁决后 --no-verify 入库（提交信息内含守卫注记），与此前批次同例；批 3 时 TOOLS/APPROVAL/SANDBOX 转绿。
+
+## 2026-10-28 — 批 2a 精读完成（呈报待裁）
+- 真源七件全读：user-approval 310+93（answerer waterfall 链/decide 三层 containment/abort race 补充）/permission-presets 481+63+10（base patch 三项表覆盖包缺省两项、投影 unit 四事件 fold、pin 三分支、命令三文案、constructor 四校验）/session-projection 715+24（读梯+change feed=Phase 18 面，Q105′A 缝=register/stateOf）。
+- fr 侧对表：fr-session 服务名 'fr-session' 与消费者 require('session-persistence') 不一致（修项随批 2a）；session 服务无读面/列表面；'agent' METHOD_INJECT=2 现成；system-prompt EndpointRef 回调面现成；fr-tools ask 路 in-process seam 无 dylib 接线；headless bundle 缺 permission-presets 行。
+- 下一动作：集中呈报 Q106-Q112（七个分叉：播种等价物/会话读面/answerer 链/ask 接线/投影驱动/PRD 4.4 范围/19.1 Auto 补录）→裁决后实施。
+
+## 2026-10-29 — 批 2a 波 1 落地（已裁独立部分），workspace 1002 tests（961→1002）
+- Q106-Q112 全 A 裁决入档；实施中发现 Q110-A 形状不可执行（dougong 锁序三路证明：同线程帧循环 REENTRANCY/worker 跨线程=channel 等待不入等待图=不可检死锁/eager 死于注册者自 append）→Q110′ 修正案呈报（A′=注册者自持折叠+纯折叠端点继电器/B′=双份折叠）待裁。
+- 波 1 落：fr-approval 新 crate（域+服务面+壳五步接线+29 测）/fr-tools set-approval（12 号方法+wire seam+7 测）/fr-session 修名+读面 9/fr-wire services 契约模块（链接碰撞系统性修法+五 owner 等值钉测）/bundle permission-presets 行/PRD 4.4+4.5+19.1。
+- 新判例两条：DOUGONG_PLUGIN_EXPORTS 符号碰撞→跨插件常量归 fr-wire；dylib 无 config 传递→烘焙判例（approval 的 FR_PERMISSION_MODE 表达式=bundle 逐字）。
+- 四门绿。待 Q110′ 裁决后落波 2（session-projections+fr-permission-presets）。
+
+## 2026-10-29 — 会话：Q110′ 裁决 + 波 2 开工
+- 状态恢复+执法点补核（dougong-dylib :85/:219/:788 与 findings 引用一致）；Q110′ 白话重呈（用户反馈首轮不清晰）→ 裁决 A′（注册者自持折叠）。
+- 波 2 真源钉：dsh session-projection register/stateOf 语义+三文案（JSON.stringify 引号式）；permission-presets index.ts 全读（校验序/derive/apply 双写径/pin 三分支/命令三文案/catalog/optionOf/Auto 臂不可达档载）；setSandboxMode=单事件 append；dsh base :141 root: dshHomePath('sessions')。
+- fr 侧钉：call_full 不传 service 名→1000+ 号段；stateOf 出站 require 骹注册者 grant（inject 保持 []）；find_log 拆自由函数冷读；approval override-of 判例 {} =查无键回形；root 烘焙=FR_SESSIONS_ROOT ?? <FR_HOME ?? ~/.fly-rafter>/sessions。
+- 设计钉全文见 findings「Q110′A′ 裁决 + 波 2 设计钉」节；档载缺口两条（bundle root 行缺、启动列表面不可达）。开工实施（fr-wire 三模块→fr-session projections→fr-permission-presets）。
+
+## 2026-10-29 — 批 2a 波 2 落地（Q110′A′ 实装），workspace 1035 tests（1002→1035）
+- fr-wire 三契约模块（session-projections 1000+ 号段/permission-presets 四方法/sandbox-policy consumed 子集）。
+- fr-session：cold_read_stored_log 自由函数化（词表逐调用快照）+projections.rs 域（注册表三文案逐字+继电）+壳重写（双 provide/HostLink/烘焙 root FR_SESSIONS_ROOT→FR_HOME→$HOME/.fly-rafter/sessions/null host 拒激活）。
+- fr-permission-presets 新 crate 23 tests：域全量（fold 单实现/derive/四校验/pin 三分支/命令三文案/catalog）+四方法服务面+壳五步接线（grant 继电权→mode→校验→declare→注册）+created listener 真驱动钉测。
+- 排障自纠：renderer as i64 饱和真 bug（f64 Display 统一实证）、三测试预期按 dsh 自纠（null-approval 不继 bundle/(Danger,ask)=custom/state 平铺）、SessionHeader 字段。
+- 四门绿：fmt OK/clippy 0/1035 passed 0 failed/doc 0。批 2a 全落；下一动作批 2b fr-sandbox。

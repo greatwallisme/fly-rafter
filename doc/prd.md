@@ -124,7 +124,7 @@ Fly Rafter（飞椽，`fr`）是一个以 dougong 组合内核为基座的 AI ag
 
 ### 4.4 服务与事件契约总则
 
-- 服务缝名与事件名**与 dsh 逐字一致**（`llm`、`tools`、`fs`、`shell`、`terminals`、`subprocess`、`sandbox`、`web`、`lsp`、`jobs`、`subagents`、`goals`、`session-title`、`session-persistence`、`spill-store`、`mcp-resources`；事件 `agent/pre-step`、`agent/request`、`agent/request-error`、`agent/assistant-stream`、`agent/turn-stopping`、`tools/pre-execute`、`tools/execute`、`tools/post-execute`、`tools/pre-execute` 的 ask 语义等；另 dsh 服务缝 `session-projections` 由 fr-session provide）。fr 增设通知事件 `agent/user-admitted`（用户消息获准进入 step 批时 agent-loop 以 fire-and-forget 镜像发出，guard 插件经 descriptor listen 订阅——dsh agent/pre-step 用户消息观测语义的 fr 载体，2026-10-28 Q102′A）。
+- 服务缝名与事件名**与 dsh 逐字一致**（`llm`、`tools`、`fs`、`shell`、`terminals`、`subprocess`、`sandbox`、`web`、`lsp`、`jobs`、`subagents`、`goals`、`session-title`、`session-persistence`、`spill-store`、`mcp-resources`、`agent`、`system-prompt`、`approval`、`permission-presets`、`guard-timeout`、`guard-repeat-reminder`（后六项=实装已用面 2026-10-29 Q111-A 全量对齐补齐）；`sandbox-policy` 随批 2b fr-sandbox 落地时补入；事件 `agent/pre-step`、`agent/request`、`agent/request-error`、`agent/assistant-stream`、`agent/turn-stopping`、`tools/pre-execute`、`tools/execute`、`tools/post-execute`、`tools/pre-execute` 的 ask 语义等；另 dsh 服务缝 `session-projections` 由 fr-session provide）。fr 增设通知事件 `agent/user-admitted`（用户消息获准进入 step 批时 agent-loop 以 fire-and-forget 镜像发出，guard 插件经 descriptor listen 订阅——dsh agent/pre-step 用户消息观测语义的 fr 载体，2026-10-28 Q102′A）。服务名与方法选择子等跨插件契约常量集中声明于 `fr-wire` `services` 模块（2026-10-29 批 2a 判例：插件壳各导出一个 `DOUGONG_PLUGIN_EXPORTS` 符号，测试二进制链接两个插件 rlib 即撞符号；跨插件共享面经纯 rlib 的 fr-wire 承载，owner crate 以等值钉测防漂移——PRD 4.4「共享 wire 形状由 fr-wire 定义」既定原则的延伸适用）。
 - 会话事件类型名与字段**与 dsh 逐字一致**（第 7 节）。
 - 仅品牌级标识按第 5 节适配表替换。
 - **Invoker 消费统一经 `ctx.require::<Invoker>`，禁止 `ctx.get`**（实现约束）：require 带声明检查，与内核“未声明依赖即拒绝”的能力基线一致；跨 dylib/wasm 边界的服务调用一律走此通道（dougong `invoke.rs`，已一手核实）。
@@ -149,7 +149,7 @@ fly-rafter/
     fr-tools-builtin    # 内置工具集（第 17 节全部；"builtin" 指工具集归属，非插件形态）
     fr-ptc              # run_code：node 子进程 wire 协议与桥接
     fr-system-prompt    # 有序 section 组装、{{var}}、AGENTS.md
-    fr-approval         # ApprovalService + 权限预设
+    fr-approval         # ApprovalService（policy fold、asked/decided 审计对、answerer 链；2026-10-28 Q104′A 权限预设移出独立 crate）
     fr-sandbox          # 沙箱策略（read-only/workspace-write/danger-full-access）与执行体
     fr-compaction       # 压缩、剪枝、图片卸载、spill
     fr-llm              # LlmAdapter seam、StreamChunk、请求派生
@@ -637,6 +637,7 @@ fr headless [TASK] [--session-id <id>] [--json] [--help]
 | Python SDK 客户端（协议消费者自行封装） | `python/` |
 | 会话格式迁移链 v0→v3 | `packages/session/session-format*` |
 | 子代理 claude-code / codex 委派桥 | `subagent-claude-code`、`subagent-codex` |
+| Auto review 集成动态钩子（registerAuto/autoAdmit 同步准入门、`permission-presets/catalog-changed` 事件发射）——M5 前无消费者不实现；AUTO_PRESET 词表与 derive 分支为服务面完整性随批 2a 落地（2026-10-28 Q98-B/Q112-A） | `packages/interaction/permission-presets/src/index.ts` |
 
 ### 19.2 有意偏差（与 1:1 口径的关系声明）
 

@@ -20,7 +20,10 @@
 //!   repair closers appended through the handle, then publish;
 //! - 7 restore: `{id?, meta?, seed, inheritedEventCount?}` — the store
 //!   restore primitive (in-memory rebuild + publish, no persistence);
-//! - 8 drain: `{cursors?}` — the outbound mirror lane (below).
+//! - 8 drain: `{cursors?}` — the outbound mirror lane (below);
+//! - 9 read: `{id, from?, to?}` — one live session's log slice with the
+//!   header and inherited count (Q107-A; the `Session.seq`/`eventAt`
+//!   read face over the wire, for consumer-side tail-scan folds).
 //!
 //! Outbound lane (Q43-A ruling): every store edge (created/event/flush/
 //! disposed) lands in a per-session cursor-numbered mirror log; the host
@@ -56,6 +59,20 @@ use crate::session::SurfaceIntent;
 use crate::store::{ListenerError, SessionMeta, SessionStore};
 use crate::vocabulary::EventVocabulary;
 
+/// The provided-service name consumers inject.
+///
+/// The dsh domain service name; cross-plugin constants live in this
+/// shell-free module so dependent artifacts never pull the FFI export
+/// object in (the rlib-pulls-by-object link judgment, batch 2a).
+pub const SERVICE_NAME: &str = "session-persistence";
+
+/// Method selector: declare durable event type names
+/// (`{"types": ["...", ...]}` — the activation-time vocabulary face).
+pub const METHOD_DECLARE_EVENT_TYPES: u32 = 0;
+
+/// Method selector: shell metadata echo (`{}`).
+pub const METHOD_DESCRIBE: u32 = 1;
+
 /// Method selector: create a session (prepare + ownership + publish).
 pub const METHOD_SESSION_CREATE: u32 = 2;
 /// Method selector: append one typed event.
@@ -70,6 +87,11 @@ pub const METHOD_SESSION_RESUME: u32 = 6;
 pub const METHOD_SESSION_RESTORE: u32 = 7;
 /// Method selector: drain the outbound mirror lane.
 pub const METHOD_SESSION_DRAIN: u32 = 8;
+/// Method selector: read one live session's log slice (`{id, from?, to?}`).
+///
+/// Q107-A — the dsh `Session.seq`/`eventAt` read face over the wire, so
+/// consumers can tail-scan folds without holding the session object.
+pub const METHOD_SESSION_READ: u32 = 9;
 
 /// Which store edge one mirror record carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -711,6 +733,42 @@ fn service_drain(
     Ok(serde_json::json!({ "records": records, "cursors": next }))
 }
 
+fn service_read(
+    service: &SessionService,
+    request: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let id = require_id(request, "id")?;
+    let session = service
+        .store
+        .get(&id)
+        .ok_or_else(|| format!("session \"{id}\" is not live in this store"))?;
+    let events = session.events();
+    let total = events.len();
+    let total_u64 = u64::try_from(total).unwrap_or(u64::MAX);
+    let from = optional_u64(request, "from")?.unwrap_or(0);
+    let to = optional_u64(request, "to")?.unwrap_or(total_u64);
+    if from > to || to > total_u64 {
+        return Err(format!(
+            "session read range {from}..{to} is outside the log (0..{total_u64})"
+        ));
+    }
+    let from_index = usize::try_from(from).unwrap_or(usize::MAX);
+    let to_index = usize::try_from(to).unwrap_or(usize::MAX);
+    let slice: Vec<serde_json::Value> = events[from_index..to_index]
+        .iter()
+        .map(|event| {
+            serde_json::to_value(event)
+                .map_err(|error| format!("session event encode failed: {error}"))
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(serde_json::json!({
+        "events": slice,
+        "total": total_u64,
+        "header": session.header(),
+        "inheritedEventCount": session.inherited_event_count(),
+    }))
+}
+
 /// Serves one dynamic-channel invocation against the assembled runtime: a
 /// pure (JSON-in, JSON-out) function so the face stays testable.
 ///
@@ -734,7 +792,8 @@ pub fn dispatch(
         METHOD_SESSION_RESUME => service_resume(service, &request)?,
         METHOD_SESSION_RESTORE => service_restore(service, &request)?,
         METHOD_SESSION_DRAIN => service_drain(service, &request)?,
-        _ => return Err(format!("unknown fr-session method {method}")),
+        METHOD_SESSION_READ => service_read(service, &request)?,
+        _ => return Err(format!("unknown session-persistence method {method}")),
     };
     serde_json::to_vec(&reply)
         .map_err(|error| format!("session service reply encode failed: {error}"))
@@ -849,6 +908,90 @@ mod tests {
         )
         .expect("second drain");
         assert_eq!(again["records"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn read_returns_slice_header_and_refuses_out_of_range() {
+        let mut service = make_service_at(&temp_root("read"));
+        call(
+            &mut service,
+            METHOD_SESSION_CREATE,
+            &serde_json::json!({ "id": "s1", "meta": { "cwd": "/repo" } }),
+        )
+        .expect("create");
+        call(
+            &mut service,
+            METHOD_SESSION_APPEND,
+            &serde_json::json!({ "id": "s1", "type": "turn/start", "data": { "turn": 1 } }),
+        )
+        .expect("append 0");
+        call(
+            &mut service,
+            METHOD_SESSION_APPEND,
+            &serde_json::json!({ "id": "s1", "type": "turn/end", "data": { "turn": 1, "reason": { "kind": "completed" } } }),
+        )
+        .expect("append 1");
+
+        let full = call(
+            &mut service,
+            METHOD_SESSION_READ,
+            &serde_json::json!({ "id": "s1" }),
+        )
+        .expect("full read");
+        assert_eq!(full["total"], 2);
+        assert_eq!(full["inheritedEventCount"], 0);
+        assert_eq!(full["header"]["cwd"], "/repo");
+        let types: Vec<&str> = full["events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .map(|event| event["type"].as_str().expect("type"))
+            .collect();
+        assert_eq!(types, vec!["turn/start", "turn/end"]);
+
+        let tail = call(
+            &mut service,
+            METHOD_SESSION_READ,
+            &serde_json::json!({ "id": "s1", "from": 1 }),
+        )
+        .expect("tail read");
+        assert_eq!(tail["total"], 2);
+        assert_eq!(tail["events"][0]["type"], "turn/end");
+        assert_eq!(tail["events"].as_array().expect("events").len(), 1);
+
+        let empty = call(
+            &mut service,
+            METHOD_SESSION_READ,
+            &serde_json::json!({ "id": "s1", "from": 2, "to": 2 }),
+        )
+        .expect("empty slice");
+        assert_eq!(empty["events"], serde_json::json!([]));
+        assert_eq!(empty["total"], 2);
+
+        let beyond = call(
+            &mut service,
+            METHOD_SESSION_READ,
+            &serde_json::json!({ "id": "s1", "from": 1, "to": 3 }),
+        )
+        .expect_err("to beyond total");
+        assert_eq!(beyond, "session read range 1..3 is outside the log (0..2)");
+        let inverted = call(
+            &mut service,
+            METHOD_SESSION_READ,
+            &serde_json::json!({ "id": "s1", "from": 1, "to": 0 }),
+        )
+        .expect_err("inverted range");
+        assert_eq!(
+            inverted,
+            "session read range 1..0 is outside the log (0..2)"
+        );
+        let absent = call(
+            &mut service,
+            METHOD_SESSION_READ,
+            &serde_json::json!({ "id": "nope" }),
+        )
+        .expect_err("absent session");
+        assert_eq!(absent, "session \"nope\" is not live in this store");
     }
 
     #[test]
@@ -1242,9 +1385,29 @@ mod tests {
     fn unknown_methods_and_malformed_payloads_fail_with_text() {
         let mut service = make_service_at(&temp_root("unknown"));
         let error = dispatch(99, b"{}", &mut service).expect_err("unknown method");
-        assert!(error.contains("unknown fr-session method 99"));
+        assert!(error.contains("unknown session-persistence method 99"));
         let error =
             dispatch(METHOD_SESSION_FLUSH, b"not json", &mut service).expect_err("bad json");
         assert!(error.contains("session service payload must be JSON"));
+    }
+    #[test]
+    fn service_face_constants_match_the_wire_table() {
+        use super::{
+            METHOD_DECLARE_EVENT_TYPES, METHOD_DESCRIBE, METHOD_SESSION_APPEND,
+            METHOD_SESSION_CREATE, METHOD_SESSION_DRAIN, METHOD_SESSION_FLUSH, METHOD_SESSION_FORK,
+            METHOD_SESSION_READ, METHOD_SESSION_RESTORE, METHOD_SESSION_RESUME, SERVICE_NAME,
+        };
+        use fr_wire::services::session_persistence as wire;
+        assert_eq!(SERVICE_NAME, wire::SERVICE_NAME);
+        assert_eq!(METHOD_DECLARE_EVENT_TYPES, wire::METHOD_DECLARE_EVENT_TYPES);
+        assert_eq!(METHOD_DESCRIBE, wire::METHOD_DESCRIBE);
+        assert_eq!(METHOD_SESSION_CREATE, wire::METHOD_SESSION_CREATE);
+        assert_eq!(METHOD_SESSION_APPEND, wire::METHOD_SESSION_APPEND);
+        assert_eq!(METHOD_SESSION_FLUSH, wire::METHOD_SESSION_FLUSH);
+        assert_eq!(METHOD_SESSION_FORK, wire::METHOD_SESSION_FORK);
+        assert_eq!(METHOD_SESSION_RESUME, wire::METHOD_SESSION_RESUME);
+        assert_eq!(METHOD_SESSION_RESTORE, wire::METHOD_SESSION_RESTORE);
+        assert_eq!(METHOD_SESSION_DRAIN, wire::METHOD_SESSION_DRAIN);
+        assert_eq!(METHOD_SESSION_READ, wire::METHOD_SESSION_READ);
     }
 }

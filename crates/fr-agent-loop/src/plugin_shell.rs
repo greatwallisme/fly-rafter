@@ -37,42 +37,18 @@ use serde::Deserialize;
 use crate::inbox::InboxTarget;
 use crate::outbound::Outbound;
 
-/// The provided service name consumers call.
-pub const SERVICE_NAME: &str = "agent";
+/// The provided service name consumers call, and the seven method
+/// selectors of the `'agent'` face — the constants live in the
+/// shell-free [`crate::agent_service`] module (dependent artifacts share
+/// them without pulling this shell's FFI export object into their
+/// link); the re-exports keep this path stable.
+pub use crate::agent_service::{
+    METHOD_CANCEL, METHOD_DESCRIBE, METHOD_FOLLOWUP, METHOD_INJECT, METHOD_SEND, METHOD_STATUS,
+    METHOD_STEER, SERVICE_NAME,
+};
 
 /// The dylib artifact's plugin name.
 pub const PLUGIN_NAME: &str = "fr-agent-loop";
-
-/// Method selector: queue one input with full target and wake control
-/// (`{sessionId, message, target, wakeup}`; dsh `send`).
-pub const METHOD_SEND: u32 = 0;
-
-/// Method selector: queue one steering input (`{sessionId, message}`;
-/// target next-step, wakes the driver; dsh `steer`).
-pub const METHOD_STEER: u32 = 1;
-
-/// Method selector: queue one non-waking injection (`{sessionId,
-/// message}`; target next-step, no wake; dsh `inject`).
-pub const METHOD_INJECT: u32 = 2;
-
-/// Method selector: queue one follow-up input (`{sessionId, message}`;
-/// target next-turn, wakes the driver; dsh `followup`).
-pub const METHOD_FOLLOWUP: u32 = 3;
-
-/// Method selector: request cancellation (`{sessionId, cause,
-/// keepInbox?}`; dsh `cancel`).
-pub const METHOD_CANCEL: u32 = 4;
-
-/// Method selector: shell metadata echo (`{}`).
-pub const METHOD_DESCRIBE: u32 = 5;
-
-/// Method selector: query the session's loop status
-/// (`{sessionId}` → `{status}`).
-///
-/// Decision 46: the non-blocking query face `whenIdle` reconstructs from;
-/// a blocking wait-for-idle require would violate the fast-path
-/// invariant.
-pub const METHOD_STATUS: u32 = 6;
 
 /// Event id the descriptor's listen map binds to `llm/chunk-ready`.
 pub const EV_CHUNK_READY: u32 = 1;
@@ -970,5 +946,21 @@ mod tests {
         shutdown_and_join(&map, &drivers);
         assert!(mailbox.is_shutdown());
         assert_eq!(mailbox.drain_commands(), [] as [super::InboundCommand; 0]);
+    }
+    #[test]
+    fn service_face_constants_match_the_wire_table() {
+        use super::{
+            METHOD_CANCEL, METHOD_DESCRIBE, METHOD_FOLLOWUP, METHOD_INJECT, METHOD_SEND,
+            METHOD_STATUS, METHOD_STEER, SERVICE_NAME,
+        };
+        use fr_wire::services::agent as wire;
+        assert_eq!(SERVICE_NAME, wire::SERVICE_NAME);
+        assert_eq!(METHOD_SEND, wire::METHOD_SEND);
+        assert_eq!(METHOD_STEER, wire::METHOD_STEER);
+        assert_eq!(METHOD_INJECT, wire::METHOD_INJECT);
+        assert_eq!(METHOD_FOLLOWUP, wire::METHOD_FOLLOWUP);
+        assert_eq!(METHOD_CANCEL, wire::METHOD_CANCEL);
+        assert_eq!(METHOD_DESCRIBE, wire::METHOD_DESCRIBE);
+        assert_eq!(METHOD_STATUS, wire::METHOD_STATUS);
     }
 }

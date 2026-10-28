@@ -18,6 +18,8 @@ members = [
     "crates/fr-tools",
     "crates/fr-guard-repeat-reminder",
     "crates/fr-guard-timeout",
+    "crates/fr-approval",
+    "crates/fr-permission-presets",
 ]
 
 [workspace.package]
@@ -63,6 +65,7 @@ fr-timeout = { path = "crates/fr-timeout" }
 fr-net = { path = "crates/fr-net" }
 fr-attachment = { path = "crates/fr-attachment" }
 fr-system-prompt = { path = "crates/fr-system-prompt" }
+fr-agent-loop = { path = "crates/fr-agent-loop" }
 fr-tools = { path = "crates/fr-tools" }
 fr-guard-repeat-reminder = { path = "crates/fr-guard-repeat-reminder" }
 fr-guard-timeout = { path = "crates/fr-guard-timeout" }

@@ -30,8 +30,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::registry::{
-    ExecuteListener, ListenerRegistration, PostExecuteListener, PreExecuteListener, ToolRegistry,
-    ToolsEmitter,
+    ApprovalOutcome, ApprovalSeam, ExecuteListener, ListenerRegistration, PostExecuteListener,
+    PreExecuteListener, ToolRegistry, ToolsEmitter,
 };
 use crate::signal::ToolSignal;
 use crate::types::{
@@ -69,6 +69,11 @@ pub const METHOD_EXECUTE: u32 = 9;
 pub const METHOD_WIRE_SCHEMAS: u32 = 10;
 /// Aborts the caller signal of one in-flight call.
 pub const METHOD_CANCEL: u32 = 11;
+/// Installs or clears the wire approval endpoint (Q109-A).
+///
+/// `{endpoint: {service, method}}` installs; `{}` clears, restoring
+/// the ask degrade. The approval provider's setup installs itself.
+pub const METHOD_SET_APPROVAL: u32 = 12;
 
 /// Mirror of `tools/change` (the tool set changed).
 pub const EVENT_TOOLS_CHANGE: &str = "tools/change";
@@ -456,6 +461,73 @@ pub struct FinishRequest {
 pub struct CancelRequest {
     /// The minted execution identity.
     pub token: ToolExecutionToken,
+}
+
+/// The set-approval request (Q109-A): one wire approval endpoint, or
+/// none to restore the ask degrade.
+#[derive(Debug, Deserialize)]
+pub struct SetApprovalRequest {
+    /// The endpoint to install; absent clears the seam.
+    #[serde(default)]
+    pub endpoint: Option<ApprovalEndpoint>,
+}
+
+/// One approval provider's request endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovalEndpoint {
+    /// The providing dougong service name.
+    pub service: String,
+    /// The method selector for the ask.
+    pub method: u32,
+}
+
+/// The approval seam over one wire endpoint: the ask becomes a
+/// synchronous require; every transport or decode failure resolves
+/// `unavailable` (fail closed, the way a missing answerer fails the dsh
+/// question) and never bypasses the ask.
+struct WireApprovalSeam {
+    seam: HostSeam,
+    endpoint: ApprovalEndpoint,
+}
+
+impl ApprovalSeam for WireApprovalSeam {
+    fn request(
+        &self,
+        exec: &ToolExecution,
+        reason: Option<&str>,
+        display_reason: Option<&str>,
+    ) -> ApprovalOutcome {
+        // The registry's ask gate already refused agent-less calls, so
+        // the agent is present here by construction.
+        let Some(agent) = exec.agent.as_deref() else {
+            return ApprovalOutcome::Unavailable;
+        };
+        let payload = serde_json::json!({
+            "agent": agent,
+            "tool_name": exec.name,
+            "call_id": exec.call_id.as_str(),
+            "reason": reason,
+            "display_reason": display_reason.map(|text| serde_json::json!({ "en": text })),
+        });
+        let Ok(bytes) = serde_json::to_vec(&payload) else {
+            return ApprovalOutcome::Unavailable;
+        };
+        let Ok(reply) = self
+            .seam
+            .require(&self.endpoint.service, self.endpoint.method, &bytes)
+        else {
+            return ApprovalOutcome::Unavailable;
+        };
+        let Ok(parsed) = serde_json::from_slice::<Value>(&reply) else {
+            return ApprovalOutcome::Unavailable;
+        };
+        match parsed.get("outcome").and_then(Value::as_str) {
+            Some("allowed-once") => ApprovalOutcome::AllowedOnce,
+            Some("rejected") => ApprovalOutcome::Rejected,
+            Some("cancelled") => ApprovalOutcome::Cancelled,
+            _ => ApprovalOutcome::Unavailable,
+        }
+    }
 }
 
 /// The cancel reply.
@@ -1098,6 +1170,22 @@ impl ToolsService {
                 let request: CancelRequest = decode(payload, "cancel")?;
                 let aborted = self.registry.abort_caller(request.token);
                 encode(&CancelReply { aborted })
+            }
+            METHOD_SET_APPROVAL => {
+                let request: SetApprovalRequest = decode(payload, "set-approval")?;
+                match request.endpoint {
+                    Some(endpoint) => {
+                        let seam = self.seam.ok_or_else(|| {
+                            ServiceError(
+                                "tools set-approval requires the attached host seam".to_owned(),
+                            )
+                        })?;
+                        self.registry
+                            .set_approval(Some(Arc::new(WireApprovalSeam { seam, endpoint })));
+                    }
+                    None => self.registry.set_approval(None),
+                }
+                encode(&serde_json::json!({}))
             }
             other => Err(ServiceError(format!(
                 "unknown {PLUGIN_NAME} method {other}"

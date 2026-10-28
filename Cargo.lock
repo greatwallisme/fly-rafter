@@ -648,6 +648,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fr-approval"
+version = "0.1.0"
+dependencies = [
+ "dougong-abi",
+ "fr-wire",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fr-attachment"
 version = "0.1.0"
 dependencies = [
@@ -766,6 +776,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fr-permission-presets"
+version = "0.1.0"
+dependencies = [
+ "dougong-abi",
+ "fr-wire",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fr-schema"
 version = "0.1.0"
 dependencies = [
@@ -783,6 +803,7 @@ dependencies = [
  "fr-wire",
  "indexmap",
  "libc",
+ "serde",
  "serde_json",
  "thiserror 2.0.21",
  "tokio",

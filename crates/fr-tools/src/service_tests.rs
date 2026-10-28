@@ -12,8 +12,8 @@ use serde_json::{Value, json};
 use super::service::{
     DeadlineState, ExecEnter, ExecExit, ExecReply, HostSeam, METHOD_CANCEL, METHOD_DESCRIBE,
     METHOD_DISPATCH, METHOD_EXECUTE, METHOD_EXECUTION_MODE, METHOD_FINALIZE, METHOD_PREPARE,
-    METHOD_REGISTER_LISTENER, METHOD_SETTLED, METHOD_UNREGISTER_LISTENER, METHOD_WIRE_SCHEMAS,
-    PLUGIN_NAME, PostEnter, PostExit, PostReply, PreEnter, PreExit, PreReply,
+    METHOD_REGISTER_LISTENER, METHOD_SET_APPROVAL, METHOD_SETTLED, METHOD_UNREGISTER_LISTENER,
+    METHOD_WIRE_SCHEMAS, PLUGIN_NAME, PostEnter, PostExit, PostReply, PreEnter, PreExit, PreReply,
     RegisterListenerRequest, ToolEvents, ToolsService, WireEndpoint, WireOutcome, WireStage,
 };
 use crate::definition::{DefineTool, ToolDefinition};
@@ -224,6 +224,19 @@ fn prepare_body(name: &str) -> Vec<u8> {
     json!({ "call_id": "call-1", "name": name, "arguments": { "value": "x" } })
         .to_string()
         .into_bytes()
+}
+
+/// One prepare request body carrying the agent the ask path routes
+/// through.
+fn prepare_body_with_agent(name: &str) -> Vec<u8> {
+    json!({
+        "call_id": "call-1",
+        "name": name,
+        "arguments": { "value": "x" },
+        "agent": "session-1",
+    })
+    .to_string()
+    .into_bytes()
 }
 
 /// Registers a tool for the service's lifetime (the registration
@@ -717,4 +730,232 @@ fn unregister_listener_detaches() {
         .expect("prepare");
     let parsed: Value = serde_json::from_slice(&reply).expect("json");
     assert_eq!(parsed["kind"], "dispatch", "{parsed}");
+}
+
+/// Installs one approval endpoint returning a fixed outcome word.
+fn install_approval(service: &mut ToolsService, outcome: &str) {
+    let request = json!({
+        "endpoint": { "service": "approval", "method": 1 },
+    });
+    service
+        .serve(METHOD_SET_APPROVAL, request.to_string().as_bytes())
+        .expect("set-approval");
+    let _ = outcome;
+}
+
+/// Registers an in-process pre-execute listener asking for approval;
+/// the returned registration keeps the listener mounted (its `Drop`
+/// deregisters).
+fn ask_listener(service: &ToolsService) -> crate::registry::ListenerRegistration {
+    service.registry().on_pre_execute(Arc::new(|_exec, _next| {
+        crate::types::PreToolDecision::Ask {
+            reason: Some("writes outside the workspace".to_owned()),
+            display_reason: Some("Write outside the workspace?".to_owned()),
+        }
+    }))
+}
+
+#[test]
+fn set_approval_allowed_once_allows_the_ask() {
+    let asked = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let recorder = Arc::clone(&asked);
+    let (_vtable, mut service) = service_with_host(Box::new(move |method, payload| {
+        assert_eq!(method, 1, "approval request selector");
+        let ask: Value = serde_json::from_slice(payload).expect("ask decodes");
+        recorder.lock().expect("lock").push(ask);
+        Ok(serde_json::to_vec(&json!({ "outcome": "allowed-once" })).unwrap())
+    }));
+    register(&service, echo_tool("echo"));
+    install_approval(&mut service, "allowed-once");
+    let _ask = ask_listener(&service);
+    let reply = service
+        .serve(METHOD_PREPARE, &prepare_body_with_agent("echo"))
+        .expect("prepare");
+    let parsed: Value = serde_json::from_slice(&reply).expect("json");
+    assert_eq!(parsed["kind"], "dispatch", "{parsed}");
+    let seen_asks = asked.lock().expect("lock").clone();
+    assert_eq!(seen_asks.len(), 1);
+    assert_eq!(seen_asks[0]["agent"], "session-1");
+    assert_eq!(seen_asks[0]["tool_name"], "echo");
+    assert_eq!(seen_asks[0]["call_id"], "call-1");
+    assert_eq!(seen_asks[0]["reason"], "writes outside the workspace");
+    assert_eq!(
+        seen_asks[0]["display_reason"]["en"],
+        "Write outside the workspace?"
+    );
+}
+
+#[test]
+fn set_approval_rejected_denies_with_the_user_text() {
+    let (_vtable, mut service) = service_with_host(Box::new(|_, _| {
+        Ok(serde_json::to_vec(&json!({ "outcome": "rejected" })).unwrap())
+    }));
+    register(&service, echo_tool("echo"));
+    install_approval(&mut service, "rejected");
+    let _ask = ask_listener(&service);
+    let reply = service
+        .serve(METHOD_PREPARE, &prepare_body_with_agent("echo"))
+        .expect("prepare");
+    let parsed: Value = serde_json::from_slice(&reply).expect("json");
+    assert_eq!(parsed["kind"], "post-result", "{parsed}");
+    assert!(
+        parsed["result"]["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message == "the user rejected tool \"echo\""),
+        "{parsed}"
+    );
+}
+
+#[test]
+fn set_approval_transport_failure_fails_closed_unavailable() {
+    let (_vtable, mut service) =
+        service_with_host(Box::new(|_, _| Err("approval channel is down".to_owned())));
+    register(&service, echo_tool("echo"));
+    install_approval(&mut service, "unused");
+    let _ask = ask_listener(&service);
+    let reply = service
+        .serve(METHOD_PREPARE, &prepare_body_with_agent("echo"))
+        .expect("prepare");
+    let parsed: Value = serde_json::from_slice(&reply).expect("json");
+    assert_eq!(parsed["kind"], "post-result", "{parsed}");
+    assert!(
+        parsed["result"]["error"]["message"]
+            .as_str()
+            .is_some_and(|message| {
+                message == "tool \"echo\" requires approval, but no approval channel is available"
+            }),
+        "{parsed}"
+    );
+}
+
+#[test]
+fn set_approval_rogue_outcome_word_contains_to_unavailable() {
+    let (_vtable, mut service) = service_with_host(Box::new(|_, _| {
+        Ok(serde_json::to_vec(&json!({ "outcome": "allowed-forever" })).unwrap())
+    }));
+    register(&service, echo_tool("echo"));
+    install_approval(&mut service, "rogue");
+    let _ask = ask_listener(&service);
+    let reply = service
+        .serve(METHOD_PREPARE, &prepare_body_with_agent("echo"))
+        .expect("prepare");
+    let parsed: Value = serde_json::from_slice(&reply).expect("json");
+    assert_eq!(parsed["kind"], "post-result", "{parsed}");
+    assert!(
+        parsed["result"]["error"]["message"]
+            .as_str()
+            .is_some_and(|message| {
+                message == "tool \"echo\" requires approval, but no approval channel is available"
+            }),
+        "a rogue word must contain to the fail-closed denial: {parsed}"
+    );
+}
+
+#[test]
+fn set_approval_requires_the_seam_and_absent_clears() {
+    // Without an attached host seam the install refuses.
+    let events = Arc::new(ToolEvents::default());
+    let registry = ToolRegistry::new(
+        ToolPresentationMode::Native,
+        Arc::clone(&events) as Arc<dyn crate::registry::ToolsEmitter>,
+    );
+    let mut service = ToolsService::new(registry, events);
+    let request = json!({ "endpoint": { "service": "approval", "method": 1 } });
+    let error = service
+        .serve(METHOD_SET_APPROVAL, request.to_string().as_bytes())
+        .expect_err("no seam");
+    assert!(
+        error.0.contains("requires the attached host seam"),
+        "{}",
+        error.0
+    );
+
+    // An absent endpoint clears an installed seam: the ask degrade
+    // denies with the ask's own reason (dsh `serviceAsk`: the
+    // not-yet-supported text is the reasonless arm).
+    let (_vtable, mut service) = service_with_host(Box::new(|_, _| {
+        Ok(serde_json::to_vec(&json!({ "outcome": "allowed-once" })).unwrap())
+    }));
+    register(&service, echo_tool("echo"));
+    install_approval(&mut service, "allowed-once");
+    service
+        .serve(METHOD_SET_APPROVAL, json!({}).to_string().as_bytes())
+        .expect("clear");
+    let _ask = ask_listener(&service);
+    let reply = service
+        .serve(METHOD_PREPARE, &prepare_body_with_agent("echo"))
+        .expect("prepare");
+    let parsed: Value = serde_json::from_slice(&reply).expect("json");
+    assert_eq!(parsed["kind"], "post-result", "{parsed}");
+    assert_eq!(
+        parsed["result"]["error"]["message"].as_str(),
+        Some("writes outside the workspace"),
+        "{parsed}"
+    );
+}
+
+#[test]
+fn set_approval_without_an_agent_routes_nowhere() {
+    let asked = Arc::new(std::sync::Mutex::new(0_u32));
+    let recorder = Arc::clone(&asked);
+    let (_vtable, mut service) = service_with_host(Box::new(move |_, _| {
+        *recorder.lock().expect("lock") += 1;
+        Ok(serde_json::to_vec(&json!({ "outcome": "allowed-once" })).unwrap())
+    }));
+    register(&service, echo_tool("echo"));
+    install_approval(&mut service, "allowed-once");
+    let _ask = ask_listener(&service);
+    let reply = service
+        .serve(METHOD_PREPARE, &prepare_body("echo"))
+        .expect("prepare");
+    let parsed: Value = serde_json::from_slice(&reply).expect("json");
+    assert_eq!(parsed["kind"], "post-result", "{parsed}");
+    assert!(
+        parsed["result"]["error"]["message"]
+            .as_str()
+            .is_some_and(|message| {
+                message
+                    == "tool \"echo\" requires approval, but the call has no agent to route it through"
+            }),
+        "{parsed}"
+    );
+    assert_eq!(
+        *asked.lock().expect("lock"),
+        0,
+        "an agent-less ask never reaches the seam"
+    );
+}
+
+#[test]
+fn service_face_constants_match_the_wire_table() {
+    use fr_wire::services::tools as wire;
+    assert_eq!(super::service::SERVICE_NAME, wire::SERVICE_NAME);
+    assert_eq!(super::service::METHOD_DESCRIBE, wire::METHOD_DESCRIBE);
+    assert_eq!(
+        super::service::METHOD_REGISTER_LISTENER,
+        wire::METHOD_REGISTER_LISTENER
+    );
+    assert_eq!(
+        super::service::METHOD_UNREGISTER_LISTENER,
+        wire::METHOD_UNREGISTER_LISTENER
+    );
+    assert_eq!(
+        super::service::METHOD_EXECUTION_MODE,
+        wire::METHOD_EXECUTION_MODE
+    );
+    assert_eq!(super::service::METHOD_PREPARE, wire::METHOD_PREPARE);
+    assert_eq!(super::service::METHOD_DISPATCH, wire::METHOD_DISPATCH);
+    assert_eq!(super::service::METHOD_SETTLED, wire::METHOD_SETTLED);
+    assert_eq!(super::service::METHOD_FINALIZE, wire::METHOD_FINALIZE);
+    assert_eq!(super::service::METHOD_FINISH, wire::METHOD_FINISH);
+    assert_eq!(super::service::METHOD_EXECUTE, wire::METHOD_EXECUTE);
+    assert_eq!(
+        super::service::METHOD_WIRE_SCHEMAS,
+        wire::METHOD_WIRE_SCHEMAS
+    );
+    assert_eq!(super::service::METHOD_CANCEL, wire::METHOD_CANCEL);
+    assert_eq!(
+        super::service::METHOD_SET_APPROVAL,
+        wire::METHOD_SET_APPROVAL
+    );
 }

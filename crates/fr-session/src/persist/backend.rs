@@ -29,7 +29,7 @@ use super::{
 use crate::vocabulary::EventVocabulary;
 
 /// Default physical encoding (dsh `DEFAULT_COMPRESSION`).
-const DEFAULT_COMPRESSION: JsonlCompression = JsonlCompression::Zstd;
+pub(crate) const DEFAULT_COMPRESSION: JsonlCompression = JsonlCompression::Zstd;
 
 /// Maximum listing operations in flight per backend (dsh
 /// `DEFAULT_LIST_CONCURRENCY`).
@@ -624,7 +624,7 @@ project directories",
     {
         // The root read is one operation and cannot contend with itself,
         // so it needs no permit; the bound bites in the phases below.
-        let project_dirs = self.list_project_dirs()?;
+        let project_dirs = project_dirs_under(&self.root)?;
         let project_outcomes = run_bounded(self.list_permits, &project_dirs, |project| {
             Self::list_session_dirs(project.as_path())
         });
@@ -701,26 +701,6 @@ where
 }
 
 impl JsonlBackend {
-    /// The human-readable project directories under the configured root
-    /// (dsh `listProjectDirs`): only an absent root means no sessions.
-    fn list_project_dirs(&self) -> Result<Vec<PathBuf>, PersistError> {
-        let entries = match std::fs::read_dir(&self.root) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(Vec::new());
-            }
-            Err(error) => return Err(error.into()),
-        };
-        let mut dirs = Vec::new();
-        for entry in entries {
-            let entry = entry.map_err(PersistError::Io)?;
-            if entry.file_type().map_err(PersistError::Io)?.is_dir() {
-                dirs.push(entry.path());
-            }
-        }
-        Ok(dirs)
-    }
-
     /// Lists session-owned directories and rejects the obsolete flat-file
     /// layout (dsh `listSessionDirs`).
     fn list_session_dirs(project: &Path) -> Result<Vec<PathBuf>, PersistError> {
@@ -732,7 +712,7 @@ impl JsonlBackend {
             let name = entry.file_name();
             let name = name.to_string_lossy();
             if file_type.is_file() && (name.ends_with(".jsonl") || name.ends_with(".jsonl.zstd")) {
-                return Err(Self::legacy_layout(&entry.path()));
+                return Err(legacy_layout(&entry.path()));
             }
             if file_type.is_dir() {
                 dirs.push(entry.path());
@@ -740,14 +720,75 @@ impl JsonlBackend {
         }
         Ok(dirs)
     }
+}
 
-    /// The dsh `legacyLayout` refusal text.
-    fn legacy_layout(path: &Path) -> PersistError {
-        PersistError::Corruption(format!(
-            "session artifact {} uses the unsupported flat-file layout; use a separate \
+/// The dsh `legacyLayout` refusal text (the free form shared by the
+/// backend methods and the cold-read helpers below).
+fn legacy_layout(path: &Path) -> PersistError {
+    PersistError::Corruption(format!(
+        "session artifact {} uses the unsupported flat-file layout; use a separate \
 root or move it into a project/session directory before loading",
-            serde_json::to_string(&path.display().to_string()).unwrap_or_default(),
-        ))
+        serde_json::to_string(&path.display().to_string()).unwrap_or_default(),
+    ))
+}
+
+/// The human-readable project directories under one root (dsh
+/// `listProjectDirs`): only an absent root means no sessions.
+fn project_dirs_under(root: &Path) -> Result<Vec<PathBuf>, PersistError> {
+    let entries = match std::fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Vec::new());
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let mut dirs = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(PersistError::Io)?;
+        if entry.file_type().map_err(PersistError::Io)?.is_dir() {
+            dirs.push(entry.path());
+        }
+    }
+    Ok(dirs)
+}
+
+/// Rejects the obsolete flat-file layout for one id (dsh
+/// `rejectLegacyFlatArtifact`).
+fn reject_legacy_flat(project: &Path, id: &SessionId) -> Result<(), PersistError> {
+    let encoded = super::paths::encode_segment(id.as_str())?;
+    for compression in [JsonlCompression::Zstd, JsonlCompression::None] {
+        let path = project.join(format!("{encoded}{}", filename::log_suffix(compression)));
+        if probe_exists(&path)? {
+            return Err(legacy_layout(&path));
+        }
+    }
+    Ok(())
+}
+
+/// Finds the unique authoritative generation for an id across project
+/// directories (dsh `findLog`) — the backend-free form the projection
+/// relay's cold reads share (Q110′A′).
+fn find_stored_generation(
+    root: &Path,
+    compression: JsonlCompression,
+    id: &SessionId,
+) -> Result<Option<ResolvedGeneration>, PersistError> {
+    let mut matches = Vec::new();
+    for project in project_dirs_under(root)? {
+        reject_legacy_flat(project.as_path(), id)?;
+        let encoded = super::paths::encode_segment(id.as_str())?;
+        let dir = project.join(encoded);
+        if let Some(selected) = resolve_generation_in_directory(&dir, compression)? {
+            matches.push(selected);
+        }
+    }
+    match matches.len() {
+        0 => Ok(None),
+        1 => Ok(Some(matches.remove(0))),
+        _ => Err(PersistError::Corruption(format!(
+            "duplicate JSONL session id \"{}\" appears in multiple project directories",
+            id.as_str()
+        ))),
     }
 }
 
@@ -755,36 +796,7 @@ impl JsonlBackend {
     /// Finds the unique authoritative generation for an id across project
     /// directories (dsh `findLog`).
     fn find_log(&self, id: &SessionId) -> Result<Option<ResolvedGeneration>, PersistError> {
-        let mut matches = Vec::new();
-        for project in self.list_project_dirs()? {
-            Self::reject_legacy_flat(project.as_path(), id)?;
-            let encoded = super::paths::encode_segment(id.as_str())?;
-            let dir = project.join(encoded);
-            if let Some(selected) = resolve_generation_in_directory(&dir, self.compression)? {
-                matches.push(selected);
-            }
-        }
-        match matches.len() {
-            0 => Ok(None),
-            1 => Ok(Some(matches.remove(0))),
-            _ => Err(PersistError::Corruption(format!(
-                "duplicate JSONL session id \"{}\" appears in multiple project directories",
-                id.as_str()
-            ))),
-        }
-    }
-
-    /// Rejects the obsolete flat-file layout for one id (dsh
-    /// `rejectLegacyFlatArtifact`).
-    fn reject_legacy_flat(project: &Path, id: &SessionId) -> Result<(), PersistError> {
-        let encoded = super::paths::encode_segment(id.as_str())?;
-        for compression in [JsonlCompression::Zstd, JsonlCompression::None] {
-            let path = project.join(format!("{encoded}{}", filename::log_suffix(compression)));
-            if probe_exists(&path)? {
-                return Err(Self::legacy_layout(&path));
-            }
-        }
-        Ok(())
+        find_stored_generation(&self.root, self.compression, id)
     }
 
     /// Rejects a root that already holds the other physical encoding's
@@ -1182,6 +1194,35 @@ fn materialize_create_header(header: &SessionHeader) -> Result<SessionHeader, Pe
 /// The absent-session refusal (dsh `SessionPersistenceNotFoundError`).
 fn not_found(id: &SessionId) -> PersistError {
     PersistError::NotFound(format!("session \"{}\" not found", id.as_str()))
+}
+
+/// Cold-reads one stored session's decoded log — header, inherited count,
+/// and events — without opening a handle or taking any lease: the
+/// `session-projections` relay's read source (Q110′A′: the crate reads
+/// the log; the registry holds no cell in M1, so every read re-scans).
+///
+/// The vocabulary snapshot is taken per call, so events of types declared
+/// after this backend-free path was set up still decode. `Ok(None)` marks
+/// a session with no stored log (an absent root is a fresh deployment,
+/// not a failure).
+///
+/// # Errors
+///
+/// Returns the persistence-layer refusal (encoding, generation gate,
+/// decode, identity) verbatim.
+pub(crate) fn cold_read_stored_log(
+    root: &Path,
+    compression: JsonlCompression,
+    known: EventVocabulary,
+    id: &SessionId,
+) -> Result<Option<super::read::ReadOutcome>, PersistError> {
+    let Some(selected) = find_stored_generation(root, compression, id)? else {
+        return Ok(None);
+    };
+    JsonlBackend::generation_version_gate(id, &selected)?;
+    let (raw, _identity) = read_stable_bytes(&selected.source_path)?;
+    super::read::decode_stored_log(root, &selected.source_path, &raw, id, compression, known)
+        .map(Some)
 }
 
 // Rust guideline compliant 2026-10-23

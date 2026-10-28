@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 14 批 1 全落（1a-1f+1e，dougong 0.4.0 吸收完），下一动作=批 2a fr-approval+fr-permission-presets+fr-session projections 服务面（Q104′A 独立 crate/Q105′A 立缝）→ 批 2b fr-sandbox（win32 全量+交叉编译门）→ 批 3 三 spec 绑定+七步流 4-7。批 1e 已落：fr-tools 服务面（12 方法+端点适配器 F3 词表+两腿协议）+三壳（grant 注册流）+loop emit user-admitted（F4）；workspace 961 tests 四门绿；dougong 0.4.0 升级全仓吸收（HostExports grant 臂+abiVersion 常量化）。
+批 2a 全落（波 1+波 2；波 2=Q110′A′ 实装：fr-wire 三契约模块+fr-session projections 域/壳 1000+ 号段 root 载体+fr-permission-presets 新 crate；workspace 1035 tests 四门绿，工作树未提交）。**下一动作=批 2b fr-sandbox**（sandbox-policy 服务面 owner 钉等值+三预设表+FR_PERMISSION_MODE 覆盖+后端链 bubblewrap→Landlock/Seatbelt/ACL+sandbox-unavailable fail-closed；bundle 行已在）→ 批 3 TOOLS/APPROVAL/SANDBOX 三 spec 绑定+七步流 4-7。
 
 ## Current Phase
 Phase 14（fr-tools + fr-approval + fr-sandbox）——批 0 真源全读（Q91-A 勘误后先行；切片 8 已闭环）
@@ -119,8 +119,8 @@ Phase 14（fr-tools + fr-approval + fr-sandbox）——批 0 真源全读（Q91-
 - [ ] 执行管线五段（createExecution 冻结 → pre-execute waterfall（ask 交 ApprovalService）→ guards 单调串 → tools/execute waterfall → 工具体 → post-execute）；ptc 坍缩调用策略前置终结；post-execute 双替换 TypeError/失败结果禁 value 替换/finalize 快照冻结；成功结果过 output schema 校验
 - [ ] 调度（isConcurrencySafe 严格 true 才 parallel；exclusive 组=单调用屏障；池上限 max-parallel-tool-calls 默认 10；lazy 重分类；concludeTurn 成功门控）
 - [ ] fr-approval：ApprovalPolicy ask/never、request() fail-closed 'unavailable' 归一化、approval/policy 事件、'never' dispatch 前自判、abort 竞速 cancelled、切换文案逐字
-- [ ] fr-permission-presets（Q104′A 独立 crate）：双 knob 捆绑表+catalog+set/current/derive+pinInitialPermission 播种+/permission 命令行为面（注册随 Phase 18 fr-commands 翻转）
-- [ ] fr-session 增 'session-projections' 服务面（Q105′A：register/stateOf；sandboxMode/permissions 投影消费者）
+- [x] fr-permission-presets（Q104′A 独立 crate）：双 knob 捆绑表+catalog+set/current/derive+pinInitialPermission 播种+/permission 命令行为面（注册随 Phase 18 fr-commands 翻转）——批 2a 波 2 落（2026-10-29，Q110′A′ 自持折叠）
+- [x] fr-session 增 'session-projections' 服务面（Q105′A：register/stateOf；sandboxMode/permissions 投影消费者）——批 2a 波 2 落（1000+ 号段+root 载体冷读继电）
 - [ ] fr-sandbox：三预设表、FR_PERMISSION_MODE 覆盖、后端链 bubblewrap→Landlock/Seatbelt/ACL、sandbox-unavailable fail-closed
 - [ ] 对照 REQ-FR-TOOLS/APPROVAL/SANDBOX 场景逐条落测试
 - **Status:** pending
@@ -179,6 +179,7 @@ Phase 14（fr-tools + fr-approval + fr-sandbox）——批 0 真源全读（Q91-
 | Q103′A（2026-10-28）PRD 4.5 增三行+TOOLS spec 边界扩两 guard crate | Q92-A 判例同形；守卫场景绑 guard crate 真实测试 |
 | Q104′A（2026-10-28）fr-permission-presets 独立 crate（撤销 Q98-B 的 fr-approval 内挂记录） | dsh 独立包 1:1；审批与预设两策略独立演进 |
 | Q105′A（2026-10-28）'session-projections' 服务现在立缝（fr-session provide，register/stateOf） | dsh 同域独立服务；Phase 18 ACP 零重构接入 |
+| Q110′A′（2026-10-29）投影折叠所有权=注册者自持折叠（自读=read 尾拉+本地折叠；第三方=fr-session 继电纯折叠端点；注册表 M1 无 cell） | dougong 同步 wire 锁序三路证明注册表侧折叠不可服务自读；单实现零漂移（B′ 双份折叠弃） |
 
 ## Errors Encountered
 | Error | Resolution |

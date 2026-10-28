@@ -11,6 +11,7 @@ pub mod error;
 pub mod fork;
 pub mod persist;
 pub mod plugin_shell;
+pub mod projections;
 pub mod repair;
 pub mod service;
 pub mod session;

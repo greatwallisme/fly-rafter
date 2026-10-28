@@ -15,6 +15,7 @@ pub mod content;
 pub mod event;
 pub mod ids;
 pub mod message;
+pub mod services;
 pub mod stream;
 
 pub use call_config::{
