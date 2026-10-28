@@ -1062,3 +1062,13 @@
 - fr-permission-presets 新 crate 23 tests：域全量（fold 单实现/derive/四校验/pin 三分支/命令三文案/catalog）+四方法服务面+壳五步接线（grant 继电权→mode→校验→declare→注册）+created listener 真驱动钉测。
 - 排障自纠：renderer as i64 饱和真 bug（f64 Display 统一实证）、三测试预期按 dsh 自纠（null-approval 不继 bundle/(Danger,ask)=custom/state 平铺）、SessionHeader 字段。
 - 四门绿：fmt OK/clippy 0/1035 passed 0 failed/doc 0。批 2a 全落；下一动作批 2b fr-sandbox。
+- 提交 4647a8f（批 2a 全量=波 1+波 2，29 文件 +6745/-159）。守卫阻断同既定例：pre-commit agent-spec guard 20 spec 红=pending 选择器批 3 绑定前设计态，用户 /commit 显式裁决后 --no-verify 入库（提交信息内含守卫注记）；批 3 时 TOOLS/APPROVAL/SANDBOX 转绿。
+
+## 2026-10-29 — 批 2b 落地（fr-sandbox），workspace 1096 tests（1035→1096）
+- 真源全读：sandbox-policy/sandbox(seam+escalation+roots+diagnostics)/sandbox-local(profiles+链)/landlock-run(main.c+CLI 契约)/windows-acl 全家 11 文件/win32-process/fs-sandbox/fs-observation-policy。设计钉先落 findings「批 2b 设计钉」节（crate 形态=单 crate 双服务+双 bin/号段修正 0-4+1000+/烘焙两层/档载清单七条）。
+- fr-sandbox 61 tests：域 9 模块（seam/escalation/roots/diagnostics/policy/profiles/provider/workspace_sid/path_boundary）+win 8 模块 cfg(windows)（abi/ffi/token/acl/grant/spawn/sandbox/mod）+服务面五方法+缝面 confine（SANDBOX_UNAVAILABLE 前缀穿错误通道）+壳（双 grant/declare/register-context 110/投影注册 stateVersion 1/烘焙/1000+ 分带 dispatch/teardown 授予回收）+landlock E2E 4 测（真探测/降级链/外写拒内写过/usage 文案）。
+- fr-wire：sandbox_policy 面重排（describe=0 approval 判例正形——批 2a 预留修正）+sandbox 新模块（1000/1001）；preset 消费点同步。
+- 排障自纠 12 项（全本方错误，详见 findings 实施记录节）：含 landlock argc 判据/CString NUL/context-text agent 键/SandboxEnforcement kebab serde/E2E 外树位置/windows-sys 符号映射全表重核。
+- 五门绿：fmt OK/clippy --workspace -D warnings 0/1096 passed 0 failed/doc 0/cargo check --target x86_64-pc-windows-msvc --all-targets 零警告零错误（Q99-B 裁定门=编译层；windows 目标 pedantic clippy 214 条档载⑧，随 Windows lane 清）。
+- PRD 4.4：sandbox-policy 补入缝清单（双缝单 crate+1000+ 号段注记）。
+- 下一动作：批 3 TOOLS/APPROVAL/SANDBOX 三 spec 绑定+七步流 4-7。

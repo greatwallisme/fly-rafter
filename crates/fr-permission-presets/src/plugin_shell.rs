@@ -555,7 +555,9 @@ mod tests {
             method,
             payload,
         });
-        let reply: &[u8] = if service == "sandbox-policy" && method == 2 {
+        let reply: &[u8] = if service == "sandbox-policy"
+            && method == fr_wire::services::sandbox_policy::METHOD_SANDBOX_MODE
+        {
             br#"{"mode":"workspace-write"}"#
         } else {
             br"{}"
@@ -648,7 +650,10 @@ mod tests {
         assert_eq!(
             targets,
             vec![
-                ("sandbox-policy".to_owned(), 2),
+                (
+                    "sandbox-policy".to_owned(),
+                    fr_wire::services::sandbox_policy::METHOD_SANDBOX_MODE
+                ),
                 ("session-persistence".to_owned(), 0),
                 ("session-projections".to_owned(), 1000),
             ],

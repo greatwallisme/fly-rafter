@@ -170,20 +170,47 @@ pub mod permission_presets {
     pub const METHOD_COMMAND: u32 = 3;
 }
 
-/// The `'sandbox-policy'` service face (owner crate `fr-sandbox`, batch 2b;
-/// the constants below are the subset `fr-permission-presets` consumes —
-/// the owner crate pins equality when it lands).
+/// The `'sandbox-policy'` service face (owner crate `fr-sandbox`).
+///
+/// Batch 2b owner correction: batch 2a shipped a consumed subset with a
+/// speculative `0 = declare-event-types` reservation, but the owner face
+/// follows the approval precedent (a policy seam declares its own events
+/// through `'session-persistence'`, it does not accept declarations), so
+/// `describe` owns selector 0.
 pub mod sandbox_policy {
     /// The provided service name consumers inject.
     pub const SERVICE_NAME: &str = "sandbox-policy";
-    /// Declare durable event type names (the event-declaring convention
-    /// reserves selectors 0/1 for declare/describe).
-    pub const METHOD_DECLARE_EVENT_TYPES: u32 = 0;
     /// Shell metadata echo.
-    pub const METHOD_DESCRIBE: u32 = 1;
+    pub const METHOD_DESCRIBE: u32 = 0;
     /// Read the deployment's default sandbox mode (`{}` → `{mode}`) — the
     /// capability fact dsh exposes as `ctx.shell.sandboxMode`.
-    pub const METHOD_SANDBOX_MODE: u32 = 2;
+    pub const METHOD_SANDBOX_MODE: u32 = 1;
+    /// Resolve one capability call's complete policy
+    /// (`{session?, mode?}` → `{mode, workspace_root, session_id?}`).
+    pub const METHOD_RESOLVE: u32 = 2;
+    /// The `sandbox:policy` runtime-context endpoint (`{agent?}` →
+    /// `{text}`; the approval `context-text` precedent).
+    pub const METHOD_CONTEXT_TEXT: u32 = 3;
+    /// The `sandboxMode` projection's pure folding endpoint — the full log
+    /// (`{header, inheritedEventCount, events}`) to `{state}` (Q110′A′).
+    pub const METHOD_FOLD: u32 = 4;
+}
+
+/// The `'sandbox'` process-confinement seam face (owner crate `fr-sandbox`).
+///
+/// Batch 2b band judgment: this service rides the same export table as
+/// `sandbox-policy`, so its selectors occupy the 1000+ band (the
+/// `session-projections` precedent — the dynamic channel hands a plugin
+/// only the method selector).
+pub mod sandbox {
+    /// The provided service name consumers inject.
+    pub const SERVICE_NAME: &str = "sandbox";
+    /// Shell metadata echo.
+    pub const METHOD_DESCRIBE: u32 = 1000;
+    /// Wrap one exact argv confined under a per-call policy
+    /// (`{argv, policy}` → the `ConfinedArgv` wire shape) or fail closed
+    /// with `sandbox-unavailable`.
+    pub const METHOD_CONFINE: u32 = 1001;
 }
 
 // Rust guideline compliant 2026-10-29

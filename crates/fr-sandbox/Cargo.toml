@@ -1,0 +1,53 @@
+[package]
+name = "fr-sandbox"
+description = "Fly Rafter sandbox policy home and process-confinement seam: the three-mode vocabulary, per-session resolution, and the fail-closed backend chain (dsh sandbox-policy + sandbox + sandbox-local parity)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# Q99-B full port: the Windows ACL backend and its runner ride cfg(windows)
+# modules; the Landlock launcher rides cfg(target_os = "linux"). Both bins
+# compile as empty shells elsewhere so the cross-compile gate stays green.
+[[bin]]
+name = "fr-landlock-run"
+path = "src/bin/fr-landlock-run.rs"
+
+[[bin]]
+name = "fr-windows-acl-run"
+path = "src/bin/fr-windows-acl-run.rs"
+
+[dependencies]
+dougong-abi.workspace = true
+fr-wire.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Environment",
+    "Win32_System_IO",
+    "Win32_System_JobObjects",
+    "Win32_System_Memory",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
+[lints]
+workspace = true

@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-批 2a 全落（波 1+波 2；波 2=Q110′A′ 实装：fr-wire 三契约模块+fr-session projections 域/壳 1000+ 号段 root 载体+fr-permission-presets 新 crate；workspace 1035 tests 四门绿，工作树未提交）。**下一动作=批 2b fr-sandbox**（sandbox-policy 服务面 owner 钉等值+三预设表+FR_PERMISSION_MODE 覆盖+后端链 bubblewrap→Landlock/Seatbelt/ACL+sandbox-unavailable fail-closed；bundle 行已在）→ 批 3 TOOLS/APPROVAL/SANDBOX 三 spec 绑定+七步流 4-7。
+批 2b 全落（fr-sandbox 61 tests：域+win 全量 cfg(windows)+双 bin+服务面/缝面/壳+landlock E2E；fr-wire 号段修正；workspace 1096 tests 五门绿——含 Q99-B 交叉编译检查门 x86_64-pc-windows-msvc 零警告；工作树未提交）。**下一动作=批 3**：TOOLS/APPROVAL/SANDBOX 三 spec 绑定真实测试选择器（替换 pending_*）→ 七步流 4-7（lifecycle 修码循环→guard 全绿→explain→stamp 归档）。
 
 ## Current Phase
 Phase 14（fr-tools + fr-approval + fr-sandbox）——批 0 真源全读（Q91-A 勘误后先行；切片 8 已闭环）

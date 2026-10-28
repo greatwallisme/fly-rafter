@@ -20,6 +20,7 @@ members = [
     "crates/fr-guard-timeout",
     "crates/fr-approval",
     "crates/fr-permission-presets",
+    "crates/fr-sandbox",
 ]
 
 [workspace.package]
