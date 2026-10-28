@@ -1037,3 +1037,4 @@
 - 两 guard 壳：timeout（grant→注册→两腿 arm/替换）8 测；repeat-reminder（grant→注册→observe/fold+user-admitted 重置）7 测+fold_reminder 提取。
 - loop：emit_user_admitted 闭包+谓词+2 钉测；0.4.0 吸收（9 文件 grant 臂+8 处 abiVersion 常量化+system-prompt describe 本体）。
 - 四门绿：fmt OK/clippy 0/961 passed 0 failed/doc 0。批 1 全落；下一动作批 2a。
+- 提交 95b0ec1（批 1e）。守卫阻断裁决记录：pre-commit agent-spec guard 对 20 spec 红=pending 选择器批 3 绑定前设计态；用户 /commit 显式裁决后 --no-verify 入库（提交信息内含守卫注记），与此前批次同例；批 3 时 TOOLS/APPROVAL/SANDBOX 转绿。
