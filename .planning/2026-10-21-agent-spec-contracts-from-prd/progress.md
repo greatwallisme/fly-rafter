@@ -1072,3 +1072,4 @@
 - 五门绿：fmt OK/clippy --workspace -D warnings 0/1096 passed 0 failed/doc 0/cargo check --target x86_64-pc-windows-msvc --all-targets 零警告零错误（Q99-B 裁定门=编译层；windows 目标 pedantic clippy 214 条档载⑧，随 Windows lane 清）。
 - PRD 4.4：sandbox-policy 补入缝清单（双缝单 crate+1000+ 号段注记）。
 - 下一动作：批 3 TOOLS/APPROVAL/SANDBOX 三 spec 绑定+七步流 4-7。
+- 提交 dbedc8b（批 2b 全量，32 文件 +9102/-12）。守卫阻断同既定例：pre-commit agent-spec guard 20 spec 红=pending 选择器批 3 绑定前设计态，用户 /commit 显式裁决后 --no-verify 入库（提交信息内含守卫注记+档载⑧⑨）；批 3 时 TOOLS/APPROVAL/SANDBOX 转绿。
