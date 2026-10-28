@@ -151,7 +151,8 @@ fn js_scalar_to_string(value: &Value) -> String {
     clippy::float_cmp,
     reason = "JS Number parity: the integer-form probe compares the exact fixpoint"
 )]
-fn js_number_to_string(n: &Number) -> String {
+#[must_use]
+pub fn js_number_to_string(n: &Number) -> String {
     if let Some(x) = n.as_f64()
         && !n.is_u64()
         && !n.is_i64()

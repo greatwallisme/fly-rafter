@@ -1,0 +1,22 @@
+[package]
+name = "fr-guard-timeout"
+description = "Fly Rafter cooperative tool-call timeout guard: arms each tool's declared budget and maps its own expiry to TOOL_TIMEOUT without racing or abandoning the body (dsh guard/timeout-policy parity)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+fr-tools.workspace = true
+fr-timeout.workspace = true
+fr-wire.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
