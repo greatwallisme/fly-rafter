@@ -173,6 +173,19 @@ impl Outbound {
     }
 }
 
+/// Test double for the host side of `grant` (the kernel validates grant
+/// semantics under its own tests; the loop's doubles only accept).
+#[cfg(test)]
+pub(crate) const unsafe extern "C" fn quiet_grant(
+    _host: *mut std::ffi::c_void,
+    _target: *const u8,
+    _target_len: usize,
+    _granted: *const u8,
+    _granted_len: usize,
+) -> i32 {
+    dougong_abi::STATUS_OK
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Outbound, RequireError};
@@ -303,6 +316,7 @@ mod tests {
         emit: unsafe extern "C" fn(*mut c_void, *const u8, usize, *const u8, usize) -> i32,
     ) -> Outbound {
         Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
             host_handle,
             require,
             emit,

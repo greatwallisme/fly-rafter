@@ -29,9 +29,9 @@ use crate::signal::ToolSignal;
 use crate::types::{
     PostToolDecision, PreToolDecision, RUN_CODE_NAME, ToolError, ToolExecution,
     ToolExecutionFailure, ToolExecutionInput, ToolExecutionMode, ToolExecutionResult,
-    ToolExecutionSuccess, ToolFailure, ToolGuard, ToolPresentationMode, ToolSchema,
-    invalid_output_error, text_content, tool_aborted_before_dispatch_result, tool_aborted_result,
-    unknown_tool_error,
+    ToolExecutionSuccess, ToolExecutionToken, ToolFailure, ToolGuard, ToolPresentationMode,
+    ToolSchema, invalid_output_error, text_content, tool_aborted_before_dispatch_result,
+    tool_aborted_result, unknown_tool_error,
 };
 
 /// One failed registration (dsh `register` throws).
@@ -611,6 +611,19 @@ impl ToolRegistry {
             }
             ScheduledPreparation::FinalResult(exec, result) => self.finish(&exec, result),
         }
+    }
+
+    /// Aborts the caller-owned signal of one in-flight call (the
+    /// service-face cancel path); returns whether the token was live.
+    pub fn abort_caller(&self, token: ToolExecutionToken) -> bool {
+        let signal = recover(&self.state)
+            .executions
+            .get(&token)
+            .map(|call| Arc::clone(&call.caller_signal));
+        signal.is_some_and(|signal| {
+            signal.abort_caller();
+            true
+        })
     }
 
     /// Stage 1: materialize the execution and run the ordered pre-execute

@@ -272,7 +272,7 @@ mod tests {
         let reply: serde_json::Value = serde_json::from_slice(&reply).expect("json");
         assert_eq!(reply["name"], PLUGIN_NAME);
         assert_eq!(reply["service"], SERVICE_NAME);
-        assert_eq!(reply["abiVersion"], 3);
+        assert_eq!(reply["abiVersion"], dougong_abi::ABI_VERSION);
     }
 
     #[test]

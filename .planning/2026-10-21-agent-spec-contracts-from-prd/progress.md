@@ -977,3 +977,63 @@
 - 用户原则重申加严并固化持久记忆（plugin-first-no-fat-shared-libs 更新：权重准则=禁实现便利论据、只以使用/维护/升级方便为准，Q100 撤回事件反例存档）。
 - 六裁决落档：findings（Q100′A-Q105′A+批结构定稿+遗留呈报点：PRD 4.4 漏 dsh sandbox-policy 名随批 2 确认）；task_plan（Decisions +6 行、Phase 14 bullets 增 guard/preset/projections 三条、Next Step→批 1）；PRD（4.5 增三 crate 行、4.4 补 session-projections+agent/user-admitted 标注、9.2 补监听注册面段）；TOOLS spec（Decisions +监听注册面条、Boundaries 扩两 guard crate）；CLAUDE.md 下一片句更新。
 - 批 0 全部裁决（Q91-Q97、Q98-B/Q99-B、Q100′-Q105′）闭环。下一动作：批 1 fr-tools+两 guard crate 开写。
+
+## 2026-10-28 — Phase 14 批 1a：fr-tools crate 落地（schema 双层），workspace 896 tests（862→896）
+- crates/fr-tools 骨架（cdylib+rlib 判例）+ json_schema.rs（强制子集层：walk 任务栈迭代+值校验帧机+JS stringify 助手+JsonSchemaError）+ schema.rs（作者 DSL 帧式编译机：dsh 任务图的 Rust 化——父帧持半成品、完成上行投递；ToolArgsError+validate_args）。34 tests。
+- 子集 walk 拆 check_node_keys/check_one_of_node/check_typed_node；check_value 拆 open_object_frame/open_array_frame/scalar_shape_violation；dispatch_node 拆 dispatch_one_of（too_many_lines 零妥协）。
+- 排障自纠（3-strike 内）：json! 宏插值走 to_value 递归深拷贝（20k 深构造即炸栈，改手工 Map 移动构造）；深测断言错预期引发 panic-unwind 递归 Drop 炸栈（serde_json Drop 固有边界→测试 mem::forget 规避，档载 findings）；check_value 重构丢标量合法路径=死循环 bug（dead_code 告警逮住即修）；测试预期自纠三（oneOf 违例次序=[短分支,兄弟键]/additionalProperties 缺席无违例/属性子路径不带 arguments 根标签）。
+- 下一动作：批 1b presentation.rs → 1c registry → 1d 管线五段+调度 → 1e 服务面+壳 → 1f 两 guard crate+loop user-admitted emit。
+
+## 2026-10-28 — Phase 14 批 1b/1c/1d：presentation+types/signal/definition+registry 管线五段，workspace 919 tests（896→919）
+- 1b presentation.rs（389 行类型词表 wire 化：card/shape/kind 判别+camelCase 字段+缺席省略，4 钉测往返）。
+- 1c types.rs（身份/错误族/决策/结果/模式+取消文案三件+unknown/invalid-output 构造）+ signal.rs（ToolSignal 递归轮询熔接=无中继线程，fuse 同对象塌缩）+ definition.rs（ToolDefinition trait+ToolOutput+DefineTool 构建器：作者 spec 编译+timeoutMs 校验+args 硬校验+呈现软包装）。
+- 1d registry.rs（dsh ToolRuntime 同步化移植）：注册四错文案/restrict scoped-only 预留/guard 单调串/get+collapse+resolveExecution/wire_schemas native+ptc（runtime 缺席文案）/execution_mode fail-closed 分类/管线五段（createExecution 冻结+finalizer/projector 快照（collapsed 语义）→prepare（waterfall 默认 allow+ask→ApprovalSeam 五文案+cancel+guard 仅 allow+caller 复查）→dispatch（execute waterfall Canonical/Authored 双轨+normalize 重渲染+deferred 合并+取消择码）→finalize（projectContent+postExecute block/accept 家族+双 TypeError）→finish（finalizeContent+notify））。调度四段面（prepare_scheduled/dispatch_scheduled/finalize_scheduled/finish）+execute 复合。23 钉测（stage 序/deny 短路仍过 post/ask 全族/守卫仅 allow/abort 前后码/authored 重渲染/post 家族/block 空文案 fallback/panic 包含/invalid output+args/deferred+concludes/wire 双模/collapse 路由文案/分类 fail-closed/呈现软包）。
+- 排障自纠：钩子逮 transmute 桩与占位脚手架（重写干净 StubTransport）；borrow 冲突换 next(view) 传参式续延（消线程局部钩子）；Err 大小 Box 化；三测试预期自纠（ask 带 reason 用 reason 本身/abort 时序在 body 后/panic 文案联动）。
+- 门禁：crate 四门绿+workspace 四门绿（919 passed 0 failed）。
+- 下一动作：批 1e 服务面+壳（Q101′A 端点监听协议：continue-token 往返）→ 批 1f 两 guard crate+loop user-admitted emit。
+
+## 2026-10-28 — Phase 14 批 1f：两 guard crate（Q100′A 落地），workspace 929 tests（919→929）
+- fr-guard-timeout（dsh guard/timeout-policy 81 行）：TOOL_TIMEOUT 码+tool_timeout_result（`Error: tool call timed out after ${ms}ms` JS 数字格式）+timeout_listener（无预算直透/预算臂=fr-timeout deadline 派生+一次性 checker 线程激活被动到期（dsh 实时钟表等价）+view.signal 熔接换入/body 后还原/自家计时器 scope-by-code 判定（timeout_of(TOOL_TIMEOUT)）才替换/Authored）。4 钉测（透传/自家到期替换文案+info/预算内保留/还原契约 ptr_eq 链探针）。
+- fr-guard-repeat-reminder（dsh guard/repeat-tool-reminder 240 行）：try_new 校验四文案逐字（thresholds 空表/非整数<2 带渲染值/重复/argumentsPreviewChars）+默认 [3,5,8] 排序+include/exclude 通配编译（dsh 元字符表锚定正则）+canonicalize（深键排序+stringify）+previewArguments 头截断 `… (+N more chars)`+GENTLE_REMINDER/detailedReminder 逐字+链推进（un-agented 不计/未 tracked 透明不计数不重置/thresholds[0]=gentle 其余 detailed）+listener（先计数后 delegate 两变体折入前插 reminder）+reset_chain（Q102′A agent/user-admitted 钩子面，壳随 1e）+reminder=wire UserMessage（source kind repeat-tool-reminder/form notice/summary `name × count`）。6 钉测（校验文案/三档升级含 3 默 5 详细/序 canonical+换参重置+无 agent 不计+重置/通配双向/denied 计数+block 保 feedback 仍载提醒/预览截断）。
+- fr-tools 侧导出 js_number_to_string（pub+must_use）。两 crate cdylib+rlib 骨架判例（dylib 壳与端点注册随批 1e 服务面装配）。
+- 排障自纠：钩子多次逮占位/shim/哑构造（重写干净）；map_or_else fn-item 推断失败改 expect 注记；测试自纠一（exclude 半区 echo 需三次调用才触发）。
+- 门禁：crate 双绿+workspace 四门绿（929 passed 0 failed）。
+- 批 1 余：批 1e 服务面+壳（Q101′A 端点监听协议：register_listener 端点化+continue-token 往返+dylib 壳三件+agent/user-admitted emit loop 侧补）。批 2a/2b/批 3 未动。
+
+## 2026-10-28 — 批 1e 会话恢复+前置核查
+- 技能激活：dougong-plugin-dev（dylib 壳+服务面）+rust-guidelines（00 已读）；计划三件恢复（resolve-plan-dir 直指 2026-10-21-agent-spec-contracts-from-prd）。
+- 前置核查落 findings「批 1e 前置事实核查」节八条：inject 门执法（require_impl:526/Activation.inject descriptor 独占/loader 不合并）、事件 rendezvous 死路证明（wait-cycle→REENTRANCY）、dsh 重置谓词（:236-239 some(user 源)即删链恒 next）、ToolsFace 六面（driver.rs:334-367）、serde 缺口四型、caller signal 不可过 wire（cancel 方法化）、壳判例结构（fr-system-prompt 293 行）、guard 依赖现状（fr-tools rlib 已链）。
+- 发现并呈报 F1：inject 静态门与 Q101′A「第三方零改接入」冲突；连带 fr-system-prompt Q86-A 端点面同患（inject=[]，Phase 18 消费者到来即爆）。
+- 批 1e 四分叉（F1 inject 落法/F2 guard 服务名/F3 execute 段指令词表/F4 user-admitted 载点载荷）集中呈报待裁；未动任何代码。
+
+## 2026-10-28 — F1-F4 裁决落档+dougong 升级需求文档交付
+- 用户裁决：F2=B（guard-timeout/guard-repeat-reminder）；F3=A；F4=A。F1 驳回首轮呈报（「升级 dougong=重/时序不可控」一句话打发=甩锅），令重析+出详细升级需求文档（脱离上下文可读：功能/效果/判断标准）。
+- 重析事实补充（findings F1 重分析节）：fr 经 crates.io 依赖 dougong*="0.3.0"，0.3.0 引入=2172682（切片 E），Q86-A/Q100′A 机制注均在其后裁决而未读 require_impl:526——升级窗口没提系我未核查执法点，已认账。grant 机制定稿：HostExports 第 4 字段 grant(target,granted)+宿主授权表（三元组：授予者激活/目标 Invoker/服务名）+require 判定序扩展（静态 inject→名级索引→Invoker 比对，两级优先序保真）+teardown 清理。
+- 交付：~/project/dougong/doc/maintenance/grant_requirements.md（294 行，ABI v4 提案草案 v1；镜像本仓 v3 需求文档文风：§1 背景五事实+三路径/§2 FR-V4-A*B*C*D*/§3 E1 矩阵 11 场景+E4 下游验收（第三方零改接入钉测=判死活）/§4 D-V4-1 目标身份·D-V4-2 授予时解析·D-V4-3 非法参数归类/§5 九项结构性排除/§6 F* 文档同步（D31+附录 A+skill）/§7 风险与变更控制）。行号基准 9b6654a 全核验（ABI_VERSION:229/HostExports:301-323/require_impl:525-536/Activation:322-335/inject 解析:1338/context 两级:599-607/最大 D 编号=30→D31）。
+- 新增持久记忆 cross-boundary-verify-enforcement（设计跨边界机制必读执法点源码；分叉呈报对依赖仓选项同等分析义务）。
+- 下一动作：等 D-V4-1/2/3 裁决 → dougong 0.4.0 实现 → fr 吸收 + 批 1e。
+
+## 2026-10-28 — D-V4 三分叉定案（用户驳回「留分叉=挖坑」，指令现在分析清楚）
+- 耦合发现：三叉非独立——Invoker 身份只能解析时取得 ⇒ 1(a) 蕴含 2(a)，「记名延后」仅在 1(b) 名字身份下成立；真二选一=授权钉激活身份（1a+2a）vs 钉名字（1b+2b）；D-V4-3 独立分类学。
+- 定案 1a+2a 三条强制依据：粒度一致（全仓能力构件均激活粒度：D16 A3 vtable/Activation.inject/fiber 兴趣集，名字粒度=无先例更宽粒度）；自愈级联（plugin.rs:67 亲读验证「re-activates whenever the provider set changes」，目标换激活⇒消费者随级联再激活⇒setup 重跑⇒重新 grant，无失养窗口）；换供安全（名字粒度下授权静默转移给新提供者）。2(b) 由 1(a) 必然否决（身份无延后可言；授权给从未解析过的名字=空洞化）。
+- 定案 3a：分类学原则——UNDECLARED/INACTIVE 是授权问题的回答、FAILED 其余一切；require 非 UTF-8 归 UNDECLARED 是检查次序产物非可迁移原则；grant 非法参数未达授权问题（两早退同桶 FAILED，详情码 grant_not_owned/invalid_grant_name 分立）。
+- 文档已冻结：grant_requirements.md 状态头改 v1 已冻结，§4 改「设计分叉定案」表（定案+强制依据全文内联，推翻条款保留）。
+- 下一动作：dougong 0.4.0 实现（等发令）。
+
+## 2026-10-28 — grant_requirements.md 整体重写（用户令：不要补丁式修改）
+- 弃草案→冻结→补丁形态，一次成文定稿（311 行）：状态行仅「定稿（2026-10-28）」；分叉叙事全部清除——D-V4-1a 融入 B1 理由位（三条依据内联）+范围外第 10 项（名字粒度目标=结构性排除）；D-V4-2a 融入 B2（「授予时解析是 B1 的必然后果」措辞）；D-V4-3a 融入 B4（分类学理由内联）。
+- 新增：事实 6（plugin.rs:67 再激活级联=授权自愈机制基础）+ E1.12（再激活级联自愈钉测）；章节重排（范围外=§4 十项/文档同步=§5/风险=§6）。
+- 自检修正两处计数（九项→十项、E1.1-11→12）；rg 核验零残留（待裁决/已冻结/草案/D-V4 无命中），36 MUST。
+- 下一动作：dougong 0.4.0 实现（等发令）。
+
+## 2026-10-28 — dougong 0.4.0 验收核验（用户令核实）
+- 源码逐条对账 A1-A5/B1-B7/C1-C5/D1-D4/F1-F4 全满足；E1.1-12 测试全对号（dougong-dylib 45 tests 绿）+四件超需求加固；E2 四 demo exit 0（grant 臂实证）；E3 四门全绿（fmt/clippy 0 警/test 226 过 0 挂/doc 0）。落 findings「dougong 0.4.0 验收核验」节。
+- 唯一扩展：B2/B4 第四臂 grant_target_unsupported（评审 F7，fail-closed）——设计文档已录、需求文档未载，一行补录呈报待裁。
+- E4 未启动（fr 仍 0.3.0）=批 1e 既定范围。下一动作：fr 升 0.4.0+批 1e（等发令）。
+
+## 2026-10-28 — 批 1e 落地：fr 升 dougong 0.4.0+服务面+三壳+loop emit，workspace 961 tests（929→961）
+- grant_requirements.md B2/B4 补录第四臂（grant_target_unsupported，与已验收实现一致）；fr 四包升 0.4.0（crates.io 已发布）。
+- fr-tools：service.rs（'tools' 12 方法面+HostSeam require/emit+端点适配器三段两腿协议+armDeadline 词表+有界码驻留器+per-call worker+settle 通知+cancel）+plugin_shell.rs（descriptor inject=[]）+13+3 钉测。
+- 两 guard 壳：timeout（grant→注册→两腿 arm/替换）8 测；repeat-reminder（grant→注册→observe/fold+user-admitted 重置）7 测+fold_reminder 提取。
+- loop：emit_user_admitted 闭包+谓词+2 钉测；0.4.0 吸收（9 文件 grant 臂+8 处 abiVersion 常量化+system-prompt describe 本体）。
+- 四门绿：fmt OK/clippy 0/961 passed 0 failed/doc 0。批 1 全落；下一动作批 2a。

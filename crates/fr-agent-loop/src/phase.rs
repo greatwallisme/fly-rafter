@@ -234,6 +234,7 @@ mod tests {
         }
         AgentEvents::new(
             Outbound::new(HostExports {
+                grant: crate::outbound::quiet_grant,
                 host_handle: std::ptr::null_mut(),
                 require: quiet_require,
                 emit: quiet_emit,

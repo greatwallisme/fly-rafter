@@ -248,7 +248,7 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_slice(&reply).expect("json");
         assert_eq!(parsed["name"], "fr-system-prompt");
         assert_eq!(parsed["service"], "system-prompt");
-        assert_eq!(parsed["abiVersion"], 3);
+        assert_eq!(parsed["abiVersion"], dougong_abi::ABI_VERSION);
     }
 
     #[test]

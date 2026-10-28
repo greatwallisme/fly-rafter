@@ -459,9 +459,9 @@ dependencies = [
 
 [[package]]
 name = "dougong"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "789d3c022e260d6db1c8bfe5e3a1d1c6b2bdb1444da9e498fa072aaa3690179c"
+checksum = "73c0f22fcb8956148d528aa3ded253f64a6fc0cd6d42bb4cd8e9217210eec6c3"
 dependencies = [
  "parking_lot",
  "serde",
@@ -472,15 +472,15 @@ dependencies = [
 
 [[package]]
 name = "dougong-abi"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "acba627adefc3424ffb468c4e3b2d3f155da7357fa8e1597b84f0127e044ced2"
+checksum = "9f270945b418815c87bd1bf33128b49b62c1f7859c798736f1def5591eea8ee0"
 
 [[package]]
 name = "dougong-dylib"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18bd02fd8b5847ced51f9dfc6d0a6dfb886ce306f467760e4e746cdead925dcf"
+checksum = "a8f0a1008ac7c73f8883ad32e5dbc88039c0d98837ef3828271f7fa9d0ab129a"
 dependencies = [
  "dougong",
  "dougong-abi",
@@ -492,9 +492,9 @@ dependencies = [
 
 [[package]]
 name = "dougong-loader"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f14f57dca5eb9e859fedcdf11b6f67928fee651109db2790b980a206667f04a8"
+checksum = "369813ce8a7dcc61bb89cb6976a9951ac78fd94f6f0b2d2e1b1343f5968cafe0"
 dependencies = [
  "dougong",
  "dougong-dylib",
@@ -506,9 +506,9 @@ dependencies = [
 
 [[package]]
 name = "dougong-wasm"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d07b3f9a95d44fd1a63c69b776b48cf144ff361c48617661276acdc70d05eea"
+checksum = "6e0187de61fe64cb296af1f7c0638259396210dc8710e18e712a27bfe2a37928"
 dependencies = [
  "dougong",
  "parking_lot",
@@ -675,6 +675,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "fr-guard-repeat-reminder"
+version = "0.1.0"
+dependencies = [
+ "dougong-abi",
+ "fr-timeout",
+ "fr-tools",
+ "fr-wire",
+ "regex",
+ "serde_json",
+]
+
+[[package]]
+name = "fr-guard-timeout"
+version = "0.1.0"
+dependencies = [
+ "dougong-abi",
+ "fr-timeout",
+ "fr-tools",
+ "fr-wire",
+ "serde_json",
+]
+
+[[package]]
 name = "fr-llm"
 version = "0.1.0"
 dependencies = [
@@ -782,6 +805,18 @@ dependencies = [
 [[package]]
 name = "fr-timeout"
 version = "0.1.0"
+
+[[package]]
+name = "fr-tools"
+version = "0.1.0"
+dependencies = [
+ "dougong-abi",
+ "fr-timeout",
+ "fr-wire",
+ "indexmap",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "fr-wire"

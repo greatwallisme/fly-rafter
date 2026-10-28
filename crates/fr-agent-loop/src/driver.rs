@@ -644,6 +644,12 @@ pub struct DriverDeps {
     pub next_id: Box<dyn Fn() -> MessageId + Send>,
     /// The volatile parallel-tool-call pool window (read per group).
     pub max_parallel_tool_calls: Box<dyn Fn() -> usize + Send>,
+    /// Emits the `agent/user-admitted` notification (Q102′A) when an
+    /// admitted step batch carries a user-source message; the argument
+    /// is the session's agent id, the same value tool calls carry (the
+    /// repeat-reminder guard keys its chains on it). The assembly wires
+    /// this to the outbound `emit` copy the loop thread owns.
+    pub emit_user_admitted: Box<dyn Fn(&str) + Send>,
 }
 
 impl fmt::Debug for DriverDeps {
@@ -679,6 +685,7 @@ pub struct LoopDriver {
     clock: Box<dyn Fn() -> i64 + Send>,
     next_id: Box<dyn Fn() -> MessageId + Send>,
     max_parallel_tool_calls: Box<dyn Fn() -> usize + Send>,
+    emit_user_admitted: Box<dyn Fn(&str) + Send>,
     request_header_logged: bool,
     request_surface_generation: u64,
     assistant_attempt_counter: u64,
@@ -753,6 +760,7 @@ impl LoopDriver {
             clock,
             next_id,
             max_parallel_tool_calls,
+            emit_user_admitted,
         } = deps;
         Ok(Self {
             session_id,
@@ -772,6 +780,7 @@ impl LoopDriver {
             clock,
             next_id,
             max_parallel_tool_calls,
+            emit_user_admitted,
             request_header_logged: false,
             request_surface_generation,
             assistant_attempt_counter: 0,
@@ -1656,6 +1665,12 @@ impl LoopDriver {
                 None,
             )?;
         }
+        // The user-interjection mirror (Q102′A): fire-and-forget once per
+        // admitted batch that carries a user-source message (the dsh
+        // `agent/pre-step` reset predicate), after the batch committed.
+        if first_attempt && enter.messages.iter().any(is_user_message) {
+            (self.emit_user_admitted)(self.session_id.as_str());
+        }
         Ok(())
     }
 
@@ -2113,6 +2128,21 @@ enum AttemptEnd {
     Retry,
     /// The attempt settled; the step ends with this reason.
     Done(Option<StepEndReason>),
+}
+
+/// Whether one message carries a user source (the dsh `source.kind ===
+/// "user"` predicate of the repeat-chain reset; runtime-context snapshots
+/// ride `Other` and never count).
+fn is_user_message(message: &Message) -> bool {
+    match message {
+        Message::Known(known) => matches!(
+            known.source(),
+            fr_wire::message::MessageSource::Known(
+                fr_wire::message::KnownMessageSource::User { .. }
+            )
+        ),
+        Message::Other(_) => false,
+    }
 }
 
 /// Whether one message is a runtime-context snapshot (the dsh source
@@ -2609,7 +2639,7 @@ mod tests {
         AgentOptions, DrainedGeneration, DriverDeps, DriverError, InstructionsBridge, LoopDriver,
         PreparedCall, PromptAssembly, RestoreView, SessionReads, SystemPromptFace,
         TOOL_ABORTED_BEFORE_DISPATCH, ToolExecution, ToolExecutionMode, ToolExecutionResult,
-        ToolPrepared, ToolSettlement, ToolsFace,
+        ToolPrepared, ToolSettlement, ToolsFace, is_user_message,
     };
     use crate::agent_events::AgentEvents;
     use crate::outbound::Outbound;
@@ -3265,6 +3295,8 @@ mod tests {
         mailbox: Arc<crate::plugin_shell::SessionMailbox>,
         driver: LoopDriver,
         tools: Arc<Mutex<ScriptedTools>>,
+        /// The recorded `agent/user-admitted` emissions (Q102′A).
+        admitted: Arc<Mutex<Vec<String>>>,
     }
 
     fn user_message(id: &str, text: &str) -> Message {
@@ -3299,8 +3331,10 @@ mod tests {
         instructions: Option<Box<dyn InstructionsBridge>>,
     ) -> Harness {
         let session = Arc::new(Mutex::new(TestSession::new()));
+        let admitted: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let session_handle = Box::into_raw(Box::new(Arc::clone(&session)));
         let outbound = Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
             host_handle: session_handle.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,
@@ -3354,6 +3388,15 @@ mod tests {
                 clock: Box::new(|| 1_700_000_000_000),
                 next_id,
                 max_parallel_tool_calls: Box::new(move || max_parallel),
+                emit_user_admitted: {
+                    let admitted = Arc::clone(&admitted);
+                    Box::new(move |agent: &str| {
+                        admitted
+                            .lock()
+                            .expect("admitted lock")
+                            .push(agent.to_owned());
+                    })
+                },
             },
         )
         .expect("driver restores");
@@ -3362,6 +3405,7 @@ mod tests {
             mailbox,
             driver,
             tools,
+            admitted,
         }
     }
 
@@ -4341,5 +4385,44 @@ mod tests {
         );
         drop(session);
         drop(thread);
+    }
+    #[test]
+    fn user_admitted_emits_once_per_batch() {
+        let harness = harness(vec![ScriptedLlm::text_generation("done")]);
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the turn ends",
+        );
+        drop(thread);
+        let admitted = harness.admitted.lock().expect("admitted lock");
+        assert_eq!(
+            admitted.as_slice(),
+            ["s1".to_owned()].as_slice(),
+            "one user batch admits one notification carrying the session id"
+        );
+    }
+
+    #[test]
+    fn user_source_predicate() {
+        let developer: Message = serde_json::from_value(serde_json::json!({
+            "role": "developer",
+            "id": "d1",
+            "content": [{ "type": "text", "text": "note" }],
+            "source": { "kind": "tool", "callId": "c1" },
+        }))
+        .expect("fixture message");
+        assert!(is_user_message(&user_message("u1", "hi")));
+        assert!(!is_user_message(&developer));
+        let other_envelope: Message =
+            serde_json::from_value(serde_json::json!({ "role": "custom" }))
+                .expect("fixture message");
+        assert!(!is_user_message(&other_envelope));
     }
 }

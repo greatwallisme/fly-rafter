@@ -602,6 +602,7 @@ mod tests {
             STATUS_OK
         }
         Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
             host_handle: std::ptr::null_mut(),
             require: quiet_require,
             emit: quiet_emit,
@@ -682,6 +683,7 @@ mod tests {
         }
         let bus: *mut Bus = Box::into_raw(Box::new(Bus::default()));
         let outbound = Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
             host_handle: bus.cast::<c_void>(),
             require: quiet_require,
             emit: recording_emit,
@@ -965,6 +967,7 @@ mod tests {
         let handle = Arc::into_raw(Arc::clone(&log));
         let events = AgentEvents::new(
             crate::outbound::Outbound::new(HostExports {
+                grant: crate::outbound::quiet_grant,
                 host_handle: handle.cast_mut().cast::<std::ffi::c_void>(),
                 require: recording_require,
                 emit: recording_emit,

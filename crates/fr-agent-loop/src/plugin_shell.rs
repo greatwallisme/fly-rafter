@@ -748,6 +748,7 @@ mod tests {
 
     fn empty_map() -> SessionMap {
         SessionMap::new(Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
             host_handle: std::ptr::null_mut(),
             require: quiet_require,
             emit: quiet_emit,
@@ -867,7 +868,7 @@ mod tests {
         let descriptor: serde_json::Value =
             serde_json::from_slice(super::DESCRIPTOR).expect("json");
         assert_eq!(reply["injects"], descriptor["inject"]);
-        assert_eq!(reply["abiVersion"], 3);
+        assert_eq!(reply["abiVersion"], dougong_abi::ABI_VERSION);
 
         assert!(
             dispatch(9, b"{}", &map)

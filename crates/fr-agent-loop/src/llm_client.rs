@@ -332,6 +332,7 @@ mod tests {
             (*service).register_source("p", Arc::new(TestSource));
         }
         let outbound = Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
             host_handle: service.cast::<std::ffi::c_void>(),
             require: real_dispatch_require,
             emit: quiet_emit,
@@ -452,6 +453,7 @@ mod tests {
     #[test]
     fn raw_host_failures_map_to_transport() {
         let outbound = Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
             host_handle: std::ptr::null_mut(),
             require: failing_require,
             emit: quiet_emit,
@@ -493,6 +495,7 @@ mod tests {
     #[test]
     fn malformed_replies_map_to_transport() {
         let outbound = Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
             host_handle: std::ptr::null_mut(),
             require: broken_require,
             emit: quiet_emit,

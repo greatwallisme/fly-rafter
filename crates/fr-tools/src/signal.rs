@@ -63,4 +63,15 @@ impl ToolSignal {
             Self::Fused { caller, wrapper } => caller.abort_kind().or_else(|| wrapper.abort_kind()),
         }
     }
+
+    /// Aborts the caller-owned leaf under this signal (the service-face
+    /// cancel path: the wire carries no signal object, so the registry
+    /// aborts the stored caller signal by token). Wrapper legs belong to
+    /// listeners and deadlines and are left untouched.
+    pub fn abort_caller(&self) {
+        match self {
+            Self::Plain(signal) => signal.abort_upstream(),
+            Self::Fused { caller, .. } => caller.abort_caller(),
+        }
+    }
 }

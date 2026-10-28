@@ -10,11 +10,16 @@
 
 pub mod definition;
 pub mod json_schema;
+pub mod plugin_shell;
 pub mod presentation;
 pub mod registry;
 pub mod schema;
+pub mod service;
 pub mod signal;
 pub mod types;
 
 #[cfg(test)]
 mod pipeline_tests;
+
+#[cfg(test)]
+mod service_tests;

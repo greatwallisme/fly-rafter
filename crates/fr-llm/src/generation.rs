@@ -1970,6 +1970,7 @@ mod tests {
             host_handle: handle.cast_mut().cast::<std::ffi::c_void>(),
             require: unreachable_require,
             emit: recording_emit,
+            grant: unreachable_grant,
         });
         vtable.notify_seam()(Some("s1"), "gen-0");
         let log = seen.lock().expect("emit log");
@@ -1979,6 +1980,16 @@ mod tests {
             String::from_utf8_lossy(&log[0].1),
             "{\"sessionId\":\"s1\",\"generationId\":\"gen-0\"}"
         );
+    }
+
+    unsafe extern "C" fn unreachable_grant(
+        _host: *mut std::ffi::c_void,
+        _target: *const u8,
+        _target_len: usize,
+        _granted: *const u8,
+        _granted_len: usize,
+    ) -> i32 {
+        panic!("grant is not part of this test's surface")
     }
 
     unsafe extern "C" fn unreachable_require(

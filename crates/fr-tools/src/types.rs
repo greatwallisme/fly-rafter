@@ -145,7 +145,8 @@ pub struct ToolResult {
 }
 
 /// A successful canonical tool execution.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolExecutionSuccess {
     /// Execution-local canonical value; omitted from durable events.
     pub value: Value,
@@ -160,7 +161,8 @@ pub struct ToolExecutionSuccess {
 }
 
 /// A failed canonical tool execution; failures never carry a value.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolExecutionFailure {
     /// The structured failure.
     pub error: ToolFailure,
@@ -173,7 +175,12 @@ pub struct ToolExecutionFailure {
 }
 
 /// The discriminated, execution-local outcome of one tool call.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ToolExecutionResult {
     /// The call succeeded through its output contract.
     Success(ToolExecutionSuccess),
@@ -217,7 +224,12 @@ impl ToolExecutionResult {
 }
 
 /// Pre-dispatch decision of the `tools/pre-execute` waterfall.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase"
+)]
 pub enum PreToolDecision {
     /// Run the call.
     Allow,
@@ -249,7 +261,12 @@ pub struct DisplayReason {
 }
 
 /// Post-dispatch decision of the `tools/post-execute` waterfall.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase"
+)]
 pub enum PostToolDecision {
     /// Accept the result, optionally replacing one projection or attaching
     /// context. Setting both `content` and `value` rejects with the dsh

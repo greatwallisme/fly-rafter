@@ -504,7 +504,7 @@ fn describe_reply() -> Vec<u8> {
     serde_json::to_vec(&serde_json::json!({
         "name": "fr-system-prompt",
         "service": SERVICE_NAME,
-        "abiVersion": 3,
+        "abiVersion": dougong_abi::ABI_VERSION,
     }))
     .unwrap_or_default()
 }
@@ -1037,7 +1037,7 @@ mod tests {
         let reply = serve(&mut service, METHOD_DESCRIBE, b"{}").expect("describe");
         let parsed: serde_json::Value = serde_json::from_slice(&reply).expect("json");
         assert_eq!(parsed["service"], SERVICE_NAME);
-        assert_eq!(parsed["abiVersion"], 3);
+        assert_eq!(parsed["abiVersion"], dougong_abi::ABI_VERSION);
     }
 
     #[test]

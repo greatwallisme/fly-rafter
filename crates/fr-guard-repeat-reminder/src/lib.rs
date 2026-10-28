@@ -21,6 +21,8 @@ use fr_tools::types::{PostToolDecision, ToolExecution, ToolExecutionResult};
 use fr_wire::Message;
 use serde_json::{Value, json};
 
+pub mod plugin_shell;
+
 /// The gentle first-threshold reminder, keyed to `thresholds[0]`.
 pub const GENTLE_REMINDER: &str = "You are repeating the exact same tool call with identical arguments. Carefully analyze the previous result before calling again: if the task is not complete, try a different approach or different arguments instead of repeating the call.";
 
@@ -160,42 +162,15 @@ impl RepeatGuard {
                   next: &mut dyn FnMut() -> PostToolDecision| {
                 let reminder = guard.observe(exec);
                 let downstream = next();
-                let Some(reminder) = reminder else {
-                    return downstream;
-                };
-                match downstream {
-                    PostToolDecision::Block {
-                        feedback,
-                        additional_contexts,
-                    } => {
-                        let mut contexts = vec![reminder];
-                        contexts.extend(additional_contexts);
-                        PostToolDecision::Block {
-                            feedback,
-                            additional_contexts: contexts,
-                        }
-                    }
-                    PostToolDecision::Accept {
-                        content,
-                        value,
-                        additional_contexts,
-                    } => {
-                        let mut contexts = vec![reminder];
-                        contexts.extend(additional_contexts);
-                        PostToolDecision::Accept {
-                            content,
-                            value,
-                            additional_contexts: contexts,
-                        }
-                    }
-                }
+                fold_reminder(downstream, reminder)
             },
         )
     }
 
     /// Advances the agent's chain and returns the reminder to deliver when
-    /// the run length hits a configured threshold.
-    fn observe(&self, exec: &ToolExecution) -> Option<Message> {
+    /// the run length hits a configured threshold (public for the shell's
+    /// two-leg endpoint: the enter leg counts before delegating).
+    pub fn observe(&self, exec: &ToolExecution) -> Option<Message> {
         // A direct registry caller has no model to remind and no id to key
         // on; only agent-loop calls participate.
         let agent = exec.agent.as_deref()?;
@@ -257,6 +232,41 @@ impl RepeatGuard {
             return false;
         }
         !self.exclude.iter().any(|p| p.is_match(tool_name))
+    }
+}
+
+/// Folds one reminder message onto a downstream decision (both decision
+/// variants carry the context; `None` passes the decision through).
+#[must_use]
+pub fn fold_reminder(downstream: PostToolDecision, reminder: Option<Message>) -> PostToolDecision {
+    let Some(reminder) = reminder else {
+        return downstream;
+    };
+    match downstream {
+        PostToolDecision::Block {
+            feedback,
+            additional_contexts,
+        } => {
+            let mut contexts = vec![reminder];
+            contexts.extend(additional_contexts);
+            PostToolDecision::Block {
+                feedback,
+                additional_contexts: contexts,
+            }
+        }
+        PostToolDecision::Accept {
+            content,
+            value,
+            additional_contexts,
+        } => {
+            let mut contexts = vec![reminder];
+            contexts.extend(additional_contexts);
+            PostToolDecision::Accept {
+                content,
+                value,
+                additional_contexts: contexts,
+            }
+        }
     }
 }
 

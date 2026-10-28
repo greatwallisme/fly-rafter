@@ -374,6 +374,7 @@ mod tests {
     fn assembly_round_trips_against_the_real_dispatch() {
         let service = service_with_section();
         let outbound = Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
             host_handle: service.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,
@@ -392,6 +393,7 @@ mod tests {
         // Without a prior assemble there is nothing to refresh (the
         // driver always holds one before refreshing).
         let mut fresh = SystemPromptClient::new(Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
             host_handle: service.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,
@@ -407,6 +409,7 @@ mod tests {
     fn compose_round_trips_and_reuses_the_pending_twin() {
         let service = service_with_section();
         let outbound = Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
             host_handle: service.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,
@@ -451,6 +454,7 @@ mod tests {
         .expect("service builds");
         let service = Box::into_raw(Box::new(service));
         let outbound = Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
             host_handle: service.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,
@@ -482,6 +486,7 @@ mod tests {
     #[test]
     fn host_failures_surface_as_face_errors() {
         let outbound = Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
             host_handle: std::ptr::null_mut(),
             require: failing_require,
             emit: quiet_emit,

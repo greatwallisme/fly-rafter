@@ -31,10 +31,10 @@ keywords = ["agent", "ai", "plugin-system", "cli"]
 categories = ["development-tools"]
 
 [workspace.dependencies]
-dougong = "0.3.0"
-dougong-abi = "0.3.0"
-dougong-dylib = "0.3.0"
-dougong-loader = "0.3.0"
+dougong = "0.4.0"
+dougong-abi = "0.4.0"
+dougong-dylib = "0.4.0"
+dougong-loader = "0.4.0"
 libc = "0.2"
 zstd = "0.14"
 zstd-safe = "8"

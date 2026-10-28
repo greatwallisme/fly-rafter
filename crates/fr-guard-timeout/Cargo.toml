@@ -13,6 +13,7 @@ categories.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+dougong-abi.workspace = true
 fr-tools.workspace = true
 fr-timeout.workspace = true
 fr-wire.workspace = true

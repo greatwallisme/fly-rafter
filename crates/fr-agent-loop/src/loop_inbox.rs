@@ -445,6 +445,7 @@ mod tests {
             requests: Vec::new(),
         }));
         let outbound = Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
             host_handle: fake.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,

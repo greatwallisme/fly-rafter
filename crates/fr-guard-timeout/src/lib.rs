@@ -21,6 +21,8 @@ use fr_tools::types::{
     ToolErrorInfo, ToolExecutionFailure, ToolExecutionResult, ToolFailure, text_content,
 };
 
+pub mod plugin_shell;
+
 /// The code owned by this guard, used both as the deadline classification
 /// code and as the structured error code on the replacement result (a
 /// nested outer deadline reads as an ordinary upstream cancel).
