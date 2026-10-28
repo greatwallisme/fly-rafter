@@ -1,0 +1,20 @@
+[package]
+name = "fr-tools"
+description = "Fly Rafter tool system: schema DSL, enforced JSON Schema subset, presentation vocabulary, registry, execution pipeline, and scheduling (dsh core/tools parity)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

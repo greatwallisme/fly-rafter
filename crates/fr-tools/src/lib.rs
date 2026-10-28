@@ -1,0 +1,12 @@
+// Rust guideline compliant 2026-10-28
+//! The Fly Rafter tool-system crate.
+//!
+//! Behavior parity target: dsh `core/tools` (schema DSL, enforced JSON
+//! Schema subset, presentation vocabulary, registry, execution pipeline,
+//! scheduling, and the `'tools'` service surface with the staged listener
+//! registration face of decision Q101′A). Wire-facing keyword spellings
+//! (`oneOf`, `additionalProperties`, ...) keep the dsh protocol shapes
+//! verbatim; Rust identifiers stay `snake_case`.
+
+pub mod json_schema;
+pub mod schema;

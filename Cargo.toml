@@ -15,6 +15,7 @@ members = [
     "crates/fr-llm-anthropic",
     "crates/fr-agent-loop",
     "crates/fr-system-prompt",
+    "crates/fr-tools",
 ]
 
 [workspace.package]
