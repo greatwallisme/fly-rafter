@@ -124,7 +124,7 @@ Fly Rafter（飞椽，`fr`）是一个以 dougong 组合内核为基座的 AI ag
 
 ### 4.4 服务与事件契约总则
 
-- 服务缝名与事件名**与 dsh 逐字一致**（`llm`、`tools`、`fs`、`shell`、`terminals`、`subprocess`、`sandbox`、`web`、`lsp`、`jobs`、`subagents`、`goals`、`session-title`、`session-persistence`、`spill-store`、`mcp-resources`；事件 `agent/pre-step`、`agent/request`、`agent/request-error`、`agent/assistant-stream`、`agent/turn-stopping`、`tools/pre-execute`、`tools/execute`、`tools/post-execute`、`tools/pre-execute` 的 ask 语义等）。
+- 服务缝名与事件名**与 dsh 逐字一致**（`llm`、`tools`、`fs`、`shell`、`terminals`、`subprocess`、`sandbox`、`web`、`lsp`、`jobs`、`subagents`、`goals`、`session-title`、`session-persistence`、`spill-store`、`mcp-resources`；事件 `agent/pre-step`、`agent/request`、`agent/request-error`、`agent/assistant-stream`、`agent/turn-stopping`、`tools/pre-execute`、`tools/execute`、`tools/post-execute`、`tools/pre-execute` 的 ask 语义等；另 dsh 服务缝 `session-projections` 由 fr-session provide）。fr 增设通知事件 `agent/user-admitted`（用户消息获准进入 step 批时 agent-loop 以 fire-and-forget 镜像发出，guard 插件经 descriptor listen 订阅——dsh agent/pre-step 用户消息观测语义的 fr 载体，2026-10-28 Q102′A）。
 - 会话事件类型名与字段**与 dsh 逐字一致**（第 7 节）。
 - 仅品牌级标识按第 5 节适配表替换。
 - **Invoker 消费统一经 `ctx.require::<Invoker>`，禁止 `ctx.get`**（实现约束）：require 带声明检查，与内核“未声明依赖即拒绝”的能力基线一致；跨 dylib/wasm 边界的服务调用一律走此通道（dougong `invoke.rs`，已一手核实）。
@@ -161,6 +161,9 @@ fly-rafter/
     fr-subagent-acp     # ACP 委派桥（与 fr-acp 共享 ACP 客户端代码）
     fr-commands         # 斜杠命令框架 + 内置命令
     fr-shell            # bash 执行 seam + 子进程/作业管理（dougong 缺口）
+    fr-guard-repeat-reminder  # 重复调用防风暴提醒插件（dsh repeat-tool-reminder 1:1；经 tools 监听注册面接入）
+    fr-guard-timeout          # 工具调用协作超时插件（dsh timeout-policy 1:1；tools/execute 段接入）
+    fr-permission-presets     # 权限预设服务插件（dsh permission-presets 1:1；双 knob 捆绑表+播种+/permission 命令行为面）
     fr-headless         # headless 入口插件
     fr-tui              # TUI 入口插件（ratatui 纯投影层）
     fr-acp              # ACP 服务器入口插件
@@ -379,6 +382,7 @@ tool/call 在 prepare（pre-execute）之前追加，tool/result 由 contiguous 
 
 `exclusive` 组成串行屏障；`parallel` 有界滚动池。concludeTurn 语义调用终结 turn；abort 为未开始调用补合成错误结果。
 调度细则：isConcurrencySafe 仅严格返回 true 才归 parallel，未声明/异常/非 true 一律 exclusive（fail-closed）；exclusive 组 = 仅首个调用（屏障），其余 parallel 排队；parallel 池上限 = agentLoop.config.maxParallelToolCalls（默认 10，volatile 可调）；每次启动前重读 executionMode（lazy 重分类，registry 变化可形成新屏障）；concludeTurn 仅成功结果可携带（failure 类型不可）。PTC 侧镜像调度：单驱动 lane——先提交队首 settled（含 post-execute）再按容量启动，仅 body 阶段并发、策略阶段全序（dsh tool-calls.ts:86-213、ptc.ts:447-522）。
+管线监听注册面（2026-10-28 Q101′A）：`tools` 服务提供 pre-execute/execute/post-execute 决策段的插件监听注册（回调端点 service+method，注册序=装配行序=触发序，dsh 事件总线语义等价）；repeat-tool-reminder 与 timeout-policy 两 guard 为独立插件 crate（fr-guard-repeat-reminder/fr-guard-timeout，base 恒装对齐 dsh base patch ：408/:448）经此接入，通知面（tools/result、tools/change、repeat 链重置）走 dougong 原生事件（listen+emit 镜像）。
 
 ### 9.4 run_code / PTC（保留，执行基底 = node 子进程，全链路 1:1）
 

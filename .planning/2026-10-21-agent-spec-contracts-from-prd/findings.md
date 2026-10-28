@@ -1525,3 +1525,150 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - locate 搜索序：dsh inbox.ts locate 先 next-turn 后 next-step（fr loop_inbox.rs locate 同构）；prepend=splice(0,0)、replace/remove=locate+splice(idx,1)
 - 刷新缓存判例：driver PromptAssembly 为还原产物（rendered/joined/tools，丢 sections/variables）→SystemPromptClient 缓存 wire 组装体供 refresh_context（dsh 驱动持全量组装体对象同构）；无缓存刷新=错（driver 先 assemble 后 refresh 的调用序不变量）
 - 测试基建判例：收件箱终态断言走 spliced 事件折叠（fold_inbox=restore 路径权威）——driver 已 move 进 DriverThread 无法直读；真 serve 往返锚 service::serve 层+镜像壳失败包 {"error":...}（fr-system-prompt plugin_shell.rs:172 形状），双壳 export 表 rlib 重符号规避=llm_client 判例沿用
+
+## Phase 16（fr-tools-builtin + fr-shell）批 0 真源全读（2026-10-28 开始）
+
+### 已核实事实（结构层）
+
+**合同面**：
+- spec task-req-fr-builtin-tools-requirement.spec.md 2485 行全读：Boundaries Allowed Changes 仅 `crates/fr-tools-builtin/**`；场景构成=每工具「调度与呈现/参数越界拒绝/说明 section 注册」三件+逐参数「形状/约束」两件+行为场景；含 run_code 与 subagent 族（subagent/list_subagent_models/interrupt_agent/list_agents/send_message）场景（这两族另有独立 spec：task-req-fr-ptc-run-code / task-req-fr-subagent-requirement）
+- **fr-shell 无任何 spec/需求覆盖**：`rg fr-shell` 仅命中 doc/prd.md:163（PRD 4.5 crate 表：`fr-shell # bash 执行 seam + 子进程/作业管理（dougong 缺口）`）。20 个 KLL 需求块无一覆盖 shell seam 本体 → 合同承载缺口，须裁决（builtin-tools spec 扩边界 vs 独立 spec）
+- 先例：agent-loop spec Allowed Changes 仅 fr-agent-loop/**，但切片 7 批 3 实改 fr-llm（generation.rs）——lifecycle 默认 --change-scope none（boundary 层不跑），guard 失败既有常态走 --no-verify 惯例；纪律面（explain/stamp）未受阻
+
+**dsh 包布局（packages/*/* 两层，域目录+子包）**：
+- 工具包嵌在域目录下：`packages/shell/tool-bash`、`packages/fs/tool-fs`、`packages/web/tool-web` 等（pnpm-workspace `packages/*/*`）
+- catalog Tool Package Map（docs/tool-catalog.md:12-54）= 工具→包→ctx 缝映射权威表，已全文摘录要点：
+  - bash/pwsh：requires ctx.workingDirectory/ctx.tools/**ctx.shell**/ctx.systemPrompt/ctx.shellEnv/**ctx.jobs**（run_in_background 与 job-backed 前台路径）；pwsh 无沙箱控制 mirror bash；每次新进程
+  - persistent bash/pwsh：requires ctx.workingDirectory/ctx.tools/**ctx.terminals** + owning Agent（PTY 后端由装配供给）
+  - glob/grep：requires ctx.workingDirectory/ctx.tools/**ctx.subprocess**/ctx.systemPrompt——打包 ripgrep（@vscode/ripgrep）经 ctx.subprocess 前台调用，永不后台 job、无 host rg 依赖、无 shell 层
+  - fs 四件：requires ctx.workingDirectory/ctx.tools/**ctx.fs**/ctx.systemPrompt/ctx.attachments（image 注册门）/ctx.llm+image 路由（image 执行门）；read-before-write 由 fs-observation-policy（fs/* 事件门插件）施加
+  - str_replace_editor：requires ctx.tools/ctx.fs
+  - terminal 六件套：requires ctx.workingDirectory/ctx.tools/**ctx.terminals**/ctx.systemPrompt/ctx.jobs（send 的 run_in_background）
+  - web 两件：requires ctx.tools/**ctx.web**/ctx.systemPrompt（provider 选择藏于 ctx.web）
+  - goal 三件：requires ctx.tools/ctx.agents/**ctx.goals**/ctx.systemPrompt + open turn
+  - schedule 四件：requires ctx.tools/**ctx.schedule**（storage domain 管理）
+  - todo_write：requires ctx.tools + owning Agent session（session-owned；allowParallelInProgress 必填无默认）
+  - ask_user_question：requires ctx.tools/**ctx.userQuestions**
+  - exit_plan_mode：requires ctx.tools/ctx.systemPrompt/ctx.userQuestions（执行期机会性）
+  - session_query 五件：requires ctx.tools/ctx.systemPrompt/**ctx.sessionQuery** + calling Agent workspace authority
+  - skill：requires ctx.workingDirectory/ctx.tools/ctx.agents/**ctx.skills**
+  - load_workspace_dependencies：requires ctx.tools（仅此）
+  - lsp：requires ctx.workingDirectory/ctx.tools/**ctx.lsp**/ctx.systemPrompt；无 provider 返回 LSP_UNAVAILABLE
+  - working_directory：requires ctx.tools/**ctx.workingDirectory**
+  - cordis_inspect 两件：requires ctx.tools/**ctx.cordisInspect**
+  - plugin_manager：requires ctx.tools/ctx.pluginManager/ctx.sandboxPolicy
+  - job_kill/list/output：requires ctx.tools/**ctx.jobs**/ctx.systemPrompt
+  - run_code：registry 保留传输 mode:ptc；subagent 族：requires ctx.tools/ctx.subagents/ctx.agents/ctx.llm
+- 域源码量级（ts 非 test 行数）：shell 5740 / subprocess 6991 / fs 5913 / web 3993 / todo 269 / goal 2642 / jobs 2220 / schedule 4091 / interaction 2916 / session-query 5122 / terminal 2015 / skill 3454 / lsp 2786 / workspace(=session 域) 1425
+
+**PRD 事实**：
+- 4.4：服务缝名逐字 dsh：`shell`、`terminals`、`subprocess`、`jobs`、`fs`、`web`、`lsp`、`goals`、`subagents`、`session-title`、`session-persistence`、`spill-store`、`mcp-resources`、`sandbox`…
+- 4.5 crate 表无 fr-fs/fr-web/fr-terminal/fr-goal/fr-schedule 等 crate——域服务 provider 归属未定（fr-shell 只写明 shell+subprocess+jobs；terminals 未提及）
+- 17 节清单=11 组（shell/文件/web/任务状态/交互/会话查询/PTY/技能/代码智能/目录/内省管理）；plugin_market 不做（19.1 亦有）
+- 22 节：ripgrep 对策=运行时 PATH/FR_RIPGREP 解析+打包捆绑+缺失明确报错
+- 19.1 排除（本切片相关）：present、workflow、ralph、create_worktree、browser-use、Agent Teams、plugin_market、语音；terminal 六件套与 persistent shell 保留（opt-in）
+- 11.2：沙箱执行体链 bubblewrap→Landlock/Seatbelt/ACL；文件系统 fence 对齐 dsh fs-sandbox/fs-observation-policy
+
+### 2026-10-28 用户裁决：Q91-A ～ Q97-A 全 A（Phase 14/16 总纲）
+
+- **Q91-A 次序勘误**：Phase 14（fr-tools+fr-approval+fr-sandbox）实际未做（五重证据：crates/ 无此三 crate、workspace members 缺席、TOOLS/APPROVAL/SANDBOX spec 全 pending_* 选择器、task_plan Status: pending、findings/progress 零记录），CLAUDE.md:15 原文「fr-tools+fr-approval+fr-sandbox（TOOLS/APPROVAL/SANDBOX 绑定）」系切片 8 批 3 补档误写——已勘误。Phase 14 先行，Phase 16 随后（硬依赖：builtin 工具注册进 'tools' 注册表、bash 过 pre-execute waterfall→ApprovalService+沙箱执行体）。
+- **Q92-A**：builtin-tools spec Boundaries 增 `crates/fr-shell/**` + Decisions 增 shell seam 条款（单合同双 crate）。
+- **Q93-A**：fr-tools-builtin 单插件 provide 全部域服务（fs/web/goals/schedule/sessionQuery/skills/lsp/workingDirectory/userQuestions/cordisInspect/pluginManager/shellEnv/terminals）+注册全部工具；fr-shell 仅 provide shell/subprocess/jobs。
+- **Q94-A**：Phase 14 单切片四批（批 0 裁决/真源→批 1 fr-tools→批 2 approval+sandbox→批 3 绑定）；Phase 16 拆 16a shell 组（bash/pwsh 工具+fr-shell）/16b 文件组 7 件/16c 任务状态（todo/goal/jobs/schedule）/16d 交互+会话查询/16e PTY 六件套+persistent/16f web+skill+lsp+working_directory+内省。
+- **Q95-A**：catalog 生成脚本 Q89-A 判例同款（python3+FR_DSH_SOURCE 必需+--check 钉测缺席即 fail 带指引）；抽取源=dsh docs/tool-catalog.md；产物=fr-tools-builtin schema 常量表（生成器独占文件）+从真实装配 dump 工具表与冻结 catalog diff 为空的钉测。
+- **Q96-A**：run_code（~13 场景）+subagent 族五工具（~20 场景）本切片不实现，绑跨切片 skip（AGENT-LOOP 判例同形）；注册面随 fr-ptc（Phase 17）/fr-subagent（Phase 18）。
+- **Q97-A**：schema 形状/约束场景（~120 件）绑定为每工具一件全 schema 钉测（~40 件）+绑定审计逐映射（Q90-A 同构）。
+
+另记：核实时误执行 `bind-session-tests.py --help`（脚本不识别 --help 直接运行）输出 applied 4 changes 但 git diff specs/ 为空=幂等重写无字节变化，无副作用。
+
+## Phase 14（fr-tools+fr-approval+fr-sandbox）批 0 真源全读（2026-10-28 开始）
+
+### 合同面（三 spec 全读）
+- TOOLS spec 18 场景：注册元数据/管线事件序/pre-execute deny 短路/exclusive 屏障/parallel 池/concludeTurn/schema 推断一致/重复调用守卫阈值 [3,5,8]/混合分组屏障/presentation 推断一致/参数快照不可变/超集键拒绝+深嵌套回退/additionalProperties 显式布尔/guards 单调/guard 拒绝仍过 post-execute/双替换 TypeError/池上限 10/惰性重分类/concludeTurn 错误不终结。Boundaries: crates/fr-tools/**
+- APPROVAL spec 15 场景（never 拒/open-turn/无 answerer fail-closed/词表外归一化/allowed-once/切换事件+通知/bash 升级同 seam/rejected+cancelled/asked+decided 配对/id 新鲜/同值 no-op/文案逐字/abort 竞速/effectivePolicy 链）。Boundaries: crates/fr-approval/**
+- SANDBOX spec 9 场景（默认 workspace-write+root=进程 cwd/两预设/两层并存（插件 schema 缺省 read-only+装配层 FR_PERMISSION_MODE??workspace-write，对齐 cordis.patch.yml:246）/策略文本入 runtime-context/降级链/全缺失 fail-closed/ workspace 外写拒/按平台解析/观察策略对齐）。Boundaries: crates/fr-sandbox/**。策略文本模板逐字（read-only/workspace-write 两段，dsh sandbox-policy/src/index.ts:44-47）
+
+### wave 1：core/tools/src/index.ts 全读（1993 行，注册面+管线心脏）
+- **事件面六件**（:138-211 声明）：tools/pre-execute（waterfall，PreToolDecision）/tools/execute（waterfall，around-dispatch 仅可换 signal）/tools/post-execute（waterfall，PostToolDecision）/tools/ptc-dispatch-log（waterfall，仅改日志副本，listener 抛错 contained 回退原文）/tools/result（emit，观察冻结最终结果，listener 失败 contained）/tools/change（emit，非 scope 过滤的全局通知）
+- **ToolDefinition**（:224-300）：output{schema,render,presentationMeta?} 必填+execute(args,exec)+projectContent?（post-execute 前装内容）+finalizeContent?（快照于调用开始、每规范化结局恰一次、含绕过 post-execute 的管线失败、必须 total 不抛）+timeoutMs?（正有限数；由 tools/execute wrapper 施加；不进模型 schema）+isConcurrencySafe?（仅严格 true 归 parallel）+presentCall?/presentResult?（纯函数呈现）
+- **取消契约**：callerSignal 于 cancellationStates WeakMap；ABORTED/ABORTED_BEFORE_DISPATCH 两码（info{name:'AbortError',code}）；结果文案 `Error: tool call aborted`/`Error: tool call aborted before dispatch`（:1966-1991）；signal 融合 fuseToolSignals（wrapper 换 signal 后与 caller 重融合 :1936-1963）；取消不抛弃已启动 body（drain 到 quiescence 后以 ABORTED 盖成功）
+- **注册校验文案**（:1071-1096）：output 形状 `tool "X" must declare output { schema, render, presentationMeta? }`（TypeError）；timeoutMs `tool "X" timeoutMs must be a positive finite number`；保留名 `tool name "run_code" is reserved for the PTC mode presentation transport and cannot be registered or shadowed`；重名（NamedEntries）`tool "X" is already registered (for a per-agent variant, register through that agent's `agent.ctx` instead)`（全局）/`tool "X" is already registered in this scope`（scoped）
+- **restrict**（:1105-1132）：scoped-only（`tools.restrict() requires a scoped context...`）；空过滤器 no-op 错；不可名 run_code；未知名错（列 known 排序 or (none)）
+- **guard**（:1144-1162）：append 不发 tools/change；guardReason=global 先、scope 链 farthest-first；ToolGuard=同步返 string 拒/undefined 放行，无 allow 结果=单调不可翻案
+- **view() 可见性**（:1186-1227）：inherited=global+链层（近遮远）；restrictions 全链相交；own 注册豁免过滤且遮蔽继承名；ptc 模式时 run_code transport 追加（modeFor 近链优先→defaultMode）
+- **serviceAsk**（:1735-1776）：approval 服务机会性 ctx.get——缺席 deny `tool "X" requires approval (not yet supported)`；无 agent deny `tool "X" requires approval, but the call has no agent to route it through`；allowed-once→allow；rejected→deny `the user rejected tool "X"`；cancelled→deny `approval for tool "X" was cancelled`（approvalCancelled=true）；unavailable→deny `tool "X" requires approval, but no approval channel is available`
+- **管线五段**（:1377-1910）：createExecution（args snapshotJsonValue+deepFreeze；finalizer/projector 快照先于实参化；collapse 判定走 modeFor）→prepare（pre-execute waterfall 默认 allow→ask 走 serviceAsk→cancel→guards（仅 allow 路径）→caller cancel 复查）→dispatch（tools/execute waterfall→dispatchToolBody：signal 融合+resolveExecution+bodyInvoked=true+execute→createSuccessResult：output schema 校验（violations→INVALID_TOOL_OUTPUT `tool "X" returned invalid output: ...`）→render→presentationMeta→concludesTurn）→finalize（projectContent→postExecute waterfall：accept 单替 content 或 value（value 替换重走 createSuccessResult 校验）、双替 TypeError `tools/post-execute accept decision cannot replace both value and content`、失败结果 value 替换 TypeError `tools/post-execute cannot replace the value of a failed result`、block→isError+feedback（失败文案=文本块 join 或 `tool result blocked by post-execute policy`）+deferred contexts 被 block 丢弃；caller 取消盖成功）→finish（materializeFinalResult（TypeError `tool result must be losslessly JSON-serializable`）→applyFinalContent→notifyResult emit）
+- **调度器内部缝**（:466-481）：TOOL_RUNTIME_SCHEDULER symbol 接口 prepare/dispatch/finalize/finish——供 agent-loop 并行调度器分段消费（切片 7 已移植消费侧；fr 侧对应 ToolsFace 分段面）
+- **executionMode**（:1311-1320）：resolveExecution（含 collapse 拒）→isConcurrencySafe 缺/抛/非严格 true→exclusive（fail-closed）
+- **PTC 折叠**（Phase 17 关联）：mode ptc 下模型直呼非 run_code → 管线前终结 UNKNOWN_TOOL 带路由文案 `only \`run_code\` is callable directly — call \`X\` from inside a \`run_code\` program instead`（:1474-1481）；折叠调用预派发 abort 仍走 aborted-before-dispatch；wireSchemas ptc 模式只出 run_code+knownNames=[run_code]；SDK section（TOOLS_SDK order）+collapse section（PTC_ONLY order，文本 PTC_ONLY_INSTRUCTION :60）；Config{mode native|ptc 默认 native, maxParallelSubCalls 自然数≥1 默认 10}
+- **deferLoading**：ToolSchema 投影含 deferLoading===true 时携带（:1290-1302）
+- **scoped 层系**（dsh-scope ScopedLayers/NamedEntries/AnonymousEntries）：M1 无 per-agent realm（Q82-A 判例）→ fr 结构性缺席候选（单层全局），spec 场景未提 scope 语义
+
+### wave 2：core/tools/src/schema.ts（632 行）+ json-schema.ts（656 行）全读
+**schema.ts（作者 DSL+defineTool）**：
+- ValueSchemaSpec 九态（string/number/integer/boolean/null/array/object/json/oneOf）+注解四键（description/title/default/examples）；object 必显式 additionalProperties:boolean；oneOf ≥2 分支
+- 编译器=迭代任务图（栈安全）+循环检测；作者键违例文案族逐字：`${path}.${key} is not supported by the value schema DSL`/`${path}.additionalProperties must be explicitly true or false`/`${path}.enum must be a non-empty array of scalar values`/`${path}.type must be string/number/integer/boolean/null/array/object/json, or use oneOf`/`${path} cannot declare both type and oneOf`/`${path}.oneOf must be an array of at least two value schemas`/`${path}.required must be true when present`/`${path} is circular`/`${path} must be a value schema object`/`${path} must be an object of value schemas`
+- parameterSchemaSpecToJsonSchema：隐式开放 object 根（type:object+properties+required?，无 additionalProperties 投影=JSON Schema 开放缺省）；valueSchemaSpecToJsonSchema：'json' 型→纯注解 schema（无 type）
+- ToolArgsError：`invalid arguments: ${violations.join('; ')}` 码 INVALID_ARGS
+- defineTool：定义期编译 parameters/output；execute 前硬校验（violations→ToolArgsError）；presentCall/presentResult/isConcurrencySafe 软校验（不匹配→undefined/false 回退=呈现与并发分类 fail-closed）；timeoutMs 定义期 `defineTool(${name}): timeoutMs must be a positive finite number`
+- TS 类型级推断（const>enum>宽类型/integer 归 number/oneOf 并集/深度 16 回退 JsonValue）为编译期类型面，运行时无深度限制——fr 侧等价物=编译投影+子集校验行为，violations 文本逐字可钉（批 1 设计要点：Rust 构建器等价 DSL，spec 场景"类型推断一致"的 fr 语义=校验 violations 输出一致）
+
+**json-schema.ts（强制子集）**：
+- 子集八约束键（type/oneOf/properties/required/additionalProperties/items/enum/const）+四注解键；JsonSchemaError `unsupported JSON schema: ${violations.join('; ')}` 码 UNSUPPORTED_SCHEMA
+- 违例文案族逐字（全表入档）：不支持键 `${path}.${key} is not a supported keyword (subset: type/oneOf/properties/required/additionalProperties/items/enum/const + annotations)`；type 数组拒 `${path}.type must be a single type string (type arrays are not supported)`；未知名 `${path}.type must be one of object/array/string/number/integer/boolean/null`（SCHEMA_TYPES 序）；type+oneOf 并存 `${path} cannot declare both type and oneOf`；错位键 `${path}.${key} is not supported on type "${T}"`；required 未声明 `${path}.required names "${key}" which is not in properties`；additionalProperties 非布 `${path}.additionalProperties must be a boolean`；oneOf 兄弟键 `${path}.${key} is not supported beside oneOf`；无 type/oneOf 带兄弟键 `${path}.${key} requires type or oneOf`；enum `${path}.enum must be a non-empty array of ${T} values`；const `${path}.const must be a ${T} value`；const∉enum `${path}.const must be one of ${path}.enum when both are declared`；注解非 JSON `${path}.${key} annotation must be lossless JSON data`
+- 值校验 violations 文案族逐字：`"path" must be an object/array/string/number/finite JSON number/integer/boolean/null`；enum `"path" must be one of [..]`；const `"path" must be ${v}`；oneOf `"path" must match exactly one oneOf branch (matched N)`；缺必需 `missing required property "path.key"`；未声明键 `"path.key" is not a declared property (additionalProperties: false)`；无损 `"path" must be a lossless JSON value/object/dense lossless JSON array`
+- 数字语义：有限+排 -0（Object.is）；realm 检查（isPlainJsonRecord/isPlainJsonArray）为 JS 特有——fr serde_json::Value 值语义天然等价（切片 7 deepFreeze/WeakSet 判例同形）
+- 校验器=显式帧迭代（栈安全）+oneOf 恰一分支计数
+
+### wave 3：presentation.ts（389）+ types.ts（63）+ user-approval（310+93）+ permission-presets（481+63）全读
+**presentation.ts（呈现词汇表）**：ToolCallKind 八值（read/edit/delete/move/search/execute/fetch/other）；ToolCallView 三态（generic{title,kind?,rawInput?,content?,locations?}/terminal{title,description?,cwd?}/diff{title,diffs[{path,oldText:null|str,newText}],locations?}）；ToolResultView 六态（generic/terminal{output?,exitCode?|signal?}/diff/search 两 shape（matches{files[{path,matches[{lineNumber,line}]}],truncated,total}/paths{paths,truncated,total}）/read{path,offset,lines[{number,text}],totalLines,lang?,content?}/web 两 kind（search{sources[{url,title?,snippet?,publishedAt?}],answer?,truncated}/fetch{url,statusCode,truncated}））——search 判别键=shape（防与 kind 撞）、web 判别键=kind；read 卡经 presentationMeta 持久化+presentResult 回读。types.ts：tool/ptc-dispatch-start{rootCallId,parentCallId,subCallId(`<parent>:ptc:<n>`),name,arguments}（调度真正启动时 append，排队弃者不落）+tool/ptc-dispatch{+isError,content,meta?,error?}（每启动者恰一结算，log-only 不进模型上下文）——Phase 17 面
+**user-approval**：
+- Config{policy 默认 ask}；APPROVAL_POLICIES=['ask','never']；OUTCOMES=['allowed-once','rejected','cancelled','unavailable']
+- runtime-context section 'approval:policy'（order=APPROVAL_POLICY）：NEVER_SENTENCE=`Approval prompts are disabled in this session: actions that require approval are rejected automatically — do not request sandbox escalation (do not set `sandbox_permissions`).`（:73）；ASK_SENTENCE=`Approval policy: ask. Operations that require approval may ask through the configured answerers; without an available answerer, the request fails closed.`（:75）；无 agent 裸 assemble 返回空串
+- setApprovalPolicy 自由函数：非法值 TypeError `approval policy must be one of "ask" or "never"`；append approval/policy{policy,source?:'delegation'}
+- request()：hasOpenTurn（日志尾倒扫 turn/start|turn/end）不满足 throw `approval.request() outside an open turn: the approval/asked + approval/decided audit pair must be turn-enclosed (a bare event between turns is crash-tail garbage on reload). Ask from inside the turn that needs the decision.`；id=randomUUID 每请求新鲜；append approval/asked{id,toolName,callId?,reason?}→decide→append approval/decided{id,outcome}；审计 append 失败即 throw（未记的决定不返回）
+- decide()（:267-307）：signal 已 abort→cancelled（先于一切）；never 策略在 dispatch 前自判 rejected（防 prepend listener 绕过）；waterfall 'approval/request'（answerer 链，scope=agent）默认 unavailable；Promise.resolve().then 入链（同步 throw 同路 contained）；词表外返回归一 unavailable；answerer 抛错→unavailable；abort 竞速 cancelled 先胜、晚到答案丢弃
+- setPolicy：同值 no-op；否则 setApprovalPolicy+agent.inject user 消息（source{kind:'user-approval'}）文案逐字 `The approval policy changed from "x" to "y" (changed by the user).`
+- effectivePolicy=overrideOf(session)尾扫??config.policy??'ask'
+**permission-presets（归属裁决项）**：预设=双 knob（sandbox:SANDBOX_MODES+approval:APPROVAL_POLICIES）捆绑表（默认仅两项：workspace-write{workspace-write,ask}/danger-full-access{danger-full-access,never}——**read-only 不在默认表**，read-only 是沙箱模式轴合法值而非预设表项）；CUSTOM_PRESET='custom'/AUTO_PRESET='auto'（Auto review 集成=experimental 面）；permission/preset 事件（log-only 用户意图）；'permissions' 会话投影（KnobState 三键+seeded）；/permission 命令=唯一写路径（空输入列当前+可用；未知名 error `unknown preset "name" (available: ...)`）；pinInitialPermission 会话发布前播种（全新=默认预设三事件；部分初始化只补缺）；constructor 校验：reserved 名/custom 表项/无 sandboxMode 的 shell 执行体（`permission: the mounted bash executor does not confine (no sandboxMode) — ...`）/组合默认无匹配 preset。**fr 侧归属未定：PRD 11.2 只有双 knob+联动公式+FR_PERMISSION_MODE，无 preset 服务/命令/投影描述；命令面归 fr-commands（Phase 18）→ 呈裁决**
+
+### wave 4：sandbox 域全读（seam 182+escalation 208+policy 183+session-mode 55+local 583）+ guard 域（240+81）
+**sandbox seam（'sandbox' 服务=SandboxProvider.confine）**：SandboxMode 三值；SandboxExecutionPolicy{mode,workspaceRoot,sessionId?}（root 恒携带）；SandboxPolicy=confined 子集（mode∈read-only|workspace-write）；ConfinedArgv{argv,enforcement:full|partial,denialSignatures,runnerFailureRules[{allowedExitCodes?,fatalSignatures,informationLines?}]}——拒绝方言按后端（bwrap='read-only file system'/landlock='permission denied'/seatbelt='operation not permitted'/windows-acl 四串）；SANDBOX_UNAVAILABLE 码+SandboxUnavailableError 文案逐字（:133-145 安装指引句）；confine 契约=argv 包装或 fail-closed，静默放行禁止；多候链功能探测仲裁（单候选免探测）
+**escalation.ts（升级词表+choreography）**：WIDER_MODES 表（read-only→[workspace-write,danger-full-access]/workspace-write→[danger-full-access]）；ESCALATION_TARGETS=[workspace-write,danger-full-access]；validateEscalationArgs 三文案（配对两错+空句 `invalid justification: expected a non-empty sentence`）；sandboxDenialMarker=`[sandbox: file access denied under ${mode} mode]`；escalationHintMarker(subject)=`[sandbox: escalation available — retry this exact ${subject} once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]`；sandboxPermissionsDescription(subject)；approveEscalation：同模式免审直返；非严格宽 throw `sandbox escalation to "X" is not strictly wider than this call's current "Y" mode`；无审批服务/无 agent 两 throw；审批 reason=`escalate sandbox to ${mode}: ${justification}`+displayReason{en,zh}；四结局（allowed-once 返模式/rejected 文案含 `; it stays denied, so stop and explain instead of working around it`/cancelled/unavailable）
+**sandbox-policy（'sandboxPolicy' 服务）**：Config{mode 默认 read-only（fail-safe 缺省），workspaceRoot 无 schema 默认→构造器 process.cwd()（装配层覆盖为 FR_PERMISSION_MODE??workspace-write=两层并存）}；SANDBOX_MODES 表；sandbox/mode 事件（log-only，source?:'delegation'）+setSandboxMode=append；sandboxMode 投影（末值 fold）；resolve()：request.mode ?? session override ?? defaultMode；workspaceRoot=session.header.cwd ?? 配置 root；sessionId 有 session 才带；renderPolicyContext 三段文本逐字（read-only/workspace-write 带根 JSON.stringify/danger-full-access=`Current DSH file policy: danger-full-access. The DSH file sandbox does not restrict file modifications by available operations.`——**spec 只引了前两段，第三段批 2 补钉**）；runtime-context section 'sandbox:policy'（order=SANDBOX_POLICY 110）无 session 空串
+**sandbox-local（LocalSandboxProvider）**：Config{runnerCommand?,runnerFailureSignatures?,probeTimeoutMs 默认 5000}（配对校验三文案+probe 正有限校验）；PLATFORM_CHAINS{linux:[bwrap,landlock],darwin:[seatbelt],win32:[windows-acl]}；链选择=平台先探测后、单候选免探测；STATIC_ENFORCEMENT（windows-acl=partial 余 full）；DENIAL_SIGNATURES/RUNNER_FAILURE_RULES 表（landlock 带 LAUNCHER_FAILURE_EXIT=125+informationalLines 部分强制行；windows-acl exit 127 门控）；缓存链判定一次；bwrap/seatbelt 探测=真 profile 包 true；landlock 探测返 enforcement 区分 per-ABI partial；windows-acl=会话/工作区双 SID 授予面（temp 私有目录 revocable+workspace ACE standing 复用缓存+dispose 回收）
+**guard/repeat-tool-reminder**：Config{thresholds 默认 [3,5,8]（空表/非整数/<2/重复→装载期 throw 文案族）、include/exclude 通配（`*`→.* 锚定，余字面）、argumentsPreviewChars 默认 500}；实现=tools/post-execute listener（observe 先计数后 delegate，additionalContexts 前插，block 分支保留 feedback 加 reminder；denied 调用也计数=锤拒绝调用正是要打断的环）+agent/pre-step 用户消息重置链；per-agent Chain{key=JSON[name,canonical],count}；canonicalize=深键排序+stringify；GENTLE_REMINDER（thresholds[0] 档）+detailedReminder（tool/count/args 预览截断 `… (+N more chars)`）两文案逐字；source={kind:'repeat-tool-reminder',form:'notice',summary:'tool × count'}
+**guard/timeout-policy**：tools/execute wrapper；TOOL_TIMEOUT 码；toolTimeoutResult 文案 `Error: tool call timed out after ${timeoutMs}ms`+info{name:'ToolTimeoutError',code:TOOL_TIMEOUT}；无 timeoutMs 直 delegate；deadline 换 signal（fr-timeout crate 已有 deadline/timeoutOf 同构原语）；自家计时器 fired 才替换结果（scope by code，外层嵌套 deadline 读作上游取消）
+**遗留待读（批 1/2 补）**：sandbox/roots.ts（canonicalPath/writableRoots 55 行）+diagnostics.ts（classifyRunnerFailure 100 行）；shell/bash-sandbox（bash 执行体包装，归 Phase 16a）；core/tools testing.ts（42 行 fixture 面）；sandbox-windows-acl 全家（win32，裁决后置项）
+
+### 2026-10-28 用户裁决：Q98-B / Q99-B（Q100 详析待裁）+ guard 装配事实
+
+- **guard 装配事实（Q100 评估输入）**：两 guard 插件均钉死在 base bundle（packages/bundle/base/cordis.patch.yml:408 timeout-policy 无 config=全 schema 缺省；:448 repeat-tool-reminder 显式 config{thresholds:[3,5,8], argumentsPreviewChars:500}）——dsh 一切基于 base 的装配（headless/sdk/web）恒装两者；"装配可裁"仅存在于不自基于 base 的自组装配。
+- **Q98-B：Phase 14 全落 permission-presets 服务面**（表+catalog+`/permission` 命令+投影+pinInitialPermission 播种）。落地后果四项（批 2 设计钉）：
+  1. Auto 面：B 字面不含 Auto 集成——AUTO_PRESET/custom 保留名校验+derive 的 auto 分支常量落（服务面完整性），registerAuto/autoAdmit 动态钩子不落（experimental 无消费者，19.1 补录确认点批 2 呈报）
+  2. /permission 命令装配：dsh 经 ctx.inject(['commands']) 子作用域条件注册；dougong descriptor inject 为静态声明（未满足则整插件 park）→ fr 落法=所有权翻转：命令行为面（handler 语义+文案）本切片服务面测试钉死，命令行注册随 Phase 18 fr-commands 落（fr-commands require 'permission-presets' 注册；1:1=行为对齐非模块镜像）
+  3. 归属 crate=fr-approval（dsh 位于 interaction 域）；默认模式事实来源：dsh 读 ctx.shell.sandboxMode（执行体能力事实）→ fr 经 'sandbox-policy' 服务面暴露 default_mode（批 2 钉）
+  4. 'permissions' 投影：fr 无通用投影注册表 → preset 服务内部 fold（session 读面）；pinInitialPermission 的 session/created 钩子 M1 等价物批 2 钉（首次触达懒播种 or 会话创建总线镜像）
+- **Q99-B：本切片全量移植 win32 ACL 执行体**（sandbox-windows-acl 全家 ~2000 行：win32-abi/token/acl/ffi/grant/spawn/runner/path-boundary/workspace-sid/acl-skill+sandbox-local 的 windows-acl rung）。落地后果三项（批 2 设计钉）：
+  1. Linux 上不可运行验证 → 形态=#[cfg(windows)] 模块+#[cfg(windows)] 测试+**新增 Windows 交叉编译检查门**（cargo check --target x86_64-pc-windows-msvc）保证零警告零错误在编译层成立；运行时行为验证在无 Windows CI lane 时空缺（如实档载，门形态批 2 钉：每提交 or CI 专用）
+  2. ACL runner 形态：dsh=[node, runner.js] → fr=独立 runner 二进制（fr-sandbox bin target 或宿主子命令）批 2 钉
+  3. 与 19.2 条 15 判例（win32 lease 后置理由=不可验证代码面不落地）的张力：本裁决为该原则的显式用户例外（Decisions Made 记录，不动 19.2——非对 dsh 偏差而是全量 1:1）；批 2 体量大增，Q94-A 批结构内拆 2a/2b
+
+### 2026-10-28 用户原则纠偏：Q100 三方案撤回（一切皆插件为纲）
+- 用户裁定：guard 归属评估不得以实现方便利（切片闭环/边界冲突/批面大小）为权重，必须以后续使用/维护/升级方便为出发点；**一切皆插件**（plugin-first 记忆明文：跨插件设施=独立插件 provide 服务+ctx.require 消费，禁共享库/机制 crate 膨胀）。A（fr-tools 内置）/C（归 fr-tools-builtin）=策略塞进机制或工具集 crate，B（后置）=拖延非设计，全撤回。
+- **机制事实核查（guard 独立插件的落地路径，依据 dougong-plugin-dev/ABI v3 权威）**：
+  1. dylib 插件出站能力=require（同步阻塞、有返回值）+emit（fire-and-forget）两种，**无出站 dispatch**——插件不能发起带结果的 waterfall；故决策型管线瀑布（tools/pre-execute 需 allow/deny/ask、tools/execute 需包装结果、tools/post-execute 需 accept/block）经 **'tools' 服务的监听注册面**实现：guard 插件经 require 注册回调端点（service+method，Q86-A 判例同构），fr-tools 管线按注册序同步调用——**通用机制**，任何第三方策略插件（审批升级器/限流器/审计器/未来 MCP 治理）同路接入，升级零改 fr-tools
+  2. 通知型事件（tools/result、tools/change 观察+repeat 链的用户消息重置钩子）走 dougong **原生事件面**：fr-tools/fr-agent-loop 经 HostExports.emit 发镜像事件，guard descriptor `listen` 声明、on_event 收——原生插件事件流，不发明新机制
+  3. 组合性：guard 独立 crate=独立装配行，可裁可换可升级（1:1 dsh 两包两行）；此前「Q87-A：M1 无跨插件监听者」表述在 tools 域修正为「M1 即有真监听者（guard 两件）」——system-prompt 域维持原判（该域 M1 确无监听者）
+- 原则复查连带项（后续使用/维护/升级视角重审）：permission-presets 归属（dsh 独立包 vs 我记的 fr-approval 内挂）、session-projections 通用投影服务（dsh 独立服务，ACP Phase 18 消费）是否现在立缝、scoped 层系缺席须附设计预留（注册表层不得封死 Phase 18 scoped 扩展路径）
+
+### 2026-10-28 用户裁决：Q100′A～Q105′A 全 A（一切皆插件定纲）+原则固化
+- **Q100′A**：guard 两 crate——`fr-guard-repeat-reminder`+`fr-guard-timeout`（dsh 两包两装配行 1:1 组合粒度，可裁可换可独立升级）
+- **Q101′A**：'tools' 服务监听注册面=分 stage 注册+显式序（register_listener(stage: pre_execute|execute|post_execute, endpoint)，触发序=注册序=装配行序）——通用策略插件公共入口（审批升级/限流/审计/第三方治理同路接入 fr-tools 零改动）
+- **Q102′A**：fr-agent-loop emit `agent/user-admitted` 通知事件（用户消息获准进 step 批时 fire-and-forget 镜像），guard descriptor listen 订阅后重置 repeat 链——dsh agent/pre-step 用户消息观测语义的 fr 载体；事件名进 PRD 4.4（fr 增设标注）
+- **Q103′A**：PRD 4.5 增行（三行：两 guard+preset crate）；TOOLS spec Allowed Changes 扩两 guard crate 路径（Q92-A 判例同形），守卫场景绑 guard crate 真实测试
+- **Q104′A**：`fr-permission-presets` 独立 crate（撤销 Q98-B 记录中「归属 fr-approval」；dsh 独立包 1:1，static inject shell+approval+sessions+sessionProjections 四依赖对应 fr 侧 'sandbox-policy'+'approval'+'session-persistence'+'session-projections' 缝）
+- **Q105′A**：`'session-projections'` 服务现在立缝——fr-session provide（dsh 同域 packages/session/session-projection，域内服务非跨切策略不另立 crate），register/stateOf 两面；sandboxMode/permissions 投影经服务注册，Phase 18 ACP 零重构接入
+- 原则已固化进持久记忆（plugin-first-no-fat-shared-libs 更新：权重准则=禁实现便利论据、只以使用/维护/升级方便为准；Q100 撤回事件为反例存档）
+- 批结构定稿：批 1 fr-tools（注册表+管线+监听注册面+schema/presentation/json-schema+调度面）+两 guard crate → 批 2a fr-approval+fr-permission-presets+fr-session projections 服务面 → 批 2b fr-sandbox（win32 全量+交叉编译门）→ 批 3 三 spec 绑定+七步流 4-7
+- 遗留呈报点（批 2）：PRD 4.4 服务缝清单漏 dsh `sandbox-policy` 名（ctx.sandboxPolicy 独立服务，fr-sandbox 将 provide——是否补入 4.4 清单随批 2 一并确认）；PRD 4.5 的 fr-sandbox 单 crate 覆盖 policy+seam+local 三 dsh 包为既裁基线不动

@@ -15,12 +15,15 @@ satisfies: [REQ-FR-TOOLS]
 - 执行管线 MUST 按序：createExecution（参数 JSON 快照/冻结）→ tools/pre-execute waterfall（allow / deny / {kind:'ask'} 交 ApprovalService）→ guards（单调串，防重复调用风暴）→ tools/execute waterfall → 工具体 → tools/post-execute → append tool/call（模型序）+ tool/result（模型序提交）；guards 仅 pre-execute allow 时求值、跨 waterfall 单调不放宽（无 allow 回退）；guard 拒绝的调用仍 MUST 过 tools/post-execute；post-execute block → isError 结果附 feedback 文本、value/content 双替换抛 TypeError；finalize 冻结执行记录后才提交 tool/result（dsh tools/src/index.ts:1153-1162,724-732,1501-1547,1789-1828,1677-1722）。
 - 调度 MUST：exclusive 调用为单调用屏障（组=该调用本身）；parallel 有界滚动池上限=agentLoop.config.maxParallelToolCalls 默认 10；批次启动前 lazy 重分类（注册表变更可产生新屏障，并行组在首个非 parallel 调用处断开）；concludeTurn 仅成功结果终结 turn、错误结果 turn 继续；abort 为未开始调用补合成错误结果（dsh agent-loop/src/tool-calls.ts:85-105,200-213、tools/src/index.ts:593）。
 - schema 类型推断与呈现元模型 MUST 对齐 dsh schema.ts / presentation.ts。
+- `tools` 服务 MUST 提供管线监听注册面（2026-10-28 Q101′A）：pre-execute/execute/post-execute 决策段接受插件注册回调端点（service+method），注册序=装配行序=触发序；repeat-tool-reminder 与 timeout-policy 为独立插件 crate（crates/fr-guard-repeat-reminder、crates/fr-guard-timeout，Q100′A/Q103′A）经此接入，守卫场景测试落 guard crate。
 - schema 子集白名单 MUST（type/oneOf/properties/required/additionalProperties/items/enum/const 加注释词，其余键拒绝）；object 类的 additionalProperties MUST 显式 boolean（缺省或非布尔拒绝）；推断规则：const 优先于 enum 优先于宽类型、integer 归 number、oneOf 并集、深度 16 上限回退 JsonValue；isConcurrencySafe 仅严格 true 才 parallel（否则 fail-closed exclusive）（dsh schema.ts:97-166,367-369、json-schema.ts:6-10）。
 
 ## Boundaries
 
 ### Allowed Changes
 - crates/fr-tools/**
+- crates/fr-guard-repeat-reminder/**
+- crates/fr-guard-timeout/**
 
 ### Forbidden
 - Do not weaken or remove the source requirement clauses.

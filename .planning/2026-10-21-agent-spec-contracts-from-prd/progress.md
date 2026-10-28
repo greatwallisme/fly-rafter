@@ -956,3 +956,24 @@
 - 七步流 4-7：lifecycle 46/0/1（带 FR_DSH_SOURCE；skip 计 not passing→exit 1=AGENT-LOOP 判例同形）；guard 全仓重跑（首跑与编辑竞态弃用）；explain 97.9%（46/0/1）；stamp --dry-run Spec-Passing:false（1 skip）。
 - CLAUDE.md 当前阶段补档（原文停在 fr-config/7f8948c）：切片 1-8 状态+四基线（82/0/26、60/0/259、23/0/3、46/0/1）+绑定回放脚本三件+FR_DSH_SOURCE 注意项；绑定面核实后修正 bind-tools-*.py 虚引（其余切片内联维护）。
 - 门禁：workspace 四门绿（fmt OK/clippy --workspace --all-targets -D warnings 0/862 passed 0 failed/doc 0）。切片 8（Phase 15 fr-system-prompt+loop 桥+AGENT-LOOP 补强）闭环。
+
+## 2026-10-28 — Phase 16 批 0 启动即转入 Phase 14（Q91-Q97 全 A 裁决落地，文档轮无代码）
+- 批 0 结构层全读：builtin-tools spec 2485 行全读+fr-shell 无 spec 覆盖发现+dsh 包布局（packages/*/* 两层）+catalog Tool Package Map（:12-54）服务缝全景+PRD 4.4/4.5/9/17/19/22 关键节（findings Phase 16 节落档）。
+- 关键发现 F1：Phase 14（fr-tools+fr-approval+fr-sandbox）未做而 CLAUDE.md:15 虚指已落（五重证据）；F2：Phase 16 硬依赖 Phase 14。呈报 Q91-Q97 七分叉，用户全 A。
+- 落地：CLAUDE.md:15 勘误（移除虚指句+次序改 Phase 14 先行+Phase 16 六裁决补档）；task_plan（Next Step/Current Phase→Phase 14、Phase 14 批结构、Phase 16 头补六裁决、Decisions Made +7 行）；findings（结构层事实+七裁决）；本条 progress。
+- 下一动作：Phase 14 批 0 真源全读（TOOLS/APPROVAL/SANDBOX 三 spec + dsh core/tools+user-approval+permission-presets+sandbox 全家）。
+
+## 2026-10-28 — Phase 14 批 0 真源全读（Q91-A 落地后先行），文档轮无代码
+- 七裁决（Q91-Q97 全 A）文档面落地：CLAUDE.md:15 勘误（移除 Phase 14 虚指句+次序改 Phase 14 先行+Phase 16 六裁决补档）；task_plan（Next Step/Current Phase→Phase 14、Phase 14 批结构、Phase 16 头补六裁决、Decisions Made +7 行）；findings 两大节（Phase 16 结构层+七裁决/Phase 14 批 0）。
+- Phase 14 批 0 真源全读：TOOLS/APPROVAL/SANDBOX 三 spec（18/15/9 场景）；dsh core/tools（index 1993+schema 632+json-schema 656+presentation 389+types 63）；user-approval（310+93）；permission-presets（481+63）；sandbox 全家（seam 182+escalation 208+policy 183+session-mode 55+local 583）；guard（repeat-tool-reminder 240+timeout-policy 81）。file:line 证据全入 findings Phase 14 节（错误文案族逐字全表）。
+- 新发现要点：sandbox renderPolicyContext 第三段（danger-full-access）spec 未引需批 2 补钉；permission-presets 默认表仅两预设（read-only 是模式轴非预设项）；guard 两插件=tools waterfall 独立监听器（PRD 4.5 无 fr-guard crate→归属待裁决）；win32 ACL ~2000 行 Linux 不可验证→后置裁决项。
+- 呈报 Q98-Q100 三裁决+五项判例延伸列示（工具体回调端点/scoped 缺席/总线镜像/runtime-context 注册/bash-sandbox 归 16a/PTC 折叠归 Phase 17）。
+
+## 2026-10-28 — Phase 14 批 0 收口轮：Q98-B/Q99-B 裁决落地，Q100 详析呈报
+- 裁决记录：Q98-B（preset 服务面全落，Auto 钩子/命令注册翻转/默认模式来源/投影 fold 四项批 2 设计钉）+ Q99-B（win32 ACL 全量移植，cfg(windows)+交叉编译门+runner 二进制形态三项批 2 设计钉，批 2 拆 2a/2b）。
+- Q100 评估新事实：两 guard 钉死 base bundle（cordis.patch.yml:408/:448，repeat 行显式 thresholds [3,5,8]）——恒装为 dsh 部署现实。
+
+## 2026-10-28 — Phase 14 批 0 闭环：Q100′A-Q105′A 全 A 落地（一切皆插件定纲）
+- 用户原则重申加严并固化持久记忆（plugin-first-no-fat-shared-libs 更新：权重准则=禁实现便利论据、只以使用/维护/升级方便为准，Q100 撤回事件反例存档）。
+- 六裁决落档：findings（Q100′A-Q105′A+批结构定稿+遗留呈报点：PRD 4.4 漏 dsh sandbox-policy 名随批 2 确认）；task_plan（Decisions +6 行、Phase 14 bullets 增 guard/preset/projections 三条、Next Step→批 1）；PRD（4.5 增三 crate 行、4.4 补 session-projections+agent/user-admitted 标注、9.2 补监听注册面段）；TOOLS spec（Decisions +监听注册面条、Boundaries 扩两 guard crate）；CLAUDE.md 下一片句更新。
+- 批 0 全部裁决（Q91-Q97、Q98-B/Q99-B、Q100′-Q105′）闭环。下一动作：批 1 fr-tools+两 guard crate 开写。

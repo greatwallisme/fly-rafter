@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 16：fr-tools-builtin + fr-shell（bash 执行 seam、子进程/作业管理、第 17 节工具：shell 组/文件组 7 件/web 2 件/todo/goal/jobs/schedule/交互 2 件（headless fail-closed）/会话查询 5 件/PTY 6 件（opt-in）/skill 2 件/lsp/working_directory/内省 3 件；参数 schema 对照 dsh tool-catalog.md 逐字冻结）。切片 8 已闭环（PROMPT 46/0/1，workspace 862 tests 四门绿）。
+Phase 14 批 1 开写：fr-tools（注册表+管线五段+监听注册面 Q101′A+schema/presentation/json-schema+调度面+agent/user-admitted emit 属 loop 侧批内补）+ fr-guard-repeat-reminder + fr-guard-timeout 两 crate（一切皆插件）。随后批 2a fr-approval+fr-permission-presets+fr-session projections 面 → 批 2b fr-sandbox（win32 全量+交叉编译门）→ 批 3 三 spec 绑定+七步流 4-7。批 0 全部裁决（Q91-Q105′）已落档。
 
 ## Current Phase
-Phase 16（fr-tools-builtin + fr-shell）——切片 8 已闭环
+Phase 14（fr-tools + fr-approval + fr-sandbox）——批 0 真源全读（Q91-A 勘误后先行；切片 8 已闭环）
 
 ## Phases
 
@@ -113,11 +113,14 @@ Phase 16（fr-tools-builtin + fr-shell）——切片 8 已闭环
 - [x] 对照 REQ-FR-LLM 场景逐条落测试（provider 合约 lifecycle 40/40 passed / 0 skipped / 0 failed 全闭环；stamp --dry-run Spec-Passing true）
 - **Status:** complete
 
-### Phase 14: fr-tools + fr-approval + fr-sandbox
-- [ ] fr-tools：ToolRegistry（register：名称/JSON Schema/executionMode/presentation/section order 1000-3000）、MCP raw schema 动态注册
+### Phase 14: fr-tools + fr-approval + fr-sandbox（Q91-A 先行；批结构 Q94-A：批 0 裁决/真源→批 1 fr-tools→批 2 approval+sandbox→批 3 绑定）
+- [ ] fr-tools：ToolRegistry（register：名称/JSON Schema/executionMode/presentation/section order 1000-3000）、MCP raw schema 动态注册；**监听注册面（Q101′A：pre-execute/execute/post-execute 分 stage 回调端点，注册序=装配行序=触发序）**
+- [ ] guard 两插件 crate（Q100′A）：fr-guard-repeat-reminder（阈值 [3,5,8]/预览 500/用户消息重置链经 agent/user-admitted）/fr-guard-timeout（TOOL_TIMEOUT 施加）
 - [ ] 执行管线五段（createExecution 冻结 → pre-execute waterfall（ask 交 ApprovalService）→ guards 单调串 → tools/execute waterfall → 工具体 → post-execute）；ptc 坍缩调用策略前置终结；post-execute 双替换 TypeError/失败结果禁 value 替换/finalize 快照冻结；成功结果过 output schema 校验
 - [ ] 调度（isConcurrencySafe 严格 true 才 parallel；exclusive 组=单调用屏障；池上限 max-parallel-tool-calls 默认 10；lazy 重分类；concludeTurn 成功门控）
 - [ ] fr-approval：ApprovalPolicy ask/never、request() fail-closed 'unavailable' 归一化、approval/policy 事件、'never' dispatch 前自判、abort 竞速 cancelled、切换文案逐字
+- [ ] fr-permission-presets（Q104′A 独立 crate）：双 knob 捆绑表+catalog+set/current/derive+pinInitialPermission 播种+/permission 命令行为面（注册随 Phase 18 fr-commands 翻转）
+- [ ] fr-session 增 'session-projections' 服务面（Q105′A：register/stateOf；sandboxMode/permissions 投影消费者）
 - [ ] fr-sandbox：三预设表、FR_PERMISSION_MODE 覆盖、后端链 bubblewrap→Landlock/Seatbelt/ACL、sandbox-unavailable fail-closed
 - [ ] 对照 REQ-FR-TOOLS/APPROVAL/SANDBOX 场景逐条落测试
 - **Status:** pending
@@ -130,7 +133,7 @@ Phase 16（fr-tools-builtin + fr-shell）——切片 8 已闭环
 - [x] 对照 REQ-FR-PROMPT/AGENT-LOOP 场景逐条落测试（PROMPT 46 真实+1 skip=working-directory Phase 18，2026-10-28 批 3）
 - **Status:** complete
 
-### Phase 16: fr-tools-builtin + fr-shell
+### Phase 16: fr-tools-builtin + fr-shell（Q92-A 单合同双 crate：builtin-tools spec Boundaries 增 crates/fr-shell/**；Q93-A fr-tools-builtin provide 全部域服务（fs/web/goals/schedule/sessionQuery/skills/lsp/workingDirectory/userQuestions/cordisInspect/pluginManager/shellEnv/terminals），fr-shell 仅 provide shell/subprocess/jobs；Q94-A 拆 16a shell 组/16b 文件组 7 件/16c 任务状态/16d 交互+会话查询/16e PTY+persistent/16f web+skill+lsp+目录+内省；Q95-A catalog 脚本 Q89-A 判例同款；Q96-A run_code+subagent 族绑跨切片 skip；Q97-A 每工具一件全 schema 钉测）
 - [ ] fr-shell：bash 执行 seam、子进程/作业管理（job_kill/list/output）、沙箱策略执行体对接
 - [ ] 第 17 节工具：shell 组（bash/pwsh/persistent）、文件组 7 件、web 2 件、todo/goal/jobs/schedule、交互 2 件（headless fail-closed）、会话查询 5 件、PTY 6 件（opt-in）、skill 2 件、lsp、working_directory、内省 3 件
 - [ ] 每工具参数 schema 对照 dsh tool-catalog.md 逐字冻结
@@ -161,6 +164,21 @@ Phase 16（fr-tools-builtin + fr-shell）——切片 8 已闭环
 | KLL 场景 DSL 用中文（场景/假设/当/那么） | 解析器双语支持（patterns.md）；项目文档语言为中文 |
 | 标记属性仅 id/title/tags/source | commands.md 只记载这四个属性；confidence 放 Source Trace 条目，避免未记载属性引发导入风险 |
 | 候选块独立落盘 doc/requirements-intake.md | import 只读显式标记块、不解释原始散文；PRD 保持纯净 |
+| Q91-A（2026-10-28）次序勘误：Phase 14 先行，随后 Phase 16 | 五重证据证实 Phase 14 未做（crate/members/spec pending/task_plan/findings 零记录）而 CLAUDE.md 虚指已落；Phase 16 硬依赖 14（注册表/审批/沙箱是 builtin 工具装配前提）；CLAUDE.md 已同批勘误 |
+| Q92-A fr-shell 合同承载：扩 builtin-tools spec（Boundaries 增 crates/fr-shell/** + Decisions 增 shell seam 条款） | 单合同双 crate，Phase 16 一体闭环；fr-shell 无独立 KLL 需求块 |
+| Q93-A 域服务 provider 归属：fr-tools-builtin provide 全部域服务（fs/web/goals/schedule/sessionQuery/skills/lsp/workingDirectory/userQuestions/cordisInspect/pluginManager/shellEnv/terminals）+全部工具；fr-shell 仅 provide shell/subprocess/jobs | PRD 4.5 无域服务 crate；plugin-first 达标（独立插件 provide+require 消费）；terminals 随工具域归 fr-tools-builtin |
+| Q94-A 切片拆分：Phase 14 单切片四批；Phase 16 拆 16a shell 组/16b 文件组/16c 任务状态/16d 交互+会话查询/16e PTY+persistent/16f web+skill+lsp+目录+内省 | 真源合计 ~50k 行，单切片不可收口 |
+| Q95-A catalog 生成脚本：Q89-A 判例同款（python3+FR_DSH_SOURCE 必需+--check 钉测缺席即 fail）；抽取源=docs/tool-catalog.md；产物=fr-tools-builtin schema 常量表+装配 dump 与冻结 catalog diff 为空钉测 | spec 决策钦定 catalog 为权威；判例降低分叉 |
+| Q96-A run_code+subagent 族五工具：本切片不实现，场景绑跨切片 skip（AGENT-LOOP 判例同形） | 实现归 fr-ptc（Phase 17）/fr-subagent（Phase 18），各自有独立 spec |
+| Q97-A schema 场景绑定：每工具一件全 schema 钉测（断言该工具完整参数表）覆盖其全部形状+约束场景，绑定审计逐映射 | Q90-A 同构；~120 逐参数场景收敛为 ~40 件钉测 |
+| Q98-B（2026-10-28）permission-presets 服务面 Phase 14 全落（表+命令行为面+投影+播种；Auto 动态钩子不落） | 用户裁决；命令注册随 Phase 18 fr-commands 所有权翻转落地 |
+| Q99-B（2026-10-28）win32 ACL 执行体本切片全量移植（~2000 行 cfg(windows)+交叉编译门） | 用户裁决；19.2 条 15 原则的显式例外，运行时验证空缺如实档载 |
+| Q100′A（2026-10-28）guard 两 crate：fr-guard-repeat-reminder+fr-guard-timeout（1:1 dsh 两包两装配行） | 一切皆插件（用户原则重申加严：权重禁实现便利，只以使用/维护/升级为准） |
+| Q101′A（2026-10-28）tools 监听注册面：分 stage+显式序，注册序=装配行序=触发序 | 决策型瀑布跨插件的唯一 ABI 可行路径（dylib 无出站 dispatch）；通用策略插件入口 |
+| Q102′A（2026-10-28）agent/user-admitted 通知事件（agent-loop emit+guard 原生 listen） | 通知型走 dougong 原生事件面；dsh agent/pre-step 用户消息观测语义的 fr 载体 |
+| Q103′A（2026-10-28）PRD 4.5 增三行+TOOLS spec 边界扩两 guard crate | Q92-A 判例同形；守卫场景绑 guard crate 真实测试 |
+| Q104′A（2026-10-28）fr-permission-presets 独立 crate（撤销 Q98-B 的 fr-approval 内挂记录） | dsh 独立包 1:1；审批与预设两策略独立演进 |
+| Q105′A（2026-10-28）'session-projections' 服务现在立缝（fr-session provide，register/stateOf） | dsh 同域独立服务；Phase 18 ACP 零重构接入 |
 
 ## Errors Encountered
 | Error | Resolution |
