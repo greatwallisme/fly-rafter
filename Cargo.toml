@@ -50,6 +50,7 @@ regex = "1.13"
 indexmap = { version = "2", features = ["serde"] }
 sha2 = "0.10.9"
 sha1 = "0.10"
+uuid = { version = "1", features = ["v4"] }
 # Slice 4 facility rulings (PRD decision 41): ureq blocking client (rustls
 # default), image codecs, and libwebp advanced API (method=0 ladder effort).
 ureq = "3.5"

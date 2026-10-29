@@ -2647,7 +2647,9 @@ mod tests {
     use dougong_abi::{HostExports, STATUS_OK};
     use fr_llm::adapter::{GenerateOptions, LlmCallConfig, ResolvedModelInfo};
     use fr_llm::error::LlmError;
-    use fr_wire::event::{CancelCause, EpochHeader, SessionEventData, SurfaceOp};
+    use fr_wire::ContentBlock;
+    use fr_wire::KnownContentBlock;
+    use fr_wire::event::{CancelCause, EpochHeader, SessionEventData, SurfaceOp, ToolResultError};
     use fr_wire::ids::ToolCallId;
     use fr_wire::message::Message;
     use fr_wire::stream::{KnownStreamChunk, StreamChunk};
@@ -3137,22 +3139,46 @@ mod tests {
         }
     }
 
-    /// The tools double: configurable mode; dispatch settles through the
-    /// mailbox notification so the scheduler's wait path is real.
+    /// One scheduler-order observation: a dispatch with the in-flight
+    /// count after it, or a settled-drain with the drained ids and the
+    /// remaining in-flight count.
+    #[derive(Clone, Debug, PartialEq)]
+    enum Transition {
+        Dispatch(String, usize),
+        Drain(Vec<String>, usize),
+    }
+
+    /// The tools double: configurable mode (per-call overrides for mixed
+    /// groups, a dispatch-time flip for lazy reclassification); dispatch
+    /// settles through the mailbox notification so the scheduler's wait
+    /// path is real, and every dispatch/drain lands on a timeline the
+    /// scheduling pins assert over.
     struct ScriptedTools {
         mailbox: Option<Arc<crate::plugin_shell::SessionMailbox>>,
         mode: ToolExecutionMode,
+        /// Per-call-id mode overrides (the mixed-group probe).
+        mode_overrides: std::collections::HashMap<String, ToolExecutionMode>,
+        /// Flip the target call to `Exclusive` once the trigger call
+        /// dispatches (the lazy-reclassification probe).
+        flip_on_dispatch: Option<(String, String)>,
         results: std::collections::VecDeque<ToolExecutionResult>,
         settled: Vec<(ToolCallId, ToolSettlement)>,
         dispatches: Vec<ToolExecution>,
         /// Enqueue a cancel when the first dispatch runs (the tool-abort
         /// probe): later pool calls never start.
         cancel_on_dispatch: bool,
+        /// The dispatched-but-undrained call ids, and the dispatch/drain
+        /// order with in-flight counts.
+        in_flight_now: Vec<String>,
+        timeline: Vec<Transition>,
     }
 
     impl ToolsFace for ScriptedTools {
-        fn execution_mode(&mut self, _exec: &ToolExecution) -> ToolExecutionMode {
-            self.mode
+        fn execution_mode(&mut self, exec: &ToolExecution) -> ToolExecutionMode {
+            self.mode_overrides
+                .get(exec.call_id.as_str())
+                .copied()
+                .unwrap_or(self.mode)
         }
 
         fn prepare(&mut self, exec: &ToolExecution) -> Result<ToolPrepared, String> {
@@ -3161,6 +3187,17 @@ mod tests {
 
         fn dispatch(&mut self, exec: &ToolExecution) -> Result<(), String> {
             self.dispatches.push(exec.clone());
+            let id = exec.call_id.to_string();
+            if let Some((trigger, target)) = self.flip_on_dispatch.clone()
+                && id == trigger
+            {
+                self.mode_overrides
+                    .insert(target, ToolExecutionMode::Exclusive);
+                self.flip_on_dispatch = None;
+            }
+            self.in_flight_now.push(id.clone());
+            self.timeline
+                .push(Transition::Dispatch(id, self.in_flight_now.len()));
             if self.cancel_on_dispatch {
                 self.cancel_on_dispatch = false;
                 if let Some(mailbox) = &self.mailbox {
@@ -3196,7 +3233,18 @@ mod tests {
         }
 
         fn settled(&mut self) -> Vec<(ToolCallId, ToolSettlement)> {
-            std::mem::take(&mut self.settled)
+            let taken = std::mem::take(&mut self.settled);
+            let drained: Vec<String> = taken.iter().map(|(id, _)| id.to_string()).collect();
+            for id in &drained {
+                if let Some(position) = self.in_flight_now.iter().position(|live| live == id) {
+                    self.in_flight_now.remove(position);
+                }
+            }
+            if !drained.is_empty() {
+                self.timeline
+                    .push(Transition::Drain(drained, self.in_flight_now.len()));
+            }
+            taken
         }
 
         fn finalize(
@@ -3357,10 +3405,14 @@ mod tests {
         let tools = Arc::new(Mutex::new(ScriptedTools {
             mailbox: Some(Arc::clone(&mailbox)),
             mode,
+            mode_overrides: std::collections::HashMap::new(),
+            flip_on_dispatch: None,
             results: tool_results.into(),
             settled: Vec::new(),
             dispatches: Vec::new(),
             cancel_on_dispatch: false,
+            in_flight_now: Vec::new(),
+            timeline: Vec::new(),
         }));
         let llm = Arc::new(Mutex::new(ScriptedLlm {
             session: Arc::clone(&session),
@@ -3941,6 +3993,324 @@ mod tests {
             turn_end_reason(&harness.session, 0),
             serde_json::json!({ "turn": 1, "reason": { "kind": "completed" } })
         );
+        drop(thread);
+    }
+
+    /// The highest in-flight count a timeline ever reached.
+    fn max_in_flight(timeline: &[Transition]) -> usize {
+        timeline
+            .iter()
+            .map(|transition| match transition {
+                Transition::Dispatch(_, count) | Transition::Drain(_, count) => *count,
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Exclusive calls are single-call barriers: every dispatch sees an
+    /// in-flight count of one (its predecessor already drained) and the
+    /// dispatch order is the model order.
+    #[test]
+    fn exclusive_calls_serialize_in_model_order() {
+        let harness = harness_with(
+            vec![with_tool_calls(3), ScriptedLlm::text_generation("done")],
+            ToolExecutionMode::Exclusive,
+            false,
+            Vec::new(),
+            10,
+            |_| {},
+            None,
+        );
+        let tools = Arc::clone(&harness.tools);
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the exclusive tool turn ends",
+        );
+        let timeline = tools.lock().expect("tools double lock").timeline.clone();
+        let dispatches: Vec<String> = timeline
+            .iter()
+            .filter_map(|transition| match transition {
+                Transition::Dispatch(id, in_flight) => {
+                    assert_eq!(
+                        *in_flight, 1,
+                        "an exclusive barrier runs alone: {transition:?}"
+                    );
+                    Some(id.clone())
+                }
+                Transition::Drain(_, in_flight) => {
+                    assert_eq!(*in_flight, 0, "nothing stays in flight: {transition:?}");
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(dispatches, ["call-0", "call-1", "call-2"]);
+        drop(thread);
+    }
+
+    /// The parallel pool is a bounded rolling window: with a cap of two,
+    /// no third dispatch happens while two calls are in flight, and the
+    /// window refills once settled calls drain.
+    #[test]
+    fn parallel_pool_bounds_in_flight() {
+        let harness = harness_with(
+            vec![with_tool_calls(4), ScriptedLlm::text_generation("done")],
+            ToolExecutionMode::Parallel,
+            false,
+            Vec::new(),
+            2,
+            |_| {},
+            None,
+        );
+        let tools = Arc::clone(&harness.tools);
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the bounded tool turn ends",
+        );
+        let double = tools.lock().expect("tools double lock");
+        let timeline = double.timeline.clone();
+        assert_eq!(max_in_flight(&timeline), 2, "{timeline:?}");
+        assert_eq!(double.dispatches.len(), 4);
+        drop(double);
+        drop(thread);
+    }
+
+    /// A successful result carrying `concludes_turn` ends the turn as
+    /// soon as its tool/result commits — no further model call is made.
+    #[test]
+    fn concluding_result_ends_the_turn() {
+        let concluding = ToolExecutionResult {
+            content: vec![ContentBlock::Known(KnownContentBlock::Text {
+                text: "done".to_owned(),
+            })],
+            is_error: false,
+            error: None,
+            meta: None,
+            additional_contexts: Vec::new(),
+            concludes_turn: true,
+        };
+        let harness = harness_with(
+            vec![with_tool_calls(1)],
+            ToolExecutionMode::Parallel,
+            false,
+            vec![concluding],
+            10,
+            |_| {},
+            None,
+        );
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the concluding tool turn ends",
+        );
+        let session = harness.session.lock().expect("test session lock");
+        assert_eq!(
+            session.begins, 1,
+            "no model call after the concluding result"
+        );
+        assert_eq!(session.typed("tool/result").len(), 1);
+        drop(session);
+        assert_eq!(
+            turn_end_reason(&harness.session, 0),
+            serde_json::json!({ "turn": 1, "reason": { "kind": "completed" } })
+        );
+        drop(thread);
+    }
+
+    /// An error result never concludes the turn: the model is called
+    /// again over the failed round and the turn ends by its own later
+    /// finish.
+    #[test]
+    fn error_result_does_not_conclude_the_turn() {
+        let failing = ToolExecutionResult {
+            content: vec![ContentBlock::Known(KnownContentBlock::Text {
+                text: "Error: script failed".to_owned(),
+            })],
+            is_error: true,
+            error: Some(ToolResultError {
+                name: "ScriptError".to_owned(),
+                code: "SCRIPT".to_owned(),
+                reason: None,
+            }),
+            meta: None,
+            additional_contexts: Vec::new(),
+            concludes_turn: false,
+        };
+        let harness = harness_with(
+            vec![with_tool_calls(1), ScriptedLlm::text_generation("done")],
+            ToolExecutionMode::Parallel,
+            false,
+            vec![failing],
+            10,
+            |_| {},
+            None,
+        );
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the errored tool turn ends",
+        );
+        let session = harness.session.lock().expect("test session lock");
+        assert_eq!(
+            session.begins, 2,
+            "the turn continues after the error result"
+        );
+        drop(session);
+        assert_eq!(
+            turn_end_reason(&harness.session, 0),
+            serde_json::json!({ "turn": 1, "reason": { "kind": "completed" } })
+        );
+        drop(thread);
+    }
+
+    /// A parallel group breaks at its first non-parallel call: the
+    /// leading parallels overlap inside the window, the exclusive call
+    /// runs strictly alone after they drain, and the trailing parallel
+    /// starts a fresh group.
+    #[test]
+    fn mixed_groups_break_at_exclusive() {
+        let harness = harness_with(
+            vec![with_tool_calls(4), ScriptedLlm::text_generation("done")],
+            ToolExecutionMode::Parallel,
+            false,
+            Vec::new(),
+            10,
+            |_| {},
+            None,
+        );
+        let tools = Arc::clone(&harness.tools);
+        tools
+            .lock()
+            .expect("tools double lock")
+            .mode_overrides
+            .insert("call-2".to_owned(), ToolExecutionMode::Exclusive);
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the mixed tool turn ends",
+        );
+        let timeline = tools.lock().expect("tools double lock").timeline.clone();
+        assert_eq!(
+            timeline,
+            vec![
+                Transition::Dispatch("call-0".to_owned(), 1),
+                Transition::Dispatch("call-1".to_owned(), 2),
+                Transition::Drain(vec!["call-0".to_owned(), "call-1".to_owned()], 0),
+                Transition::Dispatch("call-2".to_owned(), 1),
+                Transition::Drain(vec!["call-2".to_owned()], 0),
+                Transition::Dispatch("call-3".to_owned(), 1),
+                Transition::Drain(vec!["call-3".to_owned()], 0),
+            ],
+            "the exclusive call never overlaps its parallel siblings"
+        );
+        drop(thread);
+    }
+
+    /// Reclassification is lazy: a registry update landing while the
+    /// pool runs re-shapes the remaining calls — call-1 flips to
+    /// exclusive when call-0 dispatches, so it never overlaps its
+    /// former pool sibling (the fill-time re-check).
+    #[test]
+    fn reclassification_breaks_the_pool() {
+        let harness = harness_with(
+            vec![with_tool_calls(2), ScriptedLlm::text_generation("done")],
+            ToolExecutionMode::Parallel,
+            false,
+            Vec::new(),
+            10,
+            |_| {},
+            None,
+        );
+        let tools = Arc::clone(&harness.tools);
+        tools.lock().expect("tools double lock").flip_on_dispatch =
+            Some(("call-0".to_owned(), "call-1".to_owned()));
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the reclassified tool turn ends",
+        );
+        let timeline = tools.lock().expect("tools double lock").timeline.clone();
+        assert_eq!(
+            timeline,
+            vec![
+                Transition::Dispatch("call-0".to_owned(), 1),
+                Transition::Drain(vec!["call-0".to_owned()], 0),
+                Transition::Dispatch("call-1".to_owned(), 1),
+                Transition::Drain(vec!["call-1".to_owned()], 0),
+            ],
+            "the flipped call runs alone after its former sibling drains"
+        );
+        drop(thread);
+    }
+
+    /// The pool window defaults to ten (the bundle line
+    /// `max-parallel-tool-calls: 10`): twelve parallel calls never put
+    /// an eleventh in flight, and the window refills as calls drain.
+    #[test]
+    fn pool_window_defaults_to_ten() {
+        let harness = harness_with(
+            vec![with_tool_calls(12), ScriptedLlm::text_generation("done")],
+            ToolExecutionMode::Parallel,
+            false,
+            Vec::new(),
+            10,
+            |_| {},
+            None,
+        );
+        let tools = Arc::clone(&harness.tools);
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the twelve-call tool turn ends",
+        );
+        let double = tools.lock().expect("tools double lock");
+        let timeline = double.timeline.clone();
+        assert_eq!(max_in_flight(&timeline), 10, "{timeline:?}");
+        assert_eq!(double.dispatches.len(), 12);
+        drop(double);
         drop(thread);
     }
 

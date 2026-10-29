@@ -420,7 +420,7 @@ tool/call 在 prepare（pre-execute）之前追加，tool/result 由 contiguous 
 - 会话策略 `ApprovalPolicy = 'ask' | 'never'`（默认 ask；danger-full-access 权限模式下 never；`never` 对一切 ask 自动拒绝，dsh `user-approval/src/index.ts:139`）；持久化为 `approval/policy` 事件（log-only 不进模型 transcript，最后一条生效），切换时注入 user-message 通知模型（文案逐字 `The approval policy changed from "x" to "y" (changed by the user).`，dsh user-approval/src/index.ts:184-195）
 - `request()` 契约：必须处于 open turn 内（审计对 `approval/asked` + `approval/decided` 必须 turn-enclosed）；应答链（UI answerer）缺席/失败 → **fail-closed `'unavailable'`**，越权返回值一律归一化为 `'unavailable'`（dsh `user-approval/src/index.ts:62` 契约文档句、:55 结果词表 `['allowed-once','rejected','cancelled','unavailable']`、:283-291 兜底与归一化，已一手核实）；唯一授予值 `'allowed-once'`，无持久 allow-list
 - 集成：`tools/pre-execute` waterfall 返回 `{kind:'ask'}` → serviceAsk；沙箱升级（如 bash 的 `sandbox_permissions`）走同一 seam
-- 实现细则：approval/policy 事件 log-only 不进 transcript，`source:'delegation'` 标记委派种子 override；setPolicy 同值 no-op；hasOpenTurn 从日志尾倒扫 turn/start|turn/end；'never' 在 dispatch 之前由服务自身判 rejected（防 prepend listener 绕过）；结果 waterfall 以 Promise.then 先入链（同步 throw 与异步失败同路 contained）；abort 竞速先赢 resolve('cancelled')，晚到答案丢弃；ApprovalRequestId 每请求 fresh randomUUID；effectivePolicy = 会话 override ?? config.policy ?? 'ask'（dsh user-approval/src/index.ts）
+- 实现细则：approval/policy 事件 log-only 不进 transcript，`source:'delegation'` 标记委派种子 override；setPolicy 同值 no-op；hasOpenTurn 从日志尾倒扫 turn/start|turn/end；'never' 在 dispatch 之前由服务自身判 rejected（防 prepend listener 绕过；answerer 不派发，asked/decided 审计对仍完整产生——2026-10-29 Q-C 勘误，dsh request() 无条件 append 审计对）；结果 waterfall 以 Promise.then 先入链（同步 throw 与异步失败同路 contained）；abort 竞速先赢 resolve('cancelled')，晚到答案丢弃（dsh 侧 signal 竞速形态；fr M1 裁决 2026-10-29 Q-E：AbortSignal 不跨 dylib wire，竞速载体=工具管线 worker-vs-abort，先到 abort 的调用以取消性合成错误结果结算）；ApprovalRequestId 每请求 fresh randomUUID；effectivePolicy = 会话 override ?? config.policy ?? 'ask'（dsh user-approval/src/index.ts）
 - answerer 由入口提供：TUI 审批卡（18.2）；headless 无 answerer → 一律 fail-closed
 
 ### 11.2 沙箱策略（对齐 dsh `sandbox-policy`）
@@ -431,7 +431,7 @@ tool/call 在 prepare（pre-execute）之前追加，tool/result 由 contiguous 
 | `workspace-write`（默认） | workspace-write，root = 进程 cwd | ask |
 | `danger-full-access` | danger-full-access | never |
 
-`FR_PERMISSION_MODE` 可覆盖。每次请求把解析后的策略文本写入 runtime-context 快照（完整当前值跟随保留历史之后，保缓存安全）。执行体后端链：Linux bubblewrap → Landlock，macOS Seatbelt，Windows ACL restricted-token；不可用即 fail-closed（`sandbox-unavailable`）。文件系统 fence 与观察策略对齐 dsh `fs-sandbox` / `fs-observation-policy`。
+`FR_PERMISSION_MODE` 可覆盖。每次请求把解析后的策略文本写入 runtime-context 快照（完整当前值跟随保留历史之后，保缓存安全）。执行体后端链：Linux bubblewrap → Landlock，macOS Seatbelt，Windows ACL restricted-token；不可用即 fail-closed（`sandbox-unavailable`）。文件系统 fence 与观察策略对齐 dsh `fs-sandbox` / `fs-observation-policy`（观察策略属 fs 工具域，随 Phase 16 工具切片落地验证——2026-10-29 Q-F 裁决）。
 
 ---
 

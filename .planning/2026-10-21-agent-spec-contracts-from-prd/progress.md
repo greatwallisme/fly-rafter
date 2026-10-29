@@ -1073,3 +1073,16 @@
 - PRD 4.4：sandbox-policy 补入缝清单（双缝单 crate+1000+ 号段注记）。
 - 下一动作：批 3 TOOLS/APPROVAL/SANDBOX 三 spec 绑定+七步流 4-7。
 - 提交 dbedc8b（批 2b 全量，32 文件 +9102/-12）。守卫阻断同既定例：pre-commit agent-spec guard 20 spec 红=pending 选择器批 3 绑定前设计态，用户 /commit 显式裁决后 --no-verify 入库（提交信息内含守卫注记+档载⑧⑨）；批 3 时 TOOLS/APPROVAL/SANDBOX 转绿。
+
+## 2026-10-29 — 批 3 批 0：绑定前事实全钉（43 场景映射 + 六分叉呈报）
+- 机制确认：lifecycle 裸 Test 名=workspace 级过滤（跨 crate 绑定可行）；AGENT-LOOP 复跑 23 pass+3 skip 基线一致。
+- 三 spec 43 场景逐一映射（findings「批 3 设计钉」节）：TOOLS 9 可直绑+4 补小钉测+7 调度缺测（driver）+1 文本失真；APPROVAL 13 可直绑+1 文本错误（never 审计对）+1 计数器/UUID 分叉+1 结构缺席（abort 竞速）；SANDBOX 8 可直绑+1 观察策略域归属（Phase 16）。
+- 新源码事实：dsh never 臂仍写 asked+decided 对（index.ts:224-233/270-275，场景文误读 :139 注释）；深度 16 回退=TS 类型层（schema.ts:153-154）运行时无此行为；fs-observation-policy=fs 工具域（registers no service）；审批 ask id dsh=randomUUID（:224）fr=计数器（批 2a 档载无 19.2 条目）。
+- Q-A…Q-F 六分叉已呈报用户（单消息统一编号）；裁决前不动 spec/KLL/代码。
+
+## 2026-10-29 — 批 3 落地（三 spec 绑定+七步流 4-7 闭环），workspace 1111 tests，Phase 14 收口
+- 用户裁决 Q-A…Q-F 全 A。KLL/intake 四处勘误（深度 16=TS 类型层/never 审计对/竞速载体=工具管线/观察策略=fs 工具域）+PRD 两处注记；refine-drafts.py 边界图补 TOOLS 四路径（含 Q-A 的 fr-agent-loop）。
+- Q-D 改码：ask id 计数器→UUID v4（uuid crate 入 workspace）。新增 14 件钉测：driver 调度 7（ScriptedTools 扩模式覆盖/翻转钩/在飞时间线，时间线断言一次全过）+fr-tools 5+approval 2（含 rejected/cancelled 原值结算）+sandbox 1（两层默认并存）。
+- 43 选择器全真实绑定（TOOLS 19/APPROVAL 15/SANDBOX 9 pending 清零）；lifecycle 三 spec 首轮全绿 19/19+15/15+9/9 零跳过；guard 四 spec 绿（三目标+LLM；16 红=pending 态设计态；PROMPT 假红=FR_DSH_SOURCE 缺席自纠）；explain 100%；stamp 三份 Spec-Passing: true；trace liveness 三需求 Honored。
+- 六门：fmt OK/clippy 0/1111 passed 0 failed（1096→1111）/doc 0/windows 编译门 fr-approval+fr-tools+fr-sandbox 零警告零错误（fr-agent-loop 传递 zstd 需 MSVC=既有环境约束档载）。
+- Phase 14 Status→complete；下一动作=Phase 16 批 0 真源全读（fr-tools-builtin+fr-shell，Q92-A…Q97-A 既裁）。

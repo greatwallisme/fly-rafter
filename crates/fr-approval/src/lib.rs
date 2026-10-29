@@ -25,6 +25,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
+use uuid::Uuid;
 
 pub mod plugin_shell;
 pub mod service;
@@ -206,10 +207,6 @@ pub struct Approval {
     /// token would drift when an earlier entry unregisters).
     answerers: Mutex<Vec<(u64, Arc<dyn Answerer>)>>,
     next_answerer_id: AtomicU64,
-    /// Fresh ids pair each asked with its decided (dsh mints a
-    /// `randomUUID`; a process-unique counter serves the same audit
-    /// contract).
-    request_ids: AtomicU64,
     notice_ids: AtomicU64,
 }
 
@@ -295,7 +292,6 @@ impl Approval {
             inject,
             answerers: Mutex::new(Vec::new()),
             next_answerer_id: AtomicU64::new(0),
-            request_ids: AtomicU64::new(0),
             notice_ids: AtomicU64::new(0),
         }
     }
@@ -396,10 +392,10 @@ impl Approval {
         if !has_open_turn(&log) {
             return Err(OUTSIDE_TURN.to_owned());
         }
-        let id = format!(
-            "approval-request-{}",
-            self.request_ids.fetch_add(1, Ordering::SeqCst) + 1
-        );
+        // dsh mints `ApprovalRequestId(randomUUID())` per ask
+        // (user-approval/src/index.ts:224); the RFC 4122 v4 form is the
+        // wire value shape of the audit pair (2026-10-29 Q-D).
+        let id = Uuid::new_v4().to_string();
         let mut asked = serde_json::json!({
             "id": id,
             "toolName": ask.tool_name,
@@ -682,6 +678,65 @@ mod tests {
         assert_eq!(events[1]["data"]["id"], events[2]["data"]["id"]);
         assert_eq!(events[2]["type"], "approval/decided");
         assert_eq!(events[2]["data"]["outcome"], "unavailable");
+    }
+
+    /// The asked id is a fresh RFC 4122 v4 UUID per ask (dsh mints one
+    /// `randomUUID()` per request; two asks never share an id — Q-D).
+    #[test]
+    fn ask_ids_are_fresh_uuid_v4() {
+        let log = Arc::new(FakeLog::default());
+        let (service, _inject) = service_with(ApprovalPolicy::Ask, Arc::clone(&log));
+        open_turn(&log);
+        let _unused = service.request(&ask("bash")).expect("first ask");
+        let _unused = service.request(&ask("bash")).expect("second ask");
+        let events = log.read_all("s1").expect("read");
+        let ids: Vec<&str> = events
+            .iter()
+            .filter(|event| event["type"] == "approval/asked")
+            .map(|event| event["data"]["id"].as_str().expect("id is a string"))
+            .collect();
+        assert_eq!(ids.len(), 2);
+        for id in &ids {
+            assert_v4_shape(id);
+        }
+        assert_ne!(ids[0], ids[1]);
+    }
+
+    /// Asserts the canonical lowercase hyphenated v4 layout (8-4-4-4-12
+    /// hex, version nibble `4`, variant nibble in `8..=b`).
+    fn assert_v4_shape(id: &str) {
+        let bytes = id.as_bytes();
+        assert_eq!(bytes.len(), 36, "uuid length: {id}");
+        for (position, byte) in bytes.iter().enumerate() {
+            match position {
+                8 | 13 | 18 | 23 => assert_eq!(*byte, b'-', "hyphen at {position}: {id}"),
+                _ => assert!(
+                    byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase(),
+                    "lowercase hex at {position}: {id}"
+                ),
+            }
+        }
+        assert_eq!(bytes[14], b'4', "version nibble: {id}");
+        assert!(matches!(bytes[19], b'8'..=b'b'), "variant nibble: {id}");
+    }
+
+    /// The closing outcomes settle as their vocabulary words: rejected
+    /// and cancelled answerers decide their own outcome — no
+    /// normalization to `unavailable`, no grant.
+    #[test]
+    fn rejected_and_cancelled_settle_verbatim() {
+        for word in ["rejected", "cancelled"] {
+            let outcome = ApprovalOutcome::parse(word).expect("vocabulary word");
+            let log = Arc::new(FakeLog::default());
+            let (service, _inject) = service_with(ApprovalPolicy::Ask, Arc::clone(&log));
+            open_turn(&log);
+            service.register_answerer(probe(Ok(Answer::Final(outcome))));
+            let settled = service.request(&ask("bash")).expect("request");
+            assert_eq!(settled, outcome);
+            let events = log.read_all("s1").expect("read");
+            let decided = events.last().expect("the audit pair");
+            assert_eq!(decided["data"]["outcome"], word);
+        }
     }
 
     #[test]

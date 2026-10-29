@@ -20,7 +20,14 @@ BOUNDARIES: dict[str, list[str]] = {
     "REQ-FR-CONFIG": ["crates/fr-config/**", "crates/fr-schema/**", "crates/fr/**"],
     "REQ-FR-SESSION": ["crates/fr-session/**"],
     "REQ-FR-AGENT-LOOP": ["crates/fr-agent-loop/**"],
-    "REQ-FR-TOOLS": ["crates/fr-tools/**"],
+    "REQ-FR-TOOLS": [
+        "crates/fr-tools/**",
+        "crates/fr-guard-repeat-reminder/**",
+        "crates/fr-guard-timeout/**",
+        # 2026-10-29 Q-A 裁决：调度语义（exclusive 屏障/有界池/惰性重分类/
+        # concludeTurn 门控）实现在 fr-agent-loop/driver.rs，测试落点同侧。
+        "crates/fr-agent-loop/**",
+    ],
     "REQ-FR-PTC": ["crates/fr-ptc/**"],
     "REQ-FR-PROMPT": ["crates/fr-system-prompt/**"],
     "REQ-FR-APPROVAL": ["crates/fr-approval/**"],

@@ -24,7 +24,7 @@ tags: [llm, provider]
 - [REQ-FR-LLM-8] prepare_call 代际绑定 MUST：PreparedAdapterCall 冻结元数据；stream 一次性，二次派发报 INVALID_PREPARED_CALL；callConfigEquals 防跨代 capability 漂移（dsh llm/src/index.ts:956-1020）。
 - [REQ-FR-LLM-9] 重试策略 MUST：mode normal（maxRetries 5、retryableCodes 五类）| always；backoff 500ms 起步、上限 10s、jitter 0.1 对称抖动；执行方为独立 retry 插件挂 agent 失败步扩展点（dsh retry-policy.ts:211-262）。
 - [REQ-FR-LLM-10] fr-llm-deepseek 协议细则 MUST：messagesApiRoot 强制补全 /v1 后缀；SSE 经事件解析器，帧 event 名与 body.type 不一致 → 错误码 MALFORMED_RESPONSE；message_stop 三重校验（stop_reason 合法 + 全部块 closed + tool arguments 为合法 JSON）；stop_reason 按映射表转 finish kind；usage 自 message_start 起底、后续 delta 覆盖。
-- [REQ-FR-LLM-11] 其余 provider 适配语义 MUST：适配层永不中途 throw，错误以 usage + finish(kind error/aborted) 事件收尾；toolcall_end 将已解析参数 stringify 回原始串（与 deepseek 逐段拼接同契约）；toolUpdate 能力差异按 provider 固定：anthropic → in-history、openai-completions → addition-only、responses 系（openai-responses/azure-openai-responses/openai-codex-responses）在 compat 声明 supportsAdditionalTools 或 supportsToolSearch 时 → addition-only、否则无（2026-10-25 Q59-a 勘误对齐 dsh 真源，dsh llm-pi-ai/src/stream.ts:202-227、models.ts:75-92）。
+- [REQ-FR-LLM-11] 其余 provider 适配语义 MUST：适配层永不中途 throw，错误以 usage + finish(kind error/aborted) 事件收尾；toolcall_end 将已解析参数 stringify 回原始串（与 deepseek 逐段拼接同契约）；toolUpdate 能力三 provider 均无声明（2026-10-27 A2 裁决勘误）：anthropic in-history 需双 compat 旗标（ANTHROPIC_COMPAT_GATE withhold，手声明路由不可配）+内置 catalog（fr 无，19.2 条 20）结构性不可达；fr-llm-openai 两协议维持 Q74-B 无能力判定（COMPLETIONS/RESPONSES_COMPAT_GATE 双 withhold）；一律基线折叠语义（工具全集每请求重发），延迟装载不可用（真源 llm-pi-ai models.ts:75-92、anthropic-messages.ts:1141-1142；原 Q59-a 引证 stream.ts:202-227 有误系 toStreamChunks error→finish 段）。
 - [REQ-FR-LLM-12] 三 provider 形态与命名 MUST（2026-10-25 Q56A/Q57B/Q58 裁决，PRD 决策 37）：三 crate 平切维持（fr-llm-deepseek/fr-llm-openai/fr-llm-anthropic；1:1 口径=行为与协议对齐，不镜像 dsh TS 包结构——dsh 真实形态为 llm-deepseek 直连 + llm-pi-ai 库背书多路由）；fr-llm-openai MUST 实现 openai-completions 与 openai-responses 两协议，fr-llm-anthropic 实现 anthropic-messages；fr-llm-deepseek 保留 dsh 自有 DEFAULT_MODELS 内置目录（2 条目逐字），fr-llm-openai 与 fr-llm-anthropic 第一天 MUST NOT 内置模型 catalog——路由 models 全手声明、请求引用未声明模型即报错（fail-closed，19.2 条 20）；attribution User-Agent MUST 为 `fly-rafter/<version> (+<url>)` 格式（version 取 CARGO_PKG_VERSION；url = 'https://github.com/greatwallisme/fly-rafter'，2026-10-25 用户给定，去 .git 对齐 dsh attribution.ts:43 主页形态）且缺省不可抑制；重放信封 response.kind：deepseek 侧 'deepseek-messages' 逐字保留、openai 族 'fr-openai'、anthropic 族 'fr-anthropic'、不可用重放降级哨兵 'fr-foreign'（adapter 私有 durable 元数据值域=自有命名，非会话 v4 结构字段）；fr-llm-deepseek Files 上传文件名前缀逐字 'dsh-'（同 endpoint+key 命名空间与 dsh 共享上传池，配额回收互通，用户裁决接受），upload-index 路径 <FR_HOME>/llm-deepseek/files-v3.json（formatVersion 3）。
 - [REQ-FR-LLM-13] 重试策略解析诊断 MUST（2026-10-25 Q60-A 裁决，PRD 决策 38）：resolveRetryPolicy/resolveBackoff 全部八条拒绝消息与 dsh retry-policy.ts:128-193 逐字同文——形 `{path}.{field} must be ...`，backoff 臂路径带 `.backoff` 中段（调用方传完整 path 前缀，对齐 dsh config.ts:500/327 调用形）；normal 臂校验顺序 maxRetries→retryableCodes→backoff 同 dsh 臂内顺序；dsh mode 臂与 validateKeys unknown-key 臂由 fr 类型层与 provider 反序列化层承载（无运行时文本，非缺口）。
 ## Scenarios
@@ -198,9 +198,9 @@ Rule: REQ-FR-LLM-11 — 适配层收尾与 toolUpdate
   那么 发 usage 与 finish(kind error) 收尾而非 panic；toolcall_end 参数串与 provider 原始串逐字节一致
 
 场景: toolUpdate 能力差异
-  假设 同一工具更新分别路由到 anthropic 与 openai-completions 与 responses 系模型（后者 compat 带 supportsAdditionalTools 与不带两种）
+  假设 同一工具更新分别路由到 anthropic 与 fr-llm-openai 两协议模型（2026-10-27 A2 修订）
   当 应用更新时
-  那么 anthropic 为 in-history 追加、openai-completions 为 addition-only、带 compat 标记的 responses 系为 addition-only、不带标记的 responses 系不支持（拒新更新）
+  那么 三 provider 均无 toolUpdate 能力——anthropic in-history 需双 compat 旗标（withhold 不可配）+内置 catalog（fr 无）结构性不可达；openai 两协议维持 Q74-B 判定；一律基线折叠（工具全集每请求重发），延迟装载不可用
 
 Rule: REQ-FR-LLM-12 — 形态与命名
 

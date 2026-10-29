@@ -2551,7 +2551,7 @@ None.
 - [REQ-FR-TOOLS-3] 调度 MUST：exclusive 调用为单调用屏障（组=该调用本身）；parallel 有界滚动池上限=agentLoop.config.maxParallelToolCalls 默认 10；批次启动前 lazy 重分类（注册表变更可产生新屏障，并行组在首个非 parallel 调用处断开）；concludeTurn 仅成功结果终结 turn、错误结果 turn 继续；abort 为未开始调用补合成错误结果（dsh agent-loop/src/tool-calls.ts:85-105,200-213、tools/src/index.ts:593）。
 - [REQ-FR-TOOLS-4] schema 类型推断与呈现元模型 MUST 对齐 dsh schema.ts / presentation.ts。
 
-- [REQ-FR-TOOLS-5] schema 子集白名单 MUST（type/oneOf/properties/required/additionalProperties/items/enum/const 加注释词，其余键拒绝）；object 类的 additionalProperties MUST 显式 boolean（缺省或非布尔拒绝）；推断规则：const 优先于 enum 优先于宽类型、integer 归 number、oneOf 并集、深度 16 上限回退 JsonValue；isConcurrencySafe 仅严格 true 才 parallel（否则 fail-closed exclusive）（dsh schema.ts:97-166,367-369、json-schema.ts:6-10）。
+- [REQ-FR-TOOLS-5] schema 子集白名单 MUST（type/oneOf/properties/required/additionalProperties/items/enum/const 加注释词，其余键拒绝）；object 类的 additionalProperties MUST 显式 boolean（缺省或非布尔拒绝）；推断规则（dsh TS 类型层，2026-10-29 Q-B 勘误：const 优先于 enum 优先于宽类型、integer 归 number、oneOf 并集、深度 16 上限回退 JsonValue 均为 dsh 编译期类型推断 InferValueAt 非运行时行为；fr 运行时等值=author 子集校验+迭代编译，无递归且不设运行时深度上限）；isConcurrencySafe 仅严格 true 才 parallel（否则 fail-closed exclusive）（dsh schema.ts:97-166,153-170,367-369、json-schema.ts:6-10）。
 ## Scenarios
 
 Rule: REQ-FR-TOOLS-1 — 注册与 schema
@@ -2623,10 +2623,10 @@ Rule: REQ-FR-TOOLS-2 — 参数快照冻结
 
 Rule: REQ-FR-TOOLS-5 — schema 白名单与推断
 
-场景: 超集键拒绝与推断回退
+场景: 超集键拒绝与深嵌套编译
   假设 工具 schema 含白名单外键、另一工具含 16 层以上嵌套
   当 注册时
-  那么 超集键注册失败，深嵌套推断回退 JsonValue
+  那么 超集键注册失败；深嵌套 schema 迭代编译无递归、不设运行时深度上限（栈安全，2026-10-29 Q-B 勘误：原「回退 JsonValue」系 dsh TS 类型层推断非运行时行为）
 
 场景: additionalProperties 非显式布尔拒绝
   假设 object 类 schema 的 additionalProperties 缺省或为非布尔值
@@ -3244,10 +3244,10 @@ None.
 
 ## Requirements
 
-- [REQ-FR-APPROVAL-1] ApprovalPolicy MUST 为 'ask' | 'never'；effectivePolicy MUST 为 override??config??'ask' 优先级链；`never` 在 dispatch 前由审批服务自身判 rejected（防 listener 绕过），不产生 approval/asked 事件对（dsh user-approval/src/index.ts:139）。
+- [REQ-FR-APPROVAL-1] ApprovalPolicy MUST 为 'ask' | 'never'；effectivePolicy MUST 为 override??config??'ask' 优先级链；`never` 在 dispatch 前由审批服务自身判 rejected（防 listener 绕过），answerer 不被派发；asked/decided 审计对仍完整产生（2026-10-29 Q-C 勘误：dsh request() 无条件 append 审计对、never 判在 decide 内——dsh user-approval/src/index.ts:224-233,270-275）。
 - [REQ-FR-APPROVAL-2] request() MUST 处于 open turn 内；审计对 approval/asked 与 approval/decided 必须 turn-enclosed。
 - [REQ-FR-APPROVAL-3] 应答链（UI answerer）缺席或失败 MUST fail-closed 'unavailable'；越权返回值一律归一化为 'unavailable'（dsh user-approval/src/index.ts:55 结果词表 ['allowed-once','rejected','cancelled','unavailable']、:283-291 兜底与归一化）；唯一授予值 'allowed-once'，无持久 allow-list。
-- [REQ-FR-APPROVAL-4] 策略 MUST 持久化为 approval/policy 事件（log-only 不进 transcript、最后一条生效）；setPolicy 同值 no-op；切换时注入 user 消息，文案逐字 `The approval policy changed from "x" to "y" (changed by the user).`（x/y 为实际策略值）；abort 竞速先到者以 cancelled 结算（dsh user-approval/src/index.ts 各处）。
+- [REQ-FR-APPROVAL-4] 策略 MUST 持久化为 approval/policy 事件（log-only 不进 transcript、最后一条生效）；setPolicy 同值 no-op；切换时注入 user 消息，文案逐字 `The approval policy changed from "x" to "y" (changed by the user).`（x/y 为实际策略值）；竞速取消先到者胜出（2026-10-29 Q-E 裁决：审批应答链同步结算、AbortSignal 不跨 dylib wire，M1 竞速载体=工具管线 worker-vs-abort，先到 abort 的调用以取消性合成错误结果结算、后到结果弃置；dsh user-approval/src/index.ts:115-119 各处为 dsh 侧 signal 竞速形态）。
 - [REQ-FR-APPROVAL-5] 集成：tools/pre-execute waterfall 返回 {kind:'ask'} 交 ApprovalService serviceAsk；沙箱升级（如 bash 的 sandbox_permissions）走同一 seam。
 
 ## Scenarios
@@ -3257,7 +3257,7 @@ Rule: REQ-FR-APPROVAL-1 — 策略语义
 场景: never 策略自动拒绝
   假设 策略为 never
   当 任一工具请求审批时
-  那么 自动拒绝且不产生 approval/asked 事件对
+  那么 自动拒绝（decided=rejected）且不派发 answerer；asked/decided 审计对仍完整产生
 
 场景: 权限模式映射策略
   假设 权限模式为 danger-full-access
@@ -3335,10 +3335,10 @@ Rule: REQ-FR-APPROVAL-4 — 策略切换细则
   当 注入通知时
   那么 user 消息文本恰为 The approval policy changed from "ask" to "never" (changed by the user).
 
-场景: abort 竞速结算
-  假设 审批等待中同时发生 abort 与应答
+场景: 竞速取消由工具管线承载
+  假设 工具调用等待审批或执行中同时发生调用方 abort 与完成
   当 竞速结算时
-  那么 先到者胜出，先到 abort 则以 cancelled 结算
+  那么 先到者胜出；先到 abort 的调用以取消性合成错误结果结算，后到的完成结果弃置
 
 场景: effectivePolicy 优先级链
   假设 同时存在 override 与 config 值
@@ -3414,7 +3414,7 @@ Rule: REQ-FR-SANDBOX-4 — 文件系统 fence
 场景: workspace 外写入被拒
   假设 workspace-write 模式
   当 工具尝试写 workspace 外路径时
-  那么 被文件系统 fence 拒绝，观察策略与 dsh fs-sandbox 及 fs-observation-policy 一致
+  那么 被文件系统 fence 拒绝，边界语义对齐 dsh fs-sandbox
 
 Rule: REQ-FR-SANDBOX-3 — 平台后端选择
 
@@ -3423,12 +3423,12 @@ Rule: REQ-FR-SANDBOX-3 — 平台后端选择
   当 选择沙箱执行体时
   那么 依次命中 bubblewrap/Landlock、Seatbelt、ACL restricted-token 链
 
-Rule: REQ-FR-SANDBOX-4 — 观察策略对齐
+Rule: REQ-FR-SANDBOX-4 — fence 边界语义细节
 
-场景: 观察策略与 dsh 对齐
-  假设 工具读取 workspace 外路径
-  当 按观察策略结算时
-  那么 行为与 dsh fs-observation-policy 的对照断言一致
+场景: fence 边界语义与 dsh 对齐
+  假设 temp 根位于 workspace 内、或 workspace 与候选路径互为包含
+  当 判定边界时
+  那么 workspace 内 temp 根拒绝（不因在 workspace 内而放行）、双向包含合并能力、缺失路径按拼写比较；观察状态策略（dsh fs-observation-policy）属 fs 工具域，随工具切片验证（2026-10-29 Q-F 裁决）
 
 ## Dependencies
 

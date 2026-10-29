@@ -13,10 +13,10 @@ tags: [approval, permissions]
 
 ## Requirements
 
-- [REQ-FR-APPROVAL-1] ApprovalPolicy MUST 为 'ask' | 'never'；effectivePolicy MUST 为 override??config??'ask' 优先级链；`never` 在 dispatch 前由审批服务自身判 rejected（防 listener 绕过），不产生 approval/asked 事件对（dsh user-approval/src/index.ts:139）。
+- [REQ-FR-APPROVAL-1] ApprovalPolicy MUST 为 'ask' | 'never'；effectivePolicy MUST 为 override??config??'ask' 优先级链；`never` 在 dispatch 前由审批服务自身判 rejected（防 listener 绕过），answerer 不被派发；asked/decided 审计对仍完整产生（2026-10-29 Q-C 勘误：dsh request() 无条件 append 审计对、never 判在 decide 内——dsh user-approval/src/index.ts:224-233,270-275）。
 - [REQ-FR-APPROVAL-2] request() MUST 处于 open turn 内；审计对 approval/asked 与 approval/decided 必须 turn-enclosed。
 - [REQ-FR-APPROVAL-3] 应答链（UI answerer）缺席或失败 MUST fail-closed 'unavailable'；越权返回值一律归一化为 'unavailable'（dsh user-approval/src/index.ts:55 结果词表 ['allowed-once','rejected','cancelled','unavailable']、:283-291 兜底与归一化）；唯一授予值 'allowed-once'，无持久 allow-list。
-- [REQ-FR-APPROVAL-4] 策略 MUST 持久化为 approval/policy 事件（log-only 不进 transcript、最后一条生效）；setPolicy 同值 no-op；切换时注入 user 消息，文案逐字 `The approval policy changed from "x" to "y" (changed by the user).`（x/y 为实际策略值）；abort 竞速先到者以 cancelled 结算（dsh user-approval/src/index.ts 各处）。
+- [REQ-FR-APPROVAL-4] 策略 MUST 持久化为 approval/policy 事件（log-only 不进 transcript、最后一条生效）；setPolicy 同值 no-op；切换时注入 user 消息，文案逐字 `The approval policy changed from "x" to "y" (changed by the user).`（x/y 为实际策略值）；竞速取消先到者胜出（2026-10-29 Q-E 裁决：审批应答链同步结算、AbortSignal 不跨 dylib wire，M1 竞速载体=工具管线 worker-vs-abort，先到 abort 的调用以取消性合成错误结果结算、后到结果弃置；dsh user-approval/src/index.ts:115-119 各处为 dsh 侧 signal 竞速形态）。
 - [REQ-FR-APPROVAL-5] 集成：tools/pre-execute waterfall 返回 {kind:'ask'} 交 ApprovalService serviceAsk；沙箱升级（如 bash 的 sandbox_permissions）走同一 seam。
 
 ## Scenarios
@@ -26,7 +26,7 @@ Rule: REQ-FR-APPROVAL-1 — 策略语义
 场景: never 策略自动拒绝
   假设 策略为 never
   当 任一工具请求审批时
-  那么 自动拒绝且不产生 approval/asked 事件对
+  那么 自动拒绝（decided=rejected）且不派发 answerer；asked/decided 审计对仍完整产生
 
 场景: 权限模式映射策略
   假设 权限模式为 danger-full-access
@@ -104,10 +104,10 @@ Rule: REQ-FR-APPROVAL-4 — 策略切换细则
   当 注入通知时
   那么 user 消息文本恰为 The approval policy changed from "ask" to "never" (changed by the user).
 
-场景: abort 竞速结算
-  假设 审批等待中同时发生 abort 与应答
+场景: 竞速取消由工具管线承载
+  假设 工具调用等待审批或执行中同时发生调用方 abort 与完成
   当 竞速结算时
-  那么 先到者胜出，先到 abort 则以 cancelled 结算
+  那么 先到者胜出；先到 abort 的调用以取消性合成错误结果结算，后到的完成结果弃置
 
 场景: effectivePolicy 优先级链
   假设 同时存在 override 与 config 值

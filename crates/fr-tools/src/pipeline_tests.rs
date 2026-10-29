@@ -820,3 +820,230 @@ fn presentation_hooks_soft_wrap() {
             .is_none()
     );
 }
+
+/// The registration desk keeps every declared surface retrievable:
+/// identity, description, parameters schema, execution mode, and the
+/// presentation hooks (the wire schema projects the model-facing subset;
+/// tool-description section ordering 1000-3000 is owned by the prompt
+/// assembly and pinned on that side).
+#[test]
+fn registered_metadata_is_complete() {
+    let registry = ToolRegistry::new(ToolPresentationMode::Native, Arc::new(Recorder::default()));
+    let presenting = DefineTool {
+        description: "echo the value twice".to_owned(),
+        concurrency_safe: Some(Arc::new(|args| args.get("value").is_some())),
+        present_call: Some(Arc::new(|_args| {
+            Some(ToolCallView::Generic(
+                crate::presentation::GenericCallView {
+                    title: "Echoing".to_owned(),
+                    kind: Some(crate::presentation::ToolCallKind::Read),
+                    raw_input: None,
+                    content: None,
+                    locations: None,
+                },
+            ))
+        })),
+        ..echo_tool_fields("echo")
+    };
+    let built = Arc::new(presenting.build().expect("builds"));
+    assert!(
+        built.present_call(&json!({"value": "x"})).is_some(),
+        "the presentation hook stays mounted"
+    );
+    let _registration = registry.register(built).expect("registers");
+
+    let definition = registry.get("echo").expect("registered");
+    assert_eq!(definition.name(), "echo");
+    assert_eq!(definition.description(), "echo the value twice");
+    assert!(definition.parameters().is_object());
+    assert_eq!(
+        registry.execution_mode("echo", &json!({"value": "x"}), false),
+        ToolExecutionMode::Parallel
+    );
+    let schemas = registry.schemas();
+    assert_eq!(schemas.len(), 1);
+    assert_eq!(schemas[0].name, "echo");
+    assert_eq!(schemas[0].description, "echo the value twice");
+    assert!(schemas[0].parameters.is_object());
+    assert_eq!(schemas[0].defer_loading, None);
+}
+
+/// The arguments a call executes with are the snapshot frozen at
+/// createExecution: every stage after materialization (pre-execute, the
+/// body) reads one cloned value (dsh freezes the JSON snapshot; the
+/// clone at the registry boundary is the same freeze — Rust ownership
+/// already rules out the caller-side mutation dsh defends against).
+#[test]
+fn arguments_snapshot_is_frozen() {
+    let registry = ToolRegistry::new(ToolPresentationMode::Native, Arc::new(Recorder::default()));
+    let seen: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+    let pre_seen = Arc::clone(&seen);
+    let _listener = registry.on_pre_execute(Arc::new(move |exec, _next| {
+        pre_seen
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(exec.arguments.clone());
+        PreToolDecision::Allow
+    }));
+    let body_seen = Arc::clone(&seen);
+    let tool = DefineTool {
+        execute: Arc::new(move |args, _run| {
+            body_seen
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(args.clone());
+            Ok(Value::String("ok".to_owned()))
+        }),
+        ..echo_tool_fields("echo")
+    };
+    let _registration = registry
+        .register(Arc::new(tool.build().expect("builds")))
+        .expect("registers");
+    let result = registry.execute(&input_for("echo", json!({"value": "frozen"})));
+    assert!(!result.is_error());
+    let seen = seen
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    assert_eq!(
+        *seen,
+        vec![json!({"value": "frozen"}), json!({"value": "frozen"})],
+        "pre-execute and the body see the same frozen snapshot"
+    );
+}
+
+/// Guards evaluate only when the pre-execute gate lets the call proceed:
+/// neither a deny nor an ask that resolves short of `allowed-once` ever
+/// reaches them, and on the allow path the first denial in registration
+/// order settles the call — a later guard is not even consulted (no
+/// relaxation back to allow).
+#[test]
+fn guards_skip_non_allow_and_stay_monotonic() {
+    let registry = ToolRegistry::new(ToolPresentationMode::Native, Arc::new(Recorder::default()));
+    let _registration = registry.register(echo_tool("echo")).expect("registers");
+    let denials = Arc::new(AtomicUsize::new(0));
+    let deny_count = Arc::clone(&denials);
+    let _guard = registry.guard(Arc::new(move |_exec| {
+        deny_count.fetch_add(1, Ordering::SeqCst);
+        Some("loop detected".to_owned())
+    }));
+    let silent = Arc::new(AtomicUsize::new(0));
+    let silent_count = Arc::clone(&silent);
+    let _guard = registry.guard(Arc::new(move |_exec| {
+        silent_count.fetch_add(1, Ordering::SeqCst);
+        None
+    }));
+
+    // A pre-execute deny never reaches the guards.
+    {
+        let _listener = registry.on_pre_execute(Arc::new(|_exec, _next| PreToolDecision::Deny {
+            reason: "not allowed".to_owned(),
+            info: None,
+        }));
+        let result = registry.execute(&input_for("echo", json!({"value": "hi"})));
+        assert!(result.is_error());
+    }
+    assert_eq!(denials.load(Ordering::SeqCst), 0);
+    assert_eq!(silent.load(Ordering::SeqCst), 0);
+
+    // An ask that resolves rejected also never reaches the guards.
+    {
+        let _listener = registry.on_pre_execute(Arc::new(|_exec, _next| PreToolDecision::Ask {
+            reason: Some("needs a human".to_owned()),
+            display_reason: None,
+        }));
+        registry.set_approval(Some(Arc::new(ScriptedApproval {
+            outcome: ApprovalOutcome::Rejected,
+            requests: Mutex::new(Vec::new()),
+        })));
+        let mut input = input_for("echo", json!({"value": "hi"}));
+        input.agent = Some("agent-1".to_owned());
+        let result = registry.execute(&input);
+        let ToolExecutionResult::Failure(failure) = &result else {
+            panic!("a rejected ask must deny")
+        };
+        assert_eq!(failure.error.message, "the user rejected tool \"echo\"");
+        registry.set_approval(None);
+    }
+    assert_eq!(denials.load(Ordering::SeqCst), 0);
+    assert_eq!(silent.load(Ordering::SeqCst), 0);
+
+    // On the allow path the first denial wins and the later guard is
+    // never consulted.
+    let result = registry.execute(&input_for("echo", json!({"value": "hi"})));
+    let ToolExecutionResult::Failure(failure) = &result else {
+        panic!("the guard denial must fail the call")
+    };
+    assert_eq!(failure.error.message, "loop detected");
+    assert_eq!(denials.load(Ordering::SeqCst), 1);
+    assert_eq!(silent.load(Ordering::SeqCst), 0);
+}
+
+/// A guard-denied call still passes through tools/post-execute: the
+/// denial result is observable there and the pass-through accept keeps
+/// it intact.
+#[test]
+fn guard_denials_still_run_post_execute() {
+    let registry = ToolRegistry::new(ToolPresentationMode::Native, Arc::new(Recorder::default()));
+    let _registration = registry.register(echo_tool("echo")).expect("registers");
+    let _guard = registry.guard(Arc::new(|_exec| Some("loop detected".to_owned())));
+    let post_errors = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&post_errors);
+    let _listener = registry.on_post_execute(Arc::new(move |_exec, result, _next| {
+        seen.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(result.is_error());
+        PostToolDecision::Accept {
+            content: None,
+            value: None,
+            additional_contexts: Vec::new(),
+        }
+    }));
+    let result = registry.execute(&input_for("echo", json!({"value": "hi"})));
+    let ToolExecutionResult::Failure(failure) = &result else {
+        panic!("the guard denial must fail the call")
+    };
+    assert_eq!(failure.error.message, "loop detected");
+    assert_eq!(
+        *post_errors
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        vec![true],
+        "post-execute observed the denial result"
+    );
+}
+
+/// The whitelist has no supersets and the runtime has no depth cap: an
+/// unknown keyword refuses registration verbatim, while a schema nested
+/// past the dsh TS-type bound of 16 levels still compiles (that `JsonValue`
+/// fallback is a compile-time type bound, not runtime behavior — Q-B).
+#[test]
+fn superset_keys_reject_and_deep_compiles() {
+    let registry = ToolRegistry::new(ToolPresentationMode::Native, Arc::new(Recorder::default()));
+    let rogue = DefineTool {
+        parameters: json!({"value": {"type": "string", "required": true, "unknownKeyword": 1}}),
+        ..echo_tool_fields("rogue")
+    };
+    let error = rogue.build().expect_err("superset keys refuse");
+    assert!(
+        error
+            .to_string()
+            .contains("parameters.value.unknownKeyword is not supported"),
+        "{error}"
+    );
+
+    let mut deep = json!({"type": "string"});
+    for _ in 0..17 {
+        deep = json!({"type": "array", "items": deep});
+    }
+    let mut value_spec = deep.as_object().expect("object").clone();
+    value_spec.insert("required".to_owned(), json!(true));
+    let mut parameters = serde_json::Map::new();
+    parameters.insert("value".to_owned(), Value::Object(value_spec));
+    let tool = DefineTool {
+        parameters: Value::Object(parameters),
+        ..echo_tool_fields("deep")
+    };
+    let built = tool.build().expect("a 17-deep schema compiles iteratively");
+    let deep_handle: Arc<dyn ToolDefinition> = Arc::new(built);
+    let _registration = registry.register(deep_handle).expect("registers");
+}

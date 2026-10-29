@@ -18,7 +18,7 @@ tags: [tools, pipeline]
 - [REQ-FR-TOOLS-3] 调度 MUST：exclusive 调用为单调用屏障（组=该调用本身）；parallel 有界滚动池上限=agentLoop.config.maxParallelToolCalls 默认 10；批次启动前 lazy 重分类（注册表变更可产生新屏障，并行组在首个非 parallel 调用处断开）；concludeTurn 仅成功结果终结 turn、错误结果 turn 继续；abort 为未开始调用补合成错误结果（dsh agent-loop/src/tool-calls.ts:85-105,200-213、tools/src/index.ts:593）。
 - [REQ-FR-TOOLS-4] schema 类型推断与呈现元模型 MUST 对齐 dsh schema.ts / presentation.ts。
 
-- [REQ-FR-TOOLS-5] schema 子集白名单 MUST（type/oneOf/properties/required/additionalProperties/items/enum/const 加注释词，其余键拒绝）；object 类的 additionalProperties MUST 显式 boolean（缺省或非布尔拒绝）；推断规则：const 优先于 enum 优先于宽类型、integer 归 number、oneOf 并集、深度 16 上限回退 JsonValue；isConcurrencySafe 仅严格 true 才 parallel（否则 fail-closed exclusive）（dsh schema.ts:97-166,367-369、json-schema.ts:6-10）。
+- [REQ-FR-TOOLS-5] schema 子集白名单 MUST（type/oneOf/properties/required/additionalProperties/items/enum/const 加注释词，其余键拒绝）；object 类的 additionalProperties MUST 显式 boolean（缺省或非布尔拒绝）；推断规则（dsh TS 类型层，2026-10-29 Q-B 勘误：const 优先于 enum 优先于宽类型、integer 归 number、oneOf 并集、深度 16 上限回退 JsonValue 均为 dsh 编译期类型推断 InferValueAt 非运行时行为；fr 运行时等值=author 子集校验+迭代编译，无递归且不设运行时深度上限）；isConcurrencySafe 仅严格 true 才 parallel（否则 fail-closed exclusive）（dsh schema.ts:97-166,153-170,367-369、json-schema.ts:6-10）。
 ## Scenarios
 
 Rule: REQ-FR-TOOLS-1 — 注册与 schema
@@ -90,10 +90,10 @@ Rule: REQ-FR-TOOLS-2 — 参数快照冻结
 
 Rule: REQ-FR-TOOLS-5 — schema 白名单与推断
 
-场景: 超集键拒绝与推断回退
+场景: 超集键拒绝与深嵌套编译
   假设 工具 schema 含白名单外键、另一工具含 16 层以上嵌套
   当 注册时
-  那么 超集键注册失败，深嵌套推断回退 JsonValue
+  那么 超集键注册失败；深嵌套 schema 迭代编译无递归、不设运行时深度上限（栈安全，2026-10-29 Q-B 勘误：原「回退 JsonValue」系 dsh TS 类型层推断非运行时行为）
 
 场景: additionalProperties 非显式布尔拒绝
   假设 object 类 schema 的 additionalProperties 缺省或为非布尔值

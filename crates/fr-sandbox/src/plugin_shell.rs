@@ -730,6 +730,24 @@ mod tests {
         );
     }
 
+    /// The two default layers coexist (dsh sandbox-policy: the plugin
+    /// schema defaults `read-only` as the fail-safe, the assembly-layer
+    /// `!!js` expression overwrites the effective default to
+    /// workspace-write when `FR_PERMISSION_MODE` is unset).
+    #[test]
+    fn two_default_layers_coexist() {
+        assert_eq!(
+            crate::policy::PolicyConfig::default().mode,
+            crate::seam::SandboxMode::ReadOnly,
+            "the plugin schema default stays read-only"
+        );
+        assert_eq!(
+            baked_default_mode_from(None),
+            Some(crate::seam::SandboxMode::WorkspaceWrite),
+            "the assembly layer lands workspace-write without an override"
+        );
+    }
+
     #[test]
     fn the_baked_default_maps_the_bundle_expression() {
         assert_eq!(

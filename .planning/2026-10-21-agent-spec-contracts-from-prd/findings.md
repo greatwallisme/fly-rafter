@@ -1804,3 +1804,90 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - **门禁**：五门绿=fmt OK/clippy --workspace --all-targets -D warnings 0/**1096 passed 0 failed**（1035→1096）/doc -D warnings 0/**cargo check -p fr-sandbox --target x86_64-pc-windows-msvc --all-targets 零警告零错误**（Q99-B 裁定门形态）。PRD 4.4 sandbox-policy 补入（双缝单 crate+1000+ 号段注记）。
 - **档载新增**：⑧windows 目标 pedantic clippy 214 条（doc 反引号/首段过长/unsafe 标记族/const fn 等）——Q99-B 裁定门=check 编译层（绿）；盲修不可运行面的文风类项有引入错误之险，随 Windows 验证 lane 立时清（如实登记非静默）；⑨code-quality 钩子对 CLI 契约输出宏（println!/eprintln! 报告行=CLI 契约面，fr/src/main.rs 先例）与 dsh 逐字句「Some platform temporary areas...」的 "temporary" 词逐行 grep 误报——透明接受不改契约文本。
 - **批 2b 全落**。下一动作：批 3 TOOLS/APPROVAL/SANDBOX 三 spec 绑定真实测试选择器+七步流 4-7（lifecycle→guard→explain→stamp）。
+
+## 批 3 设计钉（2026-10-29，绑定前事实全钉：三 spec 43 场景映射 + 缺口 + 待裁决）
+
+前置机制事实：lifecycle 对裸 `Test:` 名跑 workspace 级过滤（evidence 显示全 test binaries "N filtered out"、命中包跑 1 test）→ 跨 crate 裸名绑定可行；跨切片场景保留 pending_*（skip 计 not passing=设计态）。AGENT-LOOP 复跑验证：23 pass + 3 skip（fiber_realm/provider/header_reason）与基线一致。
+
+### TOOLS spec 19 场景映射
+
+| # | 场景 | 绑定 | 判定 |
+|---|------|------|------|
+| 1 | 工具注册元数据齐备 | 缺全量钉测（orders 1000-3000 在 fr-system-prompt/orders.rs TOOL_BASH 1000…COMPUTER_USE 3000 已钉；execution_mode_and_wire_schemas_answer 只断 mode+schemas 非空） | 补 1 件（name/schema/executionMode/presentation 全量读出） |
+| 2 | 管线事件顺序 | pipeline_runs_stages_in_order | ✓ |
+| 3 | pre-execute deny 短路 | pre_execute_deny_short_circuits_body | ✓ |
+| 4 | exclusive 串行屏障 | 无测（调度器=fr-agent-loop/driver.rs execute_tool_calls/run_group/group_fill，仅 tool_round(2 parallel×10) 与 abort 两测沾边且已绑 AGENT-LOOP） | 待裁决 Q-A |
+| 5 | parallel 有界滚动池 | 同上无专门测 | 待裁决 Q-A |
+| 6 | concludeTurn 成功终结 turn | driver 无 concludeTurn 专门测（fr-tools 侧 deferred_contexts_and_conclusion_ride_results 只盖管线传播） | 待裁决 Q-A |
+| 7 | schema 类型推断与 dsh 一致 | compiles_scalar_and_json_nodes / compiles_nested_containers_with_wire_key_order（运行时编译面；dsh 推断=TS 类型层无运行时对应） | ✓ |
+| 8 | 重复调用达阈值触发守卫 | gentle_then_detailed_escalation（Q103′A：守卫场景落 guard crate） | ✓ |
+| 9 | exclusive 与 parallel 混合分组屏障 | 无测 | 待裁决 Q-A |
+| 10 | presentation 推断与 dsh 一致 | presentation_hooks_soft_wrap + call_views_round_trip_with_wire_shapes | ✓ |
+| 11 | 执行中参数快照不可变 | 结构已保证（create_execution `arguments: input.arguments.clone()` registry.rs:826）无专门断言 | 补 1 件小钉测 |
+| 12 | 超集键拒绝与推断回退 | rejects_unknown_keyword ✓；深度回退臂：dsh 深度 16 回退=**TS 类型层**（schema.ts:153-154 InferValueAt，运行时编译器 runSchemaCompiler 迭代无上限）→ fr 迭代编译=dsh 运行时等值，回退臂场景文本失真 | 待裁决 Q-B |
+| 13 | additionalProperties 非显式布尔拒绝 | rejects_non_boolean_additional_properties + author_rejects_implicit_openness | ✓ |
+| 14 | guards 仅 allow 时求值且单调 | guards_run_only_on_allow 盖 allow-only；"单调不放宽"无断言 | 补单调臂钉测 |
+| 15 | guard 拒绝仍过 post-execute | guards_run_only_on_allow 未断言 post-execute 仍跑 | 补 1 件 |
+| 16 | post-execute block 双替换 TypeError | post_execute_decisions_apply_verbatim（:518-533 both-replacement TypeError + :536 failed-value 臂） | ✓ |
+| 17 | parallel 池上限默认 10 | 默认在 fr-config bundles/headless max-parallel-tool-calls:10；driver 经闭包读，无默认传递测 | 待裁决 Q-A |
+| 18 | 注册表变更触发惰性重分类 | 无测（group_fill 批次启动前重分类） | 待裁决 Q-A |
+| 19 | concludeTurn 错误结果不终结 turn | 无测 | 待裁决 Q-A |
+
+### APPROVAL spec 15 场景映射
+
+| # | 场景 | 绑定 | 判定 |
+|---|------|------|------|
+| 1 | never 策略自动拒绝 | never_policy_rejects_before_any_dispatch | 场景文本错误待裁决 Q-C：dsh request() **仍写 asked+decided 审计对**（index.ts:224-233 append 无条件、never 判在 decide :270-275），跳过的只是 answerer dispatch；场景文"不产生 approval/asked 事件对"误读 dsh:139 注释"without prompting"；REQ-FR-APPROVAL-1 条款同错 |
+| 2 | 权限模式映射策略 | derive_matches_the_table_and_keeps_a_still_matching_selection（presets：danger→never 表钉）+ the_baked_default_follows_the_bundle_expression | ✓ 跨 crate |
+| 3 | open turn 之外请求被拒 | request_outside_an_open_turn_refuses_verbatim | ✓ |
+| 4 | 无 answerer fail-closed | request_without_answerers_fails_closed_with_audit_pair | ✓ |
+| 5 | 词表外返回值归一化 | throwing_and_rogue_answerers_fail_the_question_closed + rogue_answer_words_contain_to_unavailable | ✓ |
+| 6 | allowed-once 一次性授予 | answerer_chain_dispatches_in_registration_order（AllowedOnce 结算+链序） | ✓（"无持久 allow-list"=结构无存储面） |
+| 7 | 策略切换落事件并通知模型 | set_policy_notices_the_change_verbatim | ✓ |
+| 8 | bash 沙箱升级走同一 seam | fr-sandbox escalation：missing_channel_or_agent_fail_closed + outcomes_map_to_the_grant_or_verbatim_refusals（EscalationApprover 同步化=approval 服务面 fail-closed 等值，批 2b 判例） | ✓ 跨 crate |
+| 9 | rejected 与 cancelled 正常结算 | throwing_and_rogue_answerers（Cancelled 原值 :755-758）+ answerer_chain（Rejected :731） | ✓ |
+| 10 | 正常 ask 产生 asked 与 decided 配对 | request_without_answerers_fails_closed_with_audit_pair（:678-684 完整对+id 相同） | ✓ |
+| 11 | 审批请求 id 每次新鲜 | fr=计数器 `approval-request-N`（lib.rs:399-402）；dsh=randomUUID()（index.ts:224）；批 2a findings 档载"唯一性等价载体"但 PRD 19.2 无条目、场景文=randomUUID | 待裁决 Q-D |
+| 12 | 同值切换 no-op | set_policy_notices_the_change_verbatim（:780-188 no-op 臂） | ✓ |
+| 13 | 切换文案逐字 | set_policy_notices_the_change_verbatim + sentences_are_verbatim | ✓ |
+| 14 | abort 竞速结算 | 结构性缺席（lib.rs:383-388 档载：signal 不过 dylib wire=批 1e 判例、M1 无 answerer 组装、竞速载体=tools worker-vs-abort Q109-A；fr-tools caller_abort_selects_before_dispatch/caller_abort_after_body_supersedes_success 两测在） | 待裁决 Q-E |
+| 15 | effectivePolicy 优先级链 | effective_policy_reads_override_then_config_then_ask | ✓ |
+
+### SANDBOX spec 9 场景映射
+
+| # | 场景 | 绑定 | 判定 |
+|---|------|------|------|
+| 1 | 默认 workspace-write 与 root | the_baked_default_maps_the_bundle_expression（FR_PERMISSION_MODE??workspace-write）+ root=构造期 current_dir（PolicyHome；resolution_ladders_request_over_session_over_default 盖解析梯） | ✓ |
+| 2 | read-only 与 danger 预设 | presets derive（danger→never 公式）+ read_only_grants_nothing + profiles 三测 | ✓ 组合 |
+| 3 | 两层默认并存 | sandbox_mode_reports_the_deployment_default（schema 缺省 read-only）+ the_baked_default_maps_the_bundle_expression（装配 workspace-write） | ✓ |
+| 4 | 解析后策略文本进入 runtime-context | the_policy_context_renders_all_three_segments_verbatim + context_text_renders_the_resolved_policy_or_nothing + wiring_grants_declares_registers_context_and_projection_in_order（register-context order=110） | ✓ |
+| 5 | bubblewrap 缺失降级 Landlock | the_linux_chain_degrades_to_a_partial_landlock + E2E bwrap_missing_degrades_to_the_landlock_rung | ✓ |
+| 6 | 后端全缺失 fail-closed | an_empty_chain_or_all_unusable_probes_fails_closed + the_seam_face_wraps_or_fails_closed_with_the_code | ✓ |
+| 7 | workspace 外写入被拒 | E2E a_write_outside_the_workspace_is_denied_and_inside_passes + path_boundary 三测 | ✓ |
+| 8 | 按平台解析执行体后端 | the_linux_chain_probes_in_preference_order + the_seatbelt_wrap_carries_the_sbpl_profile + the_windows_acl_agentless_wrap_carries_the_three_segments + the_chain_tables_stay_pinned | ✓ |
+| 9 | 观察策略与 dsh 对齐 | fence 半=path_boundary+E2E ✓；fs-observation-policy=**fs 工具域观察状态**（dsh 包自述"Event-only filesystem observation policy; registers no service"、WeakMap per-context observed-file、write/edit prior-observation 三决策）→ Phase 16 fr-tools-builtin 域非 fr-sandbox | 待裁决 Q-F |
+
+### 无分叉直做清单（批 3 实施部分）
+- fr-tools 补 4 件小钉测：注册元数据全量读出（场景 1）/参数快照隔离（11）/守卫单调不放宽臂（14）/guard 拒绝仍过 post-execute（15）——均 Boundaries 内。
+- 三 spec 全部无分叉场景绑定真实测试名（上表 ✓ 项）。
+- lifecycle 修码循环→guard（三 spec 转绿）→explain→stamp。
+
+### 待裁决六项（Q-A…Q-F，已呈报用户）
+- Q-A TOOLS 调度七场景（#4/5/6/9/17/18/19）：调度实现+测试落点=fr-agent-loop/driver.rs；A=TOOLS spec Boundaries 扩 crates/fr-agent-loop/** + 补 7 件 driver 钉测后绑定（TOOLS 全绿）；B=七场景保留 pending 至 Phase 18（TOOLS 本批不绿）。
+- Q-B TOOLS #12 深度回退臂：dsh 深度 16=TS 类型层（运行时无此行为）；A=场景文本改"深嵌套 schema 迭代编译无递归（栈安全）"（KLL+intake+spec 同步勘误）；B=fr 实装 16 上限回退（偏离 dsh 运行时，弱化校验，不建议）。
+- Q-C APPROVAL #1 文本勘误：A=按 dsh 源码改"自动拒绝（decided=rejected）且不派发 answerer，asked/decided 审计对仍完整产生"（条款 REQ-FR-APPROVAL-1 同步勘误，走 intake→再生成管线）；B=保持原文（测试断言与文本矛盾）。
+- Q-D APPROVAL #11 ask id：A=改码 UUID v4 对齐 dsh wire 值形；B=保留计数器+PRD 19.2 补档+场景文改"每次为全新且不复用"。
+- Q-E APPROVAL #14 abort 竞速：A=场景改文钉 M1 裁决载体（竞速=tools worker-vs-abort，caller_abort 两测承载）+KLL 同步；B=保留 pending 至 Phase 18（APPROVAL 不绿）。
+- Q-F SANDBOX #9 观察策略：A=场景拆臂（fence 臂绑 path_boundary/E2E；观察策略臂注记 Phase 16 fr-tools-builtin 域）；B=整场景保留 pending（SANDBOX 不绿）。
+
+## 批 3 实施记录（2026-10-29，Q-A…Q-F 全 A 裁决落地）
+- **KLL/intake 勘误四件 + 再生成两轮**：Q-B 深度 16=TS 类型层（schema.ts:153-170 InferValueAt；运行时 runSchemaCompiler 迭代无上限）→ 条款 REQ-FR-TOOLS-5 + 场景 12 改「迭代编译无递归」；Q-C never 审计对勘误（dsh :224-233 无条件 append、never 判在 decide :270-275）→ 条款 1 + 场景 1；Q-E 竞速载体（AbortSignal 不跨 dylib wire，载体=工具管线 worker-vs-abort）→ 条款 4 + 场景 14 改名「竞速取消由工具管线承载」；Q-F 观察策略属 fs 工具域（dsh 包自述 registers no service）→ 场景 7 去 observation 尾巴 + 场景 9 改「fence 边界语义与 dsh 对齐」（temp 根拒绝/双向包含/拼写比较三臂）。管线跑两轮（第二轮=场景 12 步文本漏改自纠）；非目标 spec 全部 HEAD 恢复，绑定脚本幂等复放零 diff。
+- **refine-drafts.py 边界图**：REQ-FR-TOOLS 增 fr-guard-repeat-reminder/fr-guard-timeout/fr-agent-loop 三路径（guard crate 两路径原为内联维护未入图——本批同步；fr-agent-loop=Q-A 裁决，调度实现+测试在 driver.rs）。
+- **Q-D 改码**：fr-approval ask id 计数器→UUID v4（uuid crate workspace dep + v4 feature；lib.rs request() Uuid::new_v4().to_string()，request_ids 字段删除）；新钉测 ask_ids_are_fresh_uuid_v4（36 位小写连字符形/版本 nibble 4/变体 nibble 8-b/两次 ask 不同 id）。
+- **新增 13 件钉测**：fr-agent-loop 7 件调度（exclusive_calls_serialize_in_model_order/parallel_pool_bounds_in_flight/concluding_result_ends_the_turn/error_result_does_not_conclude_the_turn/mixed_groups_break_at_exclusive/reclassification_breaks_the_pool/pool_window_defaults_to_ten）——ScriptedTools 扩 mode_overrides（按 call_id）+flip_on_dispatch（dispatch 期翻转钩）+in_flight_now/timeline（Transition 枚举 Dispatch/Drain 带在飞计数），时间线断言一次全过=调度语义（execute_tool_calls 组界/run_group 池窗/group_fill :2469 重分类断点/commit_ready :2553 concludes 门）实现与 dsh 语义相符的直接证据；fr-tools 5 件（registered_metadata_is_complete/arguments_snapshot_is_frozen/guards_skip_non_allow_and_stay_monotonic（deny+ask 双臂跳过+首拒短路面）/guard_denials_still_run_post_execute/superset_keys_reject_and_deep_compiles（17 层深编译+超集键拒绝双臂））；fr-approval 1 件（rejected_and_cancelled_settle_verbatim）；fr-sandbox 1 件（two_default_layers_coexist=PolicyConfig 缺省 read-only+烘焙 workspace-write 双层）。
+- **绑定 43 选择器全真实**：TOOLS 19/APPROVAL 15/SANDBOX 9，三 spec pending 清零；跨 crate 裸名（presets derive 双 spec 复用/caller_abort_selects_before_dispatch/escalation 两测/path_boundary）。
+- **七步流**：lint 三 spec ≥0.7 PASS（open-question 标 [x]）；lifecycle 三 spec 首轮即全绿 19/19+15/15+9/9 零跳过（clippy 修码后复跑仍全绿）；guard（FR_DSH_SOURCE 必需——缺席时 PROMPT 2 failed=extract-prompts 钉测按设计 fail，设后回 0/1 基线）16 红全为 pending 态 spec，四 spec 绿=TOOLS/APPROVAL/SANDBOX/LLM；explain 三份 100% 全过；stamp --dry-run 三份 Spec-Passing: true；trace 三需求 liveness=Honored。
+- **门禁**：fmt OK/clippy --workspace --all-targets -D warnings 0/cargo test --workspace 1111 passed 0 failed（1096→1111：approval +2/tools +5/agent-loop +7/sandbox +1）/RUSTDOCFLAGS=-D warnings doc 0/windows 编译门 fr-approval+fr-tools+fr-sandbox 三 crate x86_64-pc-windows-msvc --all-targets 零警告零错误（fr-agent-loop 传递 fr-session→zstd-sys 需 MSVC lib.exe 本机不可达=既有环境约束非本批引入，Q99-B 判例门=fr-sandbox 编译层照过）。
+- **PRD 两处注记**：11.1 实现细则（never 审计对勘误+Q-E 竞速载体括注）、11.2（观察策略 Phase 16 域括注）。
+- 排障自纠：Arc clone-on-ref-ptr×2（BuiltTool 无 Arc::clone unsize——改 present_call 前置断言后 move）/json! 宏无 **spread/超集键实际文案「not supported by the value schema DSL」非「unsupported key」/场景 12 步文本第一轮漏改（只改了条款）第二轮补/FR_DSH_SOURCE 不跨 Bash 调用致 PROMPT 假红。
+- **批 3 附带修正（A2 KLL 补档）**：import 重生成暴露 HEAD 的 req-fr-llm-provider.md KLL 停在旧 Q59-a 文本——2026-10-27 A2 裁决当日只更新了 intake 与 spec、漏了 KLL 再导入；本次 import 按 intake 把 A2 正文（三 provider toolUpdate 均无声明/基线折叠/结构性不可达）补入 KLL。spec 侧 HEAD 恢复版为内联维护的更丰富表述（Q74-B+A2 双引注），语义一致，保留。

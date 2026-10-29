@@ -61,7 +61,7 @@ Rule: REQ-FR-SANDBOX-4 — 文件系统 fence
 场景: workspace 外写入被拒
   假设 workspace-write 模式
   当 工具尝试写 workspace 外路径时
-  那么 被文件系统 fence 拒绝，观察策略与 dsh fs-sandbox 及 fs-observation-policy 一致
+  那么 被文件系统 fence 拒绝，边界语义对齐 dsh fs-sandbox
 
 Rule: REQ-FR-SANDBOX-3 — 平台后端选择
 
@@ -70,12 +70,12 @@ Rule: REQ-FR-SANDBOX-3 — 平台后端选择
   当 选择沙箱执行体时
   那么 依次命中 bubblewrap/Landlock、Seatbelt、ACL restricted-token 链
 
-Rule: REQ-FR-SANDBOX-4 — 观察策略对齐
+Rule: REQ-FR-SANDBOX-4 — fence 边界语义细节
 
-场景: 观察策略与 dsh 对齐
-  假设 工具读取 workspace 外路径
-  当 按观察策略结算时
-  那么 行为与 dsh fs-observation-policy 的对照断言一致
+场景: fence 边界语义与 dsh 对齐
+  假设 temp 根位于 workspace 内、或 workspace 与候选路径互为包含
+  当 判定边界时
+  那么 workspace 内 temp 根拒绝（不因在 workspace 内而放行）、双向包含合并能力、缺失路径按拼写比较；观察状态策略（dsh fs-observation-policy）属 fs 工具域，随工具切片验证（2026-10-29 Q-F 裁决）
 
 ## Dependencies
 

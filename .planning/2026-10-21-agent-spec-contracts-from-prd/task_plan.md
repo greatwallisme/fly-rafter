@@ -4,10 +4,10 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-批 2b 全落（fr-sandbox 61 tests：域+win 全量 cfg(windows)+双 bin+服务面/缝面/壳+landlock E2E；fr-wire 号段修正；workspace 1096 tests 五门绿——含 Q99-B 交叉编译检查门 x86_64-pc-windows-msvc 零警告；工作树未提交）。**下一动作=批 3**：TOOLS/APPROVAL/SANDBOX 三 spec 绑定真实测试选择器（替换 pending_*）→ 七步流 4-7（lifecycle 修码循环→guard 全绿→explain→stamp 归档）。
+批 3 全落（Q-A…Q-F 全 A：KLL/intake 四勘误+两轮再生成；Q-D ask id→UUID v4；14 件新钉测含 driver 调度 7；43 选择器全真实绑定；lifecycle 19/19+15/15+9/9 零跳过；guard 四 spec 绿=TOOLS/APPROVAL/SANDBOX/LLM；workspace 1111 tests 六门绿）。Phase 14 收口。**下一动作=Phase 16 批 0**：fr-tools-builtin+fr-shell 真源全读（Q92-A 单合同双 crate/Q93-A 域服务归属/Q94-A 六子片/Q95-A catalog 脚本/Q96-A 跨切片 skip/Q97-A 每工具全 schema 钉测）。
 
 ## Current Phase
-Phase 14（fr-tools + fr-approval + fr-sandbox）——批 0 真源全读（Q91-A 勘误后先行；切片 8 已闭环）
+Phase 16（fr-tools-builtin + fr-shell）——批 0 真源全读待启（Phase 14 已收口：批 0 裁决/批 1 fr-tools+guard/批 2a approval+presets+projections/批 2b sandbox/批 3 绑定+七步流 4-7）
 
 ## Phases
 
@@ -114,16 +114,16 @@ Phase 14（fr-tools + fr-approval + fr-sandbox）——批 0 真源全读（Q91-
 - **Status:** complete
 
 ### Phase 14: fr-tools + fr-approval + fr-sandbox（Q91-A 先行；批结构 Q94-A：批 0 裁决/真源→批 1 fr-tools→批 2 approval+sandbox→批 3 绑定）
-- [ ] fr-tools：ToolRegistry（register：名称/JSON Schema/executionMode/presentation/section order 1000-3000）、MCP raw schema 动态注册；**监听注册面（Q101′A：pre-execute/execute/post-execute 分 stage 回调端点，注册序=装配行序=触发序）**
-- [ ] guard 两插件 crate（Q100′A）：fr-guard-repeat-reminder（阈值 [3,5,8]/预览 500/用户消息重置链经 agent/user-admitted）/fr-guard-timeout（TOOL_TIMEOUT 施加）
-- [ ] 执行管线五段（createExecution 冻结 → pre-execute waterfall（ask 交 ApprovalService）→ guards 单调串 → tools/execute waterfall → 工具体 → post-execute）；ptc 坍缩调用策略前置终结；post-execute 双替换 TypeError/失败结果禁 value 替换/finalize 快照冻结；成功结果过 output schema 校验
-- [ ] 调度（isConcurrencySafe 严格 true 才 parallel；exclusive 组=单调用屏障；池上限 max-parallel-tool-calls 默认 10；lazy 重分类；concludeTurn 成功门控）
-- [ ] fr-approval：ApprovalPolicy ask/never、request() fail-closed 'unavailable' 归一化、approval/policy 事件、'never' dispatch 前自判、abort 竞速 cancelled、切换文案逐字
+- [x] fr-tools：ToolRegistry（register：名称/JSON Schema/executionMode/presentation/section order 1000-3000）、MCP raw schema 动态注册；**监听注册面（Q101′A：pre-execute/execute/post-execute 分 stage 回调端点，注册序=装配行序=触发序）**——批 1e 落
+- [x] guard 两插件 crate（Q100′A）：fr-guard-repeat-reminder（阈值 [3,5,8]/预览 500/用户消息重置链经 agent/user-admitted）/fr-guard-timeout（TOOL_TIMEOUT 施加）——批 1e 落
+- [x] 执行管线五段（createExecution 冻结 → pre-execute waterfall（ask 交 ApprovalService）→ guards 单调串 → tools/execute waterfall → 工具体 → post-execute）；ptc 坍缩调用策略前置终结；post-execute 双替换 TypeError/失败结果禁 value 替换/finalize 快照冻结；成功结果过 output schema 校验——批 1e 落
+- [x] 调度（isConcurrencySafe 严格 true 才 parallel；exclusive 组=单调用屏障；池上限 max-parallel-tool-calls 默认 10；lazy 重分类；concludeTurn 成功门控）——实现在 fr-agent-loop/driver.rs（Q-A 裁决边界扩域），批 3 落 7 件调度钉测
+- [x] fr-approval：ApprovalPolicy ask/never、request() fail-closed 'unavailable' 归一化、approval/policy 事件、'never' dispatch 前自判（审计对仍产生=Q-C 勘误）、ask id UUID v4（Q-D）、竞速载体=工具管线（Q-E）、切换文案逐字——批 2a+批 3 落
 - [x] fr-permission-presets（Q104′A 独立 crate）：双 knob 捆绑表+catalog+set/current/derive+pinInitialPermission 播种+/permission 命令行为面（注册随 Phase 18 fr-commands 翻转）——批 2a 波 2 落（2026-10-29，Q110′A′ 自持折叠）
 - [x] fr-session 增 'session-projections' 服务面（Q105′A：register/stateOf；sandboxMode/permissions 投影消费者）——批 2a 波 2 落（1000+ 号段+root 载体冷读继电）
-- [ ] fr-sandbox：三预设表、FR_PERMISSION_MODE 覆盖、后端链 bubblewrap→Landlock/Seatbelt/ACL、sandbox-unavailable fail-closed
-- [ ] 对照 REQ-FR-TOOLS/APPROVAL/SANDBOX 场景逐条落测试
-- **Status:** pending
+- [x] fr-sandbox：三预设表、FR_PERMISSION_MODE 覆盖、后端链 bubblewrap→Landlock/Seatbelt/ACL、sandbox-unavailable fail-closed——批 2b 落
+- [x] 对照 REQ-FR-TOOLS/APPROVAL/SANDBOX 场景逐条落测试——批 3 落（43/43 真实绑定，lifecycle 19+15+9 全过零跳过，liveness 三需求 Honored）
+- **Status:** complete（2026-10-29 批 3 收口）
 
 ### Phase 15: fr-system-prompt + fr-agent-loop（切片 7/8，已闭环）
 - [x] 提示词抽取脚本（scripts/extract-prompts，从 dsh 源文件生成常量，禁手抄）——批 1a 落（FR_DSH_SOURCE 必需+--check 钉测+生成管道内嵌 rustfmt）
