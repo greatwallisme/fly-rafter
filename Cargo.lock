@@ -868,6 +868,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fr-tools-builtin"
+version = "0.1.0"
+dependencies = [
+ "dougong-abi",
+ "fr-sandbox",
+ "fr-wire",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fr-wire"
 version = "0.1.0"
 dependencies = [

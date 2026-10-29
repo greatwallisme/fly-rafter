@@ -1,0 +1,23 @@
+[package]
+name = "fr-tools-builtin"
+description = "Fly Rafter built-in model tools (dsh tool-bash + tool-pwsh + shell-env + working-directory parity; the 16a shell-group slice of the builtin-tools contract)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+dougong-abi.workspace = true
+fr-sandbox.workspace = true
+fr-wire.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -274,6 +274,42 @@ impl Default for ExecutorConfig {
     }
 }
 
+/// The per-kind executor configurations (the dsh bundle's per-package
+/// config rows).
+#[derive(Debug, Clone)]
+pub struct ExecutorConfigs {
+    /// The bash executor configuration.
+    pub bash: ExecutorConfig,
+    /// The pwsh executor configuration.
+    pub pwsh: ExecutorConfig,
+}
+
+impl ExecutorConfigs {
+    /// The bundle mount (the dsh base-bundle rows: the bash-sandbox row
+    /// carries `timeoutMs: 60000`, the pwsh-sandbox row keeps the package
+    /// default).
+    #[must_use]
+    pub fn bundle() -> Self {
+        Self {
+            bash: ExecutorConfig {
+                timeout_ms: 60_000.0,
+                ..ExecutorConfig::default()
+            },
+            pwsh: ExecutorConfig::default(),
+        }
+    }
+
+    /// The package defaults for both kinds (the dsh packages without a
+    /// bundle config row).
+    #[must_use]
+    pub fn default_configs() -> Self {
+        Self {
+            bash: ExecutorConfig::default(),
+            pwsh: ExecutorConfig::default(),
+        }
+    }
+}
+
 /// One rejected configuration field (the dsh `assertPositiveFinite`
 /// family).
 fn assert_positive_finite(prefix: &str, name: &str, value: f64) -> Result<(), String> {

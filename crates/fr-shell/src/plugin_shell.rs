@@ -21,7 +21,7 @@ use dougong_abi::write_out;
 use serde_json::Value;
 use serde_json::json;
 
-use crate::executors::{PolicyResolve, SandboxConfine};
+use crate::executors::{ExecutorConfigs, PolicyResolve, SandboxConfine};
 use crate::jobs_local::LocalJobRegistry;
 use crate::jobs_local::SessionLogAppend;
 use crate::jobs_types::JOB_REGISTERED_EVENT;
@@ -221,7 +221,8 @@ impl ShellState {
         let registry = LocalJobRegistry::new(sessions);
         let confine = Arc::new(WireConfine { link });
         let policy = Arc::new(WirePolicy { link });
-        let service = ShellService::new(registry, confine, policy).ok()?;
+        let service =
+            ShellService::new(registry, confine, policy, ExecutorConfigs::bundle()).ok()?;
         Some(Self { service })
     }
 

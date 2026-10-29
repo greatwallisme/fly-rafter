@@ -174,6 +174,9 @@ fn private_spill_dir() -> &'static str {
                 Err(_) => break base.join(format!("fr-subprocess-fallback-{suffix}")),
             }
         };
+        // The private-directory tightening is the POSIX permission model;
+        // Windows roots carry no mode bits.
+        #[cfg(unix)]
         let _ignored = std::fs::set_permissions(&candidate, std::fs::Permissions::from_mode(0o700));
         candidate.to_string_lossy().into_owned()
     })
@@ -290,6 +293,9 @@ impl OutputCollector {
                     .write(true)
                     .create_new(true)
                     .open(&file)?;
+                // The spill file stays owner-only on POSIX; Windows
+                // descriptors carry no mode bits.
+                #[cfg(unix)]
                 std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600))?;
                 for prior in &state.chunks {
                     fd.write_all(prior)?;
@@ -448,6 +454,50 @@ pub fn kill_group(pid: i32, sig: i32) {
     }
 }
 
+/// The SIGKILL leg of the synchronous termination (the unix arm of the
+/// compile-time dispatch; on Windows the taskkill arm always runs).
+#[cfg(unix)]
+fn terminate_group_now(group_pid: i32) {
+    kill_group(group_pid, SIG_KILL);
+}
+
+/// The compile arm of the synchronous termination on Windows: the
+/// `is_windows` runtime check always takes the taskkill arm there.
+#[cfg(windows)]
+fn terminate_group_now(_group_pid: i32) {
+    let _ = _group_pid;
+}
+
+/// The ladder's single signal leg (the unix arm of the compile-time
+/// dispatch).
+#[cfg(unix)]
+fn terminate_group(group_pid: i32, sig: i32) {
+    kill_group(group_pid, sig);
+}
+
+/// The POSIX signal words the ladder sends (the libc vocabulary).
+#[cfg(unix)]
+const SIG_TERM: i32 = libc::SIGTERM;
+/// The SIGKILL word (the libc vocabulary).
+#[cfg(unix)]
+const SIG_KILL: i32 = libc::SIGKILL;
+
+/// The Windows signal-word placeholders for the compile arm: the
+/// `is_windows` runtime check always takes the taskkill arm there, so
+/// the words never ride a real call.
+#[cfg(windows)]
+const SIG_TERM: i32 = 15;
+/// The compile-arm SIGKILL word (never sent; see the module note).
+#[cfg(windows)]
+const SIG_KILL: i32 = 9;
+
+/// The compile arm of the ladder on Windows: the `is_windows` runtime
+/// check always takes the taskkill arm there.
+#[cfg(windows)]
+fn terminate_group(_group_pid: i32, _sig: i32) {
+    let _ = (_group_pid, _sig);
+}
+
 /// Terminates one Windows process tree with `taskkill /PID <pid> /T /F`
 /// (contained like POSIX group signalling).
 fn taskkill_process_tree(pid: u32) {
@@ -579,7 +629,7 @@ impl SubprocessHandle {
         if self.state.is_windows {
             taskkill_process_tree(self.pid);
         } else {
-            kill_group(self.state.group_pid, libc::SIGKILL);
+            terminate_group_now(self.state.group_pid);
         }
     }
 
@@ -593,6 +643,21 @@ impl SubprocessHandle {
             let slot = self.state.outcome.lock().expect("outcome lock");
             return slot.outcome.is_none() && slot.failed.is_none();
         }
+        self.posix_range_alive()
+    }
+
+    /// The POSIX liveness probe (the unix arm of the compile-time
+    /// dispatch).
+    /// The compile arm on Windows: the `is_windows` runtime check
+    /// always returns through the taskkill arm above.
+    #[cfg(windows)]
+    fn posix_range_alive(&self) -> bool {
+        let _ = self;
+        false
+    }
+
+    #[cfg(unix)]
+    fn posix_range_alive(&self) -> bool {
         // SAFETY: a raw liveness probe (`kill(-pid, 0)`) with the group
         // pid recorded at spawn.
         let probe = unsafe { libc::kill(self.state.group_pid, 0) };
@@ -680,7 +745,7 @@ fn run_termination_ladder(state: &Arc<HandleState>) {
     if state.is_windows {
         taskkill_process_tree(state.pid);
     } else {
-        kill_group(state.group_pid, libc::SIGTERM);
+        terminate_group(state.group_pid, SIG_TERM);
     }
     let grace = Duration::from_millis(crate::jobs_local::ms_u64(state.grace_ms));
     let deadline = Instant::now() + grace;
@@ -693,7 +758,7 @@ fn run_termination_ladder(state: &Arc<HandleState>) {
     if state.is_windows {
         taskkill_process_tree(state.pid);
     } else {
-        kill_group(state.group_pid, libc::SIGKILL);
+        terminate_group(state.group_pid, SIG_KILL);
     }
 }
 
@@ -962,6 +1027,33 @@ fn new_handle_state(pid: u32, grace_ms: f64) -> HandleState {
 
 /// Spawns the direct-outcome thread: waits the child, then the bounded
 /// pipe drain (the dsh `pipeDrainTimer`), then publishes the outcome.
+/// Projects the waited status onto the outcome (the unix arm keeps the
+/// signal projection; the Windows arm reads the exit code — taskkill
+/// settles as an exit code there, matching the dsh note that a
+/// force-kill settles as an exit code without a signal marker).
+#[cfg(unix)]
+fn settle_status(status: std::process::ExitStatus) -> Outcome {
+    status.signal().map_or_else(
+        || Outcome {
+            exit_code: status.code(),
+            signal: None,
+        },
+        |signal| Outcome {
+            exit_code: None,
+            signal: Some(signal_name(signal)),
+        },
+    )
+}
+
+/// The Windows arm of the status projection.
+#[cfg(windows)]
+fn settle_status(status: std::process::ExitStatus) -> Outcome {
+    Outcome {
+        exit_code: status.code(),
+        signal: None,
+    }
+}
+
 fn spawn_waiter(
     state: &Arc<HandleState>,
     mut child: std::process::Child,
@@ -972,16 +1064,7 @@ fn spawn_waiter(
         .name("fr-shell-child-wait".to_owned())
         .spawn(move || {
             let outcome = match child.wait() {
-                Ok(status) => status.signal().map_or_else(
-                    || Outcome {
-                        exit_code: status.code(),
-                        signal: None,
-                    },
-                    |signal| Outcome {
-                        exit_code: None,
-                        signal: Some(signal_name(signal)),
-                    },
-                ),
+                Ok(status) => settle_status(status),
                 Err(error) => {
                     let mut slot = recover(&wait_state.outcome);
                     slot.failed = Some(error.to_string());
@@ -1087,5 +1170,5 @@ fn is_executable_file(path: &std::path::Path) -> bool {
 /// checks ACLs at spawn time, so existence is the only cheap probe).
 #[cfg(not(unix))]
 fn is_executable_file(path: &std::path::Path) -> bool {
-    std::fs::metadata(path).is_ok_and(std::fs::Metadata::is_file)
+    std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
 }

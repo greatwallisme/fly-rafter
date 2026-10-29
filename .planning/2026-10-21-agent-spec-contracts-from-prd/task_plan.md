@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 16 **16a 批 1 全部代码落地**（fr-shell：executors 四执行体+service 三带 wire face+plugin_shell+registry 钉测 24 tests；fr-tools：METHOD_REGISTER/UNREGISTER 端点化定义面，86 tests）。**下一动作=批 1 收口**（clippy 清理代理回报后跑 workspace 四门 → 用户 /commit 裁决入库）→ 批 2（fr-tools-builtin 19 工具注册面+bash/pwsh 工具三件真源全读+Q97-A 全 schema 钉测；bundle fr-shell 行执行体变体表达式呈报）。
+Phase 16 **16a 批 2 已全落**（fr-tools-builtin 七模块 19 tests+fr-shell kill_by_tool_call/1008+ExecutorConfigs bundle 行+windows 缺口修复；五门全绿 1157 tests）——待用户 /commit 裁决入库。**下一动作=批 3（16a 收口）**：fr-tools WireToolDefinition watcher（signal→jobs 1008）+presentCall/projectContent trait 接线缺口+SHELL（builtin-tools）spec 绑定（Boundaries 扩 crates/fr-tools/**+crates/fr-shell/**，Q92-A 已裁）+Q95-A catalog 脚本+七步流 4-7 闭环。
 
 ## Phases
 
@@ -139,12 +139,14 @@ Phase 16 **16a 批 1 全部代码落地**（fr-shell：executors 四执行体+se
 - [x] 对照 REQ-FR-PROMPT/AGENT-LOOP 场景逐条落测试（PROMPT 46 真实+1 skip=working-directory Phase 18，2026-10-28 批 3）
 - **Status:** complete
 
-### Phase 16: fr-tools-builtin + fr-shell（Q92-A 单合同双 crate：builtin-tools spec Boundaries 增 crates/fr-shell/**；Q93-A fr-tools-builtin provide 全部域服务（fs/web/goals/schedule/sessionQuery/skills/lsp/workingDirectory/userQuestions/cordisInspect/pluginManager/shellEnv/terminals），fr-shell 仅 provide shell/subprocess/jobs；Q94-A 拆 16a shell 组/16b 文件组 7 件/16c 任务状态/16d 交互+会话查询/16e PTY+persistent/16f web+skill+lsp+目录+内省；Q95-A catalog 脚本 Q89-A 判例同款；Q96-A run_code+subagent 族绑跨切片 skip；Q97-A 每工具一件全 schema 钉测）
-- [ ] fr-shell：bash 执行 seam、子进程/作业管理（job_kill/list/output）、沙箱策略执行体对接
-- [ ] 第 17 节工具：shell 组（bash/pwsh/persistent）、文件组 7 件、web 2 件、todo/goal/jobs/schedule、交互 2 件（headless fail-closed）、会话查询 5 件、PTY 6 件（opt-in）、skill 2 件、lsp、working_directory、内省 3 件
-- [ ] 每工具参数 schema 对照 dsh tool-catalog.md 逐字冻结
-- [ ] 对照 REQ-FR-BUILTIN-TOOLS 场景逐条落测试
-- **Status:** modules pending
+### Phase 16: fr-tools-builtin + fr-shell（Q92-A 单合同双 crate：builtin-tools spec Boundaries 增 crates/fr-shell/**；Q93-A fr-tools-builtin provide 全部域服务，fr-shell 仅 provide shell/subprocess/jobs；Q94-A 拆 16a-16f 六子批；Q95-A catalog 脚本；Q96-A run_code+subagent 族绑跨切片 skip；Q97-A 每工具一件全 schema 钉测）
+- [x] 16a 批 0+1：fr-shell 核心+四执行体+三带 service+plugin_shell+fr-tools 注册面（bc8b377+cefec8c）
+- [x] 16a 批 2：fr-tools-builtin 七模块（bash/pwsh 双工具+shell-env+working-directory 最小臂+abort 传播面 jobs 1008+ExecutorConfigs bundle 行+windows 缺口修复）——1157 tests 五门全绿
+- [ ] 16a 批 3（收口）：fr-tools watcher（signal→jobs 1008）+trait 接线缺口+SHELL spec 绑定+Q95-A catalog 脚本+七步流 4-7
+- [ ] 16b 文件组 7 件 / 16c 任务状态 / 16d 交互+会话查询 / 16e PTY+persistent / 16f web+skill+lsp+目录全量+内省
+- [ ] 每工具参数 schema 对照 dsh tool-catalog.md 逐字冻结（16a bash/pwsh 已逐字落 schema.rs，catalog 脚本随批 3）
+- [ ] 对照 REQ-FR-BUILTIN-TOOLS 场景逐条落测试（随各子批 spec 绑定）
+- **Status:** in_progress（16a 批 2 完成，批 3 待启）
 
 ### Phase 17: fr-compaction + fr-mcp + fr-ptc
 - [ ] fr-compaction：剪枝 8192/4096/1024、压缩契约与自动触发、图片卸载、spill max-inline-tokens 12500、replace-op 落地

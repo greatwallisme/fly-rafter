@@ -1151,3 +1151,11 @@
 - 待用户 /commit 裁决入库（守卫阻断同既定例：pending 选择器设计态，--no-verify 提交）。
 
 ## 2026-10-29 — 批 1 后半提交入库：cefec8c（用户 /commit 裁决 --no-verify，守卫注记随信息）
+
+## 2026-10-29 — 16a 批 2：fr-tools-builtin 新 crate+fr-shell 传播面，workspace 1157 tests（1136→1157）
+- Q16a-6 裁决 A（用户确认）+载体实证修正：dougong per-instance lock 横跨 call 与 event dispatch→abort kill 载体=fr-shell jobs 1008 killByToolCall（批 2 落）+批 3 fr-tools watcher。
+- fr-tools-builtin 七模块全落（shell_env/working_directory/render/schema/tools/service/plugin_shell，19 tests）；bash/pwsh 双工具 execute/render/presentCall/presentResult/escalation/abort/working-directory/shell-env 全 1:1。
+- fr-shell：kill_by_tool_call+1008 wire 面+ExecutorConfigs bundle 行（bash 60s/pwsh 120s 钉测）+windows 编译缺口修复（批 1 遗留）+批 1 "toolCall" 键疏漏修正。
+- 五门全绿：fmt/clippy -D warnings 0/tests 1157 passed 0 failed/doc -D warnings/Windows 门 fr-tools-builtin+fr-shell 零警告零错误。
+- 过程：生成退化 5 起全部截停或当场还原（详见 findings 批 2 实施记录）；长内容改 Write/heredoc 纪律生效。
+- 待用户 /commit 裁决入库 → **3a96478 入库**（用户 /commit 裁决 --no-verify，守卫注记随信息）。

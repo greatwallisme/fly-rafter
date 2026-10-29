@@ -742,6 +742,55 @@ impl LocalJobRegistry {
     ) -> Result<&'static str, String> {
         let mut state = recover(&self.state);
         let job = Self::expect(&mut state, id, caller)?;
+        Self::kill_tracked(job, reason)
+    }
+
+    /// Requests cancellation of the live job created by the tool
+    /// invocation named by `call_id` (the caller-abort propagation face:
+    /// the dougong per-instance lock spans a whole wire call, so the
+    /// aborting side must reach the registry directly instead of through
+    /// the tool plugin that is blocked inside its own `wait`).
+    ///
+    /// Absent matches resolve idempotently: the abort races a job that
+    /// may already have settled and left the registry, and a lost race is
+    /// the expected outcome, not an error.
+    ///
+    /// # Errors
+    ///
+    /// A failing producer cancel.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the registry lock is poisoned by a concurrent panic.
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "the producer cancel runs under the registry lock: the dsh event loop serializes the same callback against the same record"
+    )]
+    pub fn kill_by_tool_call(
+        &self,
+        call_id: &str,
+        reason: Option<&str>,
+    ) -> Result<&'static str, String> {
+        let mut state = recover(&self.state);
+        let found = state
+            .store
+            .values_mut()
+            .find(|job| {
+                job.tool_call
+                    .as_ref()
+                    .is_some_and(|call| call.call_id == call_id)
+            })
+            .map(|job| job.id.clone());
+        let Some(id) = found else {
+            return Ok("absent");
+        };
+        let job = state.store.get_mut(&id).expect("the id was just read");
+        Self::kill_tracked(job, reason)
+    }
+
+    /// The shared kill body: cancel, mark stopping, record the reason and
+    /// the kill cause.
+    fn kill_tracked(job: &mut TrackedJob, reason: Option<&str>) -> Result<&'static str, String> {
         if job.status.is_terminal() {
             return Ok("already-finished");
         }

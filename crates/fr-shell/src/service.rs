@@ -333,7 +333,9 @@ impl ShellService {
     /// Assembles the service over the registry and the cross-plugin
     /// seams, mounting the sandbox executor variant for both kinds (the
     /// dsh bundle's standing mount; the local variants are the batch-2
-    /// bundle-row override).
+    /// bundle-row override). The per-kind configurations ride the dsh
+    /// bundle rows: bash carries `timeoutMs: 60000`, pwsh the package
+    /// default.
     ///
     /// # Errors
     ///
@@ -342,11 +344,17 @@ impl ShellService {
         registry: Arc<LocalJobRegistry>,
         confine: Arc<dyn SandboxConfine>,
         policy: Arc<dyn PolicyResolve>,
+        configs: executors::ExecutorConfigs,
     ) -> Result<Self, String> {
         let executors = [ShellKind::Bash, ShellKind::Pwsh]
             .into_iter()
             .map(move |kind| {
-                let local = LocalExecutor::new(kind, executors::ExecutorConfig::default());
+                let config = if kind == ShellKind::Bash {
+                    configs.bash.clone()
+                } else {
+                    configs.pwsh.clone()
+                };
+                let local = LocalExecutor::new(kind, config);
                 let sandbox =
                     SandboxExecutor::new(local, Arc::clone(&confine), Arc::clone(&policy))?;
                 Ok::<_, String>((kind, Arc::new(sandbox) as Arc<dyn ShellExecutorFace>))
@@ -715,6 +723,7 @@ impl ShellService {
                 "service": "jobs",
                 "methods": [
                     "describe", "list", "get", "read", "readAt", "kill", "wait", "remove",
+                    "killByToolCall",
                 ],
             })),
             1001 => {
@@ -771,6 +780,14 @@ impl ShellService {
                 let (id, caller) = job_request(request)?;
                 self.registry.remove(&id, caller.as_deref())?;
                 Ok(json!({}))
+            }
+            1008 => {
+                let call_id = require_str(request, "call_id", "jobs killByToolCall")?;
+                let reason = opt_str(request, "reason");
+                let result = self
+                    .registry
+                    .kill_by_tool_call(&call_id, reason.as_deref())?;
+                Ok(json!({ "result": result }))
             }
             other => Err(format!("unknown jobs method {other}")),
         }
@@ -999,6 +1016,7 @@ mod tests {
                 signatures: Vec::new(),
             }),
             Arc::new(DangerPolicy),
+            executors::ExecutorConfigs::default_configs(),
         )
         .expect("service")
     }
@@ -1036,7 +1054,7 @@ mod tests {
                         "spec": spec,
                         "args": { "command": "echo out; echo err >&2" },
                         "owner": "s1",
-                        "toolCall": { "call_id": "c1", "root_call_id": "c1" },
+                        "tool_call": { "call_id": "c1", "root_call_id": "c1" },
                     }))
                     .expect("encode"),
                 )
@@ -1208,6 +1226,7 @@ mod tests {
                 argv: Vec::new(),
                 signatures: Vec::new(),
             }),
+            executors::ExecutorConfigs::default_configs(),
         )
         .expect("service");
         let resolve: Value = serde_json::from_slice(
@@ -1395,6 +1414,145 @@ mod tests {
                 "job {job_id} is still running; kill it and wait for settlement before removing it"
             )
         );
+        service.dispose();
+    }
+
+    /// The caller-abort propagation face kills the job created by the
+    /// named tool invocation; an unknown call id resolves idempotently.
+    #[test]
+    fn kill_by_tool_call_reaches_the_live_job() {
+        let service = danger_service();
+        let resolve: Value = serde_json::from_slice(
+            &service
+                .serve(
+                    2002,
+                    &serde_json::to_vec(&resolve_request("sleep 30")).expect("encode"),
+                )
+                .expect("resolve"),
+        )
+        .expect("decode");
+        let started: Value = serde_json::from_slice(
+            &service
+                .serve(
+                    2003,
+                    &serde_json::to_vec(&json!({
+                        "shell": "bash",
+                        "spec": resolve["spec"],
+                        "args": { "command": "sleep 30" },
+                        "owner": "s1",
+                        "tool_call": { "call_id": "c-abort", "root_call_id": "c-abort" },
+                    }))
+                    .expect("encode"),
+                )
+                .expect("start"),
+        )
+        .expect("decode");
+        let job_id = started["job_id"].as_str().expect("id").to_owned();
+        // The kill must land on a live process (the absorbed process
+        // publishes after the spawn; see kill_merges_the_recorded_reason).
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let live = match service.serve(
+                2004,
+                &serde_json::to_vec(&json!({ "job_id": job_id })).expect("encode"),
+            ) {
+                Err(error) => !error.contains("process did not start"),
+                Ok(_) => true,
+            };
+            if live {
+                break;
+            }
+            assert!(Instant::now() < deadline, "the job process never started");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let killed: Value = serde_json::from_slice(
+            &service
+                .serve(
+                    1008,
+                    &serde_json::to_vec(&json!({
+                        "call_id": "c-abort",
+                        "reason": "tool call aborted",
+                    }))
+                    .expect("encode"),
+                )
+                .expect("kill by call"),
+        )
+        .expect("decode");
+        assert_eq!(killed["result"], "requested");
+        let view: Value = serde_json::from_slice(
+            &service
+                .serve(
+                    1006,
+                    &serde_json::to_vec(
+                        &json!({ "id": job_id, "caller": "s1", "timeout_ms": 5000.0 }),
+                    )
+                    .expect("encode"),
+                )
+                .expect("wait"),
+        )
+        .expect("decode");
+        assert_eq!(view["status"], "killed");
+        let detail = view["detail"].as_str().expect("detail");
+        assert!(detail.ends_with("tool call aborted"), "got {detail}");
+        // An unknown call id is the expected lost race, not an error.
+        let absent: Value = serde_json::from_slice(
+            &service
+                .serve(
+                    1008,
+                    &serde_json::to_vec(&json!({ "call_id": "c-gone" })).expect("encode"),
+                )
+                .expect("kill by call"),
+        )
+        .expect("decode");
+        assert_eq!(absent["result"], "absent");
+        service.dispose();
+    }
+
+    /// The bundle executor rows: the bash executor carries the
+    /// `timeoutMs: 60000` config override; pwsh keeps the package
+    /// default.
+    #[test]
+    fn bundle_rows_pin_the_per_kind_timeouts() {
+        let service = ShellService::new(
+            LocalJobRegistry::new(Arc::new(FakeLog::default())),
+            Arc::new(ConfinedPolicy {
+                argv: Vec::new(),
+                signatures: Vec::new(),
+            }),
+            Arc::new(DangerPolicy),
+            executors::ExecutorConfigs::bundle(),
+        )
+        .expect("service");
+        let base =
+            json!({ "command": "echo hi", "workdir": std::env::temp_dir().to_string_lossy() });
+        let bash_reply: Value = serde_json::from_slice(
+            &service
+                .serve(
+                    2002,
+                    &serde_json::to_vec(&json!({
+                        "shell": "bash",
+                        "request": base,
+                    }))
+                    .expect("encode"),
+                )
+                .expect("resolve"),
+        )
+        .expect("decode");
+        assert_eq!(bash_reply["spec"]["timeout_ms"], 60_000.0);
+        let pwsh: Value = serde_json::from_slice(
+            &service
+                .serve(
+                    2002,
+                    &serde_json::to_vec(&json!({
+                        "shell": "pwsh",
+                        "request": base,
+                    }))
+                    .expect("encode"),
+                )
+                .expect("resolve"),
+        )
+        .expect("decode");
+        assert_eq!(pwsh["spec"]["timeout_ms"], 120_000.0);
         service.dispose();
     }
 }
