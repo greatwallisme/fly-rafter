@@ -294,4 +294,78 @@ pub mod shell {
     pub const METHOD_RESULT: u32 = 2004;
 }
 
+/// The `'fs'` service face (Q93-A + Q16b-3B rulings).
+///
+/// Owner crate `fr-tools-builtin`. The method band is this artifact's
+/// 1000+ range (the fr-shell jobs precedent: the per-artifact method
+/// space is unique across the whole export table, so the domain band
+/// starts past the tool segments at 20-82). The vocabulary mirrors dsh
+/// `@deepseek-ai/dsh-fs` verbatim: opaque `targetKey`/`version`
+/// strings, the 13-code `FsErrorCode` taxonomy, and the atomic
+/// write/edit outcomes.
+pub mod fs {
+    /// The provided service name consumers inject.
+    pub const SERVICE_NAME: &str = "fs";
+    /// Face metadata echo (`{plugin, service, methods}`).
+    pub const METHOD_DESCRIBE: u32 = 1000;
+    /// Resolve a model/plugin path to `{target: {target_key, display_path}}`
+    /// (request `{path, cwd?}`; the missing-suffix realpath walk of dsh
+    /// `resolveLocalTarget`).
+    pub const METHOD_RESOLVE: u32 = 1001;
+    /// `{target}` → `{path}` — the canonical absolute path a subprocess
+    /// in this execution world can open (the opaque key spelled out).
+    pub const METHOD_PROCESS_PATH: u32 = 1002;
+    /// `{hostPath}` → `{path: string | null}` — the host-path mapping
+    /// (the local backend resolves absolute spellings, else `null`).
+    pub const METHOD_PROCESS_PATH_FROM_HOST_PATH: u32 = 1003;
+    /// `{target}` → `{url}` — the canonical `file:` URI.
+    pub const METHOD_FILE_URL: u32 = 1004;
+    /// `{parent, child}` → `{contained: bool}` — canonical containment
+    /// without exposing target keys.
+    pub const METHOD_CONTAINS: u32 = 1005;
+    /// `{target}` → `{info: {version, kind, size?} | null}`.
+    pub const METHOD_STAT: u32 = 1006;
+    /// `{path, cwd?}` → `{info: {version, kind, size?} | null}` without
+    /// following the final symlink component.
+    pub const METHOD_LSTAT: u32 = 1007;
+    /// `{target}` → `{text}` — the whole decoded UTF-8 text (binary and
+    /// invalid UTF-8 reject with the typed codes).
+    pub const METHOD_READ_TEXT: u32 = 1008;
+    /// `{target}` → `{chunks: [...]}` — the streamed whole-file text
+    /// as decoded chunks in one bounded reply (the dsh async iterable
+    /// materialized; in-crate consumers use the pull iterator instead).
+    pub const METHOD_STREAM_TEXT: u32 = 1009;
+    /// `{target, max_bytes}` → `{bytes: base64}` — raw bytes with the
+    /// inclusive cap (`FS_TOO_LARGE` past it).
+    pub const METHOD_READ_BYTES: u32 = 1010;
+    /// `{target, offset, length}` → `{bytes: base64}` — one raw window.
+    pub const METHOD_READ_BYTE_RANGE: u32 = 1011;
+    /// `{target}` → `{entries: [...]}` — direct children in stable name
+    /// order.
+    pub const METHOD_LIST_DIR: u32 = 1012;
+    /// `{target, content, expected?, policy?}` → the write
+    /// outcome (`{operation, version, before, after}`).
+    pub const METHOD_WRITE_TEXT: u32 = 1013;
+    /// `{target, edit, expected?, policy?}` → the edit outcome
+    /// (`{version, before, after}`).
+    pub const METHOD_EDIT_TEXT: u32 = 1014;
+    /// `{target}` → the dsh base-contract refusal (`Filesystem watching
+    /// is not supported by this provider.`) — the fs-local watcher
+    /// override lands with its first consumer (the Q105′A sequencing).
+    pub const METHOD_WATCH: u32 = 1015;
+}
+
+/// The `'spill-store'` service face (the Q16b-2A seam ruling).
+///
+/// The owner crate is `fr-compaction` at Phase 17 — the face exists now
+/// so the search tools ship their final-form consumption. Vocabulary
+/// mirrors dsh `@deepseek-ai/dsh-spill`'s `SaveTextSpill`/`SpillRef`.
+pub mod spill_store {
+    /// The provided service name consumers require.
+    pub const SERVICE_NAME: &str = "spill-store";
+    /// Persist one complete formatted result (`SaveTextSpill`) → the
+    /// reference (`{locator, retrievalHint, ...}`).
+    pub const METHOD_SAVE_TEXT: u32 = 0;
+}
+
 // Rust guideline compliant 2026-10-29

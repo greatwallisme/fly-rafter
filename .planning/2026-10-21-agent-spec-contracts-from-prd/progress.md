@@ -1173,3 +1173,17 @@
 - generate-tool-catalog.py 增 TS 源抽取（extract_section_text：锚点+多段拼接+fail-closed 转义）→ BASH/PWSH_SECTION_TEXT 常量；prompt_sections 消费常量，手抄清零；spec Decision 条款扩源。
 - 门复跑：fmt/clippy/tests 1168/doc/Windows 全绿；--check 钉测覆盖新抽取面。
 - 待用户 /commit 裁决入库（②未答）。
+
+## 2026-10-29 — 批 3 提交入库：cc8d929（用户 /commit 裁决 --no-verify，守卫 16 checks 设计态注记随提交信息；17 文件 +1243/-111）
+
+## 2026-10-29 — 16b 批 0：真源全读+fr 侧核实+设计钉落盘（findings「16b 批 0」节）
+- 真源全读：fs 域契约（types/index 296+204）、tool-fs 八件、tool-fs-search 六件、str_replace_editor、fs-observation-policy、fs-sandbox+containment、dsh bundle 装配实证（fs-observation-policy+tool-fs 默认+tool-fs-search sampleOverCap=false；str_replace_editor 不装配；fs 后端 fs-sandbox 单臂）。
+- fr 侧核实：fr-attachment 无 durable store 面（saveImage/imageLimits 缺）；fr-llm ResolvedModelInfo 面在；fr-sandbox escalation+roots/path_boundary 全现成；fr-shell subprocess 五法+resolve_executable；fr-tools timeout_ms/concurrency_safe/pre-post execute 管线在；orders 表 TOOL_READ..TOOL_GREP 已钉；dougong require INACTIVE(-4)=条件注册载体。
+- 设计钉 13 条落 findings（fs 域 in-crate/观察策略 in-crate/fence 同构/ripgrep 解析序/subprocess 前台/spill 缝消费/schema+section 抽取扩源/方法号段 20+ 步进 10/config 键表/read_image probe 门/FsStat 收编/isConcurrencySafe 映射）。
+- 四分叉呈报用户（read_image 范围/spill 缝时机/fs wire 缝时机/str_replace_editor section 场景冲突），等待裁决后开工批 1。
+
+## 2026-10-29 — 16b 批 1：fs 域后端+观察策略+fence+fs/spill 两 face，workspace 1186 tests（1168→1186）
+- 用户四分叉裁决落地：Q16b-1A（read_image 全落，批 4）+2A（spill 缝批 1 立 face）+3B（fs wire 全表批 1 落）+4A（修场景批 3）。
+- 批 1 全落：fr-wire fs face（1000-1015 十六法）+spill_store face；fs_types/fsio/fence/observation/fs_domain 五模块（fs-local 1271 行+fs-sandbox 385 行真源移植）；plugin_shell provide+=fs+call 分流；working_directory StdFsStat 收编。
+- 五门全绿（fmt/clippy -D warnings 0/tests 1186+0/doc/Windows msvc 零警告）。过程：3 起生成退化截停、3 处钉测逮真缺陷自纠（详见 findings 批 1 节）。
+- 下一动作：批 2=read/write/edit 三工具+escalation 桥+section/schema 抽取扩源+working_directory 迁移收尾。

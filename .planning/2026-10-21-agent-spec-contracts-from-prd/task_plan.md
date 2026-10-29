@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 16 **16a 批 3+追加已全落**（watcher+切片 wait+四投影接线+Q95-A catalog 脚本+section-text 裁决 A 抽取扩源；SHELL spec 21 场景绑定；五门全绿 1168 tests）——待用户 /commit 裁决入库（--no-verify 守卫注记既定例）。**下一动作=16b 文件组 7 件**（read/write/edit/read_image/glob/grep/str_replace_editor opt-in，Q94-A 子批序）。
+Phase 16 **16b 批 1 已落**（四裁决 Q16b-1A/2A/3B/4A 已裁；fs 域后端+观察策略+fence+fs/spill 两 face+working_directory 收编，五门全绿 1186 tests）。**下一动作=16b 批 2：read/write/edit 三工具+escalation 桥（subject=operation）+catalog 脚本 schema/section 抽取扩源。批 3=glob/grep+spill 消费+str_replace_editor+修场景④；批 4=read_image 全落；批 5=spec 绑定+七步流收口。**
 
 ## Phases
 

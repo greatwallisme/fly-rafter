@@ -31,7 +31,7 @@ pub const PLUGIN_NAME: &str = "fr-tools-builtin";
 
 /// The static descriptor: one provided service, seven injected seams,
 /// no listeners.
-const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\"],\"listen\":{}}";
+const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\",\"fs\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\"],\"listen\":{}}";
 
 /// The maximum host reply the require loop grows its buffer toward (the
 /// approval judgment).
@@ -347,6 +347,7 @@ fn escalation_modes_from(mode: Option<&str>) -> Vec<&'static str> {
 /// vtable.
 pub struct BuiltinState {
     tools: BuiltinTools,
+    fs: Arc<crate::fs_domain::FsDomain>,
 }
 
 impl std::fmt::Debug for BuiltinState {
@@ -523,13 +524,49 @@ impl BuiltinState {
             env: Arc::clone(&env_arc),
         };
         let tools = BuiltinTools::new(Box::new(seams), env_arc, directories_arc).ok()?;
-        Some(Self { tools })
+
+        // The fs domain over the standing-policy wire seam (the
+        // composed single-arm backend; the Q16b-3B seam).
+        let config = crate::fs_domain::FsDomainConfig::new().ok()?;
+        let policy = WireStandingPolicy { link };
+        let fs = Arc::new(crate::fs_domain::FsDomain::new(
+            config,
+            Box::new(policy),
+            escalation.first().map(|mode| (*mode).to_owned()),
+        ));
+        Some(Self { tools, fs })
     }
 
     /// The hosted runtime (tests drive the wire face).
     #[must_use]
     pub const fn tools(&self) -> &BuiltinTools {
         &self.tools
+    }
+
+    /// The hosted fs domain (tests drive the wire face).
+    #[must_use]
+    pub const fn fs(&self) -> &Arc<crate::fs_domain::FsDomain> {
+        &self.fs
+    }
+}
+
+/// The standing sandbox-policy resolution over the wire (the dsh
+/// `ctx.sandboxPolicy.resolve()` consumption).
+struct WireStandingPolicy {
+    link: HostLink,
+}
+
+impl crate::fs_domain::StandingPolicy for WireStandingPolicy {
+    fn resolve(&self, session: Option<&str>) -> Result<Value, String> {
+        let payload = session.map_or_else(|| json!({}), |session| json!({ "session": session }));
+        let bytes = serde_json::to_vec(&payload)
+            .map_err(|error| format!("policy encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::sandbox_policy::SERVICE_NAME,
+            fr_wire::services::sandbox_policy::METHOD_RESOLVE,
+            &bytes,
+        )?;
+        serde_json::from_slice(&reply).map_err(|error| format!("policy decode failed: {error}"))
     }
 }
 
@@ -640,7 +677,16 @@ unsafe extern "C" fn call(
     // matching `teardown`; the host serializes calls per the
     // export-table contract.
     let state = unsafe { &*(handle.cast::<BuiltinState>()) };
-    let reply = match state.tools().serve(method, payload) {
+    // The fs domain band rides the same export table (the per-artifact
+    // method-space judgment; the fr-shell three-band precedent).
+    let reply = match if (fr_wire::services::fs::METHOD_DESCRIBE
+        ..=fr_wire::services::fs::METHOD_WATCH)
+        .contains(&method)
+    {
+        state.fs().serve(method, payload)
+    } else {
+        state.tools().serve(method, payload)
+    } {
         Ok(reply) => reply,
         Err(text) => {
             let body = json!({ "error": text }).to_string();

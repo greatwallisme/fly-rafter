@@ -25,6 +25,11 @@
 //! catalog-freeze verifier).
 
 pub mod catalog_gen;
+pub mod fence;
+pub mod fs_domain;
+pub mod fs_types;
+pub mod fsio;
+pub mod observation;
 pub mod plugin_shell;
 pub mod render;
 pub mod schema;

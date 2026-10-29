@@ -37,13 +37,17 @@ pub trait FsStat: Send + Sync {
     fn is_directory(&self, path: &str) -> Result<bool, String>;
 }
 
-/// The std filesystem inspection (the dsh `ctx.fs` local arm).
+/// The filesystem inspection over the shared fsio mechanics (the dsh
+/// `ctx.fs` local arm; the 16b migration folded the probe behind the
+/// single local-filesystem implementation).
 #[derive(Debug, Default)]
 pub struct StdFsStat;
 
 impl FsStat for StdFsStat {
     fn is_directory(&self, path: &str) -> Result<bool, String> {
-        Ok(std::path::Path::new(path).is_dir())
+        Ok(crate::fsio::probe(path)
+            .map_err(|error| error.to_string())?
+            .is_some_and(|info| info.kind == crate::fs_types::FsKind::Directory))
     }
 }
 
