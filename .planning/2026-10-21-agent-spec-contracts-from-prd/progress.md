@@ -1114,3 +1114,38 @@
 - 排障自纠（本方错误）：连续三次大模块写入损坏（jobs_local v1 字段误入 impl 块/shell_types 两版残误）→ 三振协议：改小模块+逐个编译；Python 补丁引号相邻 bug 一次；id 循环重构一度改乱现场→当场修复。
 - 门禁：cargo check -p fr-shell 零警告零错误；6 测试过（ring 4+js_number 2）。
 - 批 1 剩余：executors 四执行体（bash/pwsh local+sandbox，confine 走 'sandbox' 缝 wire）→ service 三带 wire face → plugin_shell（descriptor provide 三服务/inject [session-persistence,sandbox]/declare job 事件）→ registry 语义钉测 → fr-tools 注册面扩展。
+- 提交 bc8b377（批 0+批 1 前半全量，16 文件 +3262/-3）。守卫阻断同既定例：pre-commit agent-spec guard 16 spec 红=pending 选择器设计态，用户 /commit 显式裁决后 --no-verify 入库（提交信息内含守卫注记）。四门绿：fmt/clippy 0/1117 tests/doc 0；clippy pedantic+nursery 82 条全清（recover 判例/cast expect 理由族/三级函数拆分）；测试门 FR_DSH_SOURCE 必需（PROMPT verify 钉测，既有约束）。
+- 下一动作：16a 批 1 后半——executors 四执行体（bash/pwsh local+sandbox，confine 走 'sandbox' 1001 wire）→ service 三带 wire face → plugin_shell → registry 语义钉测 → fr-tools 注册面扩展。
+
+## 2026-10-29 — 16a 批 1 后半：executors+三带 service+plugin_shell+registry 钉测（24 tests 绿）
+- 真源补读：tool-bash 全文（startJob/processJob/processSources/processOutcome/ringDelta）+ bash-local/bash-sandbox/helpers + pwsh-local/resolve/pwsh-sandbox + shell types.ts 全读。
+- 装配事实核实：dsh bundle 平台二选一（Linux=bash-sandbox+tool-bash / win=pwsh-sandbox+tool-pwsh，ctx.shell 单槽）——Q16a-3A 全平台注册的唯一生效读法=fr-shell 双 kind 执行体并行挂载+wire 选择子（默认 bash）。
+- fr-wire 补 METHOD_RESULT=2004（promote settled-while-waiting 的前景投影腿=dsh tool 持 proc.result() 的过线替代）。
+- subprocess.rs：spawn_detailed 保留 io::Error（runner 归因）+range_gone 观察腿（linux 群探空即收）+resolve_executable 四文案逐字+SpillCap serde；outcome 发布先于 direct_settled（wait 契约竞态修复）。
+- executors.rs 新模块：四执行体一形（ShellKind 参数化 bash/pwsh+Local/Sandbox 两层）、ShellExecRequest/Spec（FR_ 前缀 fr_env 字段）、deadline 熔合=push 式双线程（bridge+timer+kill-watch，切面批注：fr-timeout check() 面无法在 watcher 阻塞中杀进程）、SandboxFacts 进 execution（dsh Map 判例的进程内化）、result() 前景投影含 runner-failure→SANDBOX_UNAVAILABLE 文案、processOutcome+sandboxNotes（escalation hint 门）。
+- service.rs 三带 wire face 全落：subprocess 0-5（wait 有界 {settled,exit_code?,signal?}——实例锁纪律对 pin 形的注记偏离）/jobs 1000-1007（registry 文案穿）/shell 2000-2004（resolve 默认策略走 sandbox-policy 缝兜底=start 吸收=2004 result）；run_threads Arc 共享表+teardown join。
+- plugin_shell.rs：descriptor provide [shell,subprocess,jobs] / inject [session-persistence,sandbox,sandbox-policy]（执行体默认策略 1:1 兜底所致）/declare job/registered+job/settled（dsh 逐字名，from_parts Unknown 臂允许对象型声明类型）/WireSessionLog+WireConfine+WirePolicy 三缝。
+- M1 结构事实：fr-shell 自附 registry controller（dsh no-controller 文案钉存不可达）；执行体变体默认双 kind=sandbox（bundle 行=批 2 装配裁决）。
+- 缺陷修复三项（前半漏网）：JobChannel serde kebab 缺失（wire 出 "Stdout"）；join_pump 先放 stop latch 再 join（producer_settled→join_pump→settle 序死锁，批 1 前半零 registry 测试未逮）；spawn_waiter 先发 outcome 再置 direct_settled。
+- 测试 24 绿（新增 18：executors 9+service 6+jobs_local 4——等待语义/取消合并/result 腿/subprocess 往返/围栏准入文案/拒绝标记+escalation 门/settle 首赢裁剪/dispose）。
+- fr-sandbox 库依赖判例成立（diagnostics/escalation/seam 纯函数，fr-guard-*→fr-tools 同构；运行时行为仍全走 wire confine）。
+- 进行中：clippy pedantic 清理（56 条）已委托后台代理；下一步=fr-tools METHOD_REGISTER/UNREGISTER 注册面。
+
+## 2026-10-29 — 16a 批 1 后半（续）：fr-tools METHOD_REGISTER/UNREGISTER 注册面落成
+- WireToolDefinition（service.rs 内，缝宿主判例）：dsh tool 对象过线=closures 端点化 {service,method}（既有 WireEndpoint 复用）；execute 端点协议 {call: WireExecution}→{value}|{error{code?,message?,name?}}（dsh HarnessError 有码路由/code 缺席=普通错误 EXECUTION_FAILED 非路由静态 interned 兜底）；render/presentationMeta/projectContent/finalizeContent/presentCall/presentResult 全端点臂（transport 失败 contained 空投影）。
+- ToolsService 增 wire_registrations 表（id=工具名；ToolRegistration disposer 存活=注册在册）；register 走 registry.register 全校验（schema 子集/timeout/保留名/重复文案逐字穿）；unregister 幂等 removed true/false。wire code 经既有 CodeInterner intern（&'static str 约束判例）。
+- 钉测 wire_register_mounts_and_unregisters（TestHost 脚本端点 9/10 选择子）：id 回显/可见/重复文案逐字/unregister 移除+幂等。fr-tools 86 tests 绿（85→86）。
+- 批 1 后半全部落地：executors+service 三带+plugin_shell+registry 钉测+fr-tools 注册面。待办：clippy 代理回报后跑 workspace 四门（fmt 已过/clippy/tests/doc）。
+
+## 2026-10-29 — 批 2 预规划收口（clippy 等待窗口）
+- working-directory 真源全读（225 行）+ approve_escalation/order 表消费面核清 → 批 2 设计钉七项落 findings「16a 批 2 预规划」。
+- Q16a-5A 裁决：working-directory 批 2 落最小臂 A（ensure+get+FsStat 缝隔离；set/notice/context 留 16f；无 19.2 偏差）。Phase 16 六子批序已入 task_plan Phase 16 条目。
+- 纪律：subagent 仍在改 fr-shell，裁决窗口内零代码改动。
+
+## 2026-10-29 — 批 1 收口：代理收编+竞态根因修复+四门全绿
+- 用户明示改码活不再委派 subagent（已存 memory: no-subagent-for-code-edits）；clippy 代理收编时已清零，其遗留发现=kill_merges 测试竞态诊断（kill 先于 spawn 时 detail 恒 "killed before exit"，实现忠实、测试前提错）并已自行修复（2004 面活体探测循环）。
+- **subprocess_face_round_trip 间歇失败根因（本方缺陷，插桩实锤：settled=true elapsed=15ms outcome=None）**：子进程被 reap 后、等待线程尚在管道排空/发布 outcome 的窗口内，range_alive 的 kill(pid,0) ESRCH 分支提前判"range 空"。修复=ESRCH 臂以 outcome 槽是否已发布为准（发布前视为仍存活）——wait 面契约（释放时 outcome 必在）从此确定成立。修复后全量连跑 6 次 24/24 全绿。
+- fr-tools 收尾三条 clippy（doc 反引号/冗余 shadowing/map_or_else 化）+ serve() 超 100 行→serve_register/serve_unregister 抽方法。
+- 四门：fmt ✓；workspace clippy --all-targets -D warnings 0 ✓；tests 1136 passed 0 failed（1117→1136，FR_DSH_SOURCE 必需=既有约束）✓；RUSTDOCFLAGS -D warnings doc ✓。
+- 变更清单：fr-wire services.rs（METHOD_RESULT=2004）；fr-shell（executors.rs+plugin_shell.rs 新增，service/subprocess/jobs_local/jobs_types/lib 扩展，Cargo.toml 增 fr-sandbox 依赖）；fr-tools service.rs/service_tests.rs（注册面）；根 Cargo.toml/Cargo.lock（fr-sandbox workspace 依赖）；.planning 三件。
+- 待用户 /commit 裁决入库（守卫阻断同既定例：pending 选择器设计态，--no-verify 提交）。

@@ -830,6 +830,7 @@ name = "fr-shell"
 version = "0.1.0"
 dependencies = [
  "dougong-abi",
+ "fr-sandbox",
  "fr-timeout",
  "fr-wire",
  "libc",

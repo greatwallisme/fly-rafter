@@ -20,13 +20,14 @@
 //! (`fr-sandbox`); session lifecycle records for owned jobs go through
 //! `'session-persistence'` as plugin records.
 //!
-//! Wire carriers and the dylib artifact shell land with the executors
-//! module in this slice's next batch; the domain vocabulary lands
-//! module-for-module ([`jobs_types`], [`ring`], [`pump`],
-//! [`jobs_local`], [`subprocess`], [`shell_types`]).
+//! The domain vocabulary and the executors land module-for-module
+//! ([`jobs_types`], [`ring`], [`pump`], [`jobs_local`], [`subprocess`],
+//! [`shell_types`], [`executors`], [`service`], [`plugin_shell`]).
 
+pub mod executors;
 pub mod jobs_local;
 pub mod jobs_types;
+pub mod plugin_shell;
 pub mod pump;
 pub mod ring;
 pub mod service;

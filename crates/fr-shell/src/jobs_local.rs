@@ -615,6 +615,14 @@ impl LocalJobRegistry {
         }
     }
 
+    /// Whether a job record with this id exists (an existential probe
+    /// for the shell service's absorbed-process table sweep; the
+    /// ownership fence stays on the accessor methods).
+    #[must_use]
+    pub fn contains(&self, id: &str) -> bool {
+        recover(&self.state).store.contains_key(id)
+    }
+
     /// Lists caller-owned and unowned jobs in registration order.
     #[must_use]
     pub fn list(&self, caller: Option<&str>) -> Vec<JobView> {
@@ -900,7 +908,9 @@ impl LocalJobRegistry {
         }
     }
 
-    /// Joins one job's pump thread after waking it for the final drain.
+    /// Releases one job's pump stop latch and joins the thread after
+    /// waking it for the final drain (the latch release precedes the
+    /// join: the pump exits only through it).
     ///
     /// # Panics
     ///
@@ -909,6 +919,14 @@ impl LocalJobRegistry {
     fn join_pump(&self, id: &str) {
         let thread = recover(&self.pumps).remove(id);
         if let Some(thread) = thread {
+            {
+                let mut state = recover(&self.state);
+                if let Some(job) = state.store.get_mut(id)
+                    && let Some(stop) = job.pump.take()
+                {
+                    stop.release();
+                }
+            }
             thread.thread().unpark();
             let _ = thread.join();
         }
@@ -1168,5 +1186,308 @@ impl Drop for ControllerGuard {
             let mut state = registry.state.lock().expect("registry lock");
             state.controllers = state.controllers.saturating_sub(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    /// One recording session log (the durable lifecycle records).
+    #[derive(Debug, Default)]
+    struct RecordingLog {
+        records: std::sync::Mutex<Vec<(String, String)>>,
+    }
+
+    impl SessionLogAppend for RecordingLog {
+        fn append(&self, session: &str, event_type: &str, _data: &Value) -> Result<(), String> {
+            self.records
+                .lock()
+                .expect("lock")
+                .push((session.to_owned(), event_type.to_owned()));
+            Ok(())
+        }
+    }
+
+    fn registry() -> Arc<LocalJobRegistry> {
+        LocalJobRegistry::new(Arc::new(RecordingLog::default()))
+    }
+
+    fn noop_hooks() -> JobHooks {
+        JobHooks {
+            cancel: Box::new(|_reason| Ok(())),
+            done: Box::new(|| JobOutcome {
+                status: JobStatus::Completed,
+                detail: Some("exit code: 0".to_owned()),
+                result: None,
+            }),
+        }
+    }
+
+    /// The admission refusal family rides the dsh texts verbatim: the
+    /// missing controller, the kind/label/limit validation, and the
+    /// per-owner cap.
+    #[test]
+    fn admission_refusals_pin_the_texts() {
+        let registry = registry();
+        let spec = || JobSpec {
+            kind: "bash".to_owned(),
+            label: "label".to_owned(),
+            owner: Some("s1".to_owned()),
+            tool_call: None,
+            output_limit_bytes: None,
+            output: Vec::new(),
+            run: Box::new(|_handle| Ok(noop_hooks())),
+        };
+        assert_eq!(
+            registry.start(spec()).unwrap_err(),
+            "background jobs unavailable: no job controller serves this agent (load @deepseek-ai/dsh-tool-jobs in its composition)"
+        );
+        let _controller = registry.attach_controller();
+        let mut variant = spec();
+        variant.kind = String::new();
+        assert_eq!(
+            registry.start(variant).unwrap_err(),
+            "invalid job kind: expected a non-empty string"
+        );
+        let mut variant = spec();
+        variant.label = String::new();
+        assert_eq!(
+            registry.start(variant).unwrap_err(),
+            "invalid job label: expected a non-empty string"
+        );
+        let mut variant = spec();
+        variant.output_limit_bytes = Some(0.5);
+        assert_eq!(
+            registry.start(variant).unwrap_err(),
+            "invalid outputLimitBytes: expected a positive safe integer, got 0.5"
+        );
+        // The per-owner cap counts active records per exact owner.
+        let limited = LocalJobRegistry::with_config(
+            Arc::new(RecordingLog::default()),
+            RegistryConfig {
+                max_concurrent_jobs_per_owner: 1,
+                ..RegistryConfig::default()
+            },
+        );
+        let _controller = limited.attach_controller();
+        let first = limited.start(spec()).expect("first job");
+        assert_eq!(
+            limited.start(spec()).unwrap_err(),
+            "background job limit reached for this owner (limit: 1); use job_kill to stop an unneeded job, wait for it to finish, then retry"
+        );
+        limited.producer_settled(
+            &first,
+            JobOutcome {
+                status: JobStatus::Completed,
+                detail: None,
+                result: None,
+            },
+            true,
+        );
+        assert!(
+            limited.start(spec()).is_ok(),
+            "a settled job frees the slot"
+        );
+    }
+
+    /// The access fence, the wait validation, and the removal rule ride
+    /// the dsh texts verbatim; an unowned job is open to every caller.
+    #[test]
+    fn fence_wait_and_removal_rules() {
+        let registry = registry();
+        let _controller = registry.attach_controller();
+        let spec = |owner: Option<String>| JobSpec {
+            kind: "bash".to_owned(),
+            label: "label".to_owned(),
+            owner,
+            tool_call: None,
+            output_limit_bytes: None,
+            output: Vec::new(),
+            run: Box::new(|_handle| Ok(noop_hooks())),
+        };
+        let owned = registry
+            .start(spec(Some("s1".to_owned())))
+            .expect("owned job");
+        let unowned = registry.start(spec(None)).expect("unowned job");
+        assert_eq!(
+            registry.get(&owned, None).unwrap_err(),
+            format!("job {owned} belongs to another session")
+        );
+        registry
+            .get(&owned, Some("s1"))
+            .expect("the owned job is open to its owner");
+        assert!(
+            registry.get(&unowned, None).is_ok(),
+            "an unowned job is open"
+        );
+        assert_eq!(
+            registry.wait(&owned, 0.0, Some("s1")).unwrap_err(),
+            "invalid wait timeout: expected a positive number of milliseconds, got 0"
+        );
+        assert_eq!(
+            registry.remove(&owned, Some("s1")).unwrap_err(),
+            format!(
+                "job {owned} is still running; kill it and wait for settlement before removing it"
+            )
+        );
+    }
+
+    /// Settlement is first-wins; a recorded kill reason merges behind
+    /// the producer detail; the result rides the first post-settlement
+    /// read only; the settled trim keeps every byte the model cursor
+    /// has not consumed.
+    #[test]
+    fn settlement_merges_trim_and_result_once() {
+        let registry = LocalJobRegistry::with_config(
+            Arc::new(RecordingLog::default()),
+            RegistryConfig {
+                settled_retain_bytes: 64,
+                ..RegistryConfig::default()
+            },
+        );
+        let _controller = registry.attach_controller();
+        let id = registry
+            .start(JobSpec {
+                kind: "bash".to_owned(),
+                label: "label".to_owned(),
+                owner: Some("s1".to_owned()),
+                tool_call: None,
+                output_limit_bytes: None,
+                output: Vec::new(),
+                run: Box::new(|_handle| Ok(noop_hooks())),
+            })
+            .expect("job");
+        // The producer writes, the killer records its reason, then the
+        // producer settles: the merged detail keeps both.
+        registry
+            .kill(&id, Some("s1"), Some("tool call aborted"))
+            .expect("kill");
+        registry.producer_settled(
+            &id,
+            JobOutcome {
+                status: JobStatus::Killed,
+                detail: Some("signal: SIGTERM".to_owned()),
+                result: None,
+            },
+            true,
+        );
+        let view = registry.get(&id, Some("s1")).expect("view");
+        assert_eq!(view.status, JobStatus::Killed);
+        assert_eq!(
+            view.detail.as_deref(),
+            Some("signal: SIGTERM; tool call aborted")
+        );
+        assert_eq!(
+            registry.kill(&id, Some("s1"), None).expect("kill"),
+            "already-finished"
+        );
+
+        // The settled trim keeps the unconsumed floor on a fresh job:
+        // a live producer writes, settlement closes the stream, and the
+        // reads consume exactly once.
+        let id = registry
+            .start(JobSpec {
+                kind: "bash".to_owned(),
+                label: "label".to_owned(),
+                owner: Some("s1".to_owned()),
+                tool_call: None,
+                output_limit_bytes: None,
+                output: Vec::new(),
+                run: Box::new(|_handle| Ok(noop_hooks())),
+            })
+            .expect("trim job");
+        let handle = JobHandle {
+            registry: Arc::clone(&registry),
+            id: id.clone(),
+        };
+        let payload = "x".repeat(1000);
+        handle.append(&payload, JobAppendOptions::default());
+        registry.producer_settled(
+            &id,
+            JobOutcome {
+                status: JobStatus::Completed,
+                detail: Some("exit code: 0".to_owned()),
+                result: Some("value".to_owned()),
+            },
+            true,
+        );
+        let first = registry.read(&id, Some("s1")).expect("read");
+        assert_eq!(
+            first
+                .chunks
+                .iter()
+                .map(|chunk| chunk.text.len())
+                .sum::<usize>(),
+            1000,
+            "the unconsumed floor survives the settled trim"
+        );
+        assert_eq!(
+            first.result.as_deref(),
+            Some("value"),
+            "the result rides the first read"
+        );
+        let second = registry.read(&id, Some("s1")).expect("read");
+        assert!(second.chunks.is_empty(), "the cursor consumed the stream");
+        assert_eq!(second.result, None, "the result is one-shot");
+    }
+
+    /// The session log records the registration and the settlement for
+    /// owned jobs only.
+    #[test]
+    fn session_records_land_for_owned_jobs() {
+        let log = Arc::new(RecordingLog::default());
+        let registry = LocalJobRegistry::new(Arc::clone(&log) as Arc<dyn SessionLogAppend>);
+        let _controller = registry.attach_controller();
+        let spec = |owner: Option<String>| JobSpec {
+            kind: "bash".to_owned(),
+            label: "label".to_owned(),
+            owner,
+            tool_call: None,
+            output_limit_bytes: None,
+            output: Vec::new(),
+            run: Box::new(|_handle| Ok(noop_hooks())),
+        };
+        let owned = registry.start(spec(Some("s1".to_owned()))).expect("owned");
+        let unowned = registry.start(spec(None)).expect("unowned");
+        registry.producer_settled(
+            &owned,
+            JobOutcome {
+                status: JobStatus::Completed,
+                detail: None,
+                result: None,
+            },
+            true,
+        );
+        registry.producer_settled(
+            &unowned,
+            JobOutcome {
+                status: JobStatus::Completed,
+                detail: None,
+                result: None,
+            },
+            true,
+        );
+        let kinds: Vec<String> = log
+            .records
+            .lock()
+            .expect("lock")
+            .iter()
+            .map(|(session, event)| format!("{session}/{event}"))
+            .collect();
+        assert!(
+            kinds.contains(&"s1/job/registered".to_owned()),
+            "got {kinds:?}"
+        );
+        assert!(
+            kinds.contains(&"s1/job/settled".to_owned()),
+            "got {kinds:?}"
+        );
+        assert_eq!(
+            kinds.len(),
+            2,
+            "an unowned job records nothing, got {kinds:?}"
+        );
     }
 }

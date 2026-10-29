@@ -54,6 +54,7 @@ impl JobStatus {
 /// model's consuming read, `log` marks producer narration that only
 /// observers see (dsh `JobChannel`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum JobChannel {
     /// Standard output.
     Stdout,

@@ -959,3 +959,76 @@ fn service_face_constants_match_the_wire_table() {
         wire::METHOD_SET_APPROVAL
     );
 }
+
+/// The wire register face mounts an endpoint-backed definition (the dsh
+/// tool object over the wire): the id echoes the name, a duplicate
+/// refuses with the registry text, and unregister removes it.
+#[test]
+fn wire_register_mounts_and_unregisters() {
+    // The scripted endpoint answers the body (9) and the render (10)
+    // selectors the registration names.
+    let endpoint: Endpoint = Box::new(|method: u32, payload: &[u8]| match method {
+        9 => {
+            let request: Value =
+                serde_json::from_slice(payload).map_err(|error| format!("body frame: {error}"))?;
+            let name = request["call"]["name"].as_str().unwrap_or_default();
+            Ok(serde_json::to_vec(&json!({ "value": { "echoed": name } })).expect("encode"))
+        }
+        10 => Ok(
+            serde_json::to_vec(&json!([{ "type": "text", "text": "rendered" }])).expect("encode"),
+        ),
+        other => Err(format!("unexpected endpoint method {other}")),
+    });
+    let (_vtable, mut service) = service_with_host(endpoint);
+    let definition = json!({
+        "name": "echo",
+        "description": "Echoes the call name.",
+        "parameters": { "type": "object", "properties": {} },
+        "output": {
+            "schema": { "type": "object", "properties": {} },
+            "render": { "service": "builtin", "method": 10 },
+        },
+        "execute": { "service": "builtin", "method": 9 },
+        "isConcurrencySafe": true,
+    });
+    let body = serde_json::to_vec(&definition).expect("encode");
+    let reply: Value = serde_json::from_slice(
+        &service
+            .serve(fr_wire::services::tools::METHOD_REGISTER, &body)
+            .expect("register"),
+    )
+    .expect("decode");
+    assert_eq!(reply["id"], "echo");
+    assert!(
+        service.registry().get("echo").is_some(),
+        "the registered tool is visible"
+    );
+    assert_eq!(
+        service
+            .serve(fr_wire::services::tools::METHOD_REGISTER, &body)
+            .unwrap_err()
+            .0,
+        "tool \"echo\" is already registered (for a per-agent variant, register through that agent's `agent.ctx` instead)"
+    );
+    let removed: Value = serde_json::from_slice(
+        &service
+            .serve(
+                fr_wire::services::tools::METHOD_UNREGISTER,
+                br#"{"id": "echo"}"#,
+            )
+            .expect("unregister"),
+    )
+    .expect("decode");
+    assert_eq!(removed["removed"], true);
+    assert!(service.registry().get("echo").is_none());
+    let again: Value = serde_json::from_slice(
+        &service
+            .serve(
+                fr_wire::services::tools::METHOD_UNREGISTER,
+                br#"{"id": "echo"}"#,
+            )
+            .expect("unregister"),
+    )
+    .expect("decode");
+    assert_eq!(again["removed"], false, "a second unregister is a no-op");
+}

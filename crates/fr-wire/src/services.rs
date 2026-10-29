@@ -285,6 +285,10 @@ pub mod shell {
     /// `startJob`, absorbed into the seam because the output-source
     /// closures cannot cross the wire).
     pub const METHOD_START: u32 = 2003;
+    /// The foreground projection of one absorbed job's process (the dsh
+    /// tool's `process.result()`; the batch-2 promote path's
+    /// settled-while-waiting arm consumes it).
+    pub const METHOD_RESULT: u32 = 2004;
 }
 
 // Rust guideline compliant 2026-10-29

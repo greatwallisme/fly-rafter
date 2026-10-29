@@ -4,8 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 16 批 0 **16a 真源深读完成**（shell 缝/shell-env/bash 双执行体/tool-bash 三件/subprocess 缝/subprocess-local(index)/jobs 五件/pwsh 四件，~4.5k 行 TS，详见 findings「16a 域深读」七节）。**下一动作=批 0 分叉四项呈报用户裁决**（findings「16a 批 0 分叉呈报」节：①DSH_*/FR_ 前缀 ②托管域分级 ③pwsh Linux 地位 ④SESSION_ID 来源）→裁决后批 1（fr-shell 实现：三服务 provider+注册面+钉测）。
-Phase 16（fr-tools-builtin + fr-shell）——批 0 真源全读待启（Phase 14 已收口：批 0 裁决/批 1 fr-tools+guard/批 2a approval+presets+projections/批 2b sandbox/批 3 绑定+七步流 4-7）
+Phase 16 **16a 批 1 全部代码落地**（fr-shell：executors 四执行体+service 三带 wire face+plugin_shell+registry 钉测 24 tests；fr-tools：METHOD_REGISTER/UNREGISTER 端点化定义面，86 tests）。**下一动作=批 1 收口**（clippy 清理代理回报后跑 workspace 四门 → 用户 /commit 裁决入库）→ 批 2（fr-tools-builtin 19 工具注册面+bash/pwsh 工具三件真源全读+Q97-A 全 schema 钉测；bundle fr-shell 行执行体变体表达式呈报）。
 
 ## Phases
 
@@ -47,6 +46,15 @@ Phase 16（fr-tools-builtin + fr-shell）——批 0 真源全读待启（Phase 
 - [x] `trace REQ-FR-HEADLESS` 基线：liveness=Unproven、场景 Skip（pending 选择器，无代码前预期态）
 - [x] worktrees 清单跳过（仓库尚无提交、无 base 分支可排程，记录于 findings）
 - **Status:** complete
+
+### Phase 16: M1 Phase 16（fr-tools-builtin + fr-shell，Q94-A 六子批）
+- [x] 16a 批 0：16a 真源全读（七节 findings）+ Q16a-1…4 全 A 裁决
+- [x] 16a 批 1：fr-shell 全 crate（executors+三带 service+plugin_shell+registry 钉测 24 tests）+ fr-tools METHOD_REGISTER/UNREGISTER 注册面（86 tests）+ fr-wire METHOD_RESULT=2004
+- [x] 16a 批 1 收口：四门全绿（1136 tests 0 failed / clippy 0 / fmt / doc），待用户 /commit 裁决入库
+- [ ] 16a 批 2：fr-tools-builtin（bash/pwsh 工具+shell-env+builtin-tools 端点面+Q97-A 全 schema 钉测+working-directory 最小臂 Q16a-5A）——裁决已定，实施待批 1 收口
+- [ ] 16a 批 3：SHELL spec 真实绑定+七步流 4-7（16a 收口）
+- [ ] 16b 文件组 7 件 → 16c 任务状态（tool-jobs 三件+todo/goal/schedule）→ 16d 交互+会话查询 → 16e PTY 六件套+persistent → 16f web+skill+lsp+目录全量+内省
+- **Status:** in_progress
 
 ### Phase 8: 覆盖度审计与修复（用户指令：检查合约是否全覆盖功能点细节）
 - [x] 逐节人工比对 + 42 项机械抽查 → doc/coverage-audit.md（16 缺口）

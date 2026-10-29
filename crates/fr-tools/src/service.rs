@@ -1041,6 +1041,9 @@ pub struct ToolsService {
     settles: Arc<Mutex<VecDeque<WireSettle>>>,
     workers: Vec<JoinHandle<()>>,
     interner: Arc<CodeInterner>,
+    /// The wire-registered tools' disposer records, keyed by name (the
+    /// dsh register disposer; `METHOD_UNREGISTER` takes one by key).
+    wire_registrations: std::collections::HashMap<String, crate::registry::ToolRegistration>,
 }
 
 impl std::fmt::Debug for ToolsService {
@@ -1067,6 +1070,7 @@ impl ToolsService {
             settles: Arc::new(Mutex::new(VecDeque::new())),
             workers: Vec::new(),
             interner: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            wire_registrations: std::collections::HashMap::new(),
         }
     }
 
@@ -1187,10 +1191,49 @@ impl ToolsService {
                 }
                 encode(&serde_json::json!({}))
             }
+            fr_wire::services::tools::METHOD_REGISTER => self.serve_register(payload),
+            fr_wire::services::tools::METHOD_UNREGISTER => self.serve_unregister(payload),
             other => Err(ServiceError(format!(
                 "unknown {PLUGIN_NAME} method {other}"
             ))),
         }
+    }
+
+    /// Mounts one endpoint-backed definition (the register face); the
+    /// disposer record stays in the service until unregister.
+    ///
+    /// # Errors
+    ///
+    /// The missing host seam, the payload decode refusal, or the
+    /// registry's registration failure family.
+    fn serve_register(&mut self, payload: &[u8]) -> Result<Vec<u8>, ServiceError> {
+        let seam = self.seam.ok_or_else(|| {
+            ServiceError("tools register requires the attached host seam".to_owned())
+        })?;
+        let request: WireToolRegistration = decode(payload, "register")?;
+        let definition = WireToolDefinition::build(seam, request, Arc::clone(&self.interner));
+        let name = crate::definition::ToolDefinition::name(&definition).to_owned();
+        let registration = self
+            .registry
+            .register(Arc::new(definition))
+            .map_err(|error| ServiceError(error.to_string()))?;
+        self.wire_registrations.insert(name.clone(), registration);
+        encode(&serde_json::json!({ "id": name }))
+    }
+
+    /// Removes one wire registration by id; a second call is a no-op.
+    ///
+    /// # Errors
+    ///
+    /// The payload decode refusal.
+    fn serve_unregister(&mut self, payload: &[u8]) -> Result<Vec<u8>, ServiceError> {
+        let request: Value = decode(payload, "unregister")?;
+        let id = request
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ServiceError("tools unregister payload requires id".to_owned()))?;
+        let dropped = self.wire_registrations.remove(id);
+        encode(&serde_json::json!({ "removed": dropped.is_some() }))
     }
 
     /// Stage 1: mint the execution, track it under its token, and answer
@@ -1342,5 +1385,244 @@ impl ToolsService {
             .expect("in-flight lock")
             .remove(&token)
             .ok_or_else(|| ServiceError(format!("tools {entry}: unknown token {token}")))
+    }
+}
+
+/// The output contract on the register wire (dsh `output { schema,
+/// render, presentationMeta? }` with the projections endpoint-ized).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WireToolOutput {
+    /// The canonical output JSON Schema (asserted subset at registration).
+    pub schema: Value,
+    /// The render projection endpoint.
+    pub render: WireEndpoint,
+    /// The presentation projection endpoint.
+    #[serde(
+        default,
+        rename = "presentationMeta",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub presentation_meta: Option<WireEndpoint>,
+}
+
+/// The register request (the dsh tool definition wire form).
+#[derive(Debug, Deserialize)]
+pub struct WireToolRegistration {
+    /// Tool name (unique within the global layer).
+    pub name: String,
+    /// Model-facing description.
+    pub description: String,
+    /// Raw JSON Schema parameters object.
+    pub parameters: Value,
+    /// The canonical output contract.
+    pub output: WireToolOutput,
+    /// The body endpoint.
+    pub execute: WireEndpoint,
+    /// Cooperative timeout budget in milliseconds.
+    #[serde(default, rename = "timeoutMs", skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<f64>,
+    /// Sibling-overlap opt-in.
+    #[serde(
+        default,
+        rename = "isConcurrencySafe",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub is_concurrency_safe: Option<bool>,
+    /// Deferred-loading request.
+    #[serde(
+        default,
+        rename = "deferLoading",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub defer_loading: Option<bool>,
+    /// Execution-prepared content endpoint.
+    #[serde(
+        default,
+        rename = "projectContent",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub project_content: Option<WireEndpoint>,
+    /// Last-mile content endpoint.
+    #[serde(
+        default,
+        rename = "finalizeContent",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub finalize_content: Option<WireEndpoint>,
+    /// Pending-state presentation endpoint.
+    #[serde(
+        default,
+        rename = "presentCall",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub present_call: Option<WireEndpoint>,
+    /// Completed-state presentation endpoint.
+    #[serde(
+        default,
+        rename = "presentResult",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub present_result: Option<WireEndpoint>,
+}
+
+/// The body reply (the dsh `Result<Value, ToolError>` over the wire).
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum WireBodyReply {
+    /// The canonical value.
+    Value { value: Value },
+    /// The body failure (the code routes; absent codes are non-routing).
+    Error { error: WireBodyError },
+}
+
+/// The wire body failure.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WireBodyError {
+    /// The harness error code, when the remote raised a coded one.
+    #[serde(default)]
+    code: Option<String>,
+    /// The structured failure.
+    #[serde(default)]
+    message: Option<String>,
+    /// The remote error class name.
+    #[serde(default)]
+    name: Option<String>,
+}
+
+/// One endpoint-backed definition (dsh tool object over the wire): the
+/// registry trait's every projection rides its endpoint.
+struct WireToolDefinition {
+    name: String,
+    spec: WireToolRegistration,
+    seam: HostSeam,
+    interner: Arc<CodeInterner>,
+    output: crate::definition::ToolOutput,
+}
+
+impl WireToolDefinition {
+    /// Builds the definition and closes its projections over the seam.
+    fn build(seam: HostSeam, spec: WireToolRegistration, interner: Arc<CodeInterner>) -> Self {
+        let render_seam = seam;
+        let name = spec.name.clone();
+        let render_endpoint = spec.output.render.clone();
+        let render: crate::definition::RenderProjector = Arc::new(move |args, value| {
+            let frame = serde_json::json!({ "args": args, "value": value });
+            call_endpoint::<Vec<fr_wire::ContentBlock>>(&render_seam, &render_endpoint, &frame)
+                .unwrap_or_default()
+        });
+        let presentation_meta = spec.output.presentation_meta.clone().map(|endpoint| {
+            let projector: crate::definition::PresentationProjector =
+                Arc::new(move |args, value| {
+                    let frame = serde_json::json!({ "args": args, "value": value });
+                    call_endpoint::<Value>(&seam, &endpoint, &frame).unwrap_or(Value::Null)
+                });
+            projector
+        });
+        Self {
+            name,
+            output: {
+                let schema = spec.output.schema.clone();
+                crate::definition::ToolOutput {
+                    schema,
+                    render,
+                    presentation_meta,
+                }
+            },
+            spec,
+            seam,
+            interner,
+        }
+    }
+
+    /// Calls the body endpoint and maps the reply onto the registry's
+    /// error vocabulary: a coded remote error keeps its code (routable,
+    /// dsh `HarnessError` parity); a plain one carries no info (the dsh
+    /// plain-error shape) under a non-routing static marker.
+    fn call_body(&self, exec: &ToolExecution) -> Result<Value, crate::types::ToolError> {
+        let frame = serde_json::json!({ "call": wire_execution(exec) });
+        let reply: WireBodyReply =
+            call_endpoint(&self.seam, &self.spec.execute, &frame).map_err(|error| {
+                crate::types::ToolError::new("EXECUTION_FAILED", exec.name.as_str(), &error)
+            })?;
+        match reply {
+            WireBodyReply::Value { value } => Ok(value),
+            WireBodyReply::Error { error } => {
+                let message = error
+                    .message
+                    .unwrap_or_else(|| "tool body failed".to_owned());
+                let name = error.name.unwrap_or_else(|| exec.name.clone());
+                error.code.as_deref().map_or_else(
+                    // A plain remote error carries no info (the dsh
+                    // plain-error shape) under a non-routing marker.
+                    || {
+                        Err(crate::types::ToolError::new(
+                            "EXECUTION_FAILED",
+                            &name,
+                            &message,
+                        ))
+                    },
+                    // A coded remote error keeps its code routable (dsh
+                    // `HarnessError` parity); an over-long code degrades
+                    // into the message under the same marker.
+                    |code| {
+                        intern_code(&self.interner, code).map_or_else(
+                            || {
+                                Err(crate::types::ToolError {
+                                    code: "EXECUTION_FAILED",
+                                    failure: crate::types::ToolFailure {
+                                        message: format!("{code}: {message}"),
+                                        info: None,
+                                    },
+                                })
+                            },
+                            |static_code| {
+                                Err(crate::types::ToolError::new(static_code, &name, &message))
+                            },
+                        )
+                    },
+                )
+            }
+        }
+    }
+}
+
+impl crate::definition::ToolDefinition for WireToolDefinition {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn description(&self) -> &str {
+        &self.spec.description
+    }
+
+    fn parameters(&self) -> &Value {
+        &self.spec.parameters
+    }
+
+    fn output(&self) -> &crate::definition::ToolOutput {
+        &self.output
+    }
+
+    fn execute(
+        &self,
+        _args: &Value,
+        exec: &ToolExecution,
+        _signal: Arc<crate::signal::ToolSignal>,
+        _run: &mut crate::definition::ToolRunContext<'_>,
+    ) -> Result<Value, crate::types::ToolError> {
+        self.call_body(exec)
+    }
+
+    fn defer_loading(&self) -> bool {
+        self.spec.defer_loading.unwrap_or(false)
+    }
+
+    fn timeout_ms(&self) -> Option<f64> {
+        self.spec.timeout_ms
+    }
+
+    fn concurrency_safe(&self, _args: &Value) -> Option<bool> {
+        self.spec.is_concurrency_safe
     }
 }

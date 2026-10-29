@@ -71,7 +71,7 @@ pub enum StdinMode {
 
 /// Spill storage for one collected stream; `None` means tail-only
 /// collection (dsh `SubprocessCollect.spill`).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SpillCap {
     /// Whole-stream byte cap; a larger stream discards its now-incomplete
     /// spill.
@@ -597,7 +597,13 @@ impl SubprocessHandle {
         // pid recorded at spawn.
         let probe = unsafe { libc::kill(self.state.group_pid, 0) };
         if probe != 0 {
-            return false;
+            // The direct child is reaped, but the wait thread still owes
+            // the bounded pipe drain and the exit-fact publication: the
+            // range is only empty once those facts are on the slot
+            // (the dsh waitForExit contract — a released caller finds
+            // the outcome already there).
+            let slot = self.state.outcome.lock().expect("outcome lock");
+            return slot.outcome.is_none() && slot.failed.is_none();
         }
         if self.state.direct_settled.load(Ordering::Acquire)
             && !linux_group_has_live_members(-self.state.group_pid)
@@ -622,6 +628,13 @@ impl SubprocessHandle {
             }
             std::thread::sleep(Duration::from_millis(15));
         }
+    }
+
+    /// The settled exit facts without blocking (the wire wait face's
+    /// non-blocking read once the range confirmed empty).
+    #[must_use]
+    pub fn settled_outcome(&self) -> Option<Outcome> {
+        recover(&self.state.outcome).outcome.clone()
     }
 
     /// Blocks until the spawned command's exit facts settle (the direct
@@ -825,16 +838,47 @@ fn spawn_collector<R: std::io::Read + Send + 'static>(
 /// # Errors
 ///
 /// The synchronous validation texts, or the spawn failure itself.
-///
-/// # Panics
-///
 pub fn spawn(spec: &SpawnSpec, abort_reason: Option<String>) -> Result<SubprocessHandle, String> {
-    validate_spawn_spec(spec, abort_reason)?;
+    spawn_detailed(spec, abort_reason).map_err(|failure| failure.to_string())
+}
+
+/// The spawn-step failure (dsh's rejection-value split).
+///
+/// A validation refusal is a plain text, while the OS spawn error keeps
+/// its typed shape so the sandbox executor can attribute it to the
+/// confinement runner (dsh `isRunnerSpawnFailure` reads
+/// `error.path`/`syscall`).
+#[derive(Debug)]
+pub enum SpawnFailure {
+    /// The synchronous validation texts, or the pre-spawn abort refusal.
+    Invalid(String),
+    /// The OS refused to start the program.
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for SpawnFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid(text) => f.write_str(text),
+            Self::Io(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+/// Spawns one fully-specified subprocess, preserving the spawn-step error
+/// kind for the executor's runner-failure attribution.
+///
+/// # Errors
+///
+/// The synchronous validation texts, or the OS spawn error itself.
+pub fn spawn_detailed(
+    spec: &SpawnSpec,
+    abort_reason: Option<String>,
+) -> Result<SubprocessHandle, SpawnFailure> {
+    validate_spawn_spec(spec, abort_reason).map_err(SpawnFailure::Invalid)?;
     let tier = select_containment_tier();
     debug_assert_eq!(tier, ContainmentTier::ProcessGroup);
-    let mut child = prepare_command(spec)
-        .spawn()
-        .map_err(|error| error.to_string())?;
+    let mut child = prepare_command(spec).spawn().map_err(SpawnFailure::Io)?;
     let pid = child.id();
     let collected = drain_stdin_and_wire_collectors(spec, &mut child);
     let state = Arc::new(new_handle_state(pid, spec.grace_ms));
@@ -962,11 +1006,22 @@ fn spawn_waiter(
                 stdout.seal();
                 stderr.seal();
             }
-            wait_state.direct_settled.store(true, Ordering::Release);
+            // Publish the exit facts BEFORE the liveness observations:
+            // a caller the range probe releases must find the outcome
+            // already on the slot (the dsh waitForExit contract).
             let mut slot = recover(&wait_state.outcome);
             slot.outcome = Some(outcome);
             drop(slot);
             wait_state.outcome_ready.notify_all();
+            wait_state.direct_settled.store(true, Ordering::Release);
+            // Observe the range exit once the direct child settled: an
+            // empty POSIX group ends the managed range (the dsh
+            // shared-timer-clears-on-exit judgment); the Windows tier
+            // keeps the outcome-slot liveness check.
+            #[cfg(target_os = "linux")]
+            if !linux_group_has_live_members(-wait_state.group_pid) {
+                wait_state.range_gone.store(true, Ordering::Release);
+            }
         })
         .expect("spawning the child wait thread never fails under the plugin contract")
         .into()
@@ -978,4 +1033,59 @@ fn reader_idle(collector: &Arc<OutputCollector>) -> bool {
     let first = collector.read_from(0).next_offset;
     std::thread::sleep(Duration::from_millis(5));
     collector.read_from(0).next_offset == first
+}
+
+/// Resolves a bare PATH name or an absolute path to an executable (the
+/// dsh `resolveExecutable` texts verbatim).
+///
+/// # Errors
+///
+/// The four refusal texts: the empty name, a relative path with a
+/// separator, an absolute miss, and a bare PATH miss.
+pub fn resolve_executable(command: &str) -> Result<String, String> {
+    if command.is_empty() {
+        return Err("subprocess-local: executable must be non-empty".to_owned());
+    }
+    let path = std::path::Path::new(command);
+    let absolute = path.is_absolute();
+    if !absolute && command.contains('/') {
+        return Err(format!(
+            "subprocess-local: command \"{command}\" is a relative path; use an absolute path or a bare PATH name"
+        ));
+    }
+    if absolute {
+        if is_executable_file(path) {
+            return Ok(command.to_owned());
+        }
+        return Err(format!(
+            "subprocess-local: command \"{command}\" is not an executable file"
+        ));
+    }
+    if let Some(search_path) = std::env::var_os("PATH") {
+        for directory in std::env::split_paths(&search_path) {
+            let candidate = directory.join(command);
+            if is_executable_file(&candidate) {
+                return Ok(candidate.to_string_lossy().into_owned());
+            }
+        }
+    }
+    Err(format!(
+        "subprocess-local: command \"{command}\" was not found on PATH"
+    ))
+}
+
+/// Whether the path is a file its permission bits let this process
+/// execute (the dsh `X_OK` texts verbatim; the Unix permission-bit
+/// spelling).
+#[cfg(unix)]
+fn is_executable_file(path: &std::path::Path) -> bool {
+    std::fs::metadata(path)
+        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+}
+
+/// Whether the path is an existing file (the Windows spelling: CreateProcess
+/// checks ACLs at spawn time, so existence is the only cheap probe).
+#[cfg(not(unix))]
+fn is_executable_file(path: &std::path::Path) -> bool {
+    std::fs::metadata(path).is_ok_and(std::fs::Metadata::is_file)
 }
