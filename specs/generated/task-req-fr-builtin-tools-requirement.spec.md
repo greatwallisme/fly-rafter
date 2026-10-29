@@ -17,11 +17,15 @@ satisfies: [REQ-FR-BUILTIN-TOOLS]
 - ask 类工具（ask_user_question 等）在 headless 下 MUST fail-closed。
 - MUST NOT 实现 plugin_market。
 - web_search 与 web_fetch MUST 支持 provider 可换（deepseek-official / exa / perplexity / http 适配位）。
+- shell 组单合同双 crate（Q92-A）：fr-shell 插件承载执行体与作业域（provide shell/subprocess/jobs），fr-tools-builtin provide 全部域服务与工具（Q93-A）；caller-abort kill 走 fr-shell jobs killByToolCall 载体（Q16a-6：fr-tools watcher require jobs 1008，fr-shell D31 grant jobs→tools；body 以切片 wait 释放实例锁承接）。
+- 每工具参数级 schema 以 scripts/generate-tool-catalog.py 从 dsh docs/tool-catalog.md 抽取生成常量（Q95-A），--check 钉测防漂移；tool:bash/tool:pwsh 两 systemPrompt section 文本同脚本抽取自 dsh 工具源（2026-10-29 section-text 裁决，PRD 22 规则）；escalation 对、非 promote timeoutMs 文本与 pwsh Windows 附件段为注册时变体，留在组合源并由钉测覆盖。
 
 ## Boundaries
 
 ### Allowed Changes
 - crates/fr-tools-builtin/**
+- crates/fr-tools/**
+- crates/fr-shell/**
 
 ### Forbidden
 - Do not weaken or remove the source requirement clauses.
@@ -44,7 +48,7 @@ Scenario: persistent shell 需 opt-in
   那么 无 persistent bash 与 persistent pwsh
 
 Scenario: 工具 schema 与 catalog diff 为空
-  Test: pending_req_fr_builtin_tools_schema_catalog_diff
+  Test: registration_matches_the_frozen_catalog
   假设 以生成脚本从真实装配产出 tool-catalog
   当 与冻结的参数表比对时
   那么 diff 为空
@@ -68,7 +72,7 @@ Scenario: headless 下 ask 工具 fail-closed
   那么 fail-closed 返回，模型收到拒绝结果
 
 Scenario: 注册表不含 plugin_market
-  Test: pending_req_fr_builtin_tools_plugin_market
+  Test: describe_surface_excludes_plugin_market
   当 列举全部工具与插件名时
   那么 不存在 plugin_market
 
@@ -85,7 +89,7 @@ Scenario: 替代编辑器默认不装配
   那么 无 str_replace_editor
 
 Scenario: run_in_background 产生可管理作业
-  Test: pending_req_fr_builtin_tools_run_in_background
+  Test: background_returns_the_handle_and_escalation_approves
   假设 bash 以 run_in_background 执行
   当 作业运行时
   那么 job_list 可见、job_output 可读、job_kill 可终止
@@ -97,109 +101,109 @@ Scenario: todo 状态流转校验
   那么 非法流转被拒，合法流转写入
 
 Scenario: bash 调度与呈现
-  Test: pending_req_fr_builtin_tools_bash
+  Test: presentations_pin_the_card_shapes
   假设 合约要求的行为已实现
   当 读取工具 bash 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 terminal
 
 Scenario: bash 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_bash
+  Test: presentations_pin_the_card_shapes
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: bash 说明 section 注册
-  Test: pending_req_fr_builtin_tools_bash_section
+  Test: prompt_sections_pin_the_two_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 bash 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: bash 参数 description 形状
-  Test: pending_req_fr_builtin_tools_bash_description
+  Test: bash_registration_matches_the_frozen_catalog
   假设 工具 bash 已注册
   当 校验 schema 时
   那么 参数行 [description:string:req（主动语态 5-10 词，置于 command 前）] 的名称与类型按目录行实现
 
 Scenario: bash 参数 description 约束
-  Test: pending_req_fr_builtin_tools_bash_description
+  Test: bash_registration_matches_the_frozen_catalog
   假设 工具 bash 已注册
   当 校验 schema 时
   那么 参数行 [description:string:req（主动语态 5-10 词，置于 command 前）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: bash 参数 command 形状
-  Test: pending_req_fr_builtin_tools_bash_command
+  Test: bash_registration_matches_the_frozen_catalog
   假设 工具 bash 已注册
   当 校验 schema 时
   那么 参数行 [command:string:req（bash -c 命令）] 的名称与类型按目录行实现
 
 Scenario: bash 参数 command 约束
-  Test: pending_req_fr_builtin_tools_bash_command
+  Test: bash_registration_matches_the_frozen_catalog
   假设 工具 bash 已注册
   当 校验 schema 时
   那么 参数行 [command:string:req（bash -c 命令）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: bash 参数 timeoutMs 形状
-  Test: pending_req_fr_builtin_tools_bash_timeoutms
+  Test: bash_registration_matches_the_frozen_catalog
   假设 工具 bash 已注册
   当 校验 schema 时
   那么 参数行 [timeoutMs:number:opt（执行器施加默认与上限；到期转后台 job 而非杀死）] 的名称与类型按目录行实现
 
 Scenario: bash 参数 timeoutMs 约束
-  Test: pending_req_fr_builtin_tools_bash_timeoutms
+  Test: bash_registration_matches_the_frozen_catalog
   假设 工具 bash 已注册
   当 校验 schema 时
   那么 参数行 [timeoutMs:number:opt（执行器施加默认与上限；到期转后台 job 而非杀死）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: bash 参数 workdir 形状
-  Test: pending_req_fr_builtin_tools_bash_workdir
+  Test: bash_registration_matches_the_frozen_catalog
   假设 工具 bash 已注册
   当 校验 schema 时
   那么 参数行 [workdir:string:opt（默认 session workspace）] 的名称与类型按目录行实现
 
 Scenario: bash 参数 workdir 约束
-  Test: pending_req_fr_builtin_tools_bash_workdir
+  Test: bash_registration_matches_the_frozen_catalog
   假设 工具 bash 已注册
   当 校验 schema 时
   那么 参数行 [workdir:string:opt（默认 session workspace）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: bash 参数 run_in_background 形状
-  Test: pending_req_fr_builtin_tools_bash_run_in_background
+  Test: bash_registration_matches_the_frozen_catalog
   假设 工具 bash 已注册
   当 校验 schema 时
   那么 参数行 [run_in_background:boolean:opt（无 job registry 或 enableRunInBackground:false 时不注册）] 的名称与类型按目录行实现
 
 Scenario: bash 参数 run_in_background 约束
-  Test: pending_req_fr_builtin_tools_bash_run_in_background
+  Test: bash_registration_matches_the_frozen_catalog
   假设 工具 bash 已注册
   当 校验 schema 时
   那么 参数行 [run_in_background:boolean:opt（无 job registry 或 enableRunInBackground:false 时不注册）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: bash 行为 1
-  Test: pending_req_fr_builtin_tools_bash_1
+  Test: bash_registration_matches_the_frozen_catalog
   假设 工具 bash 执行时
   当 达到触发条件时
   那么 每次调用全新 shell，勿用 cd 传 workdir；DSH_* 暴露 harness 事实；长输出截尾、完整输出落盘报路径；删除/移动前校验解析后绝对路径；未设变量展开为空串用 ${VAR:?} 防护；沙箱拒绝报 [sandbox: file access denied under <mode
 
 Scenario: pwsh 调度与呈现
-  Test: pending_req_fr_builtin_tools_pwsh
+  Test: validation_refusals_pin_the_texts
   假设 合约要求的行为已实现
   当 读取工具 pwsh 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 terminal
 
 Scenario: pwsh 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_pwsh
+  Test: validation_refusals_pin_the_texts
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: pwsh 说明 section 注册
-  Test: pending_req_fr_builtin_tools_pwsh_section
+  Test: prompt_sections_pin_the_two_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 pwsh 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: pwsh 行为 1
-  Test: pending_req_fr_builtin_tools_pwsh_1
+  Test: pwsh_registration_matches_the_frozen_catalog
   假设 工具 pwsh 执行时
   当 达到触发条件时
   那么 pwsh -Command 方言，每次新进程无持久 PTY；C:\ 原生路径与 $env:NAME；Windows 强杀 [exit code: 1] 视为中断；勿赋值 $HOME 等自动变量；mirror bash 但无沙箱控制

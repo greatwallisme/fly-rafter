@@ -1032,3 +1032,242 @@ fn wire_register_mounts_and_unregisters() {
     .expect("decode");
     assert_eq!(again["removed"], false, "a second unregister is a no-op");
 }
+
+/// The wire-tool abort watcher kills through the jobs kill-by-tool-call
+/// face mid-dispatch (the Q16a-6 carrier): a blocked body, an aborted
+/// caller signal, and the kill request arriving on the scripted jobs
+/// endpoint carrying the call id and the dsh stop reason.
+#[test]
+fn abort_watcher_kills_through_kill_by_tool_call() {
+    use fr_wire::services::jobs as wire_jobs;
+    let started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let kills = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let endpoint_started = Arc::clone(&started);
+    let endpoint_released = Arc::clone(&released);
+    let endpoint_kills = Arc::clone(&kills);
+    let endpoint: Endpoint = Box::new(move |method: u32, payload: &[u8]| match method {
+        // The blocked body: hold until the watcher's kill lands.
+        9 => {
+            endpoint_started.store(true, std::sync::atomic::Ordering::SeqCst);
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while !endpoint_released.load(std::sync::atomic::Ordering::SeqCst)
+                && std::time::Instant::now() < deadline
+            {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Ok(serde_json::to_vec(&json!({ "value": "settled" })).expect("encode"))
+        }
+        // The jobs kill-by-tool-call face: record the frame, release.
+        method if method == wire_jobs::METHOD_KILL_BY_TOOL_CALL => {
+            let frame: Value = serde_json::from_slice(payload).expect("kill frame");
+            endpoint_kills.lock().expect("kills lock").push(frame);
+            endpoint_released.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(br#"{"result": "requested"}"#.to_vec())
+        }
+        other => Err(format!("unexpected endpoint method {other}")),
+    });
+    let (_vtable, mut service) = service_with_host(endpoint);
+    let definition = json!({
+        "name": "slow",
+        "description": "Blocks until killed.",
+        "parameters": { "type": "object", "properties": {} },
+        "output": {
+            "schema": { "type": "object", "properties": {} },
+            "render": { "service": "builtin", "method": 10 },
+        },
+        "execute": { "service": "builtin", "method": 9 },
+    });
+    let registered: Value = serde_json::from_slice(
+        &service
+            .serve(
+                fr_wire::services::tools::METHOD_REGISTER,
+                &serde_json::to_vec(&definition).expect("encode"),
+            )
+            .expect("register"),
+    )
+    .expect("decode");
+    assert_eq!(registered["id"], "slow");
+    let prepared: Value = serde_json::from_slice(
+        &service
+            .serve(METHOD_PREPARE, &prepare_body("slow"))
+            .expect("prepare"),
+    )
+    .expect("decode");
+    let token = prepared["exec"]["token"].clone();
+    service
+        .serve(
+            METHOD_DISPATCH,
+            &json!({ "token": token }).to_string().into_bytes(),
+        )
+        .expect("dispatch");
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !started.load(std::sync::atomic::Ordering::SeqCst) && std::time::Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(
+        started.load(std::sync::atomic::Ordering::SeqCst),
+        "the body started"
+    );
+    let cancelled: Value = serde_json::from_slice(
+        &service
+            .serve(
+                METHOD_CANCEL,
+                &json!({ "token": token }).to_string().into_bytes(),
+            )
+            .expect("cancel"),
+    )
+    .expect("decode");
+    assert_eq!(cancelled["aborted"], true);
+    let _settle = wait_settled(&mut service);
+    let recorded = kills.lock().expect("kills lock");
+    assert_eq!(recorded.len(), 1, "one kill request: {recorded:?}");
+    assert_eq!(recorded[0]["call_id"], "call-1");
+    assert_eq!(recorded[0]["reason"], "tool call aborted");
+}
+
+/// The wire presentation endpoints ride the registration: presentCall
+/// and presentResult decode their views, the null reply presents as
+/// none, and invalid arguments soft-fall to the generic rendering.
+#[test]
+fn wire_presentation_endpoints_ride_the_registration() {
+    let endpoint: Endpoint = Box::new(|method: u32, payload: &[u8]| match method {
+        11 => {
+            let frame: Value =
+                serde_json::from_slice(payload).map_err(|error| format!("frame: {error}"))?;
+            assert!(frame.get("args").is_some(), "{frame}");
+            Ok(serde_json::to_vec(&json!({
+                "card": "terminal",
+                "title": "ls -la",
+                "description": "list",
+                "cwd": "/tmp",
+            }))
+            .expect("encode"))
+        }
+        12 => {
+            let frame: Value =
+                serde_json::from_slice(payload).map_err(|error| format!("frame: {error}"))?;
+            assert!(
+                frame.get("args").is_some() && frame.get("result").is_some(),
+                "{frame}"
+            );
+            if frame["result"]["isError"] == true {
+                return Ok(b"null".to_vec());
+            }
+            Ok(serde_json::to_vec(&json!({ "card": "generic", "title": "done" })).expect("encode"))
+        }
+        other => Err(format!("unexpected endpoint method {other}")),
+    });
+    let (_vtable, mut service) = service_with_host(endpoint);
+    let definition = json!({
+        "name": "presented",
+        "description": "Presenting.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false,
+        },
+        "output": {
+            "schema": { "type": "object", "properties": {} },
+            "render": { "service": "builtin", "method": 10 },
+        },
+        "execute": { "service": "builtin", "method": 9 },
+        "presentCall": { "service": "builtin", "method": 11 },
+        "presentResult": { "service": "builtin", "method": 12 },
+    });
+    service
+        .serve(
+            fr_wire::services::tools::METHOD_REGISTER,
+            &serde_json::to_vec(&definition).expect("encode"),
+        )
+        .expect("register");
+    let tool = service
+        .registry()
+        .get("presented")
+        .expect("the wire tool is mounted");
+    let call = tool.present_call(&json!({})).expect("the terminal view");
+    let crate::presentation::ToolCallView::Terminal(terminal) = call else {
+        panic!("expected the terminal card: {call:?}");
+    };
+    assert_eq!(terminal.title, "ls -la");
+    assert_eq!(terminal.cwd.as_deref(), Some("/tmp"));
+    let result = crate::types::ToolResult {
+        content: Vec::new(),
+        is_error: false,
+        meta: None,
+    };
+    let view = tool
+        .present_result(&json!({}), &result)
+        .expect("the generic view");
+    let crate::presentation::ToolResultView::Generic(generic) = view else {
+        panic!("expected the generic card: {view:?}");
+    };
+    assert_eq!(generic.title.as_deref(), Some("done"));
+    // An error result presents as the null reply: none.
+    let errored = crate::types::ToolResult {
+        content: Vec::new(),
+        is_error: true,
+        meta: None,
+    };
+    assert!(tool.present_result(&json!({}), &errored).is_none());
+    // Invalid arguments soft-fall to none (the BuiltTool judgment).
+    assert!(tool.present_call(&json!({ "nope": 1 })).is_none());
+}
+
+/// The wire content endpoints install prepared content: projectContent
+/// replaces the result content before post-execute and a null
+/// finalizeContent leaves it untouched (the pipeline's Option arms).
+#[test]
+fn wire_content_endpoints_install_prepared_content() {
+    let endpoint: Endpoint = Box::new(|method: u32, payload: &[u8]| match method {
+        9 => Ok(serde_json::to_vec(&json!({ "value": { "echoed": "body" } })).expect("encode")),
+        13 => {
+            let frame: Value =
+                serde_json::from_slice(payload).map_err(|error| format!("frame: {error}"))?;
+            assert_eq!(frame["call"]["name"], "echoed", "{frame}");
+            assert!(frame.get("result").is_some(), "{frame}");
+            Ok(
+                serde_json::to_vec(&json!([{ "type": "text", "text": "projected" }]))
+                    .expect("encode"),
+            )
+        }
+        14 => Ok(b"null".to_vec()),
+        other => Err(format!("unexpected endpoint method {other}")),
+    });
+    let (_vtable, mut service) = service_with_host(endpoint);
+    let definition = json!({
+        "name": "echoed",
+        "description": "Echoing.",
+        "parameters": { "type": "object", "properties": {} },
+        "output": {
+            "schema": { "type": "object", "properties": {} },
+            "render": { "service": "builtin", "method": 10 },
+        },
+        "execute": { "service": "builtin", "method": 9 },
+        "projectContent": { "service": "builtin", "method": 13 },
+        "finalizeContent": { "service": "builtin", "method": 14 },
+    });
+    service
+        .serve(
+            fr_wire::services::tools::METHOD_REGISTER,
+            &serde_json::to_vec(&definition).expect("encode"),
+        )
+        .expect("register");
+    let result: Value = serde_json::from_slice(
+        &service
+            .serve(METHOD_EXECUTE, &prepare_body("echoed"))
+            .expect("execute"),
+    )
+    .expect("decode");
+    assert_eq!(result["kind"], "success", "{result}");
+    let content = result["content"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the success content: {result}"));
+    assert!(
+        content
+            .iter()
+            .any(|block| block["text"].as_str() == Some("projected")),
+        "{result}"
+    );
+}

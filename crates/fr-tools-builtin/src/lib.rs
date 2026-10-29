@@ -15,16 +15,22 @@
 //! dead here and stays documented rather than implemented. Method
 //! selectors on the `'builtin-tools'` service: 0 describe, bash
 //! 1 execute / 2 render / 3 presentCall / 4 presentResult, pwsh
-//! 11-14, the shared projection fold at 900.
+//! 11-14, the shared projection fold at 900. The schema constants are
+//! script-extracted from the dsh docs/tool-catalog.md ([`catalog_gen`];
+//! the Q95-A ruling) and frozen by the in-crate verify tests.
 
 //! The domain vocabulary lands module-for-module ([`shell_env`],
 //! [`working_directory`], [`render`], [`schema`], [`tools`],
-//! [`service`], [`plugin_shell`]).
+//! [`service`], [`plugin_shell`], [`catalog_gen`], and the test-only
+//! catalog-freeze verifier).
 
+pub mod catalog_gen;
 pub mod plugin_shell;
 pub mod render;
 pub mod schema;
 pub mod service;
 pub mod shell_env;
 pub mod tools;
+#[cfg(test)]
+mod verify;
 pub mod working_directory;

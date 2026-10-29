@@ -1159,3 +1159,17 @@
 - 五门全绿：fmt/clippy -D warnings 0/tests 1157 passed 0 failed/doc -D warnings/Windows 门 fr-tools-builtin+fr-shell 零警告零错误。
 - 过程：生成退化 5 起全部截停或当场还原（详见 findings 批 2 实施记录）；长内容改 Write/heredoc 纪律生效。
 - 待用户 /commit 裁决入库 → **6c93d6d 入库**（amend 后终号；初记 3a96478 为 amend 前号已回填更正。用户 /commit 裁决 --no-verify，守卫注记随信息）。
+
+## 2026-10-29 — 16a 批 3（16a 收口）：watcher+切片 wait+trait 接线+Q95-A+spec 绑定，workspace 1168 tests（1157→1168）
+- fr-tools：WireToolDefinition 增 AbortWatcher（signal poll 50ms→jobs 1008 killByToolCall，per-call spawn/join）+四投影 trait override（project/finalize/presentCall/presentResult soft-wrap）；ToolResult 序列化化。
+- fr-shell：HostLink.grant+setup D31 grant("tools","jobs")（watcher 授权，fail-closed）。
+- fr-tools-builtin：wait_on_job 切片化（200ms slice+300ms 过期宽限，实例锁让位给 kill 落地）+catalog_gen.rs（Q95-A 脚本生成）+schema.rs 常量化+verify.rs 五钉测+describe/prompt_sections 两钉测。
+- fr-wire：jobs METHOD_KILL_BY_TOOL_CALL=1008 常量。
+- spec：Boundaries 扩 fr-tools+fr-shell（Q92-A）/Decisions +2/21 场景绑 14 选择器；lifecycle 21 pass+387 skip（quality 1.0）；guard 16 checks 设计态既定例。
+- 五门全绿（fmt/clippy/tests 1168/doc/Windows）+三需求开关 exit 0。
+- 待用户裁决：tool 双 section 文本抽取缺口（findings 批 3 记录 A/B/C 三选项）；待 /commit 裁决入库（--no-verify 守卫注记既定例）。
+
+## 2026-10-29 — 批 3 追加：用户裁决 A（section 文本抽取扩源）落地
+- generate-tool-catalog.py 增 TS 源抽取（extract_section_text：锚点+多段拼接+fail-closed 转义）→ BASH/PWSH_SECTION_TEXT 常量；prompt_sections 消费常量，手抄清零；spec Decision 条款扩源。
+- 门复跑：fmt/clippy/tests 1168/doc/Windows 全绿；--check 钉测覆盖新抽取面。
+- 待用户 /commit 裁决入库（②未答）。

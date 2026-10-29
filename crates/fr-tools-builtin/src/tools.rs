@@ -24,6 +24,17 @@ pub const TOOL_ABORTED: &str = "TOOL_ABORTED";
 /// dsh `ESCALATION_TARGETS` order).
 const SHELL_ESCALATION_MODES: [&str; 2] = ["workspace-write", "danger-full-access"];
 
+/// The bounded wait slice (milliseconds). The fr-shell instance lock
+/// spans each wait call, so the body re-locks in slices of this size;
+/// the fr-tools abort watcher's queued kill-by-tool-call lands in a
+/// between-slice gap (the fr-wire jobs `METHOD_WAIT` contract).
+const WAIT_SLICE_MS: f64 = 200.0;
+
+/// The expiry grace (milliseconds): how long the wait keeps slicing
+/// after the budget runs out so a kill requested just before exhaustion
+/// lands before the promoted/preparation decision reads the job.
+const WAIT_GRACE_MS: f64 = 300.0;
+
 /// The body failure over the wire (dsh `HarnessError` projection).
 #[derive(Debug, Clone)]
 pub struct BodyError {
@@ -307,13 +318,14 @@ pub fn validate_args(
 }
 
 /// The timeoutMs parameter's two description variants (dsh bakes the
-/// promote fact at registration).
+/// promote fact at registration): the promote arm is the catalog-frozen
+/// constant, the kill arm stays the composed source text.
+///
+/// The catalog documents the promote registration alone.
 #[must_use]
 pub fn timeout_ms_description(promote: bool) -> String {
     if promote {
-        "Timeout in milliseconds. The executor applies its configured default and cap; on expiry \
-the command moves to the background as a job instead of being killed."
-            .to_owned()
+        crate::catalog_gen::BASH_TIMEOUT_MS_PROMOTE_TEXT.to_owned()
     } else {
         "Timeout in milliseconds. The executor applies its configured default and cap, and kills \
 the command on expiry."
@@ -760,6 +772,37 @@ fn preparation_timeout_value(
 }
 
 /// The arms' refusal families and the structured caller-abort failure.
+/// One bounded wait slice (the fr-shell instance lock spans each call,
+/// so the body re-locks in bounded slices).
+fn slice_wait(
+    seams: &dyn Seams,
+    job_id: &str,
+    owner: Option<&str>,
+    slice_ms: f64,
+) -> Result<Value, BodyError> {
+    seams
+        .jobs_wait(job_id, slice_ms, owner)
+        .map_err(BodyError::plain)
+}
+
+/// Whether the view still reports an unsettled job.
+fn still_running(view: &Value) -> bool {
+    matches!(
+        view.get("status").and_then(Value::as_str),
+        Some("running" | "stopping")
+    )
+}
+
+/// The sliced wait (the fr-wire jobs `METHOD_WAIT` contract: slice waits
+/// only, because the fr-shell instance lock spans each call): bounded
+/// logical slices keep the lock free between calls, which is what lets
+/// the fr-tools abort watcher's queued kill-by-tool-call land while this
+/// call still waits — dsh rejects the wait itself on abort, and here the
+/// kill surfaces as the settled killed view the settled arm maps. The
+/// expiry grace then absorbs a kill still in flight at budget exhaustion
+/// so a dying call never promotes (the residual race — an abort inside
+/// the grace window itself — is carrier plumbing bounded by the watcher
+/// poll interval).
 #[expect(
     clippy::too_many_arguments,
     reason = "the arms mirror the dsh waitOnJob closure captures: the job identity, the wait budget, the resolved spec facts, and the advertised escalation table"
@@ -774,14 +817,37 @@ fn wait_on_job(
     policy: Option<&Value>,
     escalation_modes: &[&str],
 ) -> Result<Value, BodyError> {
-    let view = seams
-        .jobs_wait(job_id, timeout_ms, owner)
-        .map_err(BodyError::plain)?;
-    let status = view
-        .get("status")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if status == "running" || status == "stopping" {
+    let wait_slice = timeout_ms.min(WAIT_SLICE_MS);
+    let mut view = slice_wait(seams, job_id, owner, wait_slice)?;
+    let mut consumed = wait_slice;
+    while still_running(&view) {
+        let budget_left = timeout_ms - consumed;
+        if budget_left <= 0.0 {
+            break;
+        }
+        let slice = budget_left.min(WAIT_SLICE_MS);
+        view = slice_wait(seams, job_id, owner, slice)?;
+        consumed += slice;
+    }
+    if still_running(&view) {
+        // The expiry grace: a kill requested just before budget
+        // exhaustion is still queued on the instance lock; the grace
+        // slices free the lock until it lands (the next slice then reads
+        // the settled killed view) or the grace itself runs out.
+        let mut grace_left = WAIT_GRACE_MS;
+        loop {
+            if grace_left <= 0.0 {
+                break;
+            }
+            let slice = grace_left.min(WAIT_SLICE_MS);
+            view = slice_wait(seams, job_id, owner, slice)?;
+            if !still_running(&view) {
+                break;
+            }
+            grace_left -= slice;
+        }
+    }
+    if still_running(&view) {
         // The wait expired. Nothing running to keep when the spawn never
         // published: the deadline's preparation timeout, with the empty
         // settled result the executor's own deadline would have given.
@@ -1014,6 +1080,11 @@ mod tests {
         kills: Mutex<Vec<(String, Option<String>)>>,
         removed: Mutex<Vec<String>>,
         existing_dir: &'static str,
+        /// The wait-call count at which the scripted job flips to its
+        /// killed-abort view (the watcher's kill landing between
+        /// slices).
+        flip_after: Option<usize>,
+        wait_calls: std::sync::atomic::AtomicUsize,
     }
 
     impl std::fmt::Debug for ScriptSeams {
@@ -1040,6 +1111,8 @@ mod tests {
                 kills: Mutex::new(Vec::new()),
                 removed: Mutex::new(Vec::new()),
                 existing_dir: "/ws",
+                flip_after: None,
+                wait_calls: std::sync::atomic::AtomicUsize::new(0),
             }
         }
 
@@ -1063,6 +1136,8 @@ mod tests {
                 kills: Mutex::new(Vec::new()),
                 removed: Mutex::new(Vec::new()),
                 existing_dir: "/ws",
+                flip_after: None,
+                wait_calls: std::sync::atomic::AtomicUsize::new(0),
             }
         }
 
@@ -1102,6 +1177,8 @@ mod tests {
                 kills: Mutex::new(Vec::new()),
                 removed: Mutex::new(Vec::new()),
                 existing_dir: "/ws",
+                flip_after: None,
+                wait_calls: std::sync::atomic::AtomicUsize::new(0),
             }
         }
     }
@@ -1172,7 +1249,18 @@ mod tests {
             _timeout_ms: f64,
             _caller: Option<&str>,
         ) -> Result<Value, String> {
-            let job = self.job.lock().expect("job").clone();
+            let calls = self
+                .wait_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                + 1;
+            let mut job = self.job.lock().expect("job").clone();
+            if job.wait_status == "running"
+                && self.flip_after.is_some_and(|threshold| calls >= threshold)
+            {
+                // The watcher's kill landed between slices.
+                job.wait_status = "killed";
+                job.wait_detail = Some("signal: SIGTERM; tool call aborted".to_owned());
+            }
             Ok(json!({
                 "id": "bash-1",
                 "status": job.wait_status,
@@ -1353,6 +1441,36 @@ mod tests {
         assert_eq!(error.code.as_deref(), Some(TOOL_ABORTED));
         assert_eq!(error.name, "AbortError");
         assert_eq!(error.message, "tool call aborted");
+    }
+
+    /// The watcher's kill landing between slices surfaces as the
+    /// structured abort: running slices until the scripted kill flips
+    /// the job, then the settled killed view maps to the abort error and
+    /// the record leaves the registry (the sliced-wait carrier chain).
+    #[test]
+    fn sliced_wait_maps_the_landing_abort_kill_to_the_abort_error() {
+        let mut seams = ScriptSeams::timed_out_running();
+        seams.flip_after = Some(3);
+        let error = execute(
+            ShellVariant::Bash,
+            &seams,
+            &registry(),
+            &arguments(),
+            "c1",
+            "c1",
+            Some("s1"),
+        )
+        .expect_err("aborted");
+        assert_eq!(error.code.as_deref(), Some(TOOL_ABORTED));
+        assert!(
+            seams.wait_calls.load(std::sync::atomic::Ordering::SeqCst) > 1,
+            "the wait sliced across several calls"
+        );
+        assert_eq!(
+            seams.removed.lock().expect("removed").as_slice(),
+            ["bash-1"],
+            "the abort arm removes the record"
+        );
     }
 
     /// The background arm resolves without a deadline and returns the

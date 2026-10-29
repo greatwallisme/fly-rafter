@@ -132,13 +132,7 @@ impl BuiltinTools {
             METHOD_DESCRIBE => json!({
                 "plugin": PLUGIN_NAME,
                 "service": SERVICE_NAME,
-                "methods": [
-                    "describe",
-                    "bash.execute", "bash.render", "bash.presentResult", "bash.presentCall",
-                    "presentationMeta",
-                    "pwsh.execute", "pwsh.render", "pwsh.presentCall", "pwsh.presentResult",
-                    "workingDirectory.fold",
-                ],
+                "methods": describe_methods(),
             }),
             METHOD_BASH_EXECUTE => {
                 return self.serve_execute(tools::ShellVariant::Bash, &request);
@@ -269,5 +263,41 @@ pub fn fold_log(request: &Value) -> Value {
     match working_directory::fold(&log) {
         working_directory::ProjectionState::At(cwd) => Value::String(cwd),
         working_directory::ProjectionState::Null => Value::Null,
+    }
+}
+
+/// The describe surface's method names (the registration reality: the
+/// two shell tools' bands and the projection fold; excluded surfaces
+/// never appear here).
+const fn describe_methods() -> [&'static str; 11] {
+    [
+        "describe",
+        "bash.execute",
+        "bash.render",
+        "bash.presentResult",
+        "bash.presentCall",
+        "presentationMeta",
+        "pwsh.execute",
+        "pwsh.render",
+        "pwsh.presentCall",
+        "pwsh.presentResult",
+        "workingDirectory.fold",
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    /// The declared surface never names an excluded tool: `plugin_market`
+    /// (PRD 19.1) stays absent while the shell group rides its two bands
+    /// (the builtin-tools contract's exclusion clause).
+    #[test]
+    fn describe_surface_excludes_plugin_market() {
+        let methods = super::describe_methods();
+        assert!(
+            methods.iter().all(|name| !name.contains("plugin_market")),
+            "{methods:?}"
+        );
+        assert!(methods.contains(&"bash.execute"));
+        assert!(methods.contains(&"pwsh.execute"));
     }
 }

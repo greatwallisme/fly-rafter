@@ -13,49 +13,27 @@
 
 use serde_json::{Value, json};
 
+use crate::catalog_gen;
 use crate::tools::timeout_ms_description;
 
-/// The bash tool description (dsh `bashDescription`, nine sentences;
-/// the managed-variable sentence carries the FR_ prefix).
+/// The bash tool description (the catalog-frozen constant; the
+/// managed-variable sentence carries the FR_ prefix).
 #[must_use]
 pub fn bash_description() -> String {
-    concat!(
-        "Execute a bash command (`bash -c`) and return its stdout/stderr. ",
-        "Each call runs in a fresh shell; pass `workdir` instead of using `cd`. ",
-        "Managed `$FR_*` variables expose current harness environment facts. ",
-        "Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. ",
-        "Provide `description` before `command` in the arguments. ",
-        "Before any delete or move, verify that the resolved absolute target path is the intended one; never run it against a computed path you have not checked. ",
-        "An unset variable expands to an empty string, so guard variables in such paths with `${VAR:?}`. ",
-        "Commands may run under a file sandbox; a blocked file operation is reported as ",
-        "`[sandbox: file access denied under <mode> mode]`, a policy denial: do not retry another way."
-    )
-    .to_owned()
+    catalog_gen::BASH_DESCRIPTION.to_owned()
 }
 
-/// The pwsh tool description (dsh `pwshDescription`).
+/// The pwsh tool description (the catalog-frozen base constant).
 ///
 /// The base sentences ride every registration; the Windows-sandbox
 /// appendix rides when a confining executor is mounted (every fr
-/// composition with confinement; `$env:DSH_*` reads `$env:FR_*` under
-/// the prefix ruling).
+/// composition with confinement; the appendix is the composed source
+/// text — the catalog documents the base registration alone).
 #[must_use]
 pub fn pwsh_description(windows_sandbox: bool) -> String {
-    let base = concat!(
-        "Execute a PowerShell command (`pwsh -Command`) and return its stdout/stderr. ",
-        "Each call runs in a fresh pwsh process; pass `workdir` instead of using `cd`. ",
-        "Paths use native Windows form (`C:\\...`); read environment variables with `$env:NAME`. ",
-        "Managed `$env:FR_*` variables expose current harness environment facts. ",
-        "Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. ",
-        "On Windows a force-killed command settles as `[exit code: 1]` without a signal marker — treat it as an interruption, not a command failure. ",
-        "Provide `description` before `command` in the arguments. ",
-        "Before any delete or move, verify that the resolved absolute target path is the intended one; never run it against a computed path you have not checked. ",
-        "Do not assign to automatic variables such as `$HOME`; variable names are case-insensitive, so `$home` is the same read-only variable. ",
-        "Commands may run under a file sandbox; a blocked file operation is reported as ",
-        "`[sandbox: file access denied under <mode> mode]`, a policy denial: do not retry another way."
-    );
+    let base = catalog_gen::PWSH_DESCRIPTION.to_owned();
     if !windows_sandbox {
-        return base.to_owned();
+        return base;
     }
     concat!(
         " Under the Windows sandbox, read-only pwsh runs in PowerShell ConstrainedLanguage mode, while ",
@@ -72,29 +50,57 @@ pub fn pwsh_description(windows_sandbox: bool) -> String {
     .to_owned()
 }
 
-/// Builds one tool's parameter table (dsh `parameters`): the shared
-/// shell core, plus the background key while a job registry backs the
-/// tool, plus the escalation pair while the composition confines.
+/// The bash parameter table: the catalog-frozen base plus the
+/// registration facts (the background key while a job registry backs
+/// the tool; the escalation pair while the composition confines).
 #[must_use]
-pub fn shell_parameters(
+pub fn bash_parameters(background: bool, escalation: bool, promote: bool) -> Value {
+    shell_parameters(
+        background,
+        escalation,
+        promote,
+        catalog_gen::BASH_COMMAND_TEXT,
+        catalog_gen::BASH_DESCRIPTION_PROPERTY_TEXT,
+    )
+}
+
+/// The pwsh parameter table (the bash twin over the PowerShell texts).
+#[must_use]
+pub fn pwsh_parameters(background: bool, escalation: bool, promote: bool) -> Value {
+    shell_parameters(
+        background,
+        escalation,
+        promote,
+        catalog_gen::PWSH_COMMAND_TEXT,
+        catalog_gen::PWSH_DESCRIPTION_PROPERTY_TEXT,
+    )
+}
+
+/// Builds one tool's parameter table (dsh `parameters`): the shared
+/// shell core over the two catalog-frozen per-tool texts, plus the
+/// background key while a job registry backs the tool, plus the
+/// escalation pair while the composition confines. The workdir and
+/// `run_in_background` texts are byte-identical across the twins, so the
+/// shared builder reads the bash constants (the per-tool diff tests pin
+/// both spellings against the catalog).
+fn shell_parameters(
     background: bool,
     escalation: bool,
     promote: bool,
-    command_word: &str,
+    command_text: &str,
+    description_property_text: &str,
 ) -> Value {
     let mut properties = serde_json::Map::new();
     properties.insert(
         "description".to_owned(),
         json!({
             "type": "string",
-            "description": "Clear, concise description of what this command does in active voice, \
-5-10 words (shown in the UI). Examples: \"ls\" → \"List files in current directory\"; \
-\"git status\" → \"Show working tree status\"; \"npm install\" → \"Install package dependencies\"."
+            "description": description_property_text,
         }),
     );
     properties.insert(
         "command".to_owned(),
-        json!({ "type": "string", "description": format!("The {command_word} command to execute.") }),
+        json!({ "type": "string", "description": command_text }),
     );
     properties.insert(
         "timeoutMs".to_owned(),
@@ -104,8 +110,7 @@ pub fn shell_parameters(
         "workdir".to_owned(),
         json!({
             "type": "string",
-            "description": "Working directory for this command. Defaults to the session workspace; \
-        a relative path is resolved against it."
+            "description": catalog_gen::BASH_WORKDIR_TEXT,
         }),
     );
     if background {
@@ -113,8 +118,7 @@ pub fn shell_parameters(
             "run_in_background".to_owned(),
             json!({
                 "type": "boolean",
-                "description": "Run in the background and return a job id immediately \
-            (collect with job_output, stop with job_kill). No timeout applies."
+                "description": catalog_gen::BASH_RUN_IN_BACKGROUND_TEXT
             }),
         );
     }
@@ -223,7 +227,7 @@ mod tests {
         assert!(description.starts_with("Execute a bash command (`bash -c`)"));
         assert!(description.contains("Managed `$FR_*` variables"));
         assert!(description.ends_with("do not retry another way."));
-        let parameters = shell_parameters(true, true, true, "bash");
+        let parameters = bash_parameters(true, true, true);
         let keys: Vec<&str> = parameters["properties"]
             .as_object()
             .expect("properties")

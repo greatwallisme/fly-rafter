@@ -134,7 +134,8 @@ pub enum ToolExecutionMode {
 }
 
 /// The completed outcome handed to `presentResult`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolResult {
     /// The final model-facing content (or the rendered error text).
     pub content: Vec<ContentBlock>,

@@ -1608,10 +1608,23 @@ impl crate::definition::ToolDefinition for WireToolDefinition {
         &self,
         _args: &Value,
         exec: &ToolExecution,
-        _signal: Arc<crate::signal::ToolSignal>,
+        signal: Arc<crate::signal::ToolSignal>,
         _run: &mut crate::definition::ToolRunContext<'_>,
     ) -> Result<Value, crate::types::ToolError> {
-        self.call_body(exec)
+        // The per-call abort watcher (the Q16a-6 kill carrier): while the
+        // body runs, one plugin-owned thread polls the fused signal and
+        // kills the call's jobs through the fr-shell kill-by-tool-call
+        // face — the only face the instance locks leave reachable
+        // mid-dispatch (the tools fabric and the tool plugin hold their
+        // own locks for the whole call; fr-shell's frees between the
+        // body's bounded wait slices). The watcher is joined before this
+        // call returns, so a promoted/background job outliving the call
+        // is never killed by it (the dsh shape: the in-body kill exists
+        // only while the call waits).
+        let watcher = AbortWatcher::arm(self.seam, exec.call_id.clone(), Arc::clone(&signal));
+        let outcome = self.call_body(exec);
+        watcher.disarm();
+        outcome
     }
 
     fn defer_loading(&self) -> bool {
@@ -1624,5 +1637,134 @@ impl crate::definition::ToolDefinition for WireToolDefinition {
 
     fn concurrency_safe(&self, _args: &Value) -> Option<bool> {
         self.spec.is_concurrency_safe
+    }
+
+    fn project_content(
+        &self,
+        exec: &ToolExecution,
+        result: &ToolExecutionResult,
+    ) -> Option<Vec<fr_wire::ContentBlock>> {
+        let endpoint = self.spec.project_content.as_ref()?;
+        let frame = serde_json::json!({ "call": wire_execution(exec), "result": result });
+        call_endpoint::<Option<Vec<fr_wire::ContentBlock>>>(&self.seam, endpoint, &frame)
+            .ok()
+            .flatten()
+    }
+
+    fn finalize_content(
+        &self,
+        exec: &ToolExecution,
+        result: &ToolExecutionResult,
+    ) -> Option<Vec<fr_wire::ContentBlock>> {
+        let endpoint = self.spec.finalize_content.as_ref()?;
+        let frame = serde_json::json!({ "call": wire_execution(exec), "result": result });
+        call_endpoint::<Option<Vec<fr_wire::ContentBlock>>>(&self.seam, endpoint, &frame)
+            .ok()
+            .flatten()
+    }
+
+    fn present_call(&self, args: &Value) -> Option<crate::presentation::ToolCallView> {
+        let endpoint = self.spec.present_call.as_ref()?;
+        // Soft-wrapped like the built tools: invalid arguments present as
+        // the generic rendering instead of failing (a presentation-grade
+        // projection never rejects the call).
+        let violations =
+            crate::json_schema::validate_json_schema_value(&self.spec.parameters, args, "");
+        if !violations.is_empty() {
+            return None;
+        }
+        call_endpoint::<Option<crate::presentation::ToolCallView>>(
+            &self.seam,
+            endpoint,
+            &serde_json::json!({ "args": args }),
+        )
+        .ok()
+        .flatten()
+    }
+
+    fn present_result(
+        &self,
+        args: &Value,
+        result: &crate::types::ToolResult,
+    ) -> Option<crate::presentation::ToolResultView> {
+        let endpoint = self.spec.present_result.as_ref()?;
+        let violations =
+            crate::json_schema::validate_json_schema_value(&self.spec.parameters, args, "");
+        if !violations.is_empty() {
+            return None;
+        }
+        call_endpoint::<Option<crate::presentation::ToolResultView>>(
+            &self.seam,
+            endpoint,
+            &serde_json::json!({ "args": args, "result": result }),
+        )
+        .ok()
+        .flatten()
+    }
+}
+
+/// The per-call abort watcher (the Q16a-6 kill carrier): one plugin-owned
+/// thread per wire-tool execution, polling the fused signal and killing
+/// the call's jobs through the fr-shell kill-by-tool-call face the moment
+/// any leg aborts. The kill is best-effort: an unauthorized or absent
+/// jobs face (no fr-shell in the composition, a job-less tool) fails the
+/// one require deterministically and the watcher exits — it never blocks
+/// or retries. The dsh counterpart is the tool body's own `stop` on the
+/// wait rejection; the watcher exists because the body's plugin instance
+/// is lock-blocked for the whole call.
+struct AbortWatcher {
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+/// The kill reason the watcher carries (the dsh `stop('tool call
+/// aborted')` reason verbatim; the shell-tool bodies map a settlement
+/// carrying it to the structured abort).
+const ABORT_KILL_REASON: &str = "tool call aborted";
+
+/// The watcher poll interval. An abort reaches the kill request within
+/// one interval; the fr-shell wait slices are sized so the queued kill
+/// lands before the body's next slice re-locks the instance.
+const WATCHER_POLL: Duration = Duration::from_millis(50);
+
+impl AbortWatcher {
+    /// Arms one watcher over the fused signal of one in-flight call.
+    fn arm(seam: HostSeam, call_id: String, signal: Arc<ToolSignal>) -> Self {
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        let handle = std::thread::Builder::new()
+            .name("fr-tools-abort-watcher".to_owned())
+            .spawn(move || {
+                while !thread_stop.load(std::sync::atomic::Ordering::Acquire) {
+                    if signal.is_aborted() {
+                        // One best-effort kill attempt, then the watcher
+                        // is spent (dsh kills once per wait rejection).
+                        let payload = serde_json::json!({
+                            "call_id": call_id,
+                            "reason": ABORT_KILL_REASON,
+                        });
+                        if let Ok(bytes) = serde_json::to_vec(&payload) {
+                            let _ = seam.require(
+                                fr_wire::services::jobs::SERVICE_NAME,
+                                fr_wire::services::jobs::METHOD_KILL_BY_TOOL_CALL,
+                                &bytes,
+                            );
+                        }
+                        break;
+                    }
+                    std::thread::sleep(WATCHER_POLL);
+                }
+            })
+            .ok();
+        Self { stop, handle }
+    }
+
+    /// Stops and joins the watcher (the plugin-owned-thread discipline:
+    /// no watcher outlives its call, so teardown needs no extra join).
+    fn disarm(self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Release);
+        if let Some(handle) = self.handle {
+            let _ = handle.join();
+        }
     }
 }

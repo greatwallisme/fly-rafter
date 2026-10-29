@@ -267,6 +267,9 @@ pub mod jobs {
     pub const METHOD_WAIT: u32 = 1006;
     /// Drop one settled job's record from the visible set.
     pub const METHOD_REMOVE: u32 = 1007;
+    /// Kill every job registered under one tool call (the caller-abort
+    /// kill carrier; idempotent against settled or absent jobs).
+    pub const METHOD_KILL_BY_TOOL_CALL: u32 = 1008;
 }
 
 /// The `'shell'` service face (owner crate `fr-shell`).

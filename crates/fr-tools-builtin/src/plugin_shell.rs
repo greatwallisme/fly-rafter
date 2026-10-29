@@ -383,21 +383,20 @@ fn read_default_mode(link: &HostLink) -> Option<Vec<&'static str>> {
     Some(escalation_modes_from(mode_word))
 }
 
+/// The two prompt sections (dsh `ctx.systemPrompt.section`): the names,
+/// the dsh orders, and the script-extracted verbatim texts (the catalog
+/// generator; the PRD 22 rule — the texts live in the dsh tool sources,
+/// not the catalog).
+const fn prompt_sections() -> [(&'static str, f64, &'static str); 2] {
+    [
+        ("tool:bash", 1000.0, crate::catalog_gen::BASH_SECTION_TEXT),
+        ("tool:pwsh", 1010.0, crate::catalog_gen::PWSH_SECTION_TEXT),
+    ]
+}
+
 /// Registers the two prompt sections (dsh `ctx.systemPrompt.section`).
 fn register_sections(link: &HostLink) -> Option<()> {
-    let sections = [
-        (
-            "tool:bash",
-            1000.0,
-            "Check the [exit code: N] marker on every bash result; investigate failures before moving on.",
-        ),
-        (
-            "tool:pwsh",
-            1010.0,
-            "Non-zero exits are reported as `[exit code: N]` markers; investigate failures before moving on. On Windows a killed process settles as `[exit code: 1]` without a signal marker; treat a bare exit 1 after an interruption as a termination, not a command failure.",
-        ),
-    ];
-    for (name, order, text) in sections {
+    for (name, order, text) in prompt_sections() {
         step(
             link,
             fr_wire::services::system_prompt::SERVICE_NAME,
@@ -437,11 +436,11 @@ fn register_projection(link: &HostLink) -> Option<()> {
 /// Registers the two tools (the fr-tools register face; the endpoints
 /// point back at this artifact's own service).
 fn register_tools(link: &HostLink, advertise_escalation: bool) -> Option<()> {
-    for (name, description, command_word, execute, render_m, present_call, present_result) in [
+    for (name, description, parameters, execute, render_m, present_call, present_result) in [
         (
             "bash",
             crate::schema::bash_description(),
-            "bash",
+            crate::schema::bash_parameters(true, advertise_escalation, true),
             crate::service::METHOD_BASH_EXECUTE,
             crate::service::METHOD_BASH_RENDER,
             crate::service::METHOD_BASH_PRESENT_CALL,
@@ -450,15 +449,13 @@ fn register_tools(link: &HostLink, advertise_escalation: bool) -> Option<()> {
         (
             "pwsh",
             crate::schema::pwsh_description(advertise_escalation),
-            "PowerShell",
+            crate::schema::pwsh_parameters(true, advertise_escalation, true),
             crate::service::METHOD_PWSH_EXECUTE,
             crate::service::METHOD_PWSH_RENDER,
             crate::service::METHOD_PWSH_PRESENT_CALL,
             crate::service::METHOD_PWSH_PRESENT_RESULT,
         ),
     ] {
-        let parameters =
-            crate::schema::shell_parameters(true, advertise_escalation, true, command_word);
         step(
             link,
             fr_wire::services::tools::SERVICE_NAME,
@@ -710,3 +707,35 @@ pub static DOUGONG_PLUGIN_EXPORTS: PluginExports = PluginExports {
     on_next,
     teardown,
 };
+
+#[cfg(test)]
+mod tests {
+    /// The two tool sections ride the dsh orders and their verbatim
+    /// texts: the bash order opens the 1000-3000 tool band, the pwsh
+    /// twin sits ten above it (the builtin-tools contract's section
+    /// clause).
+    #[test]
+    fn prompt_sections_pin_the_two_tools() {
+        let sections = super::prompt_sections();
+        assert_eq!(sections[0].0, "tool:bash");
+        assert_eq!(sections[0].1, 1000.0);
+        assert!(
+            sections[0].2.starts_with("Check the [exit code: N] marker"),
+            "{}",
+            sections[0].2
+        );
+        assert_eq!(sections[1].0, "tool:pwsh");
+        assert_eq!(sections[1].1, 1010.0);
+        assert!(
+            sections[1]
+                .2
+                .starts_with("Non-zero exits are reported as `[exit code: N]` markers"),
+            "{}",
+            sections[1].2
+        );
+        for (name, order, _) in sections {
+            assert!(name.starts_with("tool:"));
+            assert!((1000.0..=3000.0).contains(&order));
+        }
+    }
+}

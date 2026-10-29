@@ -112,6 +112,30 @@ impl HostLink {
             ));
         }
     }
+
+    /// Grants one committed target activation access to a provided
+    /// service (the D31 registration primitive; no call, no buffer).
+    pub(crate) fn grant(&self, target_service: &str, granted_service: &str) -> Result<(), String> {
+        // SAFETY: the copied vtable is live until this activation's
+        // `teardown` returns; both names are read-only byte strings for
+        // the call.
+        let status = unsafe {
+            (self.host.grant)(
+                self.host.host_handle,
+                target_service.as_ptr(),
+                target_service.len(),
+                granted_service.as_ptr(),
+                granted_service.len(),
+            )
+        };
+        if status == dougong_abi::STATUS_OK {
+            Ok(())
+        } else {
+            Err(format!(
+                "grant {granted_service} to {target_service} failed with host status {status}"
+            ))
+        }
+    }
 }
 
 /// The durable job lifecycle records over the `'session-persistence'`
@@ -214,6 +238,16 @@ impl ShellState {
             fr_wire::services::session_persistence::SERVICE_NAME,
             fr_wire::services::session_persistence::METHOD_DECLARE_EVENT_TYPES,
             &bytes,
+        )
+        .ok()?;
+
+        // The D31 grant: the tools fabric's abort watcher requires the
+        // jobs kill-by-tool-call face directly (its own wire face is
+        // instance-lock blocked during a dispatch, so the kill cannot
+        // ride the tools fabric or the tool plugin).
+        link.grant(
+            fr_wire::services::tools::SERVICE_NAME,
+            fr_wire::services::jobs::SERVICE_NAME,
         )
         .ok()?;
 
