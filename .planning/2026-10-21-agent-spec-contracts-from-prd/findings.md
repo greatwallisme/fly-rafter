@@ -1581,6 +1581,212 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 
 另记：核实时误执行 `bind-session-tests.py --help`（脚本不识别 --help 直接运行）输出 applied 4 changes 但 git diff specs/ 为空=幂等重写无字节变化，无副作用。
 
+### 16a 域深读（2026-10-29 续）：shell 缝 + shell-env + bash 执行体双件
+
+**shell/shell（ctx.shell 缝，types.ts 238+index.ts 96）**：
+- `ShellExecutor` 抽象服务：`sandboxMode` getter（默认 undefined=不沙箱）/`resolve(request)→spec`/`execute(spec)→ShellExecution`；同名服务二装=cordis 重复服务抛错
+- `ShellExecRequest{command, workdir?, timeoutMs?, onExpiry?('kill'|'none'), stdoutMaxBytes?, signal?, stdin?, env?, dshEnv?, sandboxPolicy?}`；`ShellExecSpec`=resolve 全填版（onExpiry 缺省 'kill'）
+- `ShellRunResult{exitCode|null, signal|null, timedOut, aborted, timeoutMs, stdout:CollectedOutput, stderr:CollectedOutput, sandbox?}`；**首因分类**：timeout 与 abort 熔合单 deadline，互斥（timedOut=执行体自身超时首因；aborted=caller 取消首因）
+- `ShellSandboxInfo{mode, denied, enforcement?, runnerFailed?}`——独立于退出状态报告（区分命令失败/策略拒/runner 失败）
+- `ShellProcess{status:running|completed|killed, exitCode, signal, done(never rejects), sandbox?, readOutput()(消耗式增量:delta,lossy,stdoutSpillPath?,stderrSpillPath?), observed{stdout,stderr 非消耗 offset readers}, kill()→bool(已完成 false 幂等)}`；`ShellExecution=ShellProcess+result()`（前台投影，memoized；仅基础设施失败 reject——spawn 未产出进程；非零退出/超时杀/取消杀全部 resolve）
+- 任何 signal 终止（含命令自杀）=killed；spawn 拒绝 settle 为 killed+错误上 stderr 读路径（`subprocess failed before reporting an outcome: ${detail}` 为整条 stderr 流）；preparation 超时=已 settle 的 timed-out 无输出 handle
+- 组装 teardown（ctx.subprocess disposal）杀运行中进程并 await done；仅执行体 reload 不杀
+- `onExpiry:'none'`=不 arm deadline（caller 自界等待）；preparation 期到期=settle timed-out handle
+
+**shell/render.ts（43 行）**：`parseExitStatus`——`[exit code: N]`/`[killed by signal: X]` 标记=renderer 追加、Host presentResult 解析、Web 终端卡镜像的三方契约；标记须行首 `\n`+串尾才匹配；被消费标记从 body 移除（终端 pill 避免双显）；timeout/sandbox 拒绝标记留在 body（无 pill 对应）
+
+**shell-env（ctx.shellEnv，211 行）**：
+- 内建事实四件：`DSH_HOME`（resolveDshHome(config.dshHome)）、`DSH_SHELL='1'`、`DSH_SESSION_ID`（execution.agent.session.header.id，agent 缺席不发）、`DSH_PROFILE`/`DSH_PROFILE_DIR`（profileContext 机会性）
+- `BashEnvContributor{name, variables:Record<key,{description}>, resolve(execution)→Partial}`——name/key 唯一；保留键五件不可认领；key 校验=`DSH_` 前缀+`[A-Z][A-Z0-9_]*` 后缀
+- 注册校验文案逐字：`bash env contributor name must be non-empty` / `bash env contributor "N" is already registered` / `bash env contributor "N" declared invalid key "K"` / `bash env contributor "N" cannot own reserved key "K"` / `bash env contributor "N" must describe "K"` / `bash env key "K" is already owned by contributor "O"; contributor "N" cannot also own it` / collect 时 `bash env contributor "N" returned undeclared key "K"` / `bash env contributor "N" returned a non-string value for "K"`
+- `collect(execution)`=冻结快照，keys localeCompare 排序；contributors 按 name 排序解析
+- **命名分叉候选**：dsh 置 `DSH_*` 进 shell 环境；fr 自有环境变量按 CLAUDE.md 必须 `FR_` 前缀——待裁决（1:1 口径 vs 命名硬约束；FR_ 前缀判例=fr 已有 FR_DSH_SOURCE/FR_PERMISSION_MODE/FR_SESSIONS_ROOT）
+
+**bash-local（LocalBashExecutor，404 行）**：
+- `ENV_OVERRIDES={NO_COLOR:'1', TERM:'dumb', PAGER:'cat', GIT_PAGER:'cat'}`（合并序=overrides 先、caller env 中、dshEnv 最后；subprocess 服务另做凭据 scrub）
+- Config：cwd（缺省 process.cwd()）/timeoutMs 120_000/maxTimeoutMs 600_000/maxOutputBytes 64_000/maxSpillBytes 64MiB/graceMs 3_000（全 volatile）
+- 校验文案：`bash-local: ${name} must be a positive finite number`（五字段全查）/`bash-local: graceMs must be no greater than ${MAX_TIMER_DELAY_MS}`；resolve 时 clampTimeout('bash-local: request.timeoutMs')
+- 公共命令 argv=`['bash','-c', command]`；stdin 缺省 'ignore'；stdout cap=request.stdoutMaxBytes??maxOutputBytes（stderr 恒 maxOutputBytes）；spill={maxBytes: maxSpillBytes}
+- readOutput 增量合并格式：stdout 段+（缺尾补 `\n`）+`[stderr]\n`+stderr 段；provider 失败 note 以单 `\n` 接缝追加；lossy=任一流 lossy；spillPath 透传
+- deadline 熔合：`deadline(signal, timeoutMs, 'BASH_TIMEOUT')` 识别记 BASH_TIMEOUT——仅本执行体超时算 timedOut，外部 deadline 归 abort
+- executeArgv 保护域（子类 bash-sandbox 复用）：argvOrPrepare 可为 async 准备函数（confine 期间取消/超时=preparationTimedOut）；同步 spawn throw 收敛为同形 settled-killed
+
+**bash-sandbox（SandboxBashExecutor，192 行）**——**与 fr-sandbox 批 2b 缝面精确对接**：
+- `inject=['subprocess','sandbox','sandboxPolicy']`；继承 LocalBashExecutor；Config 同 local 逐字（沙箱缺省不在此——归 ctx.sandboxPolicy）
+- `sandboxMode`=ctx.sandboxPolicy.defaultMode（schema 广播用能力事实；实际执行带 resolved per-call policy）
+- resolve()：`sandboxPolicy: request.sandboxPolicy ?? ctx.sandboxPolicy.resolve()`
+- execute：mode=danger-full-access→直跑+decorate `{mode, denied:false}`；否则 executeArgv(spec, prepare=confine(`['bash','-c',command]`, policy)→ConfinedArgv, onStarted=装 per-process facts{mode,enforcement,denialSignatures,runnerFailureRules,runnerProgram,workdir})
+- 分类序：**runner 失败压过 denial**（命令没跑）；前台 runner 失败=throw SandboxUnavailableError（→SANDBOX_UNAVAILABLE）；后台=proc.sandbox.runnerFailed；上游 abort 在 spawn 前仍=取消；isRunnerSpawnFailure(providerError, argv[0], workdir) 归因 runner
+- per-process facts Map（非共享 latest-wrap：并发 call 各方言不同）；onProcessDone 盖 proc.sandbox（provider 拒绝时仅在 error 独立点名 argv[0] 才归 runner；signal 死非 denial）
+
+### 16a 域深读（续 2）：tool-bash 三件全读（工具层+作业适配+渲染）
+
+**tool-bash（556 行全读）**：
+- inject：`['tools','shell','systemPrompt','shellEnv','workingDirectory']`
+- Config：enableRunInBackground（默认 true）/promoteOnTimeout（默认 true，仅 background 可用时生效）
+- validateBashArgs 文案：`invalid command: expected a non-empty string`/`invalid description: expected a non-empty string`/`invalid timeoutMs: expected a positive number, got ${JSON.stringify(args.timeoutMs)}`；升级参数走 validateEscalationArgs（fr-sandbox 已实现）；effectiveMode===sandbox_permissions 时跳过（同模式免审）
+- description() 逐字（模板内嵌 DSH_ENV_PREFIX，fr 侧对应 FR_ 前缀变量名）：`Execute a bash command (\`bash -c\`) and return its stdout/stderr. Each call runs in a fresh shell; pass \`workdir\` instead of using \`cd\`. Managed \`$DSH_*\` variables expose current harness environment facts. Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. Provide \`description\` before \`command\` in the arguments. Before any delete or move, verify that the resolved absolute target path is the intended one; never run it against a computed path you have not checked. An unset variable expands to an empty string, so guard variables in such paths with \`${VAR:?}\`. Commands may run under a file sandbox; a blocked file operation is reported as \`[sandbox: file access denied under <mode> mode]\`, a policy denial: do not retry another way.`
+- systemPrompt section：name 'tool:bash'、order=getSectionOrder('TOOL_BASH')、text=`Check the [exit code: N] marker on every bash result; investigate failures before moving on.`
+- presentCall：background→generic card{title=command, kind:'execute', rawInput=command, content=[{type:'text',text:description}]}；前台→terminal card{title=command, description, cwd?}（workdir 缺席不发）
+- presentResult：background/promoted/isError→generic fenced ```console``` 块（尾换行剥除）；前台→terminal card+parseExitStatus（exit 标记→exit pill，出 body）
+- resolveWorkdir：model workdir 相对→`${sessionCwd}${sep}${modelWorkdir}`；model 缺席→sessionCwd；session 缺席→model 原样
+- canonicalBashResult(result, cwd)：{cwd, exitCode, signal, timedOut, aborted, timeoutMs, stdout{text,truncated,spillPath?}, stderr{...}, sandbox?{mode,denied,enforcement?,runnerFailed?}}（DTO 化）
+- output schema oneOf 三形：background{kind,jobId,cwd}/promoted{kind,cwd,jobId,timeoutMs,output}/foreground{kind,cwd,exitCode,signal,timedOut,aborted,stopped?,timeoutMs,stdout{},stderr{},sandbox?}；render：background→`started background job ${jobId}`；promoted→renderPromoted；前台→renderResult
+- presentationMeta={cwd}
+- execute 序：validateBashArgs→升级审批（execute 内、任何执行前；approveEscalation({requestedMode,justification,effectiveMode,subject:'command'},{approver,agent,callId,toolName:'bash',signal})）→cwd=workingDirectory.ensure(agent, signal)→resolveWorkdir→dshEnv=shellEnv.collect(exec)→分派
+- run_in_background 分派：enableRunInBackground=false→`run_in_background is disabled for this deployment (enableRunInBackground: false)`；jobs 缺席→`background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs`；exec.signal.aborted→toolAborted；resolve({...,onExpiry:'none'})→startJob→{kind:'background'}+jobId+cwd
+- 前台 promote 路径：resolve({...,onExpiry:'none'})→startJob→waitOnJob；admission 拒绝→logger.warn `bash: job registration refused, running in the foreground with the timeout kill instead: ${String(error)}`→落回 deadline-kill 前台
+- waitOnJob：registry.wait(id, timeoutMs, owner, exec.signal)——caller abort→stop('tool call aborted')+throw toolAborted；等满+process undefined→stop('timed out during preparation')→settled 空 foreground 形（timedOut:true,空流,sandbox{mode,denied:false}）；等满+process 在→**promotion**：一次消耗式 registry.read 播种→{kind:'promoted', jobId, timeoutMs, output:renderJobRead(ringDelta(chunks),lossy,spillPaths,proc?.sandbox,escalationModes)}；等满前 settle→registry.remove+process.result()→stopped 有值则并 {stopped}
+- 纯前台（无 promote）：resolve({...,signal: exec.signal})→execute→result()→aborted→throw toolAborted
+- 注册双态：!backgroundEnabled→前台专用注册即返；jobs 在场→job-backed 注册；jobs 缺席→前台注册+ctx.inject(['jobs']) 到场换装、离场换回（switcher 判例：jobs 到场/离场双臂）
+
+**tool-bash/background.ts（129 行）**：
+- sandboxNotes：runnerFailed→`[sandbox: the sandbox runner itself failed under ${mode} mode — the command did not run; this is a sandbox problem, not a command failure]`；denied→sandboxDenialMarker(mode)+（escalationModes 非空）escalationHintMarker('command')
+- processOutcome：killed→{status:'killed', detail: signal 已知 `signal: ${signal}` else 'killed before exit'}；其他→{status:'completed', detail:`exit code: ${exitCode ?? 0}`}；notes 非空→detail 尾接 `; ${notes.join(' ')}`
+- processSources：lazy 绑定 observed readers（starter 内 spawn、admission 后）；proc() undefined→空读
+- ringDelta：stdout chunks 顺序 join+[stderr] 段单 `\n` 接缝——与 readOutput 合并格式同构
+- processJob：AbortController+start(controller.signal)→kill-on-abort（abort 后 kill）→await done→outcome；catch→{status: aborted&&process undefined?'killed':'failed', detail:error.message}
+
+**tool-bash/render.ts（128 行）**：
+- streamText 截断通告：`[output truncated; full output: ${spillPath ?? '(unavailable)'}]`
+- renderResult 标记序（exit 标记最后=parseExitStatus 锚点）：sandbox 拒绝标记+升级提示→`[timed out after ${timeoutMs}ms]`→`[stopped: ${reason}]`→`[killed by signal: X]`/`[exit code: N]`；body 空→`(no output)`；markers 前单 `\n` 补齐
+- renderPromoted 尾句逐字：`[still running after ${timeoutMs}ms; moved to background job ${jobId}]\n` + `The command keeps running in the background. You will be notified when it finishes; read newer output with job_output, stop it with job_kill.`
+- renderJobRead 通告序：lossy→`[some output was dropped from memory; full output: ${spillPaths.join(', ') | '(unavailable)'}]`；runnerFailed/denied 两臂同 sandboxNotes
+
+### 16a 域深读（续 3）：subprocess 缝 + local 提供者
+
+**subprocess/subprocess/src/types.ts（297 行全读）**：
+- `DSH_ENV_PREFIX='DSH_'`（管理环境命名空间真源）
+- `CollectedOutput{text=截断时为 TAIL, truncated, spillPath?}`；`SubprocessCollect{maxBytes(尾保留), spill?{maxBytes}(更大=丢弃未完成 spill)}`
+- stdio 三态：stdin `'ignore'|'pipe'|{data}`；输出 `'pipe'|'inherit'|SubprocessCollect`；control?: 'pipe'（独立字节双工通道）
+- `SubprocessSpawnSpec{argv(不 shell 解释), cwd, stdio, graceMs(>0≤MAX_TIMER_DELAY_MS), signal?, env?}`——env undefined 条目=墓碑（从 child 移除 ambient 条目）；字符串=显式 opt-in（可穿越凭据 scrub）
+- `SubprocessOutcome{exitCode|null, signal|null}`（Node close 词汇）；`SubprocessOutputReader.readFrom(fromByte)→{text, nextOffset, lossy, spillPath?}`（caller 持 offset、独立读者互不消耗；settle 后 readFrom(0)=batch 结果）
+- `SubprocessHandle{stdin/stdout/stderr/control?, collected, done(rejects spawn/provider 失败), terminate()(幂等,abort 亦触发), waitForExit(signal?)→bool——等**托管域**空而非仅直子退出}`
+- 终端原语（PTY）：`SubprocessTerminalSignal='SIGINT'|'SIGTERM'|'SIGKILL'|'SIGTSTP'|'SIGHUP'`（与 dsh-terminal TerminalSignal 成员一致无跨缝依赖）；`SubprocessTerminalEnvironment{platform:posix|windows, defaultShell?}`；`SubprocessTerminalSpawnSpec{argv,cwd,env?,rows,cols,terminalType,shellActivity?,graceMs,signal?}`；`SubprocessTerminalHandle{pid, output, done, write, resize, inspectForeground→{processGroupId,inputWaiting}|undefined, inspectActivity→{state:idle|busy|unknown, revision}, signalForeground(signal)→groupId, terminate()}`
+- `SubprocessRuntime` 抽象（终端侧另有两法）：`resolveExecutable`/`spawn`/`terminalEnvironment`/`spawnTerminal`
+
+**subprocess-local（index 374 行全读；spawn.ts/linux-scope.ts/process-inspector.ts 等 5.3k 行未逐行）**：
+- LocalSubprocessRuntime：live Set+terminals Set+controlChannels；host-exit 同步终止（process.prependListener('exit')）；disposal=terminate+await **托管域退出**（waitForExit），失败聚合 `local subprocess teardown failed`（AggregateError）
+- **containment 选择器**：linux→LinuxScopeSelector（systemd-run scope/私 bootstrap 探测缓存，probe=spawnSync fork）；win32→Windows Job Object（probeWindowsJob）；否则 fallback=弱托管+一次性 warn：`subprocess-local is using weaker process-tree containment because ${reason}; descendants that escape the process group or direct-parent tree are not guaranteed to terminate or delay waitForExit()`
+- fallback reason 文案四臂：`the current user-systemd scope or private bootstrap is unavailable`（linux）/`macOS has no supported persistent process-range owner`（darwin）/`Windows ConPTY remains outside Job containment`（win terminal）/`the Win32 Job runner is unavailable`（win ordinary）/`platform ${platform} has no native managed range`（其他）
+- resolveExecutable 校验与文案：空名 `subprocess-local: executable must be non-empty`；带 / 的相对路径 `subprocess-local: command "X" is a relative path; use an absolute path or a bare PATH name`；终末 miss：绝对 `subprocess-local: command "X" is not an executable file` / bare `subprocess-local: command "X" was not found on PATH`
+- terminalEnvironment：platform posix|windows；defaultShell=win: ComSpec / posix: `$SHELL` || userInfo().shell
+- spawnTerminal（PTY）：node-pty；argv 必含程序（`subprocess-local: terminal argv must contain a program`）；linux-scope 时 systemd-run 包装+PWD/TERM 注入；win useConptyDll
+- **分叉候选**：dsh 的托管域分级（linux systemd-run scope→win Job Object→进程组 fallback）在 fr M1 是否复刻分级还是直接进程组？——PRD 17.2 未点名 systemd；1:1 口径="行为与协议对齐"，进程树终止保证属行为层 → 待裁决
+
+### 16a 域深读（续 4）：jobs 缝三件全读（types 309+index 198+view 99）+ jobs-local（717 全读）
+
+**jobs/jobs/src/types.ts**：
+- 会话事件两件（SessionEventMap 合并）：`job/registered` JobRegisteredData{jobId, owner, kind, label, startedAt, toolCall?}；`job/settled` JobSettledData=注册事实+{finishedAt, status, cause, producerReported, detail?}——仅 owner 在场才记（unowned 不记），失败仅 warn `jobs: failed to record lifecycle for N: ...`
+- `JobOutcome{status:'completed'|'killed'|'failed', detail?, result?}`（result=值型作业一次性交付：settle 后首个 model read 交出）
+- `JobOutputSource{channel?, read(fromByte)→JobSourceRead{text,nextOffset,lossy,spillPath?}}`——registry 抽水（pump）进 ring；settle 前末次 drain
+- `JobHandle{id, append(text,{channel?,gapBefore?}), updateProgress(line)}`——start 内暂存写入随注册提交可见；settle 后写=日志丢弃不抛
+- `JobHooks{cancel(reason?)(同步幂等), done:Promise<JobOutcome>(never reject; reject 转 failed producerReported:false)}`
+- `JobSpec{kind(id 前缀), label, owner?(SessionId), toolCall?, outputLimitBytes?, output?, run(job)→JobHooks(run 抛=什么都不注册)}`；owner=live Agent 实例（dispose 取消并 await 作业）
+- `JobRead{chunks, lossy, result?, job}`（消耗 model cursor）；`JobOutputRead{chunks, next=total, lossy}`（不消耗 cursor）；`JobSettleCause='producer'|'kill'|'teardown'`
+- `JobEvent=registered|progress|stopping|removed{job}|settled{job,cause,awaited}|output{id,owner?,total}`；`JobEventFilter={owner}|{owners:'all'|'scope'}`；`awaited`=该 settlement 释放了活 wait
+- ring 语义：追加越 cap 丢最旧；窗下读者=lossy 读不报错；settle 收缩到 settled cap 且封流
+
+**jobs/jobs/src/index.ts（JobRegistry 抽象）**：
+- 抽象基类直装检查：`@deepseek-ai/dsh-jobs is the abstract job registry seam; load an implementation such as @deepseek-ai/dsh-jobs-local instead`
+- 八法：events/start/list/get/read/readAt/kill/wait/remove/attachController；start 前置=access+validation+owner cleanup+admission，抛=零残留；注册后不可失败
+- 所有权围栏=授权非保密（id 可预测）；settlement 首赢（单终局记录→放 waiters→一轮 contained 事件）；settled 记录保留到 owner/service disposal 或显式 remove
+- attachController：start 拒绝无 controller 服务的 owner（owner-relative 层，非进程级）
+
+**jobs/jobs/src/view.ts**：
+- `JobStatus='running'|'stopping'|'completed'|'killed'|'failed'`；`JobKindMap{bash:'bash'}` 声明合并扩展；`JobChannel='stdout'|'stderr'|'log'`（log 仅观察者）
+- `JobChunk{at(绝对), text, channel?, gapBefore?}`；`JobView{id, kind, label, owner?, outputLimitBytes?, status, progress?, detail?, startedAt, finishedAt?, output{total, earliest, spillPaths?}}`（fresh 对象非活状态）
+
+**jobs-local（LocalJobRegistry 717 行全读）**：
+- Config 默认：maxConcurrentJobsPerOwner 10/retainBytes 262144/settledRetainBytes 16384/pumpPollMs 150；`TASK_WAIT_TIMEOUT` wait 超时码
+- id=`${kind}-${randomUUID 去- 前 16}`（碰撞重试）
+- start 校验文案逐字：`background jobs unavailable: no job controller serves this agent (load @deepseek-ai/dsh-tool-jobs in its composition)`/`invalid job kind: expected a non-empty string`/`invalid job label: expected a non-empty string`/`invalid outputLimitBytes: expected a positive safe integer, got N`/`background job limit reached for this owner (limit: N); use job_kill to stop an unneeded job, wait for it to finish, then retry`/`background job ownership requires the agent registry (load @deepseek-ai/dsh-agent)`/`session "X" has no live agent (background job owner must be live)`
+- 访问围栏文案：`unknown job ${id}`/`job ${id} belongs to another session`（owner.id!==caller，!==undefined 语义=unowned 全开）；readAt `invalid output read offset: expected a non-negative safe integer, got N`；remove `job ${id} is still ${status}; kill it and wait for settlement before removing it`；wait `invalid wait timeout: expected a positive number of milliseconds, got N`/abort `'wait aborted'`
+- kill 序：cancel 先（抛不改状态）→status stopping→killReason 后写者赢→settleCause 'kill'→emit stopping→'requested'；已终=`already-finished`
+- settle 序（首赢）：status=outcome.status→killed+killReason 合并 detail（`${outcome.detail}; ${killReason}` 或仅 reason；**非 killed 结局保留 producer detail 单独**——reason 描述未落地的 kill）→progress 清→result 存→finishedAt→记 session 事件→ring.trim(max(settledRetain, total-modelCursor))（未消耗字节全保）→放 waiters→markSettled→emit settled{awaited}→emitOutput
+- appendRing：settled+producer 写→warn `jobs: append to settled job N dropped`（pump 静默丢）；starter 期写=随注册提交不发事件
+- guardSource：源首抛→warn `jobs: output source for N failed; its stream stops here: ...`→此后读=枯竭空读（作业跑到自身 settlement）
+- updateProgress settled→warn `jobs: progress update on settled job N dropped`
+- producer done reject→contained：warn `jobs: job N producer done promise rejected (producer contract violation): ...`→failed/producerReported:false
+- teardown 三路：owner disposal（cancelForTeardown 'owner disposed'→await settled→drop）/service disposal（'jobs service disposed'→await→drop→detach owner effects）/cancel 抛→force-fail settle{failed, detail=`cancel threw during teardown; work may be orphaned: ...`}+warn `jobs: cancel of N threw during teardown; job record forced failed and work may be orphaned: ...`；teardown settlement announce cause 'teardown'
+- 事件 hub：ScopedLayers owner-relative（global 层 controller 服务所有 owner；scope 层服务该组合下 agents）；订阅=注册者 ctx 的 effect
+- registered 事件先于 pump 首 drain（作业首事件恒 registered）
+
+### 16a 域深读（续 5）：jobs-local 三辅助件（ring 113+pump 106+events 102 全读）
+
+- **OutputRing**：绝对 offset 永不移；append(text,{channel?,gapBefore?},cap)→空串 false；trim：越 cap 丢头块（留 1），单块超 cap=保留 UTF-8 安全尾+gapBefore+at 前移（续字节扫描 `(byte&0xC0)===0x80`）；earliest=首块 at 或 total；readFrom(from)→`{chunks(交叠[from,total) 原样新 wire chunks), next=total, lossy=from<earliest}`
+- **startPump**：pollMs 校验 `invalid pump pollMs: expected a positive finite number of milliseconds, got N`；drain 序=源数组序（跨源重排以 pollMs 界）；lossy 源读→gapBefore 块；spill(index,path) 每读上报（含 undefined=撤回）；until settle（或 reject 均算）→末次 drain；run 期资源恒定（1 订阅+1 timer）
+- **JobEventHub**：unscoped Set+ScopedLayers（scope 订阅文件进注册者 scope 层）；emit 序=unscoped（{owner} 过滤：ownerId!==filter.owner 跳过）→global.scoped 全收→chainLayers(owner scope)；listener 抛 contained：`jobs: event listener threw on ${event.type}: ...`
+- fr-shell jobs 服务真源至此**全落**（缝+local+ring+pump+events 五件 1347 行）；tool-jobs 三工具本体属 16c（Q94-A），届时读
+
+### 16a 剩余面（批 0 收尾清单）
+- tool-pwsh（617）+pwsh-local（449）+pwsh-sandbox——pwsh 与 bash 的 delta（mirror 判例：无沙箱控制）待读
+- persistent bash/pwsh 四包属 16e；win32-process 属 Windows lane；tool-jobs 属 16c
+- **批 0 分叉候选（汇总呈报待用户裁决，pwsh 读毕后单消息统一编号）**：① DSH_* 管理环境前缀 vs FR_ 命名硬约束（fr 判例已有 FR_DSH_SOURCE/FR_PERMISSION_MODE/FR_SESSIONS_ROOT；dsh shell 内变量与 tool description 模板逐字含 `$DSH_*`）② dsh 托管域分级（linux systemd-run scope→win Job Object→进程组 fallback+一次性 warn 文案）在 fr M1 是否复刻分级（行为对齐=1:1 口径）还是直接进程组（PRD 17 未点名 systemd）③ pwsh 在 M1 Linux 的地位（dsh 双 shell 全保留 vs Linux 无 pwsh 运行时的注册降级路径）④ shell-env 内建事实中 DSH_SESSION_ID 依赖 agent registry（fr 侧对应会话 id 来源=fr-session 头部 id）
+
+### 16a 域深读（终）：pwsh 三包全读（tool-pwsh 617+pwsh-local 449+resolve 79+pwsh-sandbox 200+helpers 120+render ~128）
+
+**pwsh=bash 的 call-for-call mirror（jscpd 显式判例），delta 全集**：
+- JobKindMap 合并 `pwsh:'pwsh'`；job kind='pwsh'；admission 拒绝 warn 前缀 `pwsh: job registration refused, ...`
+- **validatePwshArgs 无 effectiveMode 参数**（bash 有同模式免审臂：sandbox_permissions===effectiveMode 时跳过校验+justification 空白归一；pwsh 无——恒走全量 validateEscalationArgs，justification 原样传入）；validate 在 resolveSandboxPolicy **之前**（bash 在后）
+- pwshDescription(windowsSandbox) 双形：base=`Execute a PowerShell command (\`pwsh -Command\`) and return its stdout/stderr. Each call runs in a fresh pwsh process; pass \`workdir\` instead of using \`cd\`. Paths use native Windows form (\`C:\\...\`); read environment variables with \`$env:NAME\`. Managed \`$env:DSH_*\` variables expose current harness environment facts. Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. On Windows a force-killed command settles as \`[exit code: 1]\` without a signal marker — treat it as an interruption, not a command failure. Provide \`description\` before \`command\` in the arguments. Before any delete or move, verify that the resolved absolute target path is the intended one; never run it against a computed path you have not checked. Do not assign to automatic variables such as \`$HOME\`; variable names are case-insensitive, so \`$home\` is the same read-only variable. Commands may run under a file sandbox; a blocked file operation is reported as \`[sandbox: file access denied under <mode> mode]\`, a policy denial: do not retry another way.`；windowsSandbox 追加段（ConstrainedLanguage/命名管道 EPERM 边界，长文见源 :141-150）——gate=escalationModes 非空（'any confining executor mounted'，注释自认 POSIX pwsh-sandbox 组合须按平台 gate=tracked）
+- systemPrompt 'tool:pwsh'（order TOOL_PWSH）双句：`Non-zero exits are reported as \`[exit code: N]\` markers; investigate failures before moving on. On Windows a killed process settles as \`[exit code: 1]\` without a signal marker; treat a bare exit 1 after an interruption as a termination, not a command failure.`
+- resolveWorkdir 用 `path.resolve(sessionCwd, modelWorkdir)`（bash=字符串拼接 `${sessionCwd}${sep}${modelWorkdir}`）
+- 装配 guard 文案：`tool-pwsh: the mounted bash executor confines but ctx.sandboxPolicy is missing`（**措辞 bash executor 系 dsh 原文 quirk，逐字保留**）
+- 升级审批同构：subject 'command'/toolName 'pwsh'/缺位文案同 bash
+- wire schema 与 bash 逐字同形（注释明言 consumers of one must accept the other）
+
+**pwsh-local（PwshLocalExecutor）**：
+- argv=`[pwshPath, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', ENCODING_PREAMBLE+command]`——命令串单 argv 元素（PowerShell 自解析，无 shell 引号层）；ENCODING_PREAMBLE=`'[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [System.Text.UTF8Encoding]::new($false); '`（行 1 内 `; ` 分隔保错误行号）
+- ENV_OVERRIDES={NO_COLOR,PAGER,GIT_PAGER}（**无 TERM=dumb**——POSIX 概念）
+- Config 增 pwshPath（显式信任直用；缺省 win 探测序=PS7 安装→PATH 条目（剥引号）→PS 5.1 powershell.exe→bare 'pwsh'；非 win 恒 'pwsh'；candidateExists=lstat isFile||isSymbolicLink）；resolve 缓存 declared→changed 再探
+- 校验文案前缀 `pwsh-local: ...` 五字段同 bash；**deadline 识别码仍 'BASH_TIMEOUT'**（mirror 逐字判例）；executeArgv/onProcessDone 钩与 bash-local 全同（confining 子类包 argv）
+
+**pwsh-sandbox（SandboxPwshExecutor）**：与 bash-sandbox call-for-call 同构（inject 三件/mode=sandboxPolicy.defaultMode/resolve 戳 policy/execute danger 直跑+decorate/confine(`this.argv(spec)`, policy)/processFacts Map/runner 失败压过 denial/onProcessDone 盖章）；helpers 四函数（classifyDenial/classifyRunnerFailure/matchesSignature/isRunnerSpawnFailure）=bash-sandbox helpers 的逐调用镜像（EXECUTABLE_SPAWN_CODES={EACCES,ENOENT}/isUsableWorkdir/statSync+X_OK）——**fr-sandbox diagnostics.rs 已全实现，pwsh 直接复用**
+
+### 16a 批 1 设计钉（2026-10-29，执法点核实后实施前）
+
+**执法点核实（dougong-dylib 源码，跨边界必读判例）**：
+- `enter_exclusive`（lib.rs:282）+ DylibInvoke::call（:1341）：**实例 AsyncMutex 横跨整个 call 处理**（含 call_full FFI 段；event_bridge 注释明言）——fr-shell 内长阻塞 handler 会饿死本插件全部服务流量（并行 bash 调用互斥、job 读饿死）
+- 结论（强制推导，非分叉）：shell 长执行必须拆「即时返回 + 有界轮询面」——start 立即返回 token/jobId，wait 有界（切片轮询），工具侧循环驱动
+
+**跨插件工具注册机制（fr-tools 必扩）**：
+- 事实：fr-tools 服务面**无**工具注册法（METHOD 0-12 无 register）；registry 存进程内 `Arc<dyn ToolDefinition>`
+- 机制（三判例支撑，非分叉）：fr-tools 增 `METHOD_REGISTER=13`/`METHOD_UNREGISTER=14`（tools 面低带）——definition wire 形 `{name, description, parameters(raw schema), output{schema, render:{service,method}, presentationMeta?}, timeoutMs?, isConcurrencySafe?, deferLoading?, projectContent?/finalizeContent?/presentCall?/presentResult? 端点}`；execute/render 等=WireToolDefinition 实现 ToolDefinition trait 的端点化包装
+- 能力授予：fr-tools-builtin provide `'builtin-tools'` 服务（工具体端点面），setup 时 `grant("tools", "builtin-tools")`（D31 判例=sandbox-policy→system-prompt 同构）——fr-tools 的 dispatch worker 线程 require 'builtin-tools'.N（插件自有线程空栈无重入）
+- 注册 return id；fr-tools-builtin teardown 显式 unregister（answerer 判例同构）
+
+**fr-shell 服务面（三服务一工件 → 全工件方法号唯一，1000+ 号段判例推广）**：
+- `'subprocess'` 低带：0 describe / 1 spawn {argv,cwd,stdio,graceMs,env?}→{handle} / 2 read {handle,stream,from}→SubprocessOutputRead / 3 wait {handle}→{exitCode,signal}（**托管域等待**，阻塞有界） / 4 terminate {handle} / 5 resolveExecutable {command}→{path}
+- `'jobs'` 1000 带：1000 describe / 1001 list {caller?}→{jobs} / 1002 get {id,caller?}→view / 1003 read {id,caller?}→JobRead / 1004 readAt {id,from,caller?}→JobOutputRead / 1005 kill {id,caller?,reason?}→{result} / 1006 wait {id,timeoutMs,caller?,signal-note?}→view（**有界阻塞**） / 1007 remove {id,caller?}
+- `'shell'` 2000 带：2000 describe / 2001 sandbox_mode {}→{mode|null} / 2002 resolve {request}→{spec} / 2003 start {spec,args{command,label},owner?,toolCall?}→{jobId,workdir}——**startJob 吸收进 fr-shell**（process sources 闭包不可过线，in-crate registry 耦合强制；dsh 观察行为等价：job 出现/kind/label/toolCall 同型）
+- 纯前台 execute（registry-less）**不设**：fr 组合恒有 jobs（同插件 provide），零消费方不设零占位
+- 取消腿：工具 abort 路径经 'jobs' kill（dsh stop('tool call aborted') 同构）；轮询切片间检查本 call signal
+
+**fr-shell 内部结构（dsh 三包一 crate 对译）**：
+- `jobs_local` 模块：LocalJobRegistry+OutputRing+startPump+JobEventHub（全语义逐字，见 16a 深读续 4/5）
+- `subprocess_local` 模块：spawn+managed range；**Q16a-2A 全量分级**：linux systemd-run scope（探测缓存选择器）→win Job Object→进程组 fallback；session 事件 job/registered+job/settled 经 session-persistence append（failure=warn 不 fail）
+- `shell` 模块：ShellExecutor 面（resolve/execute）+LocalBashExecutor+`SandboxBashExecutor`（confine→fr-sandbox 'sandbox' 1001 confine 端点——跨插件 require，inject 'sandbox'！）+pwsh 双件（Q16a-3A）
+- 沙箱执行体选择：dsh 装配二选一装 local 或 sandbox 执行体（同名服务 ctx.shell 二装抛错）；fr 对应=bundle 层决定装哪个——**待批 2 装配裁决**（bundle 增 fr-shell 行：执行体选择表达式）
+- confine 跨插件：fr-shell inject ['sandbox']（fr-sandbox provide），require sandbox.1001；**非 grant**（inject 声明即能力）
+
+**descriptor**：`provide ["shell","subprocess","jobs"]` / `inject ["session-persistence","sandbox"]` / listen {}——setup 序：declare job/registered+job/settled → 构造 registry/subprocess/executor 三件（fail=任一失败 null 拒激活）
+
+**档载登记（下轮 Q 呈报）**：①owned-job live-agent 校验 M1 结构性缺席（无 agents registry；工具发起 job 的 caller 恒=活会话自身→M1 不可达）②owner-disposal 取消腿缺席（同因；teardown disposeAll 兜底）③job 完成通知机器（"You will be notified"）=agent-loop 侧 16c/d 落④bundle fr-shell 行执行体选择表达式=批 2 装配裁决
+
+## Phase 14（fr-tools+fr-approval+fr-sandbox）批 0 真源全读（2026-10-28 开始）
+
+- **Q16a-1A**：管理环境前缀全量 `FR_*`（FR_HOME/FR_SHELL/FR_SESSION_ID/FR_PROFILE/FR_PROFILE_DIR；贡献键校验与 ambient 剥除同前缀；bash/pwsh description 同位替换；FR_HOME=fr-config resolve_home 判例）——**PRD 19.2 条 25 已登记**（提示词逐字口径的受控偏差）
+- **Q16a-2A**：托管域分级全量复刻（linux systemd-run scope 探测缓存 → win32 Job Object → 进程组 TERM→KILL fallback + 一次性 warn 文案逐字）
+- **Q16a-3A**：pwsh 全平台注册（Linux 无 pwsh 运行时=spawn 失败自然报错，1:1 无偏差）
+- **Q16a-4A**：fr-shell-env 运行期经 ctx.require 向 session-persistence 拉 session id（Q110′A′ 读取判例：注册者自持折叠=读尾拉+本地折叠，消费方直接 require 读即可）
+
+## Phase 14（fr-tools+fr-approval+fr-sandbox）批 0 真源全读（2026-10-28 开始）
+1. **管理环境前缀**：dsh 置 `DSH_*`（DSH_HOME/DSH_SHELL/DSH_SESSION_ID/DSH_PROFILE/DSH_PROFILE_DIR+插件贡献键），tool description/system prompt 逐字含 `$DSH_*`/`$env:DSH_*`。CLAUDE.md 硬约束=自有环境变量 `FR_` 前缀。选项：A=全量改 FR_*（description 模板同步 FR_，1:1 偏差记 PRD 19.2）；B=协议豁免保留 DSH_*（wire 层豁免类推——但 shell 环境非 wire）。此分叉同染 shell-env 内建键名与 bash/pwsh description 文本。
+2. **托管域分级**：dsh subprocess-local=linux systemd-run scope（LinuxScopeSelector 探测缓存）→win32 Job Object→进程组 fallback（一次性 warn 文案钉存）。选项：A=M1 复刻分级（systemd-run+Job Object+fallback 全量，win32 Job 已有 fr-sandbox win/ 底子）；B=M1 仅进程组 TERM→KILL（PRD 17 未点名 systemd；1:1 偏差记 19.2）；C=分级留缝（trait 预留，M1 只落 fallback 臂）。
+3. **pwsh Linux 地位**：dsh tool-pwsh/pwsh-local 全平台可装（非 win 解析恒 'pwsh' 走 PATH；description 双形按 escalationModes gate 而非平台）。选项：A=fr 全保留（pwsh 工具照注册，Linux 无 pwsh 时 spawn 失败自然报错，1:1）；B=M1 Linux 仅注册 bash（pwsh 随 Windows lane，偏差记 19.2）。
+4. **DSH_SESSION_ID 来源**：dsh shell-env collect 从 execution.agent.session.header.id 取；fr 对应=fr-session 头部 id（fr-agent-loop 的 SessionFacts 面）。选项：A=同构（fr-shell-env 经 ctx.require 向 session-persistence 拉 id，Q110′A′ 注册者自持折叠判例——注意 shell-env 是消费方非注册者，直接 require 读即可）；B=壳装配期烘焙注入。倾向无结构性分叉，仅落实路径需裁。
+
 ## Phase 14（fr-tools+fr-approval+fr-sandbox）批 0 真源全读（2026-10-28 开始）
 
 ### 合同面（三 spec 全读）

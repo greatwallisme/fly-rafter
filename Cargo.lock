@@ -826,6 +826,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "fr-shell"
+version = "0.1.0"
+dependencies = [
+ "dougong-abi",
+ "fr-timeout",
+ "fr-wire",
+ "libc",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "fr-system-prompt"
 version = "0.1.0"
 dependencies = [

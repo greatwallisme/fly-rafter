@@ -1087,3 +1087,30 @@
 - 六门：fmt OK/clippy 0/1111 passed 0 failed（1096→1111）/doc 0/windows 编译门 fr-approval+fr-tools+fr-sandbox 零警告零错误（fr-agent-loop 传递 zstd 需 MSVC=既有环境约束档载）。
 - Phase 14 Status→complete；下一动作=Phase 16 批 0 真源全读（fr-tools-builtin+fr-shell，Q92-A…Q97-A 既裁）。
 - 提交 1aa04b3（批 3 全量，21 文件 +905/-124）。守卫阻断同既定例：pre-commit agent-spec guard 16 spec 红=pending 态后续 Phase 绑定前设计态，用户 /commit 显式裁决后 --no-verify 入库（提交信息内含守卫注记+三 Spec trailers）；四 spec 绿（TOOLS/APPROVAL/SANDBOX/LLM）。
+## 2026-10-29 — Phase 16 批 0 续：16a 域深读（会话恢复）
+- 恢复后盘点：catalog 笔记（doc/dsh-catalog-notes.md 296 行 112 节）+gen-catalog-scenarios.py 既成；结构层事实+Q91-A…Q97-A 已钉（findings Phase 16 节）。
+- 16a 深读开卷：shell 缝 types/index/render（377 行）+shell-env（211）+bash-local（404）+bash-sandbox（192）全读已钉（findings「16a 域深读」节：ShellExecutor resolve/execute 面、首因分类、DSH_* 注册校验八文案、ENV_OVERRIDES、熔合 deadline 首因序、readOutput 合并格式、bash-sandbox per-process facts+runner 失败压过 denial+与 fr-sandbox confine 缝对接）。
+- 下一动作：tool-bash/src/index.ts（556）→subprocess 缝 types（297）→jobs（types 309+jobs-local 717+tool-jobs 416）。
+- 16a 深读推进（本段会话）：tool-bash 三件（index 556+background 129+render 128）+subprocess 缝 types 297+subprocess-local index 374+jobs 缝 types/index/view 606+jobs-local index 717+ring/pump/events 321——共 ~3.1k 行全读，全部钉入 findings「16a 域深读」五节（含全部逐字文案：validate/limit/围栏/teardown/事件告警约 40 句）。
+- fr-shell 三服务（shell/subprocess/jobs）缝面真源至此**全落**；与 fr-sandbox 批 2b 对接点确认：bash-sandbox confine(['bash','-c',cmd])→ConfinedArgv+classifyRunnerFailure/matchesSignature/isRunnerSpawnFailure 均 fr-sandbox 已实现。
+- task_plan Next Step 更新=16a 收尾：pwsh 三包 delta 读→批 0 分叉四项单消息呈报（DSH_*/FR_ 前缀、托管域分级 systemd-run/Job/进程组、pwsh Linux 地位、DSH_SESSION_ID 来源）。
+- 下一动作：pwsh delta 读（617+449+~small）→分叉呈报→用户裁决。
+- 16a 收尾完成：pwsh 三包全读（tool-pwsh 617+pwsh-local 449+resolve 79+pwsh-sandbox 200+helpers 120+render 128）钉入 findings「16a 域深读（终）」节——pwsh=bash call-for-call mirror 判例坐实（jscpd 注释明言），delta 全集钉存（validate 无同模式免审/resolveWorkdir 用 path.resolve/description 双形/deadline code 仍 BASH_TIMEOUT/装配 guard 文案含 'bash executor' quirk）。
+- 批 0 分叉四项已呈报用户（findings「16a 批 0 分叉呈报」节）：①DSH_*/FR_ 前缀 ②托管域分级 ③pwsh Linux 地位 ④SESSION_ID 来源。裁决前不动 spec/KLL/代码。
+- 下一动作：用户裁决 → 批 1 fr-shell 实现。
+
+## 2026-10-29 — 16a 批 0 收口 + 批 1 设计钉（裁决全 A）
+- 用户裁决 Q16a-1…4 全 A。PRD 19.2 条 25 登记（FR_ 前缀受控偏差）；Q16a-2A/3A=1:1 无偏差不入节。
+- 执法点核实（dougong-dylib lib.rs:282/:1341）：实例 AsyncMutex 横跨整个 call 处理——fr-shell 强制「即时返回+有界轮询」面。
+- 跨插件注册机制定案：fr-tools 增 METHOD_REGISTER=13/UNREGISTER=14（端点化 definition）；fr-tools-builtin provide 'builtin-tools'+grant("tools","builtin-tools")（D31 判例）。
+- fr-shell 三服务面+号段定案（subprocess 低带/jobs 1000/shell 2000）；shell.start 吸收 startJob（sources 闭包不可过线）；纯前台 execute 不设（零消费方）。
+- 档载四项登记（下轮 Q）：live-agent 校验缺席/owner-disposal 腿缺席/完成通知机器/bundle 执行体选择表达式。
+- 批 1 开工：fr-wire 三面+tools 两方法 → fr-shell crate。
+
+## 2026-10-29 — 16a 批 1 开工：fr-shell 核心域落地（编译门绿，6 测试过）
+- fr-wire services.rs 扩四面：tools 增 METHOD_REGISTER=13/UNREGISTER=14；新增 subprocess（低带 0-5）/jobs（1000-1007）/shell（2000-2003）三面。
+- fr-shell 入 workspace（cdylib+rlib；deps: dougong-abi/fr-timeout/fr-wire/serde/serde_json/uuid + unix libc）。
+- 六模块落地：jobs_types（wire 词表全对译：JobView/JobChunk/JobStatus kebab/JobOutcome/JobRead/JobOutputRead/JobSettleCause/JobRegisteredData+JobSettledData flatten/JobSourceRead/JobOutputSource 闭包型）；ring（OutputRing 全对译：绝对 offset/头丢弃/UTF-8 安全尾+gapBefore/lossy 读）；pump（PumpStop latch+unpark 即醒+末次 drain+guardSource 崩溃围栏）；jobs_local（LocalJobRegistry：controller 检查逐字文案/admission 上限文案/kill 先 cancel/settle 首赢+killReason 合并序/ring.trim(max(settled,未消耗))/session 事件双 record/teardown disposeAll+Condvar 等待）；subprocess（OutputCollector spill 全对译：私有 0700 目录 fr-subprocess- 前缀/wx 0600/越 cap 丢 spill/readFrom lossy+seal+finalize；scrubbed_parent_env：SENSITIVE 四词+FR_ 前缀剥除；TERM→KILL 阶梯+15ms 托管域活体探测（/proc pgrp 扫描）+taskkill 树终止+signal_name 全表；ContainmentTier 选择器骨架=ProcessGroup 臂，scope/Job 臂随本切片后续批）；shell_types（AbortSignal+FR_ENV_PREFIX）；service（js_number+测试）。
+- 排障自纠（本方错误）：连续三次大模块写入损坏（jobs_local v1 字段误入 impl 块/shell_types 两版残误）→ 三振协议：改小模块+逐个编译；Python 补丁引号相邻 bug 一次；id 循环重构一度改乱现场→当场修复。
+- 门禁：cargo check -p fr-shell 零警告零错误；6 测试过（ring 4+js_number 2）。
+- 批 1 剩余：executors 四执行体（bash/pwsh local+sandbox，confine 走 'sandbox' 缝 wire）→ service 三带 wire face → plugin_shell（descriptor provide 三服务/inject [session-persistence,sandbox]/declare job 事件）→ registry 语义钉测 → fr-tools 注册面扩展。

@@ -4,9 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-批 3 全落（Q-A…Q-F 全 A：KLL/intake 四勘误+两轮再生成；Q-D ask id→UUID v4；14 件新钉测含 driver 调度 7；43 选择器全真实绑定；lifecycle 19/19+15/15+9/9 零跳过；guard 四 spec 绿=TOOLS/APPROVAL/SANDBOX/LLM；workspace 1111 tests 六门绿）。Phase 14 收口。**下一动作=Phase 16 批 0**：fr-tools-builtin+fr-shell 真源全读（Q92-A 单合同双 crate/Q93-A 域服务归属/Q94-A 六子片/Q95-A catalog 脚本/Q96-A 跨切片 skip/Q97-A 每工具全 schema 钉测）。
-
-## Current Phase
+Phase 16 批 0 **16a 真源深读完成**（shell 缝/shell-env/bash 双执行体/tool-bash 三件/subprocess 缝/subprocess-local(index)/jobs 五件/pwsh 四件，~4.5k 行 TS，详见 findings「16a 域深读」七节）。**下一动作=批 0 分叉四项呈报用户裁决**（findings「16a 批 0 分叉呈报」节：①DSH_*/FR_ 前缀 ②托管域分级 ③pwsh Linux 地位 ④SESSION_ID 来源）→裁决后批 1（fr-shell 实现：三服务 provider+注册面+钉测）。
 Phase 16（fr-tools-builtin + fr-shell）——批 0 真源全读待启（Phase 14 已收口：批 0 裁决/批 1 fr-tools+guard/批 2a approval+presets+projections/批 2b sandbox/批 3 绑定+七步流 4-7）
 
 ## Phases

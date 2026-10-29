@@ -21,6 +21,7 @@ members = [
     "crates/fr-approval",
     "crates/fr-permission-presets",
     "crates/fr-sandbox",
+    "crates/fr-shell",
 ]
 
 [workspace.package]
@@ -71,6 +72,7 @@ fr-agent-loop = { path = "crates/fr-agent-loop" }
 fr-tools = { path = "crates/fr-tools" }
 fr-guard-repeat-reminder = { path = "crates/fr-guard-repeat-reminder" }
 fr-guard-timeout = { path = "crates/fr-guard-timeout" }
+fr-shell = { path = "crates/fr-shell" }
 
 # Lint table aligned with the dougong workspace (PRD 21): the zero-warning
 # gates (fmt / clippy -D warnings / test / doc) must stay reproducible.

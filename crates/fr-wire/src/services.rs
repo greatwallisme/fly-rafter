@@ -113,6 +113,12 @@ pub mod tools {
     pub const METHOD_CANCEL: u32 = 11;
     /// Install or clear the wire approval endpoint (Q109-A).
     pub const METHOD_SET_APPROVAL: u32 = 12;
+    /// Register one tool whose body rides wire endpoints (16a: the
+    /// registration carries inline schema fields and
+    /// `{service, method}` endpoints for execute/render/present).
+    pub const METHOD_REGISTER: u32 = 13;
+    /// Detach one wire-registered tool by id.
+    pub const METHOD_UNREGISTER: u32 = 14;
 }
 
 /// The `'approval'` service face (owner crate `fr-approval`).
@@ -211,6 +217,74 @@ pub mod sandbox {
     /// (`{argv, policy}` → the `ConfinedArgv` wire shape) or fail closed
     /// with `sandbox-unavailable`.
     pub const METHOD_CONFINE: u32 = 1001;
+}
+
+/// The `'subprocess'` service face (owner crate `fr-shell`).
+///
+/// 16a band judgment: three services ride one export table, so every
+/// method number stays unique across the whole artifact (the
+/// `session-projections`/`sandbox` 1000+ precedent) — `subprocess`
+/// keeps the low band, `jobs` and `shell` occupy the 1000+ / 2000+
+/// bands.
+pub mod subprocess {
+    /// The provided service name consumers inject.
+    pub const SERVICE_NAME: &str = "subprocess";
+    /// Shell metadata echo.
+    pub const METHOD_DESCRIBE: u32 = 0;
+    /// Spawn one fully-specified subprocess (collect/pipe/inherit
+    /// per-stream stdio) and return its handle id.
+    pub const METHOD_SPAWN: u32 = 1;
+    /// Read one collected stream from a byte offset without consuming.
+    pub const METHOD_READ: u32 = 2;
+    /// Settle one handle's exit facts (managed-range wait, bounded).
+    pub const METHOD_WAIT: u32 = 3;
+    /// Begin the managed-range termination procedure (idempotent).
+    pub const METHOD_TERMINATE: u32 = 4;
+    /// Resolve a bare PATH name or absolute path to an executable.
+    pub const METHOD_RESOLVE_EXECUTABLE: u32 = 5;
+}
+
+/// The `'jobs'` service face (owner crate `fr-shell`).
+pub mod jobs {
+    /// The provided service name consumers inject.
+    pub const SERVICE_NAME: &str = "jobs";
+    /// Shell metadata echo.
+    pub const METHOD_DESCRIBE: u32 = 1000;
+    /// List caller-owned and unowned jobs in registration order.
+    pub const METHOD_LIST: u32 = 1001;
+    /// Project one job without changing its cursor.
+    pub const METHOD_GET: u32 = 1002;
+    /// Consume the ring from the model cursor (the `result` rides the
+    /// first post-settlement read).
+    pub const METHOD_READ: u32 = 1003;
+    /// Read retained output at an absolute offset without moving the
+    /// model cursor.
+    pub const METHOD_READ_AT: u32 = 1004;
+    /// Request cancellation, then mark the job stopping.
+    pub const METHOD_KILL: u32 = 1005;
+    /// Wait for settlement or the bounded timeout (slice waits only —
+    /// the instance lock spans each call).
+    pub const METHOD_WAIT: u32 = 1006;
+    /// Drop one settled job's record from the visible set.
+    pub const METHOD_REMOVE: u32 = 1007;
+}
+
+/// The `'shell'` service face (owner crate `fr-shell`).
+pub mod shell {
+    /// The provided service name consumers inject.
+    pub const SERVICE_NAME: &str = "shell";
+    /// Shell metadata echo.
+    pub const METHOD_DESCRIBE: u32 = 2000;
+    /// The mounted executor's default sandbox mode (`{}` →
+    /// `{mode: word | null}`) — the capability fact dsh exposes as
+    /// `ctx.shell.sandboxMode`.
+    pub const METHOD_SANDBOX_MODE: u32 = 2001;
+    /// Apply implementation defaults and caps to one request.
+    pub const METHOD_RESOLVE: u32 = 2002;
+    /// Register the command as a job and spawn it (the dsh bash tool's
+    /// `startJob`, absorbed into the seam because the output-source
+    /// closures cannot cross the wire).
+    pub const METHOD_START: u32 = 2003;
 }
 
 // Rust guideline compliant 2026-10-29
