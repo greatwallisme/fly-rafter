@@ -1158,4 +1158,4 @@
 - fr-shell：kill_by_tool_call+1008 wire 面+ExecutorConfigs bundle 行（bash 60s/pwsh 120s 钉测）+windows 编译缺口修复（批 1 遗留）+批 1 "toolCall" 键疏漏修正。
 - 五门全绿：fmt/clippy -D warnings 0/tests 1157 passed 0 failed/doc -D warnings/Windows 门 fr-tools-builtin+fr-shell 零警告零错误。
 - 过程：生成退化 5 起全部截停或当场还原（详见 findings 批 2 实施记录）；长内容改 Write/heredoc 纪律生效。
-- 待用户 /commit 裁决入库 → **3a96478 入库**（用户 /commit 裁决 --no-verify，守卫注记随信息）。
+- 待用户 /commit 裁决入库 → **6c93d6d 入库**（amend 后终号；初记 3a96478 为 amend 前号已回填更正。用户 /commit 裁决 --no-verify，守卫注记随信息）。
