@@ -1149,3 +1149,5 @@
 - 四门：fmt ✓；workspace clippy --all-targets -D warnings 0 ✓；tests 1136 passed 0 failed（1117→1136，FR_DSH_SOURCE 必需=既有约束）✓；RUSTDOCFLAGS -D warnings doc ✓。
 - 变更清单：fr-wire services.rs（METHOD_RESULT=2004）；fr-shell（executors.rs+plugin_shell.rs 新增，service/subprocess/jobs_local/jobs_types/lib 扩展，Cargo.toml 增 fr-sandbox 依赖）；fr-tools service.rs/service_tests.rs（注册面）；根 Cargo.toml/Cargo.lock（fr-sandbox workspace 依赖）；.planning 三件。
 - 待用户 /commit 裁决入库（守卫阻断同既定例：pending 选择器设计态，--no-verify 提交）。
+
+## 2026-10-29 — 批 1 后半提交入库：cefec8c（用户 /commit 裁决 --no-verify，守卫注记随信息）
