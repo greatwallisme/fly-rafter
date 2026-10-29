@@ -1086,3 +1086,4 @@
 - 43 选择器全真实绑定（TOOLS 19/APPROVAL 15/SANDBOX 9 pending 清零）；lifecycle 三 spec 首轮全绿 19/19+15/15+9/9 零跳过；guard 四 spec 绿（三目标+LLM；16 红=pending 态设计态；PROMPT 假红=FR_DSH_SOURCE 缺席自纠）；explain 100%；stamp 三份 Spec-Passing: true；trace liveness 三需求 Honored。
 - 六门：fmt OK/clippy 0/1111 passed 0 failed（1096→1111）/doc 0/windows 编译门 fr-approval+fr-tools+fr-sandbox 零警告零错误（fr-agent-loop 传递 zstd 需 MSVC=既有环境约束档载）。
 - Phase 14 Status→complete；下一动作=Phase 16 批 0 真源全读（fr-tools-builtin+fr-shell，Q92-A…Q97-A 既裁）。
+- 提交 1aa04b3（批 3 全量，21 文件 +905/-124）。守卫阻断同既定例：pre-commit agent-spec guard 16 spec 红=pending 态后续 Phase 绑定前设计态，用户 /commit 显式裁决后 --no-verify 入库（提交信息内含守卫注记+三 Spec trailers）；四 spec 绿（TOOLS/APPROVAL/SANDBOX/LLM）。
