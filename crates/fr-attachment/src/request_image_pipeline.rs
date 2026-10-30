@@ -49,7 +49,7 @@ pub struct AttachmentError {
 }
 
 impl AttachmentError {
-    fn new(message: impl Into<String>, code: &'static str) -> Self {
+    pub(crate) fn new(message: impl Into<String>, code: &'static str) -> Self {
         Self {
             message: message.into(),
             code,
@@ -484,7 +484,7 @@ fn resized_long_edge(source: &image::DynamicImage, target: (u32, u32)) -> image:
 /// Encode one prepared raster through the codec ladder: WebP keeps a
 /// source alpha channel, everything else is JPEG (dsh `encodingLadder`),
 /// each candidate built lazily from highest to lowest quality.
-fn encode_ladder(
+pub(crate) fn encode_ladder(
     pixels: &image::RgbaImage,
     has_alpha: bool,
     max_bytes: u64,

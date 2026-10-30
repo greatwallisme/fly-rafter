@@ -315,6 +315,69 @@ pub fn edit_parameters(escalation: bool) -> Value {
     })
 }
 
+/// The `read_image` parameter table (the dsh `applyReadImageTool`
+/// parameters).
+#[must_use]
+pub fn read_image_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "type": "string",
+                "description": catalog_gen::READ_IMAGE_FILE_PATH_TEXT,
+            },
+        },
+        "required": ["file_path"],
+    })
+}
+
+/// The `read_image` structured outcome (the dsh `IMAGE_VALUE_SCHEMA`).
+#[must_use]
+pub fn read_image_value_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": true,
+        "properties": {
+            "attachmentId": { "type": "string", "required": true },
+            "mediaType": {
+                "type": "string",
+                "enum": ["image/png", "image/jpeg", "image/webp", "image/gif"],
+                "required": true,
+            },
+            "bytes": { "type": "integer", "required": true },
+            "width": { "type": "integer", "required": true },
+            "height": { "type": "integer", "required": true },
+            "name": { "type": "string" },
+            "originalDimensions": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "width": { "type": "integer", "required": true },
+                    "height": { "type": "integer", "required": true },
+                },
+            },
+        },
+    })
+}
+
+/// The `read_image` output schema (the dsh read-image `output.schema`).
+#[must_use]
+pub fn read_image_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "path": {
+                "type": "string",
+                "required": true,
+                "description": "Canonical absolute path in the filesystem execution world.",
+            },
+            "image": read_image_value_schema(),
+        },
+    })
+}
+
 /// The read output contract (the dsh `defineTool` `output.schema`,
 /// verbatim shapes).
 #[must_use]

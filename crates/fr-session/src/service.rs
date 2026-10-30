@@ -92,6 +92,10 @@ pub const METHOD_SESSION_DRAIN: u32 = 8;
 /// Q107-A — the dsh `Session.seq`/`eventAt` read face over the wire, so
 /// consumers can tail-scan folds without holding the session object.
 pub const METHOD_SESSION_READ: u32 = 9;
+/// Method selector: read one live session's latest `request/header`
+/// snapshot (`{id}` → `{"header": EpochHeader | null}`; the dsh
+/// `session.requestHeader()`; the Q16b-1A route-gate seam).
+pub const METHOD_REQUEST_HEADER: u32 = 10;
 
 /// Which store edge one mirror record carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -769,6 +773,24 @@ fn service_read(
     }))
 }
 
+/// Serves one live session's latest request-header snapshot (the dsh
+/// `session.requestHeader()`; the fold is incremental on the session).
+fn service_request_header(
+    service: &mut SessionService,
+    request: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let id = require_id(request, "id")?;
+    let session = service
+        .store
+        .get_mut(&id)
+        .ok_or_else(|| format!("session \"{id}\" is not live in this store"))?;
+    let header = session.request_header();
+    serde_json::to_value(serde_json::json!({
+        "header": header,
+    }))
+    .map_err(|error| format!("request-header reply encode failed: {error}"))
+}
+
 /// Serves one dynamic-channel invocation against the assembled runtime: a
 /// pure (JSON-in, JSON-out) function so the face stays testable.
 ///
@@ -793,6 +815,7 @@ pub fn dispatch(
         METHOD_SESSION_RESTORE => service_restore(service, &request)?,
         METHOD_SESSION_DRAIN => service_drain(service, &request)?,
         METHOD_SESSION_READ => service_read(service, &request)?,
+        METHOD_REQUEST_HEADER => service_request_header(service, &request)?,
         _ => return Err(format!("unknown session-persistence method {method}")),
     };
     serde_json::to_vec(&reply)
@@ -988,6 +1011,58 @@ mod tests {
         let absent = call(
             &mut service,
             METHOD_SESSION_READ,
+            &serde_json::json!({ "id": "nope" }),
+        )
+        .expect_err("absent session");
+        assert_eq!(absent, "session \"nope\" is not live in this store");
+    }
+
+    /// The request-header face folds the log's latest header snapshot
+    /// (null before the first header) and refuses a non-live session
+    /// (the Q16b-1A route-gate seam).
+    #[test]
+    fn request_header_folds_the_latest_snapshot() {
+        let mut service = make_service_at(&temp_root("req-header"));
+        call(
+            &mut service,
+            METHOD_SESSION_CREATE,
+            &serde_json::json!({ "id": "s1", "meta": { "cwd": "/repo" } }),
+        )
+        .expect("creates");
+        let id = "s1".to_owned();
+
+        let before = call(
+            &mut service,
+            METHOD_REQUEST_HEADER,
+            &serde_json::json!({ "id": id }),
+        )
+        .expect("before any request");
+        assert_eq!(before["header"], serde_json::Value::Null);
+
+        call(
+            &mut service,
+            METHOD_SESSION_APPEND,
+            &serde_json::json!({ "id": id, "type": "request/header", "data": { "header": { "config": { "provider": "p", "model": "first" } }, "reason": "initial" } }),
+        )
+        .expect("header 0");
+        call(
+            &mut service,
+            METHOD_SESSION_APPEND,
+            &serde_json::json!({ "id": id, "type": "request/header", "data": { "header": { "config": { "provider": "p", "model": "second" } }, "reason": "change" } }),
+        )
+        .expect("header 1");
+
+        let routed = call(
+            &mut service,
+            METHOD_REQUEST_HEADER,
+            &serde_json::json!({ "id": id }),
+        )
+        .expect("latest header");
+        assert_eq!(routed["header"]["config"]["model"], "second");
+
+        let absent = call(
+            &mut service,
+            METHOD_REQUEST_HEADER,
             &serde_json::json!({ "id": "nope" }),
         )
         .expect_err("absent session");

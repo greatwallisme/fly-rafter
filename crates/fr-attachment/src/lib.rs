@@ -8,10 +8,17 @@
 //! service into each adapter's injected seam belongs to the
 //! runtime-registry slice.
 
+pub mod admission;
 pub mod attachment_read;
+pub mod error;
+pub mod file_store;
+pub mod limits;
+pub mod local;
+pub mod normalize;
 pub mod plugin_shell;
 pub mod request_image;
 pub mod request_image_pipeline;
+pub mod store;
 
 pub use attachment_read::AttachmentRead;
 pub use request_image_pipeline::AttachmentError;

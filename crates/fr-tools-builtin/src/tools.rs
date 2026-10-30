@@ -98,6 +98,13 @@ pub trait Seams: Send + Sync {
     fn policy(&self) -> &dyn PolicySeam;
     /// The approval seam.
     fn approval(&self) -> &dyn ApprovalSeam;
+    /// The attachment-store seam (the `read_image` body; absent when
+    /// the composition mounted no durable store).
+    fn attachments(&self) -> Option<&dyn AttachmentSeam>;
+    /// The model-metadata seam (the `read_image` route gate).
+    fn llm(&self) -> Option<&dyn LlmSeam>;
+    /// The routing-header seam (the `read_image` route gate).
+    fn route_header(&self) -> Option<&dyn RouteHeaderSeam>;
     /// Resolves one execution request (dsh `ctx.shell.resolve`).
     ///
     /// # Errors
@@ -214,6 +221,51 @@ pub trait Seams: Send + Sync {
     ///
     /// The storage failure family (the dsh `saveText` rejection).
     fn spill_store_save_text(&self, save: &Value) -> Result<Option<Value>, String>;
+}
+
+/// The attachment-store seam (dsh `ctx.get('attachments')` reduced to
+/// the two faces the `read_image` body consumes): the deployment's
+/// image admission limits and the durable image save.
+pub trait AttachmentSeam: Send + Sync {
+    /// The admission limits snapshot (dsh `attachments.imageLimits`).
+    ///
+    /// # Errors
+    ///
+    /// The transport failure family.
+    fn image_limits(&self) -> Result<Value, String>;
+    /// Saves one image and replies the durable reference (dsh
+    /// `attachments.saveImage`); the payload carries the base64 data,
+    /// the declared media type, and the optional display name.
+    ///
+    /// # Errors
+    ///
+    /// The attachment-error document family (the wire
+    /// `attachmentError` body) or the transport failure.
+    fn save_image(&self, input: &Value) -> Result<Value, String>;
+}
+
+/// The model-metadata seam (dsh `ctx.get('llm')` reduced to the
+/// resolve-model-info face the route gate consumes).
+pub trait LlmSeam: Send + Sync {
+    /// Resolves one route's exact model metadata (dsh
+    /// `llm.resolveModelInfo`): the reply is the wire model info.
+    ///
+    /// # Errors
+    ///
+    /// The llm failure document (the wire `llmError` body).
+    fn resolve_model_info(&self, provider: &str, model: &str) -> Result<Value, String>;
+}
+
+/// The routing-header seam (dsh `agent.session.requestHeader()`
+/// reduced to the session-id read the route gate consumes).
+pub trait RouteHeaderSeam: Send + Sync {
+    /// Reads one session's latest `request/header` snapshot: the reply
+    /// carries `{"header": ... | null}`.
+    ///
+    /// # Errors
+    ///
+    /// The transport failure family.
+    fn request_header(&self, session: &str) -> Result<Value, String>;
 }
 
 /// The shell variant the bodies parameterize over (dsh's two tool
@@ -1233,6 +1285,18 @@ mod tests {
     }
 
     impl Seams for ScriptSeams {
+        fn attachments(&self) -> Option<&dyn crate::tools::AttachmentSeam> {
+            None
+        }
+
+        fn llm(&self) -> Option<&dyn crate::tools::LlmSeam> {
+            None
+        }
+
+        fn route_header(&self) -> Option<&dyn crate::tools::RouteHeaderSeam> {
+            None
+        }
+
         fn policy(&self) -> &dyn crate::tools::PolicySeam {
             self
         }

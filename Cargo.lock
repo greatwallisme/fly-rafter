@@ -874,6 +874,7 @@ dependencies = [
  "dougong-abi",
  "fr-sandbox",
  "fr-wire",
+ "image",
  "regex",
  "serde",
  "serde_json",

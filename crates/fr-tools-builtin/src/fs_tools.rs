@@ -243,7 +243,10 @@ pub fn parse_edit_args(arguments: &Value) -> Result<EditInput, String> {
 /// Resolves the session working directory for one call (dsh
 /// `sessionResolveOptions`: agent calls ensure, agent-less calls leave
 /// the directory default).
-fn session_cwd(seams: &dyn Seams, agent: Option<&str>) -> Result<Option<String>, BodyError> {
+pub(crate) fn session_cwd(
+    seams: &dyn Seams,
+    agent: Option<&str>,
+) -> Result<Option<String>, BodyError> {
     match agent {
         None => Ok(None),
         Some(agent) => Ok(Some(
@@ -1039,6 +1042,18 @@ mod tests {
     }
 
     impl Seams for ScriptSeams {
+        fn attachments(&self) -> Option<&dyn crate::tools::AttachmentSeam> {
+            None
+        }
+
+        fn llm(&self) -> Option<&dyn crate::tools::LlmSeam> {
+            None
+        }
+
+        fn route_header(&self) -> Option<&dyn crate::tools::RouteHeaderSeam> {
+            None
+        }
+
         fn policy(&self) -> &dyn crate::tools::PolicySeam {
             self
         }

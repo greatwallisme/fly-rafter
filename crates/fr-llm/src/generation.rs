@@ -36,7 +36,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::task::{Context, Poll, Waker};
 
 use fr_wire::content::TrueOnly;
-use fr_wire::{AdapterDefaults, StreamChunk};
+use fr_wire::{AdapterDefaults, CallControls, StreamChunk};
 use futures_core::Stream;
 
 use crate::adapter::{
@@ -62,6 +62,9 @@ pub const METHOD_DRAIN: u32 = 4;
 /// Method selector: flag one generation cancelled (`{generationId}` →
 /// `{}`); the worker settles asynchronously.
 pub const METHOD_ABORT: u32 = 5;
+/// Method selector: resolve one route's exact model metadata (the dsh
+/// `llm.resolveModelInfo`; `{provider, model}` → `WireModelInfo`).
+pub const METHOD_RESOLVE_MODEL_INFO: u32 = 6;
 
 /// The notification event every buffer append emits (decision 46); the
 /// payload is `{sessionId?, generationId}` — tiny by contract.
@@ -315,6 +318,16 @@ pub struct DrainReply {
     pub chunks: Vec<StreamChunk>,
     /// Whether the terminal settlement was delivered.
     pub done: bool,
+}
+
+/// The `resolve-model-info` request body.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveModelInfoRequest {
+    /// Registered provider route.
+    pub provider: String,
+    /// Provider-owned model id.
+    pub model: String,
 }
 
 /// The `abort` request body.
@@ -797,6 +810,23 @@ pub trait GenerationSource: Send + Sync {
     /// runs on the source's worker threads; implementations must honor
     /// `options.signal`).
     fn stream(&self, options: GenerateOptions) -> Pin<Box<dyn Stream<Item = StreamChunk> + Send>>;
+
+    /// Resolves one route's exact model metadata (the dsh
+    /// `llm.resolveModelInfo` face): the default routes the plain
+    /// config through `prepare` and takes its model record.
+    ///
+    /// # Errors
+    ///
+    /// The route's own resolution failure.
+    fn resolve_model(&self, provider: &str, model: &str) -> Result<ResolvedModelInfo, LlmError> {
+        let config = LlmCallConfig {
+            provider: provider.to_owned(),
+            model: model.to_owned(),
+            controls: CallControls::default(),
+            agent_loop: false,
+        };
+        self.prepare(&config).map(|(record, _)| record.model)
+    }
 }
 
 /// The dsh runtime `prepareCall` default-fill arm (index.ts:976-986):
@@ -1176,6 +1206,23 @@ impl GenerationService {
         Ok((prepared_id, record, resolved_config))
     }
 
+    /// Resolves one route's exact model metadata without starting a
+    /// generation (the Q16b-1A route-gate face; the dsh
+    /// `llm.resolveModelInfo`).
+    ///
+    /// # Errors
+    ///
+    /// [`LlmError`] `NO_ADAPTER` for an unregistered route (the dsh
+    /// index.ts:1018 text), or the route's own resolution failure.
+    pub fn resolve_model_info(
+        &self,
+        provider: &str,
+        model: &str,
+    ) -> Result<ResolvedModelInfo, LlmError> {
+        let source = self.source_of(provider)?;
+        source.resolve_model(provider, model)
+    }
+
     /// Starts one generation and returns its id.
     ///
     /// # Errors
@@ -1364,6 +1411,13 @@ pub fn serve(
             service.abort(&request.generation_id);
             encode_reply(&serde_json::json!({}))
         }
+        METHOD_RESOLVE_MODEL_INFO => {
+            let request: ResolveModelInfoRequest = decode_payload(method, payload)?;
+            let resolved = service
+                .resolve_model_info(&request.provider, &request.model)
+                .map_err(ServiceError::Llm)?;
+            encode_reply(&WireModelInfo::from(&resolved))
+        }
         _ => Err(ServiceError::Text(format!(
             "unknown llm service method {method}"
         ))),
@@ -1389,11 +1443,11 @@ mod tests {
     use super::{
         AbortRequest, AdapterSource, BeginReply, BeginRequest, CHUNK_READY_EVENT, DrainReply,
         DrainRequest, EmitVtable, GenerateOptions, GenerationService, METHOD_ABORT, METHOD_BEGIN,
-        METHOD_DRAIN, Notify, PreparedRecord, ServiceError, WireGenerateOptions, WireModelInfo,
-        serve,
+        METHOD_DRAIN, METHOD_RESOLVE_MODEL_INFO, Notify, PreparedRecord, ServiceError,
+        WireGenerateOptions, WireModelInfo, serve,
     };
     use crate::adapter::{
-        AbortSignal, LlmAdapter, LlmCallConfig, ModelContext, ModelReasoningInfo,
+        AbortSignal, LlmAdapter, LlmCallConfig, ModelContext, ModelModality, ModelReasoningInfo,
         PreparedAdapterCall, RequestMessage, ResolvedModelInfo,
     };
     use crate::retry_policy::{Backoff, RetryPolicy};
@@ -2085,6 +2139,80 @@ mod tests {
         assert_eq!(json["context"]["contextWindow"], 128);
         let back = ResolvedModelInfo::from(wire);
         assert_eq!(back, model);
+    }
+
+    /// The resolve-model-info face serves the exact-route metadata
+    /// through the registered source and refuses an unregistered route
+    /// with the dsh `NO_ADAPTER` text (the Q16b-1A route-gate seam).
+    #[test]
+    fn resolve_model_info_serves_the_registered_route() {
+        struct ImageAdapter;
+        impl LlmAdapter for ImageAdapter {
+            fn stream(
+                &self,
+                _options: GenerateOptions,
+            ) -> Pin<Box<dyn Stream<Item = StreamChunk> + Send>> {
+                loaded(vec![finish()])
+            }
+
+            fn prepare_call(
+                self: &Arc<Self>,
+                provider: &str,
+                model: &str,
+            ) -> impl Future<Output = PreparedAdapterCall> {
+                std::future::ready(PreparedAdapterCall::new(
+                    ResolvedModelInfo {
+                        provider: provider.to_owned(),
+                        id: model.to_owned(),
+                        name: model.to_owned(),
+                        input_modalities: Some(vec![ModelModality::Text, ModelModality::Image]),
+                        ..ResolvedModelInfo::default()
+                    },
+                    LlmCallConfig {
+                        provider: provider.to_owned(),
+                        model: model.to_owned(),
+                        controls: CallControls::default(),
+                        agent_loop: false,
+                    },
+                    Arc::new(|_options| loaded(vec![finish()])),
+                ))
+            }
+        }
+        let service = GenerationService::new(crate::generation::quiet_notify());
+        service.register_source(
+            "vision",
+            Arc::new(AdapterSource::new(Arc::new(ImageAdapter))),
+        );
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "provider": "vision",
+            "model": "vl",
+        }))
+        .expect("encodes");
+        let reply = serve(&service, METHOD_RESOLVE_MODEL_INFO, &payload).expect("resolves");
+        let parsed: serde_json::Value = serde_json::from_slice(&reply).expect("json");
+        assert_eq!(parsed["provider"], "vision");
+        assert_eq!(
+            parsed["inputModalities"],
+            serde_json::json!(["text", "image"])
+        );
+        // The unregistered route refuses with the dsh index.ts:1018 text.
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "provider": "missing",
+            "model": "m",
+        }))
+        .expect("encodes");
+        let error = serve(&service, METHOD_RESOLVE_MODEL_INFO, &payload)
+            .expect_err("unregistered route refuses");
+        match error {
+            ServiceError::Llm(failure) => {
+                assert_eq!(failure.code(), "NO_ADAPTER");
+                assert_eq!(
+                    failure.message(),
+                    "no adapter registered for provider \"missing\""
+                );
+            }
+            ServiceError::Text(_) => panic!("expected the llm failure"),
+        }
     }
 
     /// The [`AdapterSource`] face: the AFIT `prepare_call` future resolves

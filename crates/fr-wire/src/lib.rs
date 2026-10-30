@@ -10,6 +10,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod base64;
 pub mod call_config;
 pub mod content;
 pub mod event;

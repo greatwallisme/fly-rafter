@@ -26,7 +26,9 @@ pub const PLUGIN_NAME: &str = "fr-llm";
 /// Method selector: shell metadata echo (`{}`).
 pub const METHOD_DESCRIBE: u32 = 1;
 
-pub use crate::generation::{METHOD_ABORT, METHOD_BEGIN, METHOD_DRAIN, METHOD_PREPARE_CALL};
+pub use crate::generation::{
+    METHOD_ABORT, METHOD_BEGIN, METHOD_DRAIN, METHOD_PREPARE_CALL, METHOD_RESOLVE_MODEL_INFO,
+};
 
 /// The descriptor the loader consumes: the `llm` service over the dynamic
 /// channel, no injected dependencies or listeners in this slice. The version
@@ -101,7 +103,11 @@ pub fn dispatch(state: &ShellState, method: u32, payload: &[u8]) -> Result<Vec<u
             }))
             .unwrap_or_default())
         }
-        METHOD_PREPARE_CALL | METHOD_BEGIN | METHOD_DRAIN | METHOD_ABORT => {
+        METHOD_PREPARE_CALL
+        | METHOD_BEGIN
+        | METHOD_DRAIN
+        | METHOD_ABORT
+        | METHOD_RESOLVE_MODEL_INFO => {
             match crate::generation::serve(&state.service, method, payload) {
                 Ok(reply) => Ok(reply),
                 Err(crate::generation::ServiceError::Llm(failure)) => {

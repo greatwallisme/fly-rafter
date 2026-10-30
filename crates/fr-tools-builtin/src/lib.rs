@@ -37,6 +37,7 @@ pub mod catalog_gen;
 pub mod fence;
 pub mod fs_diff;
 pub mod fs_domain;
+pub mod fs_read_image;
 pub mod fs_read_render;
 pub mod fs_sandbox;
 pub mod fs_tools;

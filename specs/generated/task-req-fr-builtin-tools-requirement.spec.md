@@ -26,6 +26,8 @@ satisfies: [REQ-FR-BUILTIN-TOOLS]
 - crates/fr-tools-builtin/**
 - crates/fr-tools/**
 - crates/fr-shell/**
+- crates/fr-attachment/**
+- crates/fr-llm/**
 
 ### Forbidden
 - Do not weaken or remove the source requirement clauses.

@@ -1319,6 +1319,18 @@ mod tests {
     }
 
     impl Seams for SpawnSeams {
+        fn attachments(&self) -> Option<&dyn crate::tools::AttachmentSeam> {
+            None
+        }
+
+        fn llm(&self) -> Option<&dyn crate::tools::LlmSeam> {
+            None
+        }
+
+        fn route_header(&self) -> Option<&dyn crate::tools::RouteHeaderSeam> {
+            None
+        }
+
         fn policy(&self) -> &dyn crate::tools::PolicySeam {
             self
         }

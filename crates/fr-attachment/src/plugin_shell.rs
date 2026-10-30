@@ -2,18 +2,22 @@
 //! surface over the dougong dynamic channel.
 //!
 //! Kernel-family edge: this module is the only `dougong-abi` consumer; the
-//! rest of the crate stays a plain rlib housing the attachment contract
-//! and normalization pipeline.
+//! rest of the crate stays a plain rlib housing the attachment contract,
+//! normalization pipeline, and durable store.
 //!
-//! The shell provides the `attachments` service (2026-10-27 Q78-A). The
-//! service protocol over the dynamic channel (the Invoker-face of dsh's
-//! attachment store, `ctx.get('attachments')` mapped to the dougong
-//! service model) is refined by the runtime-registry slice; this M1 shell
-//! carries the descriptor and a metadata echo only.
+//! The shell provides the `attachments` service (2026-10-27 Q78-A; the
+//! Q16b-1A durable-store face): the limits snapshot and the image
+//! save the `read_image` tool consumes over the wire, over a store assembled
+//! from the deployment defaults (`FR_HOME`, then `~/.fr`). The binary
+//! payload rides the shared base64 codec.
 
+use crate::limits::AttachmentConfig;
+use crate::local::LocalAttachmentStore;
+use crate::store::SaveImageAttachment;
 use dougong_abi::{
     ABI_VERSION, HostExports, PluginExports, STATUS_CAPACITY, STATUS_FAILED, STATUS_OK, write_out,
 };
+use fr_wire::services::attachments as face;
 
 /// The provided service name this plugin offers (Q78-A `provide
 /// attachments`).
@@ -21,9 +25,6 @@ pub const PROVIDED_SERVICE: &str = "attachments";
 
 /// The dylib artifact's plugin name.
 pub const PLUGIN_NAME: &str = "fr-attachment";
-
-/// Method selector: shell metadata echo (`{}`).
-pub const METHOD_DESCRIBE: u32 = 1;
 
 /// The descriptor the loader consumes: the `attachments` service provided,
 /// nothing injected, no listeners in this slice. The version is sourced
@@ -41,9 +42,9 @@ const DESCRIPTOR: &[u8] = concat!(
 /// # Errors
 ///
 /// Returns the failure text the host surfaces as `STATUS_FAILED`.
-pub fn dispatch(method: u32, payload: &[u8]) -> Result<Vec<u8>, String> {
+pub fn dispatch(state: &ShellState, method: u32, payload: &[u8]) -> Result<Vec<u8>, String> {
     match method {
-        METHOD_DESCRIBE => {
+        face::METHOD_DESCRIBE => {
             let _ = payload;
             Ok(serde_json::to_vec(&serde_json::json!({
                 "name": PLUGIN_NAME,
@@ -52,11 +53,91 @@ pub fn dispatch(method: u32, payload: &[u8]) -> Result<Vec<u8>, String> {
             }))
             .unwrap_or_default())
         }
+        face::METHOD_IMAGE_LIMITS => {
+            let _ = payload;
+            let limits = &state.store.image_limits;
+            Ok(serde_json::to_vec(&serde_json::json!({
+                "maxImageBytes": limits.max_image_bytes,
+                "maxImagesPerMessage": limits.max_images_per_message,
+                "maxMessageImageBytes": limits.max_message_image_bytes,
+                "maxImagePixels": limits.max_image_pixels,
+                "maxImageDimension": limits.max_image_dimension,
+                "mediaTypes": limits.media_types,
+            }))
+            .map_err(|error| format!("limits reply encode failed: {error}"))?)
+        }
+        face::METHOD_SAVE_IMAGE => {
+            let request: serde_json::Value = serde_json::from_slice(payload)
+                .map_err(|error| format!("attachments payload must be JSON: {error}"))?;
+            let data_text = request
+                .get("data")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| "save-image payload requires data".to_owned())?;
+            let data = fr_wire::base64::decode_base64(data_text)
+                .map_err(|error| format!("save-image data must be base64: {error:?}"))?;
+            let media_type: fr_wire::ImageMediaType = serde_json::from_value(
+                request
+                    .get("mediaType")
+                    .cloned()
+                    .ok_or_else(|| "save-image payload requires mediaType".to_owned())?,
+            )
+            .map_err(|error| format!("save-image mediaType must be a wire media type: {error}"))?;
+            let name = request
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
+            let reference = state
+                .store
+                .save_image(&SaveImageAttachment {
+                    data,
+                    media_type,
+                    name,
+                })
+                .map_err(|error| {
+                    serde_json::json!({
+                        "attachmentError": { "message": error.message(), "code": error.code() },
+                    })
+                    .to_string()
+                })?;
+            Ok(serde_json::to_vec(&reference)
+                .map_err(|error| format!("save-image reply encode failed: {error}"))?)
+        }
         _ => Err(format!("unknown fr-attachment method {method}")),
     }
 }
 
-struct ShellState;
+/// The shell state: the durable store assembled at activation.
+pub struct ShellState {
+    store: LocalAttachmentStore,
+}
+
+impl std::fmt::Debug for ShellState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ShellState").finish_non_exhaustive()
+    }
+}
+
+impl ShellState {
+    /// Assembles the state over the deployment defaults (the config
+    /// section rides fr-config when the runtime-registry slice wires
+    /// the loader document).
+    ///
+    /// # Errors
+    ///
+    /// The store configuration validation failure.
+    pub fn new() -> Result<Self, String> {
+        let config = AttachmentConfig::with_defaults();
+        Ok(Self {
+            store: LocalAttachmentStore::new(&config)?,
+        })
+    }
+
+    /// The hosted store (tests drive it directly).
+    #[must_use]
+    pub const fn store(&self) -> &LocalAttachmentStore {
+        &self.store
+    }
+}
 
 unsafe extern "C" fn plugin_name(out: *mut u8, cap: usize, len: *mut usize) -> i32 {
     // SAFETY: the host guarantees a `cap`-sized out-buffer and a writable
@@ -83,7 +164,12 @@ unsafe extern "C" fn descriptor(out: *mut u8, cap: usize, len: *mut usize) -> i3
 // and copying it would extend its lifetime toward the documented UB window
 // past `teardown`.
 unsafe extern "C" fn setup(_host: *const HostExports) -> *mut std::os::raw::c_void {
-    Box::into_raw(Box::new(ShellState)).cast::<std::ffi::c_void>()
+    let Ok(state) = ShellState::new() else {
+        // Decline activation: a store that cannot validate its
+        // configuration must not exist half-wired.
+        return std::ptr::null_mut();
+    };
+    Box::into_raw(Box::new(state)).cast::<std::ffi::c_void>()
 }
 
 unsafe extern "C" fn call(
@@ -109,7 +195,10 @@ unsafe extern "C" fn call(
         // `in_len` readable bytes per the host contract.
         unsafe { std::slice::from_raw_parts(in_data, in_len) }
     };
-    let reply = match dispatch(method, payload) {
+    // SAFETY: the handle was produced by `setup` and is valid until the
+    // matching `teardown`, which the host never overlaps with a call.
+    let state = unsafe { &*(handle.cast::<ShellState>()) };
+    let reply = match dispatch(state, method, payload) {
         Ok(reply) => reply,
         Err(message) => {
             let body = serde_json::json!({ "error": message }).to_string();
@@ -179,11 +268,16 @@ pub static DOUGONG_PLUGIN_EXPORTS: PluginExports = PluginExports {
 
 #[cfg(test)]
 mod tests {
-    use super::{METHOD_DESCRIBE, PLUGIN_NAME, dispatch};
+    use super::{PLUGIN_NAME, ShellState, dispatch};
+    use fr_wire::services::attachments as face;
+
+    fn state() -> ShellState {
+        ShellState::new().expect("builds")
+    }
 
     #[test]
     fn describe_reports_the_shell_metadata() {
-        let reply = dispatch(METHOD_DESCRIBE, b"{}").expect("describe");
+        let reply = dispatch(&state(), face::METHOD_DESCRIBE, b"{}").expect("describe");
         let reply: serde_json::Value = serde_json::from_slice(&reply).expect("json");
         assert_eq!(reply["name"], PLUGIN_NAME);
         assert_eq!(reply["provides"], "attachments");
@@ -193,10 +287,82 @@ mod tests {
     #[test]
     fn unknown_methods_fail_with_text() {
         assert!(
-            dispatch(9, b"{}")
+            dispatch(&state(), 9, b"{}")
                 .expect_err("unknown method")
                 .contains("unknown fr-attachment method 9")
         );
+    }
+
+    #[test]
+    fn image_limits_replies_the_deployment_snapshot() {
+        let reply = dispatch(&state(), face::METHOD_IMAGE_LIMITS, b"{}").expect("limits");
+        let reply: serde_json::Value = serde_json::from_slice(&reply).expect("json");
+        assert_eq!(reply["maxImageBytes"], 20 * 1024 * 1024);
+        assert_eq!(reply["maxImagesPerMessage"], 20);
+        assert_eq!(reply["maxImageDimension"], 8192);
+        assert_eq!(
+            reply["mediaTypes"],
+            serde_json::json!(["image/png", "image/jpeg", "image/webp", "image/gif"])
+        );
+    }
+
+    #[test]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the test raster is 4x3, far below one byte per channel"
+    )]
+    fn save_image_round_trips_a_tiny_png() {
+        let pixels = image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(4, 3, |x, y| {
+            image::Rgb([x as u8, y as u8, 7])
+        }));
+        let mut bytes = Vec::new();
+        pixels
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
+            .expect("encodes");
+        let payload = serde_json::json!({
+            "data": fr_wire::base64::encode_base64(&bytes),
+            "mediaType": "image/png",
+            "name": "shot.png",
+        });
+        let reply = dispatch(
+            &state(),
+            face::METHOD_SAVE_IMAGE,
+            serde_json::to_vec(&payload).expect("encodes").as_slice(),
+        )
+        .expect("saves");
+        let reference: serde_json::Value = serde_json::from_slice(&reply).expect("json");
+        assert_eq!(reference["mediaType"], "image/png");
+        assert_eq!(reference["width"], 4);
+        assert_eq!(reference["height"], 3);
+        assert_eq!(reference["name"], "shot.png");
+        assert_eq!(
+            reference["attachmentId"]
+                .as_str()
+                .expect("id")
+                .chars()
+                .count(),
+            71,
+            "sha256: plus 64 hex"
+        );
+    }
+
+    #[test]
+    fn save_image_maps_the_attachment_error_to_the_document() {
+        let payload = serde_json::json!({
+            "data": fr_wire::base64::encode_base64(b"not an image"),
+            "mediaType": "image/png",
+        });
+        let body = dispatch(
+            &state(),
+            face::METHOD_SAVE_IMAGE,
+            serde_json::to_vec(&payload).expect("encodes").as_slice(),
+        )
+        .expect_err("refuses");
+        let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(parsed["attachmentError"]["code"], "INVALID_IMAGE");
     }
 
     #[test]

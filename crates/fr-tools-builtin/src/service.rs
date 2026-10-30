@@ -77,6 +77,16 @@ pub const METHOD_EDIT_PRESENT_CALL: u32 = 42;
 pub const METHOD_EDIT_PRESENT_RESULT: u32 = 43;
 /// Method selector: the edit presentation metadata.
 pub const METHOD_EDIT_PRESENTATION_META: u32 = 44;
+/// Method selector: the `read_image` tool body.
+pub const METHOD_READ_IMAGE_EXECUTE: u32 = 50;
+/// Method selector: the `read_image` content projection (the dsh
+/// `output.render`).
+pub const METHOD_READ_IMAGE_RENDER: u32 = 51;
+/// Method selector: the `read_image` pending-call presentation.
+pub const METHOD_READ_IMAGE_PRESENT_CALL: u32 = 52;
+/// Method selector: the `read_image` presentation metadata (the
+/// resolved path only).
+pub const METHOD_READ_IMAGE_PRESENTATION_META: u32 = 53;
 /// Method selector: the glob tool body.
 pub const METHOD_GLOB_EXECUTE: u32 = 60;
 /// Method selector: the glob render projection.
@@ -339,7 +349,7 @@ pub fn fold_log(request: &Value) -> Value {
 /// two shell tools' bands, the read/write/edit/glob/grep bands, the
 /// spill listeners, the editor band, and the projection fold; excluded
 /// surfaces never appear here).
-const fn describe_methods() -> [&'static str; 41] {
+const fn describe_methods() -> [&'static str; 45] {
     [
         "describe",
         "bash.execute",
@@ -356,6 +366,10 @@ const fn describe_methods() -> [&'static str; 41] {
         "read.presentCall",
         "read.presentResult",
         "read.presentationMeta",
+        "read_image.execute",
+        "read_image.render",
+        "read_image.presentCall",
+        "read_image.presentationMeta",
         "write.execute",
         "write.render",
         "write.presentCall",

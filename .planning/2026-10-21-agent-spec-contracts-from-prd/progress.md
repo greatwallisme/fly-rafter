@@ -1209,3 +1209,16 @@
 - 下一动作：批 4=read_image 全落（attachment store+llm 缝+路由头缝）。
 
 ## 2026-10-30 — 16b 批 3 提交入库：0004841（用户 /commit，同款 --no-verify 守卫设计态注记随提交信息；22 文件 +6045/-88，四新模块入库）
+
+## 2026-10-30 — 16b 批 4 进行中：fr-attachment durable store 面已落（29 tests）
+- fr-wire：base64 共享编解码新模块（encode/decode+钉测）；services::attachments（DESCRIBE=1/SAVE_IMAGE=2/IMAGE_LIMITS=3）+services::llm（DESCRIBE=1…RESOLVE_MODEL_INFO=6）+session_persistence METHOD_REQUEST_HEADER=10 三 face 落位；fr-tools-builtin fs_domain encode_base64 改为 fr-wire 委托。
+- fr-attachment 六新模块全落：error.rs（17 码族+两成员函数）、limits.rs（ImageAttachmentLimits/AttachmentConfig/九 DEFAULT+validate 品牌适配文案）、admission.rs（SourceFacts 全事实+DepthWord 三值+request_image_dimensions 几何+PNG/JPEG/WebP 容器走查 animated/carries_metadata+orientation 走 image crate decoder trait 默认 EXIF 解析）、normalize.rs（NormalizationPolicy+can_pass_through+initial_dimensions+verify+normalize_image 旋转/缩放/阶梯+16-bit PNG 源描述）、store.rs（display_name/ensure_reference/prepare/commit/save/read+staged→link→dedup→0400→目录 fsync 出版机制+scratch roundtrip/dedup/损坏拒读/超限拒钉测）、file_store.rs（file_leaf_name Windows 设备名/utf8 255 前缀+save verbatim/stream verbatim/read verbatim 终验）、local.rs（resolve_home FR_HOME~/.fr+CompressionLimiter FIFO+SharedRequest 单飞 condvar 同步移植 last-waiter-cancel+LocalAttachmentStore 全家+AttachmentRead 实装）。
+- 过程注记：本批生成退化持续（Write/Edit corrupted tokens 三度、python 引号战两度）——小片段+python line-list+逐段 cargo check 纪律；测试 scratch 误传 root 致 ensure_durable_home 上溯 "/" chmod EPERM，track_caller+FAIL 标签探针定位（root 须为 <home>/attachments/v1）；PNG 测试 chunk 手造 CRC 错两轮自纠（CRC32 测试内实现+IHDR 必须居首）。
+- 下一步：fr-attachment plugin_shell（save_image/image_limits serve）→fr-llm resolve_model_info→fr-session request_header→fr-tools-builtin read_image 全家→spec Boundaries→五门。
+
+## 2026-10-30 — 16b 批 4 落地：read_image 全落（Q16b-1A），workspace 1283 tests（1245→1283）
+- fr-attachment durable store 面全落（七模块：error/limits/admission/normalize/store/file_store/local + LocalAttachmentStore 组合 + dylib shell save_image/image_limits serve）；fr-wire 三 face（attachments/llm/session METHOD_REQUEST_HEADER=10）+base64 共享编解码；fr-llm resolve_model_info 缝（GenerationSource 默认+serve 臂 6+shell 路由+42 tests）；fr-session request_header 折叠面（166 tests）；fr-tools-builtin 三缝 trait（AttachmentSeam/LlmSeam/RouteHeaderSeam）+fs_read_image 全家族（方法号 50-53+describe 扩 45 法+schema 双表+catalog READ_IMAGE 再生+注册门=setup 期 attachments DESCRIBE probe+band 路由+isConcurrencySafe）。
+- spec：TOOLS Boundaries 扩 crates/fr-attachment/** + crates/fr-llm/**（Q16b-1A 随裁决生效），parse+lint 100% exit 0；三开关 0 errors；lifecycle 19 passed/389 pending 如实（批 5 绑定）。
+- 五门全绿：fmt/clippy workspace 0/tests 1283（FR_DSH_SOURCE）/doc -D warnings/Windows msvc 未跑（本机无）。
+- 过程注记：生成退化贯穿本批（corrupted tokens 约 8 起、heredoc 引号战、rg -rn 误用再犯两回）——python line-list+小片段+逐段 cargo check 纪律；钉测自纠 5 起（PNG 手造 CRC 两轮+IHDR 位序、测试 scratch 误传 root 致 ensure_durable_home 上溯 "/" chmod EPERM、save_failure 删块误伤 if 行两处、base64 lenient tail 被 unwrap_err 钉测逮住=真 bug 修复、serve 尾括号连环）。
+- 下一动作：批 5=read_image 场景绑定全族+七步流 4-7 收口（TOOLS spec 408 场景绑定真实测试+guard/explain/stamp 闭环）。

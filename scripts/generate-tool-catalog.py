@@ -121,6 +121,13 @@ TOOLS = {
         ],
         "segments",
     ),
+    "read_image": (
+        "READ_IMAGE",
+        [
+            ("file_path", "FILE_PATH_TEXT"),
+        ],
+        "none",
+    ),
     "str_replace_editor": (
         "STR_REPLACE_EDITOR",
         [

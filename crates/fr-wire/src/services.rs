@@ -57,6 +57,10 @@ pub mod session_persistence {
     pub const METHOD_SESSION_DRAIN: u32 = 8;
     /// Read one live session's log slice (Q107-A).
     pub const METHOD_SESSION_READ: u32 = 9;
+    /// `{id}` → `{"header": EpochHeader | null}` — the log's latest
+    /// `request/header` snapshot (the dsh `session.requestHeader()`; the
+    /// Q16b-1A route-gate seam).
+    pub const METHOD_REQUEST_HEADER: u32 = 10;
 }
 
 /// The `'system-prompt'` service face (owner crate `fr-system-prompt`).
@@ -366,6 +370,47 @@ pub mod spill_store {
     /// Persist one complete formatted result (`SaveTextSpill`) → the
     /// reference (`{locator, retrievalHint, ...}`).
     pub const METHOD_SAVE_TEXT: u32 = 0;
+}
+
+/// The `'attachments'` service face (the Q16b-1A durable-store seam).
+///
+/// Vocabulary mirrors dsh `@deepseek-ai/dsh-attachment`'s store face:
+/// the limits snapshot the tool bodies read, and the image save the
+/// `read_image` tool calls. Byte payloads ride `crate::base64`.
+pub mod attachments {
+    /// The provided service name consumers inject.
+    pub const SERVICE_NAME: &str = "attachments";
+    /// Face metadata echo (`{plugin, service, abiVersion}`).
+    pub const METHOD_DESCRIBE: u32 = 1;
+    /// `{data: base64, mediaType, name?}` → the durable reference
+    /// (`ImageAttachmentRef` wire form; the dsh `saveImage`).
+    pub const METHOD_SAVE_IMAGE: u32 = 2;
+    /// `{}` → the admission limits snapshot (the dsh `imageLimits`).
+    pub const METHOD_IMAGE_LIMITS: u32 = 3;
+}
+
+/// The `'llm'` service face (the fr-llm shell's provided service).
+///
+/// The generation trio rides the runtime generation hub; the
+/// resolve-model-info arm (the Q16b-1A route gate's seam) resolves one
+/// route's exact model metadata without starting a generation.
+pub mod llm {
+    /// The provided service name consumers inject (PRD :336 `inject llm`).
+    pub const SERVICE_NAME: &str = "llm";
+    /// Face metadata echo (`{name, service, abiVersion}`).
+    pub const METHOD_DESCRIBE: u32 = 1;
+    /// `{request: CallConfig}` → the prepared-call binding (the
+    /// runtime `prepareCall`).
+    pub const METHOD_PREPARE_CALL: u32 = 2;
+    /// `{request: GenerateOptions, preparedId?}` → `{generationId}`.
+    pub const METHOD_BEGIN: u32 = 3;
+    /// `{generationId}` → the buffered batches.
+    pub const METHOD_DRAIN: u32 = 4;
+    /// `{generationId}` → `{}`.
+    pub const METHOD_ABORT: u32 = 5;
+    /// `{provider, model}` → `WireModelInfo` — exact-route model metadata
+    /// without starting a generation (the dsh `llm.resolveModelInfo`).
+    pub const METHOD_RESOLVE_MODEL_INFO: u32 = 6;
 }
 
 // Rust guideline compliant 2026-10-29

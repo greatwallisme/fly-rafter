@@ -34,7 +34,7 @@ pub const PLUGIN_NAME: &str = "fr-tools-builtin";
 /// listeners — the spill listeners register at activation instead (the
 /// descriptor `listen` map stays a dylib event face, not a tools-pipeline
 /// registration).
-const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\",\"fs\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\",\"subprocess\"],\"listen\":{}}";
+const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\",\"fs\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\",\"subprocess\",\"attachments\",\"llm\"],\"listen\":{}}";
 
 /// The maximum host reply the require loop grows its buffer toward (the
 /// approval judgment).
@@ -162,6 +162,59 @@ impl crate::tools::PolicySeam for WireSeams {
     }
 }
 
+impl crate::tools::AttachmentSeam for WireSeams {
+    fn image_limits(&self) -> Result<Value, String> {
+        let reply = self.link.require(
+            fr_wire::services::attachments::SERVICE_NAME,
+            fr_wire::services::attachments::METHOD_IMAGE_LIMITS,
+            b"{}",
+        )?;
+        serde_json::from_slice(&reply)
+            .map_err(|error| format!("image-limits decode failed: {error}"))
+    }
+
+    fn save_image(&self, input: &Value) -> Result<Value, String> {
+        let bytes = serde_json::to_vec(input)
+            .map_err(|error| format!("save-image encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::attachments::SERVICE_NAME,
+            fr_wire::services::attachments::METHOD_SAVE_IMAGE,
+            &bytes,
+        )?;
+        serde_json::from_slice(&reply).map_err(|error| format!("save-image decode failed: {error}"))
+    }
+}
+
+impl crate::tools::LlmSeam for WireSeams {
+    fn resolve_model_info(&self, provider: &str, model: &str) -> Result<Value, String> {
+        let payload = json!({ "provider": provider, "model": model });
+        let bytes = serde_json::to_vec(&payload)
+            .map_err(|error| format!("resolve-model-info encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::llm::SERVICE_NAME,
+            fr_wire::services::llm::METHOD_RESOLVE_MODEL_INFO,
+            &bytes,
+        )?;
+        serde_json::from_slice(&reply)
+            .map_err(|error| format!("resolve-model-info decode failed: {error}"))
+    }
+}
+
+impl crate::tools::RouteHeaderSeam for WireSeams {
+    fn request_header(&self, session: &str) -> Result<Value, String> {
+        let payload = json!({ "id": session });
+        let bytes = serde_json::to_vec(&payload)
+            .map_err(|error| format!("request-header encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::session_persistence::SERVICE_NAME,
+            fr_wire::services::session_persistence::METHOD_REQUEST_HEADER,
+            &bytes,
+        )?;
+        serde_json::from_slice(&reply)
+            .map_err(|error| format!("request-header decode failed: {error}"))
+    }
+}
+
 impl crate::tools::ApprovalSeam for WireSeams {
     fn request(&self, ask: &fr_sandbox::escalation::EscalationAsk) -> Result<String, String> {
         let payload = json!({
@@ -195,6 +248,18 @@ impl Seams for WireSeams {
 
     fn approval(&self) -> &dyn crate::tools::ApprovalSeam {
         self
+    }
+
+    fn attachments(&self) -> Option<&dyn crate::tools::AttachmentSeam> {
+        Some(self)
+    }
+
+    fn llm(&self) -> Option<&dyn crate::tools::LlmSeam> {
+        Some(self)
+    }
+
+    fn route_header(&self) -> Option<&dyn crate::tools::RouteHeaderSeam> {
+        Some(self)
     }
 
     fn shell_resolve(&self, shell: &str, request: &Value) -> Result<Value, String> {
@@ -584,7 +649,11 @@ type RegistrationRow = (
     clippy::too_many_lines,
     reason = "the tuple table mirrors the dsh registrations one arm per tool; splitting it would hide the correspondence"
 )]
-fn register_tools(link: &HostLink, advertise_escalation: bool) -> Option<()> {
+fn register_tools(
+    link: &HostLink,
+    advertise_escalation: bool,
+    attachments_mounted: bool,
+) -> Option<()> {
     let tools: Vec<RegistrationRow> = vec![
         (
             "bash",
@@ -726,6 +795,43 @@ fn register_tools(link: &HostLink, advertise_escalation: bool) -> Option<()> {
             serde_json::to_vec(&registration).ok()?.as_slice(),
         )?;
     }
+    // The composition-conditional image tool rides the read family:
+    // content-addressed attachment writes are idempotent, so concurrent
+    // reads of the same file cannot conflict (the dsh
+    // `isConcurrencySafe` judgment).
+    if attachments_mounted {
+        let registration = json!({
+            "name": "read_image",
+            "description": crate::catalog_gen::READ_IMAGE_DESCRIPTION.to_owned(),
+            "parameters": crate::schema::read_image_parameters(),
+            "output": {
+                "schema": crate::schema::read_image_output_schema(),
+                "render": {
+                    "service": crate::service::SERVICE_NAME,
+                    "method": crate::service::METHOD_READ_IMAGE_RENDER,
+                },
+                "presentationMeta": {
+                    "service": crate::service::SERVICE_NAME,
+                    "method": crate::service::METHOD_READ_IMAGE_PRESENTATION_META,
+                },
+            },
+            "execute": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_READ_IMAGE_EXECUTE,
+            },
+            "presentCall": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_READ_IMAGE_PRESENT_CALL,
+            },
+            "isConcurrencySafe": true,
+        });
+        step(
+            link,
+            fr_wire::services::tools::SERVICE_NAME,
+            fr_wire::services::tools::METHOD_REGISTER,
+            serde_json::to_vec(&registration).ok()?.as_slice(),
+        )?;
+    }
     if crate::sre_tools::BAKED_STR_REPLACE_EDITOR {
         let registration = json!({
             "name": "str_replace_editor",
@@ -799,9 +905,21 @@ impl BuiltinState {
         link.grant("tools", "builtin-tools").ok()?;
         link.grant("session-projections", "builtin-tools").ok()?;
         let escalation = read_default_mode(&link)?;
+        // The composition gate (the dsh `ctx.inject(['attachments'], …)`
+        // conditional registration): without a committed durable store
+        // the deployment cannot durably commit image bytes, so the tool
+        // never registers; the execute body keeps a defensive re-check
+        // for direct callers.
+        let attachments_mounted = link
+            .require(
+                fr_wire::services::attachments::SERVICE_NAME,
+                fr_wire::services::attachments::METHOD_DESCRIBE,
+                b"{}",
+            )
+            .is_ok();
         register_sections(&link)?;
         register_projection(&link)?;
-        register_tools(&link, !escalation.is_empty())?;
+        register_tools(&link, !escalation.is_empty(), attachments_mounted)?;
 
         // The managed-environment registry over the resolved home.
         let env = ShellEnvRegistry::new(None).ok()?;
@@ -1002,6 +1120,16 @@ unsafe extern "C" fn call(
             advertised: state.fs().sandbox_mode().is_some(),
         };
         crate::fs_tools::serve(&deps, method, payload)
+    } else if (crate::service::METHOD_READ_IMAGE_EXECUTE
+        ..=crate::service::METHOD_READ_IMAGE_PRESENTATION_META)
+        .contains(&method)
+    {
+        let deps = crate::fs_read_image::ImageToolDeps {
+            fs: state.fs(),
+            gate: state.gate(),
+            seams: state.tools().seams(),
+        };
+        crate::fs_read_image::serve(&deps, method, payload)
     } else if (crate::service::METHOD_GLOB_EXECUTE..=crate::service::METHOD_GREP_SPILL)
         .contains(&method)
     {

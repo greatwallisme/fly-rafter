@@ -312,6 +312,27 @@ pub const GREP_PATH_TEXT: &str = r"File or directory to search. Defaults to the 
 /// The `grep` `include` parameter description (catalog-verbatim).
 pub const GREP_INCLUDE_TEXT: &str = r#"One glob filter for which files to search (e.g. "*.ts", "*.{js,jsx}"). Not a list; negation is not supported."#;
 
+/// The `read_image` tool description (catalog-verbatim).
+pub const READ_IMAGE_DESCRIPTION: &str = r"Read a PNG/JPEG/WebP/GIF file and return the image itself. Large images are downscaled automatically; do not install image libraries or create thumbnails to inspect an image.";
+
+/// The `read_image` parameter table (the json block, verbatim).
+pub const READ_IMAGE_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "file_path": {
+      "type": "string",
+      "description": "Path to the image file, resolved by the filesystem backend."
+    }
+  },
+  "required": [
+    "file_path"
+  ]
+}"#;
+
+/// The `read_image` `file_path` parameter description (catalog-verbatim).
+pub const READ_IMAGE_FILE_PATH_TEXT: &str =
+    r"Path to the image file, resolved by the filesystem backend.";
+
 /// The `str_replace_editor` tool description (catalog-verbatim).
 pub const STR_REPLACE_EDITOR_DESCRIPTION: &str = r"Custom editing tool for viewing, creating and editing files
 * State is persistent across command calls and discussions with the user
