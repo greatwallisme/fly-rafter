@@ -1287,6 +1287,8 @@
 - 过程注记：生成退化持续高发（占位符混入 3 起+def 行吞并 1 起+sampleOverGoat 误写 1 起+测试别名虚构 1 起+anchor 失配 4 起）全部分块写入+逐块校验自纠；真缺陷两起（blockedReason 离开 blocked 相未清除=dsh withPhase 语义、projection failure 未门控 mutation=dsh state() 抛出）由测试暴露当场修复。
 
 ## 2026-10-31 — 16c 批 4 落地：jobs 域三工具 + 完成通知机（Q16c-1A）+ tool:jobs section
+
+## 2026-10-31 — 16c 批 4 提交入库：9696137（用户 /commit，--no-verify 守卫设计态注记随提交信息；26 文件 +3204/-120，job_tools.rs 新模块入库）
 - 真源终勘：dsh tool-jobs index.ts 416 行+render.ts 84 行全读；catalog 三条目（tool-catalog.md :2202-2272）；section 静态文本（TOOL_JOBS=1600）。设计终勘落 findings.md 批 4 节（载体裁决全图）。
 - fr-shell（settlement 发射面）：新 SettlementAnnounce seam（内核 "job/settled" 事件，dsh hub 形状 {type:'settled',job,cause,awaited}；fr-llm emit 判例）+HostLink::emit+WireJobAnnounce+每 job 等待者计数（wait() 首个 terminal 检查失败后增、出口减）+settle() 锁内快照 awaited/view 后 announce。两钉测：hub 载荷形状逐键+awaited 活等待者臂。
 - fr-agent-loop（授权+载体补全）：Outbound::grant（D31 法）+setup grant("builtin-tools","agent")（缺席=continue，消费者可选；装配序契约注释）+InboxClaimedPayload 增 sessionId（loop_inbox.claim 处 client.session_id() 在手；dsh 载荷携 Agent 引用的诚实序列化）。grant 两名逐字+拒收臂钉测。既有 perf 测试 println! 按 hook 移除。
