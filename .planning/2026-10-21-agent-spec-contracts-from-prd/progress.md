@@ -1249,3 +1249,5 @@
 - PRD 4.5 增 fr-storage 行（fr-permission-presets 之后，Q16c-3B 随裁决生效）；workspace members+deps 接线。
 - 过程注记：生成退化持续（Write 中途乱码两度+python 引号战两度+regex 误替换 METHOD_X 一度全部自纠）——line-list 纪律有效；hook 首次标记 atomic.rs use-in-fn（改顶层 cfg 门控）。
 - 下一动作：16c 批 2=fr-wire 三事件常量（todo/write、goal/change、schedule/change）+fr-config 六组新键+todo_write 全件（projection todos v2+工具+catalog+section 否定钉测）。
+
+## 2026-10-30 — 16c 批 1 提交入库：fff3742（用户 /commit，--no-verify 守卫设计态注记随提交信息；16 文件 +3190/-3，fr-storage 十源文件+PRD 4.5 行+计划三件+workspace 接线入库）
