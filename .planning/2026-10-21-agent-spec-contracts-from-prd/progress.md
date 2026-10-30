@@ -1199,3 +1199,5 @@
 - 五门全绿：fmt/clippy workspace -D warnings 0/tests 1214+0（FR_DSH_SOURCE 必需）/doc/Windows msvc。verify 增三冻结钉测+escalation 对+输出 schema 形状。
 - 过程注记：本批 4 起 Write/Edit 生成退化当场截停（TOOL_SOURCES 两度、schema promoted 臂截断、python 补丁锚三度）——小片段+逐段校验纪律再生效；钉测逮真错自纠 7 处（tokenize 尾段/window 测试数据无换行/信封体含 footer/jsdiff 三行上下文两侧/tf 短名/陈旧写需外部变异/FsError=HarnessError 需带码）。
 - 下一动作：批 3=glob/grep+spill 消费+str_replace_editor+修场景④（Q16b-4A）。
+
+## 2026-10-30 — 16b 批 2 提交入库：af43854（用户 /commit 裁决 --no-verify，守卫 16 checks 设计态注记随提交信息；17 文件 +4294/-128）
