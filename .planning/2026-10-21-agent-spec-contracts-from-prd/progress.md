@@ -1265,3 +1265,5 @@
 - 过程注记：生成退化 5 起（registry.rs 两度截断+python heredoc 乱码+describe 表漏 glob.spill+WireSessionLog 误毁）全部当场自纠；hook 误报两类（todo 子串/脚本既有 print）透明接受。
 - 下一动作：16c 批 3=goal 域（fold 全量含 goal 源推进 Q16c-2A+service+投影 goal v6）+create/get/update_goal 三工具+tool:goal section（{{blocked_after}} 模板抽取）。
 - guard 复跑（带 FR_DSH_SOURCE）：16 checks 全 0 failed（pending 设计态 skip 计 not passing=16b 收口同态；首跑漏传 FR_DSH_SOURCE 致 catalog --check 按设计 fail 1 起，非码面缺陷）。
+
+## 2026-10-30 — 16c 批 2 提交入库：84c34ed（用户 /commit，--no-verify 守卫设计态注记随提交信息；21 文件 +1567/-80，fr-wire 三常量+fr-schema registry+bundle 行+todo.rs 全件+descriptor 缺陷修复+两 spec 绑定+审计节入库）
