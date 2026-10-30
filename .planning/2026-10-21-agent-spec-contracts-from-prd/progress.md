@@ -1187,3 +1187,15 @@
 - 批 1 全落：fr-wire fs face（1000-1015 十六法）+spill_store face；fs_types/fsio/fence/observation/fs_domain 五模块（fs-local 1271 行+fs-sandbox 385 行真源移植）；plugin_shell provide+=fs+call 分流；working_directory StdFsStat 收编。
 - 五门全绿（fmt/clippy -D warnings 0/tests 1186+0/doc/Windows msvc 零警告）。过程：3 起生成退化截停、3 处钉测逮真缺陷自纠（详见 findings 批 1 节）。
 - 下一动作：批 2=read/write/edit 三工具+escalation 桥+section/schema 抽取扩源+working_directory 迁移收尾。
+
+## 2026-10-30 — 16b 批 1 提交入库：a6a26c5（用户 /commit 裁决 --no-verify，守卫 16 checks 设计态注记随提交信息；14 文件 +3309/-6）
+
+## 2026-10-30 — 16b 批 2：read/write/edit 三工具+escalation 桥+catalog 扩源+working_directory 收尾，workspace 1214 tests（1186→1214）
+- 真源全读：tool-fs read/write/edit/read-render/diff/error/mutation-result/sandbox/session-cwd/read-target/index（1561 行）+tool-catalog 三节+jsdiff 9.0.0（npm tarball）+dsh-util-code-language 全表；fr 侧 WireToolRegistration/presentation 词表/orders/verify 判例核实。设计钉 14 条落 findings「批 2 设计钉」节。
+- catalog 脚本扩源：TOOLS 改 (stem, per-tool 键表) 结构，TOOL_SOURCES 增三路径，新 extract_section_text_segments（剥 ctx.tools.get 字面量+弃空段）；catalog_gen.rs 重生成（READ/WRITE/EDIT 常量族+WRITE_SECTION_TEXTS 三段）。
+- 四新模块：fs_read_render（build_window/formatReadOutput/lang 表/meta 收窄+信封正则）；fs_diff（jsdiff 9.0.0 移植：tokenize 尾段补推+Myers bestPath 逐字+buildPatch 重叠规则+No-newline 标记+meta 收窄）；fs_sandbox（schema_fields subject='operation'+resolve_policy fail-closed 链+map_error+remediate_fs_error）；fs_tools（三 execute+五投影器+serve 第三带+write_section_text 组合）。
+- 接线：service 方法号 20-24/30-34/40-44+describe 26 法+seams 访问器；plugin_shell 五 section（1000/1010/1100/1200/1300）+五工具注册（read isConcurrencySafe=true）+BuiltinState.gate+20..=44 带；schema.rs 三参数表+三输出 schema。
+- working_directory 收尾：FsStat trait+StdFsStat 删除，is_directory 直调 fsio::probe；测试换真实临时目录（Scratch 判例）。
+- 五门全绿：fmt/clippy workspace -D warnings 0/tests 1214+0（FR_DSH_SOURCE 必需）/doc/Windows msvc。verify 增三冻结钉测+escalation 对+输出 schema 形状。
+- 过程注记：本批 4 起 Write/Edit 生成退化当场截停（TOOL_SOURCES 两度、schema promoted 臂截断、python 补丁锚三度）——小片段+逐段校验纪律再生效；钉测逮真错自纠 7 处（tokenize 尾段/window 测试数据无换行/信封体含 footer/jsdiff 三行上下文两侧/tf 短名/陈旧写需外部变异/FsError=HarnessError 需带码）。
+- 下一动作：批 3=glob/grep+spill 消费+str_replace_editor+修场景④（Q16b-4A）。

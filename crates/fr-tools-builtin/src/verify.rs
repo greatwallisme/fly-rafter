@@ -68,6 +68,99 @@ fn pwsh_registration_matches_the_frozen_catalog() {
     assert_eq!(base_registration(pwsh_parameters(true, true, true)), frozen);
 }
 
+#[test]
+fn read_registration_matches_the_frozen_catalog() {
+    let frozen: Value = serde_json::from_str(crate::catalog_gen::READ_PARAMETERS_JSON)
+        .expect("the frozen table parses");
+    // The read table carries no escalation pair; the composed table is
+    // the catalog base outright.
+    assert_eq!(crate::schema::read_parameters(), frozen);
+}
+
+#[test]
+fn write_registration_matches_the_frozen_catalog() {
+    let frozen: Value = serde_json::from_str(crate::catalog_gen::WRITE_PARAMETERS_JSON)
+        .expect("the frozen table parses");
+    assert_eq!(
+        base_registration(crate::schema::write_parameters(true)),
+        frozen
+    );
+}
+
+#[test]
+fn edit_registration_matches_the_frozen_catalog() {
+    let frozen: Value = serde_json::from_str(crate::catalog_gen::EDIT_PARAMETERS_JSON)
+        .expect("the frozen table parses");
+    assert_eq!(
+        base_registration(crate::schema::edit_parameters(true)),
+        frozen
+    );
+}
+
+/// The fs escalation variants differ from the frozen bases exactly by
+/// the escalation pair, whose description carries the operation
+/// subject (the dsh `FsSandboxController` judgment).
+#[test]
+fn fs_escalation_variant_differs_exactly_by_the_escalation_pair() {
+    for full in [
+        crate::schema::write_parameters(true),
+        crate::schema::edit_parameters(true),
+    ] {
+        let properties = full
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(properties.contains_key("sandbox_permissions"));
+        assert!(properties.contains_key("justification"));
+        assert_eq!(
+            properties["sandbox_permissions"]["enum"],
+            json!(["workspace-write", "danger-full-access"])
+        );
+        assert!(
+            properties["sandbox_permissions"]["description"]
+                .as_str()
+                .expect("description")
+                .contains("the exact operation"),
+            "{}",
+            properties["sandbox_permissions"]["description"]
+        );
+    }
+    let base: Value =
+        serde_json::from_str(crate::catalog_gen::WRITE_PARAMETERS_JSON).expect("parses");
+    assert_eq!(
+        base_registration(crate::schema::write_parameters(true)),
+        base
+    );
+}
+
+/// The fs output contracts pin the canonical shapes (the catalog
+/// documents parameters alone; the output schemas ride the dsh tool
+/// sources).
+#[test]
+fn fs_output_schemas_pin_the_shapes() {
+    let read = crate::schema::read_output_schema();
+    assert_eq!(read["properties"].as_object().expect("properties").len(), 4);
+    assert_eq!(read["additionalProperties"], false);
+    assert_eq!(
+        read["properties"]["lines"]["items"]["properties"]["number"]["type"],
+        "integer"
+    );
+    let write = crate::schema::write_output_schema();
+    assert_eq!(
+        write["properties"]["operation"]["enum"],
+        json!(["create", "update"])
+    );
+    assert_eq!(
+        write["properties"]["before"]["oneOf"]
+            .as_array()
+            .expect("oneOf")
+            .len(),
+        2
+    );
+    let edit = crate::schema::edit_output_schema();
+    assert_eq!(edit["properties"].as_object().expect("properties").len(), 3);
+}
+
 /// The escalation variant differs from the frozen base exactly by the
 /// escalation pair (the fr-only registration facts).
 #[test]

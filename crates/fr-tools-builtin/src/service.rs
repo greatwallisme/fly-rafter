@@ -47,6 +47,36 @@ pub const METHOD_PRESENTATION_META: u32 = 5;
 /// Method selector: the `workingDirectory` projection fold (the
 /// non-tool band; 20+ stays reserved for the later tool groups).
 pub const METHOD_WORKING_DIRECTORY_FOLD: u32 = 900;
+/// Method selector: the read tool body.
+pub const METHOD_READ_EXECUTE: u32 = 20;
+/// Method selector: the read render projection.
+pub const METHOD_READ_RENDER: u32 = 21;
+/// Method selector: the read pending-call presentation.
+pub const METHOD_READ_PRESENT_CALL: u32 = 22;
+/// Method selector: the read completed-result presentation.
+pub const METHOD_READ_PRESENT_RESULT: u32 = 23;
+/// Method selector: the read presentation metadata.
+pub const METHOD_READ_PRESENTATION_META: u32 = 24;
+/// Method selector: the write tool body.
+pub const METHOD_WRITE_EXECUTE: u32 = 30;
+/// Method selector: the write render projection.
+pub const METHOD_WRITE_RENDER: u32 = 31;
+/// Method selector: the write pending-call presentation.
+pub const METHOD_WRITE_PRESENT_CALL: u32 = 32;
+/// Method selector: the write completed-result presentation.
+pub const METHOD_WRITE_PRESENT_RESULT: u32 = 33;
+/// Method selector: the write presentation metadata.
+pub const METHOD_WRITE_PRESENTATION_META: u32 = 34;
+/// Method selector: the edit tool body.
+pub const METHOD_EDIT_EXECUTE: u32 = 40;
+/// Method selector: the edit render projection.
+pub const METHOD_EDIT_RENDER: u32 = 41;
+/// Method selector: the edit pending-call presentation.
+pub const METHOD_EDIT_PRESENT_CALL: u32 = 42;
+/// Method selector: the edit completed-result presentation.
+pub const METHOD_EDIT_PRESENT_RESULT: u32 = 43;
+/// Method selector: the edit presentation metadata.
+pub const METHOD_EDIT_PRESENTATION_META: u32 = 44;
 
 /// The escalate-to modes this composition advertises (the dsh
 /// `ESCALATION_TARGETS` words in table order).
@@ -113,6 +143,13 @@ impl BuiltinTools {
     #[must_use]
     pub const fn directories(&self) -> &std::sync::Arc<working_directory::WorkingDirectories> {
         &self.directories
+    }
+
+    /// The composed cross-plugin seam (the fs tool bodies' standing
+    /// policy, approval, and session-cwd consumption).
+    #[must_use]
+    pub fn seams(&self) -> &dyn tools::Seams {
+        self.seams.as_ref()
     }
 
     /// Serves one method invocation.
@@ -267,9 +304,9 @@ pub fn fold_log(request: &Value) -> Value {
 }
 
 /// The describe surface's method names (the registration reality: the
-/// two shell tools' bands and the projection fold; excluded surfaces
-/// never appear here).
-const fn describe_methods() -> [&'static str; 11] {
+/// two shell tools' bands, the read/write/edit bands, and the
+/// projection fold; excluded surfaces never appear here).
+const fn describe_methods() -> [&'static str; 26] {
     [
         "describe",
         "bash.execute",
@@ -281,6 +318,21 @@ const fn describe_methods() -> [&'static str; 11] {
         "pwsh.render",
         "pwsh.presentCall",
         "pwsh.presentResult",
+        "read.execute",
+        "read.render",
+        "read.presentCall",
+        "read.presentResult",
+        "read.presentationMeta",
+        "write.execute",
+        "write.render",
+        "write.presentCall",
+        "write.presentResult",
+        "write.presentationMeta",
+        "edit.execute",
+        "edit.render",
+        "edit.presentCall",
+        "edit.presentResult",
+        "edit.presentationMeta",
         "workingDirectory.fold",
     ]
 }

@@ -3,8 +3,9 @@
 //! arm per Q16a-5A): the per-session serialized `ensure` and the
 //! committed-state read.
 //!
-//! The filesystem inspection rides a swappable seam (the 16b migration
-//! point); the durable changes ride the `'session-persistence'` faces.
+//! The filesystem inspection rides the in-crate fsio probe (the 16b
+//! migration folded the 16a seam away); the durable changes ride the
+//! `'session-persistence'` faces.
 //!
 //! The projection registration and relay fold land here as the dsh
 //! `workingDirectory` projection (stateVersion 1): the fold input is
@@ -25,30 +26,13 @@ pub const STATE_VERSION: u64 = 1;
 /// The durable change event type (dsh `working-directory/change`).
 pub const CHANGE_EVENT: &str = "working-directory/change";
 
-/// The swappable filesystem-inspection seam (the dsh `ctx.fs`
+/// Whether `path` resolves to an existing directory (the dsh `ctx.fs`
 /// resolve+stat pair reduced to the directory-existence face the
-/// minimal arm needs).
-pub trait FsStat: Send + Sync {
-    /// Whether `path` resolves to an existing directory.
-    ///
-    /// # Errors
-    ///
-    /// A failing inspection (the dsh `fs.stat` rejection family).
-    fn is_directory(&self, path: &str) -> Result<bool, String>;
-}
-
-/// The filesystem inspection over the shared fsio mechanics (the dsh
-/// `ctx.fs` local arm; the 16b migration folded the probe behind the
-/// single local-filesystem implementation).
-#[derive(Debug, Default)]
-pub struct StdFsStat;
-
-impl FsStat for StdFsStat {
-    fn is_directory(&self, path: &str) -> Result<bool, String> {
-        Ok(crate::fsio::probe(path)
-            .map_err(|error| error.to_string())?
-            .is_some_and(|info| info.kind == crate::fs_types::FsKind::Directory))
-    }
+/// minimal arm needs; the single fsio implementation).
+fn is_directory(path: &str) -> Result<bool, String> {
+    Ok(crate::fsio::probe(path)
+        .map_err(|error| error.to_string())?
+        .is_some_and(|info| info.kind == crate::fs_types::FsKind::Directory))
 }
 
 /// The session-log seam: cold-reads one session's header plus the event
@@ -122,7 +106,6 @@ pub struct WorkingDirectories {
     /// One serialization gate per session (dsh `serialize`).
     gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     log: Arc<dyn SessionLog>,
-    stat: Arc<dyn FsStat>,
     default_dir: String,
 }
 
@@ -135,14 +118,13 @@ impl std::fmt::Debug for WorkingDirectories {
 }
 
 impl WorkingDirectories {
-    /// Assembles the domain over the log seam, the filesystem seam, and
-    /// the launch directory (dsh `defaultDirectory`).
+    /// Assembles the domain over the log seam and the launch directory
+    /// (dsh `defaultDirectory`).
     #[must_use]
-    pub fn new(log: Arc<dyn SessionLog>, stat: Arc<dyn FsStat>, default_dir: String) -> Self {
+    pub fn new(log: Arc<dyn SessionLog>, default_dir: String) -> Self {
         Self {
             gates: Mutex::new(HashMap::new()),
             log,
-            stat,
             default_dir,
         }
     }
@@ -196,7 +178,7 @@ impl WorkingDirectories {
             ProjectionState::At(cwd) => cwd.clone(),
             ProjectionState::Null => self.default_dir.clone(),
         };
-        if self.stat.is_directory(&current)? {
+        if is_directory(&current)? {
             // The dsh commit arm: a null projection is backfilled with a
             // change record so third-party relays converge.
             if state == ProjectionState::Null {
@@ -204,7 +186,7 @@ impl WorkingDirectories {
             }
             return Ok(current);
         }
-        if !self.stat.is_directory(&original)? {
+        if !is_directory(&original)? {
             return Err(format!(
                 "working-directory: directory does not exist: {}",
                 quote(&original)
@@ -286,28 +268,48 @@ mod tests {
         }
     }
 
-    /// One scripted filesystem: a fixed set of existing directories.
-    #[derive(Debug, Default)]
-    struct FakeStat {
-        existing: Vec<String>,
-    }
+    /// One unique scratch root per test (cleaned on drop); the
+    /// scripted directory set becomes real directories under it.
+    struct Scratch(std::path::PathBuf);
 
-    impl FsStat for FakeStat {
-        fn is_directory(&self, path: &str) -> Result<bool, String> {
-            Ok(self.existing.iter().any(|dir| dir == path))
+    impl Scratch {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "fr-working-directory-{tag}-{}-{}",
+                std::process::id(),
+                uuid::Uuid::new_v4().simple()
+            ));
+            std::fs::create_dir_all(&dir).expect("scratch dir creates");
+            Self(dir)
+        }
+
+        fn path(&self, name: &str) -> String {
+            self.0.join(name).to_string_lossy().into_owned()
+        }
+
+        fn make(&self, name: &str) -> String {
+            std::fs::create_dir_all(self.0.join(name)).expect("scratch subdir creates");
+            self.path(name)
         }
     }
 
-    fn domain(log: FakeLog, existing: Vec<&str>) -> (WorkingDirectories, Arc<FakeLog>) {
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn domain(log: FakeLog, existing: &[&str]) -> (WorkingDirectories, Arc<FakeLog>, Scratch) {
+        let scratch = Scratch::new("domain");
+        for name in existing {
+            scratch.make(name);
+        }
         let log: Arc<FakeLog> = Arc::new(log);
         let wd = WorkingDirectories::new(
             Arc::clone(&log) as Arc<dyn SessionLog>,
-            Arc::new(FakeStat {
-                existing: existing.into_iter().map(str::to_owned).collect(),
-            }),
-            "/launch".to_owned(),
+            scratch.path("launch"),
         );
-        (wd, log)
+        (wd, log, scratch)
     }
 
     /// The fold kernel: header init, then change events in log order.
@@ -335,13 +337,13 @@ mod tests {
     /// backfilled with one change record.
     #[test]
     fn ensure_returns_existing_and_backfills_null_projection() {
-        let (wd, log) = domain(FakeLog::default(), vec!["/launch"]);
+        let (wd, log, scratch) = domain(FakeLog::default(), &["launch"]);
         let got = wd.ensure("s1").expect("ensure");
-        assert_eq!(got, "/launch");
+        assert_eq!(got, scratch.path("launch"));
         // The null projection was backfilled exactly once.
         assert_eq!(log.changes.lock().expect("changes").len(), 1);
         let second = wd.ensure("s1").expect("second ensure");
-        assert_eq!(second, "/launch");
+        assert_eq!(second, scratch.path("launch"));
         assert_eq!(log.changes.lock().expect("changes").len(), 1);
     }
 
@@ -350,22 +352,24 @@ mod tests {
     #[test]
     fn ensure_restores_the_original_and_refuses_when_it_is_gone_too() {
         // A committed /gone (the change log), no header cwd, default
-        // /launch exists: restore.
-        let (wd, log) = domain(FakeLog::with_changes(&["/gone"]), vec!["/launch"]);
-        assert_eq!(wd.ensure("s1").expect("ensure"), "/launch");
+        // launch exists: restore.
+        let (wd, log, scratch) = domain(FakeLog::with_changes(&["/gone"]), &["launch"]);
+        assert_eq!(wd.ensure("s1").expect("ensure"), scratch.path("launch"));
         assert_eq!(log.changes.lock().expect("changes").len(), 1);
         // A vanished header cwd is also-unavailable: the dsh recovery
-        // refusal (the header's own project is the restore target).
-        let (wd, _log) = domain(FakeLog::with_header("/repo"), vec!["/launch"]);
+        // refusal (the header's own project is the restore target; the
+        // default launch dir exists but the committed state is the
+        // vanished header project).
+        let (wd, _log, _) = domain(FakeLog::with_header("/nonexistent-repo"), &["launch"]);
         assert_eq!(
             wd.ensure("s1").unwrap_err(),
-            "working-directory: directory does not exist: \"/repo\""
+            "working-directory: directory does not exist: \"/nonexistent-repo\""
         );
         // Neither exists: the dsh recovery refusal.
-        let (wd, _log) = domain(FakeLog::with_header("/repo"), vec![]);
+        let (wd, _log, _) = domain(FakeLog::with_header("/nonexistent-repo-2"), &[]);
         assert_eq!(
             wd.ensure("s1").unwrap_err(),
-            "working-directory: directory does not exist: \"/repo\""
+            "working-directory: directory does not exist: \"/nonexistent-repo-2\""
         );
     }
 }

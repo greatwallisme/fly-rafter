@@ -215,6 +215,177 @@ pub fn shell_output_schema() -> Value {
     })
 }
 
+/// The read parameter table (the catalog-frozen base; the caps are the
+/// baked dsh defaults, so the frozen `limit` text carries them).
+#[must_use]
+pub fn read_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "type": "string",
+                "description": catalog_gen::READ_FILE_PATH_TEXT,
+            },
+            "offset": {
+                "type": "number",
+                "description": catalog_gen::READ_OFFSET_TEXT,
+            },
+            "limit": {
+                "type": "number",
+                "description": catalog_gen::READ_LIMIT_TEXT,
+            },
+        },
+        "required": ["file_path"],
+    })
+}
+
+/// The write parameter table: the catalog-frozen base plus the
+/// escalation pair while the composition confines (the dsh
+/// `sandbox.escalationModes.length > 0` spread).
+#[must_use]
+pub fn write_parameters(escalation: bool) -> Value {
+    let (permissions, justification) = crate::fs_sandbox::schema_fields();
+    let mut properties = serde_json::Map::new();
+    properties.insert(
+        "file_path".to_owned(),
+        json!({
+            "type": "string",
+            "description": catalog_gen::WRITE_FILE_PATH_TEXT,
+        }),
+    );
+    properties.insert(
+        "content".to_owned(),
+        json!({
+            "type": "string",
+            "description": catalog_gen::WRITE_CONTENT_TEXT,
+        }),
+    );
+    if escalation {
+        properties.insert("sandbox_permissions".to_owned(), permissions);
+        properties.insert("justification".to_owned(), justification);
+    }
+    json!({
+        "type": "object",
+        "properties": properties,
+        "required": ["file_path", "content"],
+    })
+}
+
+/// The edit parameter table (the write twin over the edit texts).
+#[must_use]
+pub fn edit_parameters(escalation: bool) -> Value {
+    let (permissions, justification) = crate::fs_sandbox::schema_fields();
+    let mut properties = serde_json::Map::new();
+    properties.insert(
+        "file_path".to_owned(),
+        json!({
+            "type": "string",
+            "description": catalog_gen::EDIT_FILE_PATH_TEXT,
+        }),
+    );
+    properties.insert(
+        "old_string".to_owned(),
+        json!({
+            "type": "string",
+            "description": catalog_gen::EDIT_OLD_STRING_TEXT,
+        }),
+    );
+    properties.insert(
+        "new_string".to_owned(),
+        json!({
+            "type": "string",
+            "description": catalog_gen::EDIT_NEW_STRING_TEXT,
+        }),
+    );
+    properties.insert(
+        "replace_all".to_owned(),
+        json!({
+            "type": "boolean",
+            "description": catalog_gen::EDIT_REPLACE_ALL_TEXT,
+        }),
+    );
+    if escalation {
+        properties.insert("sandbox_permissions".to_owned(), permissions);
+        properties.insert("justification".to_owned(), justification);
+    }
+    json!({
+        "type": "object",
+        "properties": properties,
+        "required": ["file_path", "old_string", "new_string"],
+    })
+}
+
+/// The read output contract (the dsh `defineTool` `output.schema`,
+/// verbatim shapes).
+#[must_use]
+pub fn read_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "path": {
+                "type": "string",
+                "required": true,
+                "description": "Canonical absolute path in the filesystem execution world.",
+            },
+            "offset": { "type": "integer", "required": true },
+            "lines": {
+                "type": "array",
+                "required": true,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "number": { "type": "integer", "required": true },
+                        "text": { "type": "string", "required": true },
+                    },
+                },
+            },
+            "totalLines": { "type": "integer", "required": true },
+        },
+    })
+}
+
+/// The write output contract (the dsh `defineTool` `output.schema`).
+#[must_use]
+pub fn write_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "path": {
+                "type": "string",
+                "required": true,
+                "description": "Canonical absolute path in the filesystem execution world.",
+            },
+            "operation": { "type": "string", "required": true, "enum": ["create", "update"] },
+            "before": {
+                "required": true,
+                "oneOf": [{ "type": "string" }, { "type": "null" }],
+            },
+            "after": { "type": "string", "required": true },
+        },
+    })
+}
+
+/// The edit output contract (the dsh `defineTool` `output.schema`).
+#[must_use]
+pub fn edit_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "path": {
+                "type": "string",
+                "required": true,
+                "description": "Canonical absolute path in the filesystem execution world.",
+            },
+            "before": { "type": "string", "required": true },
+            "after": { "type": "string", "required": true },
+        },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

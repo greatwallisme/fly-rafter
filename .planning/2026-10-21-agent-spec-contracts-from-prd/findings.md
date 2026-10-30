@@ -2227,3 +2227,23 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - **working_directory**：StdFsStat 收编迁移（is_directory→fsio::probe 单实现；16a 留的迁移点兑现）。
 - **五门全绿**：fmt/clippy workspace -D warnings 0/tests 1186+0（+18=observation 5+fs_domain 13）/doc -D warnings/Windows msvc check fr-tools-builtin 零警告（has_parent_segment cfg(unix) 门）。
 - 过程注记：本批 3 起 Write/heredoc 生成退化全部当场截停（fs_types 两度+补丁期 is::none 签名自检逮住）——小片段+逐段校验纪律再次生效；三处真缺陷由钉测逮住自纠（diff basis 归一/fence 测试前提（/tmp 本为可写根，dsh 同语义）/错误体双编码）。
+
+## 16b 批 2 设计钉（2026-10-30，真源全读后实施前钉存）
+### 真源补充全读（批 2 面）
+- dsh tool-fs read/write/edit/read-render/diff/error/mutation-result/sandbox/session-cwd/read-target/index 全读（1561 行）；tool-catalog.md read/write/edit 三节参数表抽得；jsdiff 9.0.0（tool-fs 锁定版）base.js Myers 核心+create.js structuredPatch/buildPatch/splitLines 全读（npm tarball /tmp/jsdiff-src）；dsh-util-code-language 全表读（50 语言扩展+READ_LANG_BY_EXTENSION 5 短名覆盖+SHORT_BY_LANGUAGE）。
+- fr 侧核实：WireToolRegistration 有 isConcurrencySafe/timeoutMs rename 字段；presentResult 线框携全量 ToolResult（含 meta）；presentation.rs 全视图形状已在（ReadResultView/DiffCallView/DiffResultView/FileDiff camelCase wire）；fr-system-prompt orders TOOL_READ=1100/TOOL_WRITE=1200/TOOL_EDIT=1300；verify.rs 冻结判例（base_registration 剥 escalation 对）；working_directory::FsStat trait+StdFsStat（probe 已收编）=收尾删除对象；config 无 dylib 运行时通道→fr-shell ExecutorConfigs::bundle() 判例=烘焙 dsh 默认值+键表文档载。
+### 设计钉（非分叉）
+1. 模块：fs_read_render（read-render.ts+code-language 表）/fs_diff（jsdiff 9.0.0 移植）/fs_sandbox（sandbox.ts 控制器 subject='operation'）/fs_tools（read/write/edit 体+remediate+mutation_result）。
+2. 方法号（钉案批 0 钉 9 兑现）：read 20-24/write 30-34/edit 40-44（execute/render/presentCall/presentResult/presentationMeta）；serve 第三带 20..=44 在 BuiltinState（fs 域 1000-1015 不动）；describe_methods 11→26。
+3. caps 烘焙（ExecutorConfigs::bundle 判例）：read_limit 2000/read_max_line_length 2000/read_max_bytes 51200/read_stream_min_size 10485760；read/write/edit/read_image 开关默认全 true（M1 组合全注册；catalog 冻结文 "Defaults to 2000." 同源）。
+4. isConcurrencySafe：read=Some(true)，write/edit 缺省。
+5. escalation 桥：FsSandboxController——escalationModes=fs.sandbox_mode() 有无；schemaFields description=sandbox_permissions_description("operation")+justification fs 文（"this exact file operation"）；resolve_policy=validate→standing resolve→双参缺席早返→modes 空 plain（fs 词 "no sandboxing filesystem to escalate"）→approve_escalation(subject="operation")→mode 盖章合并；map_error 仅 FS_SANDBOX_DENIED→denialMarker+\n+hintMarker('operation') 保码。注册面 escalation 对公布条件=fs.sandbox_mode().is_some()（=16a 既有 escalation 非空旗标）。
+6. 观察门：BuiltinState.gate=ObservedStateGate；read 成功 observe(present)/缺席 observe(absent)+拒；write：intent（gate.write_intent，try 外）→mutate；edit：intent（gate.edit_intent，try 内=FS_NOT_OBSERVED 也走 remediate）→mutate；mutation_result=observe(present,version)+剥 version+path=processPath。owner=agent。
+7. 错误序：mapError 先、remediate 后（dsh 同序）；FS_NOT_OBSERVED→`cannot modify "P": file has not been read — read the file, then retry`；FS_STALE_VERSION→原文本+` — re-read the file, then retry`；FsError=plain（dsh 非 HarnessError 不走 code 路由）。
+8. section 文本：tool:read 1100 静态；tool:write 1200=base+(edit 注册?tail)+'.（脚本抽 3 段，剥 ctx.tools.get 字面量，弃空字面量）；tool:edit 1300 静态；注册条件=对应工具注册（16a 判例）。
+9. catalog 脚本扩源：TOOLS 增 read/write/edit（per-tool 参数键表 read: file_path/offset/limit、write: file_path/content、edit: file_path/old_string/new_string/replace_all）+TOOL_SOURCES 三路径+extract_section_text_segments 变体；输出 schema=TS defineTool 逐字（bash 判例手建）。
+10. read 窗口：build_window 逐字（lineBufferCap=maxLineLength+1/stripCarriageReturn/行字节=UTF8+非首行1/finish offset 越界 FS_NOT_FOUND 文案/formatReadOutput 信封+三 footer）；lang 表=扩展名→短 id 单表静态匹配（双分隔符/末点/leading dot 即分隔/toLowerCase）。
+11. diff 移植：myers（bestPath 链组件+tie-break `!canRemove || (canAdd && removePath.oldPos < addPath.oldPos)`→add 否则 remove+min/maxDiagonalToConsider 剪枝+extractCommon）；tokenize（split 保留分隔符归并+尾空弃+removeEmpty）；buildPatch（context=3、重叠判定 lines.len<=2*context && i<diff.len-2、contextLines ' ' 前缀、hunk 头四元组、step2 尾 \n 剥+No-newline 标记插入）；computeHunkDiffs 跳 '\\' 行、纯插入 oldText:null。
+12. presentResult：read=meta 收窄（语义校验逐字）+信封正则体抽取→card read；write=diffsFromMeta ?? args 兜底（meta 无/空 diff 均兜底）；edit=diffsFromMeta 缺→undefined；write/edit isError→undefined。
+13. working_directory 收尾：FsStat trait+StdFsStat 删除；is_directory=直调 fsio::probe；测试换真实临时目录（fs_domain Scratch 判例）。
+14. regex 入 fr-tools-builtin 依赖（read presentResult 信封解析）；DESCRIPTOR 不动（gate/fs in-crate）。

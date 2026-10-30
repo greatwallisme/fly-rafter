@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
-"""Extract the shell-tool schema constants from the dsh tool catalog.
+"""Extract the built-in tool schema constants from the dsh tool catalog.
 
 PRD 17 + the builtin-tools contract: every tool's parameter-level schema
 is frozen against the deepseek-harness docs/tool-catalog.md and produced
-by this script; hand-copying is forbidden. The two tool prompt-section
-texts (the dsh `ctx.systemPrompt.section` calls) extract from the tool
-sources themselves (the 2026-10-29 section-text ruling: they are prompt
-texts under the PRD 22 rule and appear in no catalog). The catalog
-documents the base registration, so the fr-only registration variants
-(the escalation pair, the non-promote timeout text, the pwsh Windows
+by this script; hand-copying is forbidden. The tool prompt-section texts
+(the dsh `ctx.systemPrompt.section` calls) extract from the tool sources
+themselves (the 2026-10-29 section-text ruling: they are prompt texts
+under the PRD 22 rule and appear in no catalog). The catalog documents
+the base registration, so the fr-only registration variants (the
+escalation pair, the non-promote timeout text, the pwsh Windows
 appendix) stay in the composed sources; everything this script emits is
 source-verbatim under the FR_ prefix ruling (PRD 10 judgment: the
 managed-variable prefix alone is brand-mapped).
+
+The fs tools' section texts compose conditionally in the dsh sources
+(the `tool:write` text appends an edit tail only while `edit` registers),
+so the extractor emits the non-empty literal segments in source order and
+the consumer composes them with the same rule.
 
 Usage:
     FR_DSH_SOURCE=<dsh checkout> scripts/generate-tool-catalog.py
@@ -38,12 +43,58 @@ CATALOG = os.path.join("docs", "tool-catalog.md")
 TOOL_SOURCES = {
     "bash": os.path.join("packages", "shell", "tool-bash", "src", "index.ts"),
     "pwsh": os.path.join("packages", "shell", "tool-pwsh", "src", "index.ts"),
+    "read": os.path.join("packages", "fs", "tool-fs", "src", "read.ts"),
+    "write": os.path.join("packages", "fs", "tool-fs", "src", "write.ts"),
+    "edit": os.path.join("packages", "fs", "tool-fs", "src", "edit.ts"),
 }
 
-# The extracted tools and the Rust constant stems they emit.
+# The extracted tools: the Rust constant stem and the parameter-text keys
+# each tool's section emits.
 TOOLS = {
-    "bash": "BASH",
-    "pwsh": "PWSH",
+    "bash": (
+        "BASH",
+        [
+            ("description", "DESCRIPTION_PROPERTY_TEXT"),
+            ("command", "COMMAND_TEXT"),
+            ("timeoutMs", "TIMEOUT_MS_PROMOTE_TEXT"),
+            ("workdir", "WORKDIR_TEXT"),
+            ("run_in_background", "RUN_IN_BACKGROUND_TEXT"),
+        ],
+    ),
+    "pwsh": (
+        "PWSH",
+        [
+            ("description", "DESCRIPTION_PROPERTY_TEXT"),
+            ("command", "COMMAND_TEXT"),
+            ("timeoutMs", "TIMEOUT_MS_PROMOTE_TEXT"),
+            ("workdir", "WORKDIR_TEXT"),
+            ("run_in_background", "RUN_IN_BACKGROUND_TEXT"),
+        ],
+    ),
+    "read": (
+        "READ",
+        [
+            ("file_path", "FILE_PATH_TEXT"),
+            ("offset", "OFFSET_TEXT"),
+            ("limit", "LIMIT_TEXT"),
+        ],
+    ),
+    "write": (
+        "WRITE",
+        [
+            ("file_path", "FILE_PATH_TEXT"),
+            ("content", "CONTENT_TEXT"),
+        ],
+    ),
+    "edit": (
+        "EDIT",
+        [
+            ("file_path", "FILE_PATH_TEXT"),
+            ("old_string", "OLD_STRING_TEXT"),
+            ("new_string", "NEW_STRING_TEXT"),
+            ("replace_all", "REPLACE_ALL_TEXT"),
+        ],
+    ),
 }
 
 HEADER = """\
@@ -147,6 +198,34 @@ def extract_section_text(source, tool):
     return "".join(ts_unescape(segment) for segment in segments)
 
 
+def extract_section_text_segments(source, tool):
+    """Extracts one tool's prompt-section text as its non-empty literal
+    segments (the dsh section texts that compose conditionally: the
+    `ctx.tools.get(...)` probes strip out first, then the remaining
+    string literals join in source order, empty ternary arms dropped)."""
+    anchor = source.find(f"name: 'tool:{tool}'")
+    if anchor < 0:
+        raise ExtractError(f"tool source carries no section for `tool:{tool}`")
+    call_end = source.find("\n  })", anchor)
+    if call_end < 0:
+        close = source.find("})", anchor)
+        if close < 0:
+            raise ExtractError(f"the `tool:{tool}` section call never closes")
+        call_end = close
+    body = source[anchor:call_end]
+    marker = body.find("text:")
+    if marker < 0:
+        raise ExtractError(f"the `tool:{tool}` section call carries no text")
+    expression = body[marker + len("text:"):]
+    stripped = re.sub(r"ctx\.tools\.get\('[^']+', scope\)", "", expression)
+    literals = re.findall(r"'((?:[^'\\]|\\.)*)'", stripped)
+    segments = [ts_unescape(segment) for segment in literals]
+    kept = [segment for segment in segments if segment]
+    if not kept:
+        raise ExtractError(f"the `tool:{tool}` section text parses no literals")
+    return kept
+
+
 def brand_map(text):
     """The FR_ prefix ruling: the managed-variable prefix alone maps."""
     return text.replace("$env:DSH_", "$env:FR_").replace("DSH_", "FR_")
@@ -175,7 +254,7 @@ def emit():
     catalog = read_catalog(source_root)
     blocks = [HEADER]
     extracted = {}
-    for tool, stem in TOOLS.items():
+    for tool, (stem, keys) in TOOLS.items():
         description, _, parsed = extract_tool(catalog, tool)
         description = brand_map(description)
         parameters = brand_map(json.dumps(parsed, indent=2, ensure_ascii=False))
@@ -190,21 +269,37 @@ def emit():
         )
         source_root_tool = os.path.join(source_root, TOOL_SOURCES[tool])
         with open(source_root_tool, encoding="utf-8") as handle:
-            section_text = brand_map(extract_section_text(handle.read(), tool))
-        blocks.append(
-            f"\n/// The `tool:{tool}` prompt-section text (the dsh"
-            f" `ctx.systemPrompt.section` call, source-verbatim).\n"
-        )
-        blocks.append(
-            f"pub const {stem}_SECTION_TEXT: &str = {raw_literal(section_text)};\n"
-        )
-        for key, suffix in (
-            ("description", "DESCRIPTION_PROPERTY_TEXT"),
-            ("command", "COMMAND_TEXT"),
-            ("timeoutMs", "TIMEOUT_MS_PROMOTE_TEXT"),
-            ("workdir", "WORKDIR_TEXT"),
-            ("run_in_background", "RUN_IN_BACKGROUND_TEXT"),
-        ):
+            source = handle.read()
+        if tool in ("bash", "pwsh"):
+            section_text = brand_map(extract_section_text(source, tool))
+            blocks.append(
+                f"\n/// The `tool:{tool}` prompt-section text (the dsh"
+                f" `ctx.systemPrompt.section` call, source-verbatim).\n"
+            )
+            blocks.append(
+                f"pub const {stem}_SECTION_TEXT: &str = {raw_literal(section_text)};\n"
+            )
+        else:
+            segments = [brand_map(s) for s in extract_section_text_segments(source, tool)]
+            if len(segments) == 1:
+                blocks.append(
+                    f"\n/// The `tool:{tool}` prompt-section text (the dsh"
+                    f" `ctx.systemPrompt.section` call, source-verbatim).\n"
+                )
+                blocks.append(
+                    f"pub const {stem}_SECTION_TEXT: &str = {raw_literal(segments[0])};\n"
+                )
+            else:
+                rendered = ", ".join(raw_literal(segment) for segment in segments)
+                blocks.append(
+                    f"\n/// The `tool:{tool}` prompt-section text segments (the dsh"
+                    f" `ctx.systemPrompt.section` call, source-verbatim; the consumer"
+                    f" composes them with the source's conditional rule).\n"
+                )
+                blocks.append(
+                    f"pub const {stem}_SECTION_TEXTS: [&str; {len(segments)}] = [{rendered}];\n"
+                )
+        for key, suffix in keys:
             text = brand_map(parameter_text(parsed, key))
             blocks.append(
                 f"\n/// The `{tool}` `{key}` parameter description (catalog-verbatim).\n"

@@ -114,3 +114,123 @@ pub const PWSH_WORKDIR_TEXT: &str = r"Working directory for this command. Defaul
 
 /// The `pwsh` `run_in_background` parameter description (catalog-verbatim).
 pub const PWSH_RUN_IN_BACKGROUND_TEXT: &str = r"Run in the background and return a job id immediately (collect with job_output, stop with job_kill). No timeout applies.";
+
+/// The `read` tool description (catalog-verbatim).
+pub const READ_DESCRIPTION: &str = r"Read a UTF-8 text file and return line-numbered content.";
+
+/// The `read` parameter table (the catalog json block, verbatim).
+pub const READ_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "file_path": {
+      "type": "string",
+      "description": "Path to read, resolved by the filesystem backend."
+    },
+    "offset": {
+      "type": "number",
+      "description": "1-based first line to return. Defaults to 1."
+    },
+    "limit": {
+      "type": "number",
+      "description": "Maximum number of lines to return. Defaults to 2000."
+    }
+  },
+  "required": [
+    "file_path"
+  ]
+}"#;
+
+/// The `tool:read` prompt-section text (the dsh `ctx.systemPrompt.section` call, source-verbatim).
+pub const READ_SECTION_TEXT: &str = r"Use the read tool — not shell commands like cat — to inspect text files. Use offset and limit to continue reading large files.";
+
+/// The `read` `file_path` parameter description (catalog-verbatim).
+pub const READ_FILE_PATH_TEXT: &str = r"Path to read, resolved by the filesystem backend.";
+
+/// The `read` `offset` parameter description (catalog-verbatim).
+pub const READ_OFFSET_TEXT: &str = r"1-based first line to return. Defaults to 1.";
+
+/// The `read` `limit` parameter description (catalog-verbatim).
+pub const READ_LIMIT_TEXT: &str = r"Maximum number of lines to return. Defaults to 2000.";
+
+/// The `write` tool description (catalog-verbatim).
+pub const WRITE_DESCRIPTION: &str = r"Create or fully replace a UTF-8 text file.";
+
+/// The `write` parameter table (the catalog json block, verbatim).
+pub const WRITE_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "file_path": {
+      "type": "string",
+      "description": "Path to write, resolved by the filesystem backend. Provide `file_path` before `content` in the arguments."
+    },
+    "content": {
+      "type": "string",
+      "description": "Full UTF-8 text content to write."
+    }
+  },
+  "required": [
+    "file_path",
+    "content"
+  ]
+}"#;
+
+/// The `tool:write` prompt-section text segments (the dsh `ctx.systemPrompt.section` call, source-verbatim; the consumer composes them with the source's conditional rule).
+pub const WRITE_SECTION_TEXTS: [&str; 3] = [
+    r"Read an existing file before overwriting it with write (the default fs-observation-policy requires it)",
+    r" and prefer edit for targeted changes",
+    r".",
+];
+
+/// The `write` `file_path` parameter description (catalog-verbatim).
+pub const WRITE_FILE_PATH_TEXT: &str = r"Path to write, resolved by the filesystem backend. Provide `file_path` before `content` in the arguments.";
+
+/// The `write` `content` parameter description (catalog-verbatim).
+pub const WRITE_CONTENT_TEXT: &str = r"Full UTF-8 text content to write.";
+
+/// The `edit` tool description (catalog-verbatim).
+pub const EDIT_DESCRIPTION: &str = r"Edit an existing UTF-8 text file by replacing literal text.";
+
+/// The `edit` parameter table (the catalog json block, verbatim).
+pub const EDIT_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "file_path": {
+      "type": "string",
+      "description": "Path to edit, resolved by the filesystem backend. Provide `file_path` before `old_string` and `new_string` in the arguments."
+    },
+    "old_string": {
+      "type": "string",
+      "description": "Literal text to replace."
+    },
+    "new_string": {
+      "type": "string",
+      "description": "Literal replacement text. Use an empty string to delete the match."
+    },
+    "replace_all": {
+      "type": "boolean",
+      "description": "Replace all matches. Defaults to false; when false, old_string must appear exactly once."
+    }
+  },
+  "required": [
+    "file_path",
+    "old_string",
+    "new_string"
+  ]
+}"#;
+
+/// The `tool:edit` prompt-section text (the dsh `ctx.systemPrompt.section` call, source-verbatim).
+pub const EDIT_SECTION_TEXT: &str = r"Read a file before editing it (the default fs-observation-policy requires it), unless you just created or edited it in this session.";
+
+/// The `edit` `file_path` parameter description (catalog-verbatim).
+pub const EDIT_FILE_PATH_TEXT: &str = r"Path to edit, resolved by the filesystem backend. Provide `file_path` before `old_string` and `new_string` in the arguments.";
+
+/// The `edit` `old_string` parameter description (catalog-verbatim).
+pub const EDIT_OLD_STRING_TEXT: &str = r"Literal text to replace.";
+
+/// The `edit` `new_string` parameter description (catalog-verbatim).
+pub const EDIT_NEW_STRING_TEXT: &str =
+    r"Literal replacement text. Use an empty string to delete the match.";
+
+/// The `edit` `replace_all` parameter description (catalog-verbatim).
+pub const EDIT_REPLACE_ALL_TEXT: &str =
+    r"Replace all matches. Defaults to false; when false, old_string must appear exactly once.";

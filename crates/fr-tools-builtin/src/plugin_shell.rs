@@ -348,6 +348,7 @@ fn escalation_modes_from(mode: Option<&str>) -> Vec<&'static str> {
 pub struct BuiltinState {
     tools: BuiltinTools,
     fs: Arc<crate::fs_domain::FsDomain>,
+    gate: crate::observation::ObservedStateGate,
 }
 
 impl std::fmt::Debug for BuiltinState {
@@ -384,14 +385,39 @@ fn read_default_mode(link: &HostLink) -> Option<Vec<&'static str>> {
     Some(escalation_modes_from(mode_word))
 }
 
-/// The two prompt sections (dsh `ctx.systemPrompt.section`): the names,
+/// The five prompt sections (dsh `ctx.systemPrompt.section`): the names,
 /// the dsh orders, and the script-extracted verbatim texts (the catalog
 /// generator; the PRD 22 rule — the texts live in the dsh tool sources,
-/// not the catalog).
-const fn prompt_sections() -> [(&'static str, f64, &'static str); 2] {
-    [
-        ("tool:bash", 1000.0, crate::catalog_gen::BASH_SECTION_TEXT),
-        ("tool:pwsh", 1010.0, crate::catalog_gen::PWSH_SECTION_TEXT),
+/// not the catalog). The write text composes with the source's
+/// conditional (the edit tail rides while edit registers, which the M1
+/// composition always does).
+fn prompt_sections() -> Vec<(String, f64, String)> {
+    vec![
+        (
+            "tool:bash".to_owned(),
+            1000.0,
+            crate::catalog_gen::BASH_SECTION_TEXT.to_owned(),
+        ),
+        (
+            "tool:pwsh".to_owned(),
+            1010.0,
+            crate::catalog_gen::PWSH_SECTION_TEXT.to_owned(),
+        ),
+        (
+            "tool:read".to_owned(),
+            1100.0,
+            crate::catalog_gen::READ_SECTION_TEXT.to_owned(),
+        ),
+        (
+            "tool:write".to_owned(),
+            1200.0,
+            crate::fs_tools::write_section_text(true),
+        ),
+        (
+            "tool:edit".to_owned(),
+            1300.0,
+            crate::catalog_gen::EDIT_SECTION_TEXT.to_owned(),
+        ),
     ]
 }
 
@@ -434,54 +460,114 @@ fn register_projection(link: &HostLink) -> Option<()> {
     )
 }
 
-/// Registers the two tools (the fr-tools register face; the endpoints
-/// point back at this artifact's own service).
+/// Registers the five tools (the fr-tools register face; the endpoints
+/// point back at this artifact's own service). The read tool opts into
+/// sibling overlap (`isConcurrencySafe`); the exclusives stay absent.
+#[expect(
+    clippy::too_many_lines,
+    reason = "the five-tuple table mirrors the dsh registrations one arm per tool; splitting it would hide the correspondence"
+)]
 fn register_tools(link: &HostLink, advertise_escalation: bool) -> Option<()> {
-    for (name, description, parameters, execute, render_m, present_call, present_result) in [
+    for (
+        name,
+        description,
+        parameters,
+        output_schema,
+        concurrency_safe,
+        execute,
+        render_m,
+        present_call,
+        present_result,
+        presentation_meta,
+    ) in [
         (
             "bash",
             crate::schema::bash_description(),
             crate::schema::bash_parameters(true, advertise_escalation, true),
+            crate::schema::shell_output_schema(),
+            false,
             crate::service::METHOD_BASH_EXECUTE,
             crate::service::METHOD_BASH_RENDER,
             crate::service::METHOD_BASH_PRESENT_CALL,
             crate::service::METHOD_BASH_PRESENT_RESULT,
+            crate::service::METHOD_PRESENTATION_META,
         ),
         (
             "pwsh",
             crate::schema::pwsh_description(advertise_escalation),
             crate::schema::pwsh_parameters(true, advertise_escalation, true),
+            crate::schema::shell_output_schema(),
+            false,
             crate::service::METHOD_PWSH_EXECUTE,
             crate::service::METHOD_PWSH_RENDER,
             crate::service::METHOD_PWSH_PRESENT_CALL,
             crate::service::METHOD_PWSH_PRESENT_RESULT,
+            crate::service::METHOD_PRESENTATION_META,
+        ),
+        (
+            "read",
+            crate::catalog_gen::READ_DESCRIPTION.to_owned(),
+            crate::schema::read_parameters(),
+            crate::schema::read_output_schema(),
+            true,
+            crate::service::METHOD_READ_EXECUTE,
+            crate::service::METHOD_READ_RENDER,
+            crate::service::METHOD_READ_PRESENT_CALL,
+            crate::service::METHOD_READ_PRESENT_RESULT,
+            crate::service::METHOD_READ_PRESENTATION_META,
+        ),
+        (
+            "write",
+            crate::catalog_gen::WRITE_DESCRIPTION.to_owned(),
+            crate::schema::write_parameters(advertise_escalation),
+            crate::schema::write_output_schema(),
+            false,
+            crate::service::METHOD_WRITE_EXECUTE,
+            crate::service::METHOD_WRITE_RENDER,
+            crate::service::METHOD_WRITE_PRESENT_CALL,
+            crate::service::METHOD_WRITE_PRESENT_RESULT,
+            crate::service::METHOD_WRITE_PRESENTATION_META,
+        ),
+        (
+            "edit",
+            crate::catalog_gen::EDIT_DESCRIPTION.to_owned(),
+            crate::schema::edit_parameters(advertise_escalation),
+            crate::schema::edit_output_schema(),
+            false,
+            crate::service::METHOD_EDIT_EXECUTE,
+            crate::service::METHOD_EDIT_RENDER,
+            crate::service::METHOD_EDIT_PRESENT_CALL,
+            crate::service::METHOD_EDIT_PRESENT_RESULT,
+            crate::service::METHOD_EDIT_PRESENTATION_META,
         ),
     ] {
+        let mut registration = json!({
+            "name": name,
+            "description": description,
+            "parameters": parameters,
+            "output": {
+                "schema": output_schema,
+                "render": {
+                    "service": crate::service::SERVICE_NAME,
+                    "method": render_m,
+                },
+                "presentationMeta": {
+                    "service": crate::service::SERVICE_NAME,
+                    "method": presentation_meta,
+                },
+            },
+            "execute": { "service": crate::service::SERVICE_NAME, "method": execute },
+            "presentCall": { "service": crate::service::SERVICE_NAME, "method": present_call },
+            "presentResult": { "service": crate::service::SERVICE_NAME, "method": present_result },
+        });
+        if concurrency_safe {
+            registration["isConcurrencySafe"] = serde_json::Value::Bool(true);
+        }
         step(
             link,
             fr_wire::services::tools::SERVICE_NAME,
             fr_wire::services::tools::METHOD_REGISTER,
-            serde_json::to_vec(&json!({
-                "name": name,
-                "description": description,
-                "parameters": parameters,
-                "output": {
-                    "schema": crate::schema::shell_output_schema(),
-                    "render": {
-                        "service": crate::service::SERVICE_NAME,
-                        "method": render_m,
-                    },
-                    "presentationMeta": {
-                        "service": crate::service::SERVICE_NAME,
-                        "method": crate::service::METHOD_PRESENTATION_META,
-                    },
-                },
-                "execute": { "service": crate::service::SERVICE_NAME, "method": execute },
-                "presentCall": { "service": crate::service::SERVICE_NAME, "method": present_call },
-                "presentResult": { "service": crate::service::SERVICE_NAME, "method": present_result },
-            }))
-            .ok()?
-            .as_slice(),
+            serde_json::to_vec(&registration).ok()?.as_slice(),
         )?;
     }
     Some(())
@@ -509,10 +595,9 @@ impl BuiltinState {
         let env = ShellEnvRegistry::new(None).ok()?;
 
         // The working-directory domain over the wire log seam and the
-        // std filesystem seam.
+        // in-crate fsio probe.
         let directories = WorkingDirectories::new(
             Arc::new(WireSessionLog { link }),
-            Arc::new(crate::working_directory::StdFsStat),
             std::env::current_dir().ok()?.to_string_lossy().to_string(),
         );
 
@@ -534,7 +619,11 @@ impl BuiltinState {
             Box::new(policy),
             escalation.first().map(|mode| (*mode).to_owned()),
         ));
-        Some(Self { tools, fs })
+        Some(Self {
+            tools,
+            fs,
+            gate: crate::observation::ObservedStateGate::new(),
+        })
     }
 
     /// The hosted runtime (tests drive the wire face).
@@ -547,6 +636,12 @@ impl BuiltinState {
     #[must_use]
     pub const fn fs(&self) -> &Arc<crate::fs_domain::FsDomain> {
         &self.fs
+    }
+
+    /// The hosted observation gate (the fs tool bodies' policy slot).
+    #[must_use]
+    pub const fn gate(&self) -> &crate::observation::ObservedStateGate {
+        &self.gate
     }
 }
 
@@ -677,16 +772,27 @@ unsafe extern "C" fn call(
     // matching `teardown`; the host serializes calls per the
     // export-table contract.
     let state = unsafe { &*(handle.cast::<BuiltinState>()) };
-    // The fs domain band rides the same export table (the per-artifact
-    // method-space judgment; the fr-shell three-band precedent).
-    let reply = match if (fr_wire::services::fs::METHOD_DESCRIBE
-        ..=fr_wire::services::fs::METHOD_WATCH)
+    // The fs domain and fs-tool bands ride the same export table (the
+    // per-artifact method-space judgment; the fr-shell three-band
+    // precedent).
+    let reply = if (fr_wire::services::fs::METHOD_DESCRIBE..=fr_wire::services::fs::METHOD_WATCH)
         .contains(&method)
     {
         state.fs().serve(method, payload)
+    } else if (crate::service::METHOD_READ_EXECUTE..=crate::service::METHOD_EDIT_PRESENTATION_META)
+        .contains(&method)
+    {
+        let deps = crate::fs_tools::FsToolDeps {
+            fs: state.fs(),
+            gate: state.gate(),
+            seams: state.tools().seams(),
+            advertised: state.fs().sandbox_mode().is_some(),
+        };
+        crate::fs_tools::serve(&deps, method, payload)
     } else {
         state.tools().serve(method, payload)
-    } {
+    };
+    let reply = match reply {
         Ok(reply) => reply,
         Err(text) => {
             let body = json!({ "error": text }).to_string();
@@ -756,12 +862,13 @@ pub static DOUGONG_PLUGIN_EXPORTS: PluginExports = PluginExports {
 
 #[cfg(test)]
 mod tests {
-    /// The two tool sections ride the dsh orders and their verbatim
+    /// The five tool sections ride the dsh orders and their verbatim
     /// texts: the bash order opens the 1000-3000 tool band, the pwsh
-    /// twin sits ten above it (the builtin-tools contract's section
-    /// clause).
+    /// twin sits ten above it, and the fs trio rides the dsh
+    /// read/write/edit orders (the builtin-tools contract's section
+    /// clause; the write text carries the composed edit tail).
     #[test]
-    fn prompt_sections_pin_the_two_tools() {
+    fn prompt_sections_pin_the_five_tools() {
         let sections = super::prompt_sections();
         assert_eq!(sections[0].0, "tool:bash");
         assert_eq!(sections[0].1, 1000.0);
@@ -778,6 +885,31 @@ mod tests {
                 .starts_with("Non-zero exits are reported as `[exit code: N]` markers"),
             "{}",
             sections[1].2
+        );
+        assert_eq!(sections[2].0, "tool:read");
+        assert_eq!(sections[2].1, 1100.0);
+        assert!(
+            sections[2]
+                .2
+                .starts_with("Use the read tool — not shell commands like cat"),
+            "{}",
+            sections[2].2
+        );
+        assert_eq!(sections[3].0, "tool:write");
+        assert_eq!(sections[3].1, 1200.0);
+        assert!(
+            sections[3]
+                .2
+                .ends_with("and prefer edit for targeted changes."),
+            "{}",
+            sections[3].2
+        );
+        assert_eq!(sections[4].0, "tool:edit");
+        assert_eq!(sections[4].1, 1300.0);
+        assert!(
+            sections[4].2.starts_with("Read a file before editing it"),
+            "{}",
+            sections[4].2
         );
         for (name, order, _) in sections {
             assert!(name.starts_with("tool:"));

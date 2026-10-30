@@ -19,6 +19,12 @@
 //! script-extracted from the dsh docs/tool-catalog.md ([`catalog_gen`];
 //! the Q95-A ruling) and frozen by the in-crate verify tests.
 
+//! The 16b file group adds the fs domain, the observation gate, the
+//! fence, the read/write/edit tool bodies, and the contextual-diff
+//! engine ([`fs_types`], [`fsio`], [`fs_domain`], [`observation`],
+//! [`fence`], [`fs_read_render`], [`fs_diff`], [`fs_sandbox`],
+//! [`fs_tools`]).
+//!
 //! The domain vocabulary lands module-for-module ([`shell_env`],
 //! [`working_directory`], [`render`], [`schema`], [`tools`],
 //! [`service`], [`plugin_shell`], [`catalog_gen`], and the test-only
@@ -26,7 +32,11 @@
 
 pub mod catalog_gen;
 pub mod fence;
+pub mod fs_diff;
 pub mod fs_domain;
+pub mod fs_read_render;
+pub mod fs_sandbox;
+pub mod fs_tools;
 pub mod fs_types;
 pub mod fsio;
 pub mod observation;
