@@ -22,6 +22,7 @@ members = [
     "crates/fr-permission-presets",
     "crates/fr-sandbox",
     "crates/fr-shell",
+    "crates/fr-storage",
     "crates/fr-tools-builtin",
 ]
 
@@ -74,6 +75,7 @@ fr-tools = { path = "crates/fr-tools" }
 fr-guard-repeat-reminder = { path = "crates/fr-guard-repeat-reminder" }
 fr-guard-timeout = { path = "crates/fr-guard-timeout" }
 fr-shell = { path = "crates/fr-shell" }
+fr-storage = { path = "crates/fr-storage" }
 fr-tools-builtin = { path = "crates/fr-tools-builtin" }
 fr-sandbox = { path = "crates/fr-sandbox" }
 

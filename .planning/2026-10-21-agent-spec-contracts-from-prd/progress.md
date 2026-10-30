@@ -1233,3 +1233,19 @@
 - 五门+三开关全绿：fmt --check 绿（verify.rs 一处 fmt 修码）；clippy workspace 0 警告（2 起新警自纠=map_or_else+assertions_on_constants→const fn 谓词）；tests 1286/0（FR_DSH_SOURCE）；doc -D warnings 绿；lint-knowledge/graph/plan 三开关 0 errors。最终码态复跑 lifecycle 复核 96/0/312。
 - 过程注记：Edit 笔误 1 起（"no no such"当场自纠）；write no-content 臂误设（工具体默认空串=dsh 逐字行为，删臂）。
 - 下一动作：16c 任务状态组（todo_write+create_goal/get_goal/update_goal+job_kill/job_list/job_output+schedule_create/delete/list/update，Q94-A 子批表）。
+
+## 2026-10-30 — 16c 批 0 落地：四域真源全读+fr 码面勘察（Q 呈报准备）
+- dsh 真源全读：tool-todo 212/tool-jobs 416/goal 域 1310+tool-goal 502（含 authority+wrapup）/schedule 域 3333+tool-schedule 590，全量要点已落 findings.md（16c 三节）。
+- fr 码面勘察：fr-shell jobs registry API 全（attach_controller/start/list/get/read/read_at/kill/wait/remove）；fr-tools-builtin 方法号家族（todo/goal/jobs/schedule 需新号段）+prompt_sections 现 7 条（16c 增 tool:jobs 1600+tool:goal 2400=9）；fr-session 词汇=core 14+插件激活声明面（todo/write/goal/change/schedule/change 需声明+fr-wire 常量）；fr-agent-loop 已有 turn_boundary（open_turn_start_seq 折叠）+LoopInbox（next_step/next_turn/prepend/splice）+'agent' 服务（inject/steer/followup 方法齐）——通知机与 goal 权威的 fr 载体已在。
+- 关键发现：①SECTION_ORDERS 无 TOOL_TODO/TOOL_SCHEDULE（dsh tool-todo/tool-schedule 源码无 section 注册；catalog 四族 section 列全 "-"）→ todo_write+schedule 四件共五场景"说明 section 注册"=合同错误候选（Q16b-5A 场景 339 同形）②tool:goal section 文本含 ${blockedAfter} 动态内插（抽取需模板化）③goal/schedule 投影 stateVersion 6/2、schedule Host 路径=storage domain 行（session 事件仅 legacy 读）④workspace 无 chrono/jiff——IANA tz+DST gap/overlap 需新依赖。
+- 16a 遗留①②③（owned-job live-agent/owner-disposal/通知机）与本轮 goal 注册表依赖臂同类，随本轮 Q 一并呈报。
+- 下一步：用户 Q16c 裁决 → 批 1 todo_write 起实现。
+
+## 2026-10-30 — 16c 批 1 落地：fr-storage crate（Q16c-3B），workspace 1313 tests（1286→1313）
+- 新 crate crates/fr-storage（cdylib+rlib，dougong dylib 插件 provide ['storage-domain'] inject [] listen {}；dsh storage/storage-domain/storage-json 三包等价）：error.rs（六码错误表 version-mismatch/malformed-medium/closed/already-open/missing-key/invalid-record，dsh 码串逐字）+format.rs（serialize/parse：unit 头+global null 哨兵+插入序 pretty+尾 \n）+atomic.rs（同目录 .{uuid}.tmp wx 0o600→fsync→rename→POSIX 目录 fsync，失败清 tmp）+unit.rs（SingleJsonUnit：内存权威+guard 借用收紧+发布失败回滚 put/delete/global 三路+close 原子旗）+domain.rs（DomainSpec/define_domain+MemoryState+FIFO 写链 worker 线程（mpsc Job 队列+oneshot 回执）+KvTable/Domain 面+global 槽+snapshot_tables+DomainOperation put|deleted+OnClose 钩子（teardown 后名释放=dsh onClosed 形））+facility.rs（mount 单次+prepare 两相开（reserve→快照 payload→pending 暂存）+take_prepared→commit/refuse+domains/reserved 双查 already-open+close_all）+service.rs（13 方法 wire 面 DESCRIBE 0…REFUSE 11）+plugin_shell.rs（导出表全件+FR_STORAGE_ROOT→FR_HOME+storage→HOME/.fly-rafter+storage→相对退化根链+baked_storage_root_from 纯函数+domain/changed→HostExports.emit 接线）。
+- 两相开协议裁决（架构落点）：dsh zod schema 属 owner 包（schedule/storage.ts），fr 同构——facility 只做 medium 级校验（头/版本/结构），记录级 schema 校验由消费者在 OPEN 快照返回后本地执行，COMMIT/REFUSE 完成开（invalid-record 语义=开拒绝，行为保持）；wire 面不传闭包。
+- 27 tests 全绿（format 4+atomic 2+unit 8+domain 7+facility 5+service 4：round-trip/foreign 头/版本失配/缺文件空开/删除幂等/发布失败内存回滚（目标改目录逼 rename 失败）/close 拒全/FIFO 序与事件序/Delete absent 无事件/global 往返/两相开 commit 重开耐久读/refuse 释放名/close_all 后 facility 仍 mounted（dsh 语义）/wire 面 describe/unknown method 自名/round trip/refuse 释放名）。
+- 四门全绿：fmt --check ✓；clippy --workspace --all-targets -- -D warnings ✓（42→0：poison 错误带源/guard 显式收紧 drop/Debug 派生与手写/文档首段拆分/断言 Result 形）；tests 1313/0（FR_DSH_SOURCE）；doc ✓（两处歧义内联链接 mod@ 前缀修）。
+- PRD 4.5 增 fr-storage 行（fr-permission-presets 之后，Q16c-3B 随裁决生效）；workspace members+deps 接线。
+- 过程注记：生成退化持续（Write 中途乱码两度+python 引号战两度+regex 误替换 METHOD_X 一度全部自纠）——line-list 纪律有效；hook 首次标记 atomic.rs use-in-fn（改顶层 cfg 门控）。
+- 下一动作：16c 批 2=fr-wire 三事件常量（todo/write、goal/change、schedule/change）+fr-config 六组新键+todo_write 全件（projection todos v2+工具+catalog+section 否定钉测）。

@@ -164,6 +164,7 @@ fly-rafter/
     fr-guard-repeat-reminder  # 重复调用防风暴提醒插件（dsh repeat-tool-reminder 1:1；经 tools 监听注册面接入）
     fr-guard-timeout          # 工具调用协作超时插件（dsh timeout-policy 1:1；tools/execute 段接入）
     fr-permission-presets     # 权限预设服务插件（dsh permission-presets 1:1；双 knob 捆绑表+播种+/permission 命令行为面）
+    fr-storage          # 存储域 seam 插件（dsh storage/storage-domain/storage-json 三包等价：声明式 domain/table+JSON single-unit 原子文档持久化；schedule 首消费者；2026-10-30 Q16c-3B）
     fr-headless         # headless 入口插件
     fr-tui              # TUI 入口插件（ratatui 纯投影层）
     fr-acp              # ACP 服务器入口插件

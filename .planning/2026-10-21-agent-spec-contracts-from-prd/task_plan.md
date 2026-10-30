@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 16 **16b 批 5 已落**（spec 绑定全族+七步流 4-7 收口：70 场景绑真实测试+16a 错绑 2 处修正+3 新钉测，Q16b-5A 裁决 A=场景 339 改写否定场景；lifecycle 96 pass/312 pending/0 failed score 1.0，五门+三开关全绿，workspace 1286 tests）。**下一动作=16c 任务状态组：todo_write+create_goal/get_goal/update_goal+job_kill/job_list/job_output+schedule_create/delete/list/update 全家（Q94-A 子批表）。**
+Phase 16 **16c 批 1 已落**（fr-storage crate 全绿：27 tests 四门，workspace 1313；Q16c-3B PRD 4.5 增行生效）。**下一动作=16c 批 2：fr-wire 三事件常量（todo/write、goal/change、schedule/change）+fr-config 六组新键+todo_write 全件（projection todos v2+工具+catalog+section 否定钉测）。**
 
 ## Phases
 
@@ -143,10 +143,17 @@ Phase 16 **16b 批 5 已落**（spec 绑定全族+七步流 4-7 收口：70 场�
 - [x] 16a 批 0+1：fr-shell 核心+四执行体+三带 service+plugin_shell+fr-tools 注册面（bc8b377+cefec8c）
 - [x] 16a 批 2：fr-tools-builtin 七模块（bash/pwsh 双工具+shell-env+working-directory 最小臂+abort 传播面 jobs 1008+ExecutorConfigs bundle 行+windows 缺口修复）——1157 tests 五门全绿
 - [x] 16a 批 3（收口）：fr-tools watcher（signal→jobs 1008）+切片 wait+四投影 trait 接线+SHELL spec 21 场景绑定+Q95-A catalog 脚本+七步流 4-7（lifecycle 21 pass/387 skip；1168 tests 五门绿；section 文本抽取缺口待裁决）
-- [ ] 16b 文件组 7 件 / 16c 任务状态 / 16d 交互+会话查询 / 16e PTY+persistent / 16f web+skill+lsp+目录全量+内省
+- [x] 16b 文件组 7 件（批 1-5 全收口：fs 七件+read_image 全家+spec 绑定 70 场景+七步流 4-7；1286 tests 五门绿，Q16b-1A/3A/3B/4A/5A 裁决闭）
+- [x] 16c 批 1：fr-storage crate（dsh storage/storage-domain/storage-json 三包等价插件：spec+facility+domain 写链+JSON single-unit 后端+atomic 协议）+PRD 4.5 增行（Q16c-3B）——27 tests，四门绿，workspace 1313
+- [ ] 16c 批 2：fr-wire 三事件常量（todo/write、goal/change、schedule/change）+fr-config 六组新键+todo_write 全件（投影 todos v2+工具+catalog+section 否定钉测）
+- [ ] 16c 批 3：goal 域（fold 全量含 goal 源推进 Q16c-2A+service+投影 goal v6）+create/get/update_goal 三工具+tool:goal section（{{blocked_after}} 模板抽取）
+- [ ] 16c 批 4：job_output/list/kill 三工具+完成通知机全落（Q16c-1A：settled→fitCompletionNotice 截断梯→inject/followup+wakeBudget）+tool:jobs section
+- [ ] 16c 批 5：schedule 域（六规则+jiff Q16c-4A）+fr-storage 接线+service+runtime 投递+schedule 四工具
+- [ ] 16c 批 6（收口）：五 section 场景改否定（Q16b-5A 判例）+92 场景绑定+七步流 4-7+五门
+- [ ] 16d 交互+会话查询 / 16e PTY+persistent / 16f web+skill+lsp+目录全量+内省
 - [ ] 每工具参数 schema 对照 dsh tool-catalog.md 逐字冻结（16a bash/pwsh 已逐字落 schema.rs，catalog 脚本随批 3）
 - [ ] 对照 REQ-FR-BUILTIN-TOOLS 场景逐条落测试（随各子批 spec 绑定）
-- **Status:** in_progress（16a 批 2 完成，批 3 待启）
+- **Status:** in_progress（16b 收口；16c 批 0 真源全读+裁决闭，批 1 fr-storage 待启）
 
 ### Phase 17: fr-compaction + fr-mcp + fr-ptc
 - [ ] fr-compaction：剪枝 8192/4096/1024、压缩契约与自动触发、图片卸载、spill max-inline-tokens 12500、replace-op 落地
@@ -189,6 +196,10 @@ Phase 16 **16b 批 5 已落**（spec 绑定全族+七步流 4-7 收口：70 场�
 | Q105′A（2026-10-28）'session-projections' 服务现在立缝（fr-session provide，register/stateOf） | dsh 同域独立服务；Phase 18 ACP 零重构接入 |
 | Q110′A′（2026-10-29）投影折叠所有权=注册者自持折叠（自读=read 尾拉+本地折叠；第三方=fr-session 继电纯折叠端点；注册表 M1 无 cell） | dougong 同步 wire 锁序三路证明注册表侧折叠不可服务自读；单实现零漂移（B′ 双份折叠弃） |
 | 批 3 裁决 A（2026-10-29）tool:bash/tool:pwsh section 文本抽取扩源：generate-tool-catalog.py 增 TS 工具源抽取（extract_section_text） | 两文本是 PRD 22 提示词域而 catalog 不载；Q95-A 源扩须备案=本裁决即备案；手抄清零，--check 钉测覆盖 |
+| Q16c-1A（2026-10-30）jobs 完成通知机本切片全落（16a 遗留③关闭） | fr-agent-loop 'agent' 服务 inject/steer/followup 三方法为载体；tool-jobs 语义完整（attach controller+投递一体） |
+| Q16c-2A（2026-10-30）goal-round 域面全量移植（fold goal 源推进+blocked 阈值臂+wrapup 渲染；纯函数合成测） | 行为场景 blocked 阈值臂可绑真实测试；round 产生机器（goal-round-driver）本就不属本切片 |
+| Q16c-3B（2026-10-30）schedule 持久存储=新 fr-storage crate（generic domain/table 面独立插件） | PRD 4.5 增行随裁决生效；为未来多域消费者预留 generic 面 |
+| Q16c-4A（2026-10-30）IANA tz+日历=jiff（Temporal 语义直译+内置 tzdb） | 与 dsh @js-temporal/polyfill 用法一一对应，移植摩擦最小 |
 
 ## Errors Encountered
 | Error | Resolution |

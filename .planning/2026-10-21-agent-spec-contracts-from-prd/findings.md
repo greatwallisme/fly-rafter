@@ -2313,3 +2313,138 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - 未挂载判定：require 错误文本含 "host status"（STATUS_INACTIVE=-4/UNDECLARED 族）→ dsh `ctx.get` undefined 同臂（"no attachment service is mounted"/route-unresolved）；llm 服务侧拒绝（UNKNOWN_MODEL 族 llmError 文档）原样浮出。
 - 路由头 fallback 论证落实：模型签发的 read_image 调用必先有一次模型请求→request/header 恒已入日志→dsh `?? agent.options` 臂=防御死臂（fr M1 帧无 agent options 面，注记于 fs_read_image doc）。
 - 批 5 入口：read_image 场景族绑定（registration gate/unmounted/route gate 双拒/六 save 臂/extension-less sniff/downscaled envelope/render image 块/presentCall 卡/presentationMeta path-only/isConcurrencySafe），接批 3 已绑族之后续绑。
+
+### 16c 域深读（2026-10-30）：todo + goal + jobs 工具真源
+
+**tool-todo（212 行全读）**：
+- inject=['tools','sessionProjections']；Config.allowParallelInProgress **required 无默认**（z.boolean().required()）
+- description 三段拼装：HEAD='Record and update a task list to plan multi-step work and show progress; skip it for trivial single-step tasks. Add one todo per concrete step before you start. ' + (allowParallel ? 'While work remains, keep the todos being worked on `in_progress`, several only when work runs in parallel. ' : 'While work remains, keep exactly one todo `in_progress`. ') + 'Mark each todo `completed` as soon as it is done.'
+- toTodoList 校验（schema 后工具体层）：trim 空→`invalid todo: \`content\` must be a non-empty string`；重复→`invalid todos: duplicate content ${JSON.stringify(content)}`；!allowParallel 且 in_progress>1→`invalid todos: at most one task may be in_progress (got ${active})`
+- execute：exec.agent 缺席→`todo_write requires an owning agent session`；agent.session.append('todo/write',{todos})；返回 {todos:[{content,status}],counts:{pending,inProgress,completed}}（wire 键 inProgress=camel 协议豁免）
+- render：`Updated todo list: ${pending} pending, ${inProgress} in progress, ${completed} completed.`
+- presentCall：{card:'generic',title:'Update todo list',kind:'other',rawInput:args.todos}
+- projection：key 'todos'，state TodoItem[]|null，stateVersion 2；apply：todo/write→data.todos；turn/start→null（turn/end 不清=完成清单仍可见）；init null；wire view=state
+
+**tool-jobs（416 行全读）**：
+- inject=['tools','jobs','systemPrompt']；Config：waitTimeoutMs 默认 30_000/maxWaitTimeoutMs 默认 600_000/completionDelivery 'quiet'|'wakeup' 默认 'wakeup'/maxConsecutiveWakes 可选 min1
+- 装配校验：`tool-jobs: waitTimeoutMs (${waitDefault}) exceeds maxWaitTimeoutMs (${waitCap})`；`tool-jobs: maxConsecutiveWakes (${N}) must be a whole number of turns`
+- ctx.jobs.attachController('tool-jobs')（生产者门：不装 tool-jobs 则 bash 后台不可用）
+- section 'tool:jobs' order=TOOL_JOBS，text 逐字（254 行：'Track every background job id you start. You are notified in-session when a job finishes — do not busy-poll or sleep on one; keep working on independent steps and do not duplicate a running job\'s work. Before giving a final answer, collect every still-relevant job with job_output (set wait: true only when you are genuinely blocked on it), and job_kill jobs that stopped mattering.'）
+- 完成通知机（agent-loop 依赖）：jobs.events.subscribe({owners:'scope'})；settled 事件且非 killedByModel/非 awaited/非 teardown/owner 在场→createUserMessage source {kind:'tool-jobs',form:'notice',summary=boundContextSummary(`${kind} ${label} ${statusLine}`)}；wakeup+owner idle→followup（wakeBudget 内，spentWakes WeakMap 按 Agent，user 源 inbox/claimed 重置）否则 inject
+- fitCompletionNotice 截断梯（outputLimitBytes 帽）：完整→`${prefix}${omitted}${action}`→`${prefix}${action}`→`background job ended; use job_list for id.`→retainHead('job_list',maxBytes)；prefix=`background job ${job.id}`，detail=` (${kind}: ${label}) finished ${statusLine}`，complete=prefix+detail+'. Read its output with job_output.'，action='\nDone; job_output.'，omitted='\n[notice truncated]'
+- PUBLIC_JOB_SCHEMA：{id req/kind req/label req/status req enum [running,stopping,completed,killed,failed]/detail?/startedAt req int/finishedAt? int} additionalProperties:false
+- job_output：params job_id req/wait bool/timeout_ms number（无 required）；execute：wait=true→jobs.wait(id, min(timeout??waitDefault, waitCap), agent?.id, signal)；readBody=read.chunks renderModelDelta+result（delta 非空且非 \n 尾则补 \n 接缝）；validateJobId 空→`invalid job_id: expected a non-empty string, got ${JSON.stringify(v)}`；output {text req, job req}；render：body（空→'(no new output)'）+（非 \n 尾补 \n）+statusLine(job)
+- job_list：params {}；jobs.list(agent?.id)→publicJob[]；render：空→'(no background jobs)'；否则 `${id} [${kind}] ${status} — ${label}` join '\n'
+- job_kill：params job_id req/reason 可选（'Optional short reason, recorded in the log and forwarded to the job.'）；execute：jobs.kill(id, agent?.id, reason)→'requested'|'already-finished'；requested→killedByModel.add；publicJob(jobs.get(id, agent?.id))；output {outcome req enum ['cancellation-requested','already-finished'], job req}；render：already→`job ${id} had already finished ${statusLine}` 否则 `requested cancellation of job ${id}`
+- finalizeContent：tools/pre-execute prepend 钩记 visibleOutputLimit（job_output/job_kill 按 job_id 查 list 得 outputLimitBytes）；job_output 非 error 且默认渲染完整→fitWithSuffix(body, `\n${statusLine}`, maxBytes, '\n[output truncated]')；否则通用 boundSingleText '\n[result truncated]'
+- presentCall：`Read output from background job ${job_id}` read rawInput=job_id / `List background jobs` read / `Kill background job ${job_id}` execute rawInput=job_id
+
+**goal 域（types 152+domain 116+fold 349+index 653+runtime 30+client 10 全读）**：
+- 词汇：GoalId（branded 串）；GoalRef{id,revision}；GoalPhase active|paused|blocked|complete；GoalBlockReason{code lower-kebab 正则 ^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$, message 非空 trim 归一}；GoalSnapshot extends GoalRef{objective,phase,blockedReason?,maxGoalRounds}；GoalActivation armed|disarmed（进程本地不持久）；GoalView=GoalSnapshot+roundsStarted+createdAt+updatedAt+activation；GoalProjection{goal,roundsStarted,createdAt,updatedAt}；GoalProjectionState{current,seenGoalIds[],failure}
+- GoalOperation create|edit|pause|resume|complete|block|clear；goal/change 会话事件 version=1；snapshot 形 {kind,version,operation,goal,roundsStarted,createdAt,updatedAt} 恰七键；clear 形 {kind,version,operation:'clear',cleared:GoalRef,clearedAt} 恰五键
+- fold 规则（全 strict）：snapshot 解码逐字段（revision/maxGoalRounds 正 safe int、objective 非空 trim 归一、phase 白名单、blocked 相恰六键否则恰五键、blockedReason 恰 code,message 两键）；updateDateAt<createdAt→fail；非 create 变更要求恰下一 revision+计数/时间戳保持；edit 不得改 phase/blockedReason；pause active→paused；resume active|paused|blocked→active 且 roundsStarted<maxGoalRounds；complete 非 complete→complete；block active→blocked；clear 要求 current 在场+恰下一 revision+clearedAt>=updatedAt，清空全部并 lastRef=tombstone
+- create fold 规则：revision===1+phase active+roundsStarted 0+(无 current 或 current.phase==='complete')+id 未复用（seenGoalIds 拒绝复用）
+- user/message source.kind==='goal' 事件推进 roundsStarted：要求恰 next round 且 goalId/revision 匹配 current active 且 round<=maxGoalRounds，否则 `goal round at session event ${seq} is not the next admitted round of the active goal`
+- GoalService inject=['agents','sessionProjections']；Config defaultMaxGoalRounds 默认 256（resolveMaxGoalRounds 正 safe int）
+- 投影注册：key 'goal' stateVersion **6**；init {current:null,seenGoalIds:[],failure:null}；apply=applyGoalProjection（failure 非空即短路；仅 goal/change 与 source.kind==='goal' 的 user/message 触发；折叠异常→failure=`goal replay failed at session event ${seq}: ${msg}` 不上抛）；wire view=state.current（GoalProjection|null）
+- 服务 API（全部先 assertLive：ctx.agents.get(agent.id)!==agent→GOAL_AGENT_NOT_LIVE `agent "${id}" is not live in this registry`）：
+  - get(agent)→GoalView|undefined
+  - create(agent,{objective,maxGoalRounds?})：resolveObjective（trim 非空→GOAL_INVALID_OBJECTIVE 'goal objective must be a non-empty string'）；maxGoalRounds??256（GOAL_INVALID_MAX_ROUNDS 'maxGoalRounds must be a positive safe integer'）；current 存在且 phase!=='complete'→GOAL_ALREADY_EXISTS `goal "${id}" already exists with phase "${phase}"`；id=`goal-${randomUUID()}` revision1 phase active；armed
+  - edit(agent,ref,{objective?,maxGoalRounds?})：两缺→GOAL_INVALID_EDIT 'goal edit requires objective and/or maxGoalRounds'；保持 phase/blockedReason；revision+1
+  - pause：active→paused disarmed；resume：active|paused|blocked→active armed，active 且已 armed→GOAL_INVALID_TRANSITION `goal "${id}" is already active and armed`，roundsStarted>=cap→`goal "${id}" exhausted ${cap} goal rounds; increase maxGoalRounds before resuming`；complete：active|paused|blocked→complete disarmed；block：active→blocked+resolveBlockReason（code lower-kebab+message 非空→GOAL_INVALID_BLOCK_REASON 'goal block reason requires a lower-kebab-case code and a non-empty message'）
+  - clear(agent,ref)→tombstone GoalRef{id,revision+1}，clearedAt=nextMutationTime
+  - expectCurrent：null→GOAL_NOT_FOUND 'no current goal'；ref 不匹配→GOAL_STALE_REVISION `stale goal ref "${id}" revision ${r}; current is "${id}" revision ${c}`
+  - transitionError：`cannot ${op} goal "${id}" from phase "${phase}"; expected ${allowed.join(' or ')}`
+- 时间：now=Date.now()；nextMutationTime=max(Date.now(), state.updatedAt)（防墙钟回拨）
+- activation 机：runtimeStates WeakMap<Session,{activation,pendingActivation}>；agent/created→disarmed；session/event goal/change→pendingActivation offset 匹配则取之否则 disarmed；变更时 emit goal/activation-changed {sessionId, goal?{id,revision,activation}}
+- commit：pendingActivation={offset:session.seq,activation}→session.append('goal/change',change)（append 后 offset 匹配则 activation 生效）→emit goal/changed（agentEvents scoped）{operation,ref,goal?:GoalView}
+- GoalError extends HarnessError(message, code)；GOAL_CHANGE_VERSION=1
+
+**tool-goal（index 343+authority 118+wrapup 41 全读）**：
+- inject=['agents','goals','tools','systemPrompt','sessionProjections']；Config blockedAfterConsecutiveRounds 默认 3（正 safe int，TypeError 'blockedAfterConsecutiveRounds must be a positive safe integer'）
+- section 'tool:goal' order=TOOL_GOAL text=guidance(threshold)：'create_goal may infer goal intent from a direct human request in any language. After session resume or fork, an active goal is disarmed: when a human asks to continue or resume in any wording or language, use update_goal action resume to rearm it. Mark complete only when the objective is actually achieved. Mark blocked only after the same blocking condition persists for at least ${blockedAfter} consecutive goal rounds, and report that concrete condition in blocked_reason; difficulty, uncertainty, or useful remaining work is not blocked.'（**动态文本**：阈值内嵌——catalog 抽取需参数化）
+- goalToolExecution：agent 缺席→'goal tools require a calling agent' GOAL_TOOL_AGENT_REQUIRED；agents.get!==agent||status!=='running'||agents.currentInitiator()!==agent→'goal tools require the exact live calling agent inside its active driver' GOAL_TOOL_DRIVER_REQUIRED；turnBoundary 投影缺席或 openTurnStartSeq===null→'goal tools require an open model turn' GOAL_TOOL_DRIVER_REQUIRED；返回 {agent, events=snapshotEvents(), openTurnStartSeq}
+- requireDirectHuman：roots().includes(agent) 且 open turn 内（seq openTurnStartSeq+1..end）存在 user/message 且 source.kind==='user'（followup/steer 无源默认 'user'=继承权限，非人生产者须自带源）；否则 reject 'this goal operation requires a direct human turn on a top-level agent' GOAL_TOOL_AUTHORITY_REQUIRED
+- completionAuthority：direct-human 或 goal=view 且 open turn 内有 user/message source {kind:'goal',goalId,revision,round}===当前恰轮→{kind:'goal-round',goal}；否则 'complete and blocked require a direct human turn or the current goal round'
+- goalRef 校验：goal_id 空/未 trim/revision 非正 safe int→'goal_id must be non-empty and revision must be a positive safe integer' GOAL_TOOL_INVALID_UPDATE
+- get_goal：params {}；presentCall 'Read current goal' read
+- create_goal：objective req（'The concrete completion objective inferred from the direct human request.'）+max_goal_rounds 可选（'Optional positive safe-integer limit on automatic continuation rounds.'）；requireDirectHuman；presentCall 'Create goal' other rawInput=objective
+- update_goal：goal_id req/revision req/action req enum [edit,pause,resume,complete,blocked]/objective/max_goal_rounds/blocked_reason 可选；action 描述逐字（'edit, pause, and resume require a direct top-level human request. complete and blocked are also allowed during an automatic continuation of this goal; blocked is rejected before the configured minimum round count.'）
+  - edit：requireDirectHuman；hasText(blocked_reason)→'blocked_reason is valid only with action blocked'
+  - pause/resume：requireDirectHuman；objective/max_goal_rounds/blocked_reason 任一在场→'objective and max_goal_rounds are valid only with action edit; blocked_reason is valid only with action blocked'；resume 且 ref===current 且 phase==='paused'→'the model cannot resume a paused goal; the user must resume it' GOAL_TOOL_RESUME_PAUSED
+  - complete/blocked（completionAuthority）：objective/max_goal_rounds 在场→'objective and max_goal_rounds are valid only with action edit'；complete+blocked_reason→'blocked_reason is valid only with action blocked'；blocked 缺/空 blocked_reason→'blocked_reason is required with action blocked'；blocked 且 goal-round 权且 roundsStarted<threshold→`blocked requires at least ${N} consecutive goal rounds; current round is ${roundsStarted}` GOAL_TOOL_BLOCK_THRESHOLD；block code='model-reported'
+  - goal-round 权威时 deferContext(wrapup)：complete→<goal_complete> 块（objective JSON 化头+收尾指示+GROUNDING）；blocked→<goal_blocked> 块；source {kind:'tool-goal',form:'notice',summary=`${action}: ${objective}`}
+- 输出 GOAL_VALUE_SCHEMA oneOf：{goal:null}|{goal{id,revision,objective,phase enum,roundsStarted,maxGoalRounds,blockedReason?{code,message}},activation enum armed|disarmed}；render=JSON.stringify(value)
+- presentCall：`${action==='blocked'?'Mark':capitalize(action)} goal` other rawInput=blocked_reason||objective||max_goal_rounds||goal_id
+- wrapup GROUNDING='Report only what earlier rounds and tool results in this session actually establish; when a detail is not in the session, say so instead of inventing it. '
+- **M1 结构性缺席候选（待与 spec 场景对勘后呈 Q 裁决）**：agents 注册表（assertLive/roots/currentInitiator）、turnBoundary 投影 openTurnStartSeq、goal-round 消息源与 roundsStarted 推进（goal-round-driver 属 agent-loop 侧）、deferContext wrapup、通知机 wakeup/inject（jobs 完成通知同因）——M1 headless 单会话根 agent+每 turn 均直人输入→authority 恒 direct-human、通知机不可达；结构性缺席面如何落测须裁决
+
+### 16c 域深读（续）：schedule 域全落（types 480+index 471+storage 60+update 179+runtime 166+delivery-history 77+domain 1896+tool 590 全读）
+
+**词汇（types.ts）**：
+- ScheduleId（branded）；六规则记录：after{afterSeconds,scheduledAt}/at{scheduledAt}/every{everySeconds≥60,scheduledAt}/daily{time HH:mm:ss.SSS 归一,timeZone,scheduledAt}/weekly{+weekdays ISO 1-7 唯一升序}/cron{expression 五字段 canonical,timeZone}；scheduledAt=四位年 RFC3339 UTC `.mmmZ` 串；title 必填≤120 trim 非空；prompt trim 非空
+- ScheduleTask 行：{sessionId,record,status active|inactive(缺省 active),lastDelivery?,deliveryHistory?{records[{scheduledAt,deliveredAt,messageId,prompt?}],earlierRecordsUnavailable,earlierRecordsPruned?}}；校验 lastDelivery===最新 receipt
+- ScheduleChange v1：create{schedule Legacy}/delete{id}/dispatch{id,acceptedAt?}（acceptedAt 仅 every）；schedule/change 会话事件
+- 错误 union（**value 返回非抛**）：invalid_prompt/invalid_selector/invalid_rule/invalid_time_zone/not_future/time_out_of_range/frequency_too_high/subagent_session/internal_error；ScheduleInputError（服务层抛）vs ScheduleLogError（corrupt_schedule_log 持久层）
+- ScheduleView=record+state scheduled|overdue+deliveryMode 'host'；ScheduleUpdateMiss{updated:false,code:schedule_not_found|schedule_ended|schedule_conflict}
+- update CAS：expected 完整记录对比+timing change 可换 kind（at/every/daily/weekly/cron；after 不可改=需新建）
+- delivery-history 分页：limit 1-100 safe int、before messageId 排他游标、nextBefore、earlierRecordsUnavailable/Pruned、retention 回显
+
+**ScheduleService（index.ts 471）**：
+- inject=['agents','sessions','storageDomain','sessionController','sessionPersistence']；Config deliveryHistoryDays 默认 30(1-3650)/deliveryHistoryRecords 默认 200(1-10000)
+- 存储域 'schedule' v1 单表 tasks；open 时键≠record.id→`schedule: stored task key "${key}" differs from record id "${id}"`（先 close 再抛）
+- serialize=FIFO promise 链；stopping→reject 'Schedule service is stopping'
+- create：选择器>1→invalid_selector 'Exactly one reminder selector is required.'；title=scheduleTitle；id=`schedule-${randomUUID()}`；**now=队列入队前取样**（等待中可能已到期）；入队后 reminderTargetRefusal（agents.get(sessionId) 为委托子→subagent_session 'This Session belongs to subagent routing, which never receives reminder delivery.'）；行={sessionId,record,status:'active',deliveryHistory:{records:[],earlierRecordsUnavailable:false}}
+- list：sessionId+active 过滤，存储序；catalog：全任务按 scheduledAt.localeCompare→id.localeCompare 排序；delete：get+sessionId 匹配否则 {deleted:false,code:'schedule_not_found'}；行删除含 deliveryHistory
+- update：refusal→not_found(绑定不符)→ended(inactive)→resolveScheduleUpdate→put
+- session/created 全局监听：fold 历史遗留事件，unreadable→warn `schedule: Session "${id}" historical events could not be read (${msg}); the legacy reminder is ignored.`；activeLegacy>0→warn `schedule: Session "${id}" contains legacy reminders; recreate active reminders with schedule_create.`
+- 归档 admission：workspace/session-activity 增 {kind:'schedule',items:[{id,label:title}]}；workspace/session-stop→stopSessionTasks（队列内逐行删，聚合首错）
+- emitChanged：schedule/changed emit（listener 异步失败吞 warn `schedule: schedule/changed listener failed: ...`）
+
+**resolveScheduleUpdate（update.ts）**：expected decodeScheduleRecord 失败→{code:'invalid_rule',message:'expected must be a complete valid Schedule record.'}；deepEqual 失败→schedule_conflict；title=prompt 校验（retainedTitle 用 ScheduleLogError 面）；timing change validateChange（恰 kind+selector 两键）→等值归一（at 与 after|at 比 parseAtInput===Date.parse(scheduledAt)；every 同秒；daily/weekly 归一比对 canonicalizeTimeZone；cron canonical 表达式比对）→等值仅更 content；否则**以同一 now 重算目标**（recompute exactly as creation）
+
+**ScheduleRuntime（runtime.ts）**：
+- MAX_TIMER_DELAY_MS=2^31-1；单 timer+requested 标志+running promise；ctx.agents.withoutInitiator 驱动
+- drive：scanNow 取 due（active+scheduledAt<=now）；recurring 按 sessionId 分组批量（同会话全部 recurring 成一 batch）；resolveAgent 恢复会话 agent；admitted=恢复后再滤（墙钟回滚防护）；recurring→resolveRecurringOccurrence 每 member+renderRecurringReminderBatchFraming；one-shot→renderReminderFraming；createUserMessage source{kind:'schedule'}；agent.followup(message)；**sessions.flush 确认持久**否则 throw 'Session persistence did not acknowledge the reminder'；one-shot→status inactive+appendDelivery；recurring→scheduledAt=nextScheduledAt??occurrenceAt、status 随之
+- 失败：未 commit 且仍到期者入 failed 集（本次 drive 不再排 timer），warn `schedule: reminders ${JSON.stringify(ids)} were not acknowledged: ${err}`
+- timer 重排：next=min(scheduledAt)，clamp [0,MAX_TIMER_DELAY_MS]，unref
+
+**delivery-history.ts**：appendDelivery（floor=deliveredAt-days*86400s 过滤+尾 cap records；earlierRecordsUnavailable/Pruned 演进）；deliveryHistoryPage（before 游标 findIndex→-1=delivery_cursor_not_found；start=max(0,end-limit)；reverse 最新优先；start>0 且有 oldest→nextBefore）
+
+**domain.ts（1896）核心算法**：
+- 常量：SCHEDULE_CHANGE_VERSION=1/MIN_EVERY_INTERVAL_SECONDS=60/MAX_TITLE_LENGTH=120/CRON_SEARCH_HORIZON_YEARS=400（格里高利 400 年周期）；MIN/MAX_FOUR_DIGIT_YEAR_MS=0001-01-01T00:00:00.000Z/9999-12-31T23:59:59.999Z
+- futureInstant：range 外→time_out_of_range 'The scheduled time must be representable as a four-digit-year RFC 3339 UTC instant.'；<=now→not_future 'The scheduled time must be strictly in the future.'
+- parseOffsetInstant：OFFSET_INSTANT 正则（YYYY-MM-DDTHH:mm:ss[.ddd](Z|±HH:MM)）；-00:00 拒；hour>23 等拒→invalid_rule 'at must use YYYY-MM-DDTHH:mm:ss with optional 1-3 digit fractional seconds and an explicit Z or numeric offset.'
+- canonicalizeTimeZone：空/未 trim/非 UTC 且非 IANA_ZONE 正则→invalid_time_zone 'time_zone must be UTC or a valid IANA Area/Location name.'；Intl resolvedOptions canonical 化（Rust=chrono-tz 名字归一）
+- localInstant(Temporal disambiguation 'earlier')：重叠取早即时，gap→undefined（**chrono-tz LocalResult 映射：Ambiguous→earlier，None→gap，Single→值**）
+- parseAtInput：串=offset 即时；对象恰 date,time,time_zone 三键→resolveLocalInstant（gap→invalid_rule 'The local at time does not exist in the selected time zone.'）；否则 'at must be an explicit-offset string or local calendar object.'
+- 记录构造器六件（createXxxScheduleRecord）：prompt trim 非空→invalid_prompt 'prompt must be non-empty after trimming.'；scheduleTitle→invalid_prompt REQUIRED_TITLE_MESSAGE/'title must be at most 120 characters.'；after 正 safe int→invalid_rule 'after_seconds must be a positive safe integer.'；every safe int→'every_seconds must be a safe integer.'、<60→frequency_too_high 'every_seconds must be at least 60.'；daily/weekly/cron now 代表性→time_out_of_range 'Daily/Weekly/Cron creation time must be a representable four-digit-year UTC instant.'；无未来→'No future daily/weekly/cron occurrence is representable as a four-digit-year UTC instant.'
+- 本地钟时间解析 LOCAL_CLOCK_TIME ^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?$→`${selector}.time must use HH:mm:ss with optional 1-3 fractional digits, without leap seconds or 24:00.`；存储侧要求 .SSS 归一（'daily/weekly time must be normalized to HH:mm:ss.SSS'）
+- normalizeWeekdays：非空数组+1-7 整数+无重复→'weekly.weekdays must be a non-empty array of ISO weekday numbers.'/'Each weekly.weekdays entry must be an integer from 1 (Monday) through 7 (Sunday).'/'weekly.weekdays must not repeat weekday ${n}.'；存储侧升序校验 'weekly weekdays must be normalized to unique ascending ISO weekday numbers'
+- decodeScheduleRecord：daily/weekly/cron 三 Host 形（恰键+title 必经 decodeStoredTitle：空/超长/未 trim→ScheduleLogError）+legacy after/at/every（title 可选，缺省不拒绝）；current Host 记录 legacy 形缺 title→REQUIRED_TITLE_MESSAGE
+- 每次出现解析四件：resolveEveryOccurrence（steps=floor((acceptedAt-target)/interval) 不枚举积压；acceptedAt<target→'every dispatch cannot precede the active scheduledAt'）；daily/weekly=latestDueOccurrence（自 decision UTC 日期+1 向回走，max(candidate,savedTarget) 兜 tzdata 漂移）+next*Target（自 max(today,afterDate+1) 向前走，gap 日期跳过）；cron=latestCronOccurrence/nextCronTarget（400 年地平线+月跳跃+Vixie DOM/DOW_STAR 语义：**两侧均限=OR，任一侧星=AND**；day-of-week 7→0 折叠；canonical 编码 encodeCronField/encodeStarCronField 保 star 旗）
+- decodeScheduleChange：version≠1→'schedule/change version must be 1'；三操作恰键；create schedule=legacy 形（title 可选）
+- foldScheduleEvents/applyScheduleChanges：id 复用→`schedule id "${id}" was reused`；delete 非 active→`schedule delete targets inactive id "${id}"`；dispatch 非 active→同形；one-shot dispatch 带 acceptedAt→'one-shot dispatch must not contain acceptedAt'；every 无 acceptedAt→'every dispatch must contain acceptedAt'
+- allocateScheduleId：schedule-N 首个未用 N（Host 存储不用——Host id=uuid；此为会话遗留 fold 面）
+- scheduleView：state=now>=scheduledAt?'overdue':'scheduled'
+- framing：'[SCHEDULE REMINDER]'+'This is a scheduled message from the user'+schedule_id_json/occurrence_at/reminder_prompt_json（JSON.stringify 转义）；批量='[SCHEDULE REMINDER BATCH]'+reminders_json:[{schedule_id,occurrence_at,reminder_prompt}]
+
+**tool-schedule（590）**：见前述已 persist 要点+四工具参数 schema（SELECTOR_PARAMETERS 逐字 description）；schedule_delete id 校验在 agent 判定前；update 流=List 找 expected→catalog() 查 ended→schedule.update CAS；presentCall 'Create reminder'/'List reminders'/'Delete reminder'/'Update reminder'
+
+**Rust 移植要点**：Temporal→chrono(+chrono-tz)；Intl.canonicalizeTimeZone→chrono_tz::Tz::from_str 归一（名字规范化）+UTC 特判；disambiguation 'earlier'→LocalResult::Ambiguous(_,later 用 earlier)/None=gap；MAX_TIMER_DELAY_MS 同值；四位数年界=chrono 显式范围检查；Date.parse/toISOString↔chrono RFC3339 with milliseconds Z 恒定格式
+
+### 16c 批 0 裁决（2026-10-30 用户四裁决）+storage 栈真源
+
+**裁决**：
+- **Q16c-1A**：jobs 完成通知机本切片全落（截断梯+wakeBudget+quiet/wakeup+inject/followup；fr-agent-loop 'agent' 服务三方法为载体）——16a 遗留③就此关闭
+- **Q16c-2A**：goal-round 域面全量移植（fold goal 源推进+blocked 阈值臂+wrapup 渲染；纯函数合成测；round 产生机器不属本切片）
+- **Q16c-3B**：schedule 持久存储=**新 fr-storage crate**（generic domain/table 面独立插件；PRD 4.5 增行随裁决生效）
+- **Q16c-4A**：IANA tz+日历=jiff（Temporal 语义直译：disambiguation earlier/reject 内建、ISO dayOfWeek 周一=1、内置 tzdb）
+- 判例执行项（呈报无异议）：五 section 场景改否定（Q16b-5A 判例）；registry/subagent 拒绝臂在位+纯函数钉测+档载（16a 遗留①②同类处理）；fr-config 六组新键；fr-wire 三事件常量
+
+**storage 栈真源（storage-domain 723+storage-json 481 全读）**：
+- spec：DomainSpec{name(UNIT_NAME_RE),version(非负 int),layout single|per-record(缺省 single),compatibleVersions(旧版白名单,per-record 读放行/整单元拒),invalidRecords backup-and-skip(可弃派生数据；无 backupRecord 后端回退拒绝),global{schema,initial}(schema 禁 null=null 是"未写"哨兵),tables{name→{valueSchema}}}；defineDomain 模块载入即验（名/版本/layout/global-null）
+- facility：单开表 reserved set（already-open）→backend 路由（routes 覆盖默认）→kv facet→open(descriptor{ name,version,tables,hasGlobal,layout,compatibleVersions })→loadAll→逐记录 schema 验（invalid-record 带 table/key；backup-and-skip 则移档+log error+跳过；global 恒拒绝）→DomainImpl；caller 持有 handle 自 close；facility 卸载关残留
+- domain.ts 运行时：**权威态在内存**；每域单写链 FIFO（chain.then；link 恒 settle）；写序=后端耐久 FIRST→内存→emit domain/changed（listener 失败吞 warn `domain '${name}': domain/changed listener failed: ${err}`）；后端拒→内存不动（无读写分叉）；KvTable{get/entries/keys/size(内存快照),put(整记录无合并),delete(存在性在链槽判定,false 无写无事件),update(原子 RMW,缺键→missing-key)}；global{get(initial),set(首 set 才落盘)}；close: disposing 拒新写→drain 链→unit.close→closed 拒读→名字释放（幂等共享 teardown）
+- storage-json：文件=<root>/<name>.json 恒为当前净态（pretty 2 空格+插入序+尾 \n；文档={unit:{name,version},global,tables}）；parse 错误=malformed-medium（非 JSON/非对象/头缺失或异名/tables 非对象或数组/表非对象）+version-mismatch（stored≠expected）；**atomic 协议=同目录 .{uuid}.tmp(wx 0o600)→fsync→rename 整替→POSIX fsync 目录**（win 跳过目录 fsync；session-log 的 link+unlink no-clobber 是另一协议，单元文件单写者 last-write-wins 正确）；single-unit：内存权威，每写原语变更后整文件重发布；发布失败回滚内存（put 恢复 previous/删除；delete/global 同）；close 恒 drain inFlight；写序归 caller（域层写链）——后端只保证单调用发布完整耐久文件
+- 缺文件=空单元（物化延至首写）；M1 消费者 schedule=单表 tasks+无 global+single layout
