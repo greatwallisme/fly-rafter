@@ -115,7 +115,7 @@ Scenario: bash 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: bash 说明 section 注册
-  Test: prompt_sections_pin_the_seven_tools
+  Test: prompt_sections_pin_the_eight_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 bash 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -199,7 +199,7 @@ Scenario: pwsh 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: pwsh 说明 section 注册
-  Test: prompt_sections_pin_the_seven_tools
+  Test: prompt_sections_pin_the_eight_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 pwsh 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -277,7 +277,7 @@ Scenario: read 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: read 说明 section 注册
-  Test: prompt_sections_pin_the_seven_tools
+  Test: prompt_sections_pin_the_eight_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 read 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -337,7 +337,7 @@ Scenario: read_image 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: read_image 说明 section 注册缺席
-  Test: prompt_sections_pin_the_seven_tools
+  Test: prompt_sections_pin_the_eight_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 read_image 无说明 section（dsh 真源 read-image.ts 不注入 systemPrompt）；注册表恰七条 tool:* section 且 order 位于 1000-3000
@@ -373,7 +373,7 @@ Scenario: write 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: write 说明 section 注册
-  Test: prompt_sections_pin_the_seven_tools
+  Test: prompt_sections_pin_the_eight_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 write 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -421,7 +421,7 @@ Scenario: edit 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: edit 说明 section 注册
-  Test: prompt_sections_pin_the_seven_tools
+  Test: prompt_sections_pin_the_eight_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 edit 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -493,7 +493,7 @@ Scenario: glob 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: glob 说明 section 注册
-  Test: prompt_sections_pin_the_seven_tools
+  Test: prompt_sections_pin_the_eight_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 glob 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -541,7 +541,7 @@ Scenario: grep 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: grep 说明 section 注册
-  Test: prompt_sections_pin_the_seven_tools
+  Test: prompt_sections_pin_the_eight_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 grep 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -781,7 +781,7 @@ Scenario: todo_write 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: todo_write 说明 section 注册缺席
-  Test: prompt_sections_pin_the_seven_tools
+  Test: prompt_sections_pin_the_eight_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 todo_write 无说明 section（dsh 真源 tool-todo 不注入 systemPrompt）；注册表恰七条 tool:* section 且 order 位于 1000-3000
@@ -829,169 +829,169 @@ Scenario: todo_write 行为 1
   那么 session 持有状态；并行工作可多个 in_progress（allowParallelInProgress:true），false 则恰一活跃且多标拒绝
 
 Scenario: create_goal 调度与呈现
-  Test: pending_req_fr_builtin_tools_create_goal
+  Test: goal_registrations_match_the_frozen_catalog
   假设 合约要求的行为已实现
   当 读取工具 create_goal 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 other
 
 Scenario: create_goal 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_create_goal
+  Test: goal_registrations_match_the_frozen_catalog
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: create_goal 说明 section 注册
-  Test: pending_req_fr_builtin_tools_create_goal_section
+  Test: goal_section_composes_over_the_extracted_template
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 create_goal 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: create_goal 参数 objective 形状
-  Test: pending_req_fr_builtin_tools_create_goal_objective
+  Test: goal_registrations_match_the_frozen_catalog
   假设 工具 create_goal 已注册
   当 校验 schema 时
   那么 参数行 [objective:string:req（直接人类请求推断的长时目标）] 的名称与类型按目录行实现
 
 Scenario: create_goal 参数 objective 约束
-  Test: pending_req_fr_builtin_tools_create_goal_objective
+  Test: goal_registrations_match_the_frozen_catalog
   假设 工具 create_goal 已注册
   当 校验 schema 时
   那么 参数行 [objective:string:req（直接人类请求推断的长时目标）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: create_goal 参数 max_goal_rounds 形状
-  Test: pending_req_fr_builtin_tools_create_goal_max_goal_rounds
+  Test: goal_registrations_match_the_frozen_catalog
   假设 工具 create_goal 已注册
   当 校验 schema 时
   那么 参数行 [max_goal_rounds:number:opt（正安全整数）] 的名称与类型按目录行实现
 
 Scenario: create_goal 参数 max_goal_rounds 约束
-  Test: pending_req_fr_builtin_tools_create_goal_max_goal_rounds
+  Test: goal_registrations_match_the_frozen_catalog
   假设 工具 create_goal 已注册
   当 校验 schema 时
   那么 参数行 [max_goal_rounds:number:opt（正安全整数）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: create_goal 行为 1
-  Test: pending_req_fr_builtin_tools_create_goal_1
+  Test: create_flow_commits_over_the_human_turn
   假设 工具 create_goal 执行时
   当 达到触发条件时
   那么 跨自动续轮；仅长时目标
 
 Scenario: get_goal 调度与呈现
-  Test: pending_req_fr_builtin_tools_get_goal
+  Test: goal_registrations_match_the_frozen_catalog
   假设 合约要求的行为已实现
   当 读取工具 get_goal 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 read
 
 Scenario: get_goal 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_get_goal
+  Test: goal_registrations_match_the_frozen_catalog
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: get_goal 说明 section 注册
-  Test: pending_req_fr_builtin_tools_get_goal_section
+  Test: goal_section_composes_over_the_extracted_template
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 get_goal 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: get_goal 行为 1
-  Test: pending_req_fr_builtin_tools_get_goal_1
+  Test: get_flow_reads_the_current_goal
   假设 工具 get_goal 执行时
   当 达到触发条件时
   那么 读当前 goal 含 id/revision
 
 Scenario: update_goal 调度与呈现
-  Test: pending_req_fr_builtin_tools_update_goal
+  Test: goal_registrations_match_the_frozen_catalog
   假设 合约要求的行为已实现
   当 读取工具 update_goal 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: update_goal 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_update_goal
+  Test: goal_registrations_match_the_frozen_catalog
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: update_goal 说明 section 注册
-  Test: pending_req_fr_builtin_tools_update_goal_section
+  Test: goal_section_composes_over_the_extracted_template
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 update_goal 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: update_goal 参数 goal_id 形状
-  Test: pending_req_fr_builtin_tools_update_goal_goal_id
+  Test: goal_registrations_match_the_frozen_catalog
   假设 工具 update_goal 已注册
   当 校验 schema 时
   那么 参数行 [goal_id:string:req] 的名称与类型按目录行实现
 
 Scenario: update_goal 参数 goal_id 约束
-  Test: pending_req_fr_builtin_tools_update_goal_goal_id
+  Test: goal_registrations_match_the_frozen_catalog
   假设 工具 update_goal 已注册
   当 校验 schema 时
   那么 参数行 [goal_id:string:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: update_goal 参数 revision 形状
-  Test: pending_req_fr_builtin_tools_update_goal_revision
+  Test: goal_registrations_match_the_frozen_catalog
   假设 工具 update_goal 已注册
   当 校验 schema 时
   那么 参数行 [revision:number:req（精确正 revision）] 的名称与类型按目录行实现
 
 Scenario: update_goal 参数 revision 约束
-  Test: pending_req_fr_builtin_tools_update_goal_revision
+  Test: goal_registrations_match_the_frozen_catalog
   假设 工具 update_goal 已注册
   当 校验 schema 时
   那么 参数行 [revision:number:req（精确正 revision）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: update_goal 参数 action 形状
-  Test: pending_req_fr_builtin_tools_update_goal_action
+  Test: goal_registrations_match_the_frozen_catalog
   假设 工具 update_goal 已注册
   当 校验 schema 时
   那么 参数行 [action:string:req:enum[edit|pause|resume|complete|blocked]] 的名称与类型按目录行实现
 
 Scenario: update_goal 参数 action 约束
-  Test: pending_req_fr_builtin_tools_update_goal_action
+  Test: goal_registrations_match_the_frozen_catalog
   假设 工具 update_goal 已注册
   当 校验 schema 时
   那么 参数行 [action:string:req:enum[edit|pause|resume|complete|blocked]] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: update_goal 参数 objective 形状
-  Test: pending_req_fr_builtin_tools_update_goal_objective
+  Test: goal_registrations_match_the_frozen_catalog
   假设 工具 update_goal 已注册
   当 校验 schema 时
   那么 参数行 [objective:string:opt（仅 edit）] 的名称与类型按目录行实现
 
 Scenario: update_goal 参数 objective 约束
-  Test: pending_req_fr_builtin_tools_update_goal_objective
+  Test: goal_registrations_match_the_frozen_catalog
   假设 工具 update_goal 已注册
   当 校验 schema 时
   那么 参数行 [objective:string:opt（仅 edit）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: update_goal 参数 max_goal_rounds 形状
-  Test: pending_req_fr_builtin_tools_update_goal_max_goal_rounds
+  Test: goal_registrations_match_the_frozen_catalog
   假设 工具 update_goal 已注册
   当 校验 schema 时
   那么 参数行 [max_goal_rounds:number:opt（仅 edit）] 的名称与类型按目录行实现
 
 Scenario: update_goal 参数 max_goal_rounds 约束
-  Test: pending_req_fr_builtin_tools_update_goal_max_goal_rounds
+  Test: goal_registrations_match_the_frozen_catalog
   假设 工具 update_goal 已注册
   当 校验 schema 时
   那么 参数行 [max_goal_rounds:number:opt（仅 edit）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: update_goal 参数 blocked_reason 形状
-  Test: pending_req_fr_builtin_tools_update_goal_blocked_reason
+  Test: goal_registrations_match_the_frozen_catalog
   假设 工具 update_goal 已注册
   当 校验 schema 时
   那么 参数行 [blocked_reason:string:opt（仅 blocked 必填）] 的名称与类型按目录行实现
 
 Scenario: update_goal 参数 blocked_reason 约束
-  Test: pending_req_fr_builtin_tools_update_goal_blocked_reason
+  Test: goal_registrations_match_the_frozen_catalog
   假设 工具 update_goal 已注册
   当 校验 schema 时
   那么 参数行 [blocked_reason:string:opt（仅 blocked 必填）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: update_goal 行为 1
-  Test: pending_req_fr_builtin_tools_update_goal_1
+  Test: update_flow_pins_the_action_families
   假设 工具 update_goal 执行时
   当 达到触发条件时
   那么 edit/pause/resume 需直接人类 root 权威；blocked 在最小轮前被拒（blockedAfterConsecutiveRounds 默认 3）

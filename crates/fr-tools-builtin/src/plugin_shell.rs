@@ -521,6 +521,7 @@ fn declare_change_event(link: &HostLink) -> Option<()> {
             "types": [
                 crate::working_directory::CHANGE_EVENT,
                 crate::todo::CHANGE_EVENT,
+                crate::goal::CHANGE_EVENT,
             ]
         }))
         .ok()?
@@ -543,15 +544,16 @@ fn read_default_mode(link: &HostLink) -> Option<Vec<&'static str>> {
     Some(escalation_modes_from(mode_word))
 }
 
-/// The seven prompt sections (dsh `ctx.systemPrompt.section`): the names,
+/// The eight prompt sections (dsh `ctx.systemPrompt.section`): the names,
 /// the dsh orders, and the script-extracted verbatim texts (the catalog
 /// generator; the PRD 22 rule — the texts live in the dsh tool sources,
 /// not the catalog). The write text composes with the source's
 /// conditional (the edit tail rides while edit registers, which the M1
 /// composition always does); the grep text composes the same way (the
-/// read tail). The `str_replace_editor` registers no section (the dsh
+/// read tail); the goal text composes over the extracted threshold
+/// template. The `str_replace_editor` registers no section (the dsh
 /// source injects no systemPrompt; the Q16b-4A ruling).
-fn prompt_sections() -> Vec<(String, f64, String)> {
+pub(crate) fn prompt_sections() -> Vec<(String, f64, String)> {
     vec![
         (
             "tool:bash".to_owned(),
@@ -588,6 +590,11 @@ fn prompt_sections() -> Vec<(String, f64, String)> {
             1500.0,
             crate::search_tools::grep_section_text(true),
         ),
+        (
+            "tool:goal".to_owned(),
+            2400.0,
+            crate::schema::goal_section_text(crate::goal_tools::BAKED_BLOCKED_AFTER),
+        ),
     ]
 }
 
@@ -611,8 +618,10 @@ fn register_sections(link: &HostLink) -> Option<()> {
 }
 
 /// Registers the `workingDirectory` projection (the relay's third-party
-/// read face; the fold endpoint is the 900 selector) and the `todos`
-/// projection (stateVersion 2; the fold endpoint is the 901 selector).
+/// read face; the fold endpoint is the 900 selector), the `todos`
+/// projection (stateVersion 2; the fold endpoint is the 901 selector),
+/// and the `goal` projection (stateVersion 6; the fold endpoint is the
+/// 902 selector).
 fn register_projection(link: &HostLink) -> Option<()> {
     for (key, version, fold_method) in [
         (
@@ -624,6 +633,11 @@ fn register_projection(link: &HostLink) -> Option<()> {
             crate::todo::PROJECTION_KEY,
             crate::todo::STATE_VERSION,
             crate::service::METHOD_TODOS_FOLD,
+        ),
+        (
+            crate::goal::PROJECTION_KEY,
+            crate::goal::STATE_VERSION,
+            crate::service::METHOD_GOAL_FOLD,
         ),
     ] {
         step(
@@ -894,8 +908,101 @@ fn register_tools(
             .ok()?
             .as_slice(),
     )?;
+    // The three goal controls (dsh `tool-goal`; the same partial-face
+    // shape: exclusive scheduling, no presentResult/presentationMeta,
+    // the shared oneOf output contract).
+    for registration in [
+        get_goal_registration(),
+        create_goal_registration(),
+        update_goal_registration(),
+    ] {
+        step(
+            link,
+            fr_wire::services::tools::SERVICE_NAME,
+            fr_wire::services::tools::METHOD_REGISTER,
+            serde_json::to_vec(&registration).ok()?.as_slice(),
+        )?;
+    }
     register_spill_listeners(link);
     Some(())
+}
+
+/// The `get_goal` registration row (dsh `ctx.tools.register`,
+/// call-for-call).
+#[must_use]
+pub fn get_goal_registration() -> Value {
+    json!({
+        "name": "get_goal",
+        "description": crate::catalog_gen::GET_GOAL_DESCRIPTION,
+        "parameters": crate::schema::get_goal_parameters(),
+        "output": {
+            "schema": crate::schema::goal_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_GET_GOAL_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_GET_GOAL_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_GET_GOAL_PRESENT_CALL,
+        },
+    })
+}
+
+/// The `create_goal` registration row (dsh `ctx.tools.register`,
+/// call-for-call).
+#[must_use]
+pub fn create_goal_registration() -> Value {
+    json!({
+        "name": "create_goal",
+        "description": crate::catalog_gen::CREATE_GOAL_DESCRIPTION,
+        "parameters": crate::schema::create_goal_parameters(),
+        "output": {
+            "schema": crate::schema::goal_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_CREATE_GOAL_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_CREATE_GOAL_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_CREATE_GOAL_PRESENT_CALL,
+        },
+    })
+}
+
+/// The `update_goal` registration row (dsh `ctx.tools.register`,
+/// call-for-call).
+#[must_use]
+pub fn update_goal_registration() -> Value {
+    json!({
+        "name": "update_goal",
+        "description": crate::catalog_gen::UPDATE_GOAL_DESCRIPTION,
+        "parameters": crate::schema::update_goal_parameters(),
+        "output": {
+            "schema": crate::schema::goal_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_UPDATE_GOAL_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_UPDATE_GOAL_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_UPDATE_GOAL_PRESENT_CALL,
+        },
+    })
 }
 
 /// The `todo_write` registration row (dsh `ctx.tools.register(defineTool)`,
@@ -999,6 +1106,12 @@ impl BuiltinState {
         // `allow-parallel-in-progress: true` bundle judgment).
         let lists = crate::todo::TodoLists::new(true, Box::new(WireSessionAppend { link }));
 
+        // The goal domain over the wire read/append/relay seams (the
+        // baked `default-max-goal-rounds: 256` and
+        // `blocked-after-consecutive-rounds: 3` defaults; the bundle
+        // adds no goal config rows — the dsh base judgment).
+        let goals = crate::goal_service::Goals::new(Box::new(WireGoalSeams { link }));
+
         let env_arc = Arc::new(env);
         let directories_arc = Arc::new(directories);
         let seams = WireSeams {
@@ -1006,8 +1119,14 @@ impl BuiltinState {
             directories: Arc::clone(&directories_arc),
             env: Arc::clone(&env_arc),
         };
-        let tools =
-            BuiltinTools::new(Box::new(seams), env_arc, directories_arc, Arc::new(lists)).ok()?;
+        let tools = BuiltinTools::new(
+            Box::new(seams),
+            env_arc,
+            directories_arc,
+            Arc::new(lists),
+            Arc::new(goals),
+        )
+        .ok()?;
 
         // The fs domain over the standing-policy wire seam (the
         // composed single-arm backend; the Q16b-3B seam).
@@ -1133,6 +1252,81 @@ impl crate::todo::SessionAppend for WireSessionAppend {
             &bytes,
         )?;
         Ok(())
+    }
+}
+
+/// The goal domain's wire seams: the session-persistence read/append
+/// faces and the session-projections relay (the dsh
+/// `snapshotEvents`/`session.append`/`stateOf` consumption).
+struct WireGoalSeams {
+    link: HostLink,
+}
+
+impl std::fmt::Debug for WireGoalSeams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WireGoalSeams").finish_non_exhaustive()
+    }
+}
+
+impl crate::goal_service::GoalSeams for WireGoalSeams {
+    fn read_log(&self, session: &str) -> Result<Option<crate::goal_service::ColdGoalLog>, String> {
+        let bytes = serde_json::to_vec(&json!({ "id": session }))
+            .map_err(|error| format!("session read encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::session_persistence::SERVICE_NAME,
+            fr_wire::services::session_persistence::METHOD_SESSION_READ,
+            &bytes,
+        )?;
+        let parsed: Value = serde_json::from_slice(&reply)
+            .map_err(|error| format!("session read decode failed: {error}"))?;
+        if parsed.get("header").is_none() {
+            // The read face answers nothing for an absent session.
+            return Ok(None);
+        }
+        Ok(Some(crate::goal_service::ColdGoalLog {
+            inherited_event_count: parsed
+                .get("inheritedEventCount")
+                .and_then(Value::as_u64)
+                .unwrap_or_default(),
+            events: parsed
+                .get("events")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+        }))
+    }
+
+    fn append_change(&self, session: &str, change: &Value) -> Result<i64, String> {
+        let bytes = serde_json::to_vec(&json!({
+            "id": session,
+            "type": crate::goal::CHANGE_EVENT,
+            "data": change,
+        }))
+        .map_err(|error| format!("session append encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::session_persistence::SERVICE_NAME,
+            fr_wire::services::session_persistence::METHOD_SESSION_APPEND,
+            &bytes,
+        )?;
+        let parsed: Value = serde_json::from_slice(&reply)
+            .map_err(|error| format!("session append decode failed: {error}"))?;
+        Ok(parsed
+            .pointer("/event/seq")
+            .and_then(Value::as_i64)
+            .unwrap_or_default())
+    }
+
+    fn projection_state(&self, session: &str, key: &str) -> Result<Option<Value>, String> {
+        let bytes = serde_json::to_vec(&json!({ "id": session, "key": key }))
+            .map_err(|error| format!("projection encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::session_projections::SERVICE_NAME,
+            fr_wire::services::session_projections::METHOD_STATE_OF,
+            &bytes,
+        )?;
+        let parsed: Value = serde_json::from_slice(&reply)
+            .map_err(|error| format!("projection decode failed: {error}"))?;
+        Ok(parsed.get("state").cloned())
     }
 }
 
@@ -1326,16 +1520,56 @@ mod tests {
     /// Q16b-5A rulings), and the whole-list snapshot tool registers no
     /// section either (the dsh tool source injects no systemPrompt; the
     /// Q16c batch-2 negative pin).
+    /// The eight tool sections ride the dsh orders and their verbatim
+    /// texts: the bash order opens the 1000-3000 tool band, the pwsh
+    /// twin sits ten above it, the fs trio rides the dsh
+    /// read/write/edit orders, the discovery pair rides the glob/grep
+    /// orders, and the goal guidance rides the `TOOL_GOAL` order with its
+    /// threshold-composed text (the builtin-tools contract's section
+    /// clause; the write and grep texts carry the composed conditional
+    /// tails). The count pins the absences too: the image tool, the
+    /// opt-in editor, and the whole-list snapshot tool register no
+    /// section (the dsh sources inject no systemPrompt; the Q16b-4A,
+    /// Q16b-5A, and Q16c batch-2 rulings).
     #[test]
-    fn prompt_sections_pin_the_seven_tools() {
+    fn prompt_sections_pin_the_eight_tools() {
         let sections = super::prompt_sections();
-        assert_eq!(sections.len(), 7);
+        assert_eq!(sections.len(), 8);
         assert!(
-            sections.iter().all(|(name, _, _)| !name.contains("todo")),
-            "the tool registers no prompt section (the dsh truth)"
+            sections
+                .iter()
+                .all(|(name, _, _)| !name.contains("todo") && !name.contains("image")),
+            "the section-free tools stay absent (the dsh truth)"
         );
-        let sections = super::prompt_sections();
-        assert_eq!(sections.len(), 7);
+        let goal = sections
+            .iter()
+            .find(|(name, _, _)| name == "tool:goal")
+            .expect("the goal section registers");
+        assert_eq!(goal.1, 2400.0);
+        assert!(
+            goal.2
+                .starts_with("create_goal may infer goal intent from a direct human request"),
+            "{}",
+            goal.2
+        );
+        assert!(
+            goal.2.contains("at least 3 consecutive goal rounds"),
+            "{}",
+            goal.2
+        );
+        assert!(
+            goal.2.ends_with("or useful remaining work is not blocked."),
+            "{}",
+            goal.2
+        );
+        // The threshold interpolation rides the extracted template: a
+        // synthetic threshold swaps exactly the number.
+        let tuned = crate::schema::goal_section_text(7);
+        assert!(
+            tuned.contains("at least 7 consecutive goal rounds")
+                && !tuned.contains("at least 3 consecutive goal rounds"),
+            "{tuned}"
+        );
         assert_eq!(sections[0].0, "tool:bash");
         assert_eq!(sections[0].1, 1000.0);
         assert!(

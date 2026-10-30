@@ -705,6 +705,137 @@ pub fn todo_write_output_schema() -> Value {
     })
 }
 
+/// The `tool:goal` section text for one deployment threshold (the dsh
+/// `guidance(blockedAfter)` composition over the extracted template).
+#[must_use]
+pub fn goal_section_text(blocked_after: i64) -> String {
+    format!(
+        "{}{blocked_after}{}",
+        crate::catalog_gen::GOAL_SECTION_TEXT_HEAD,
+        crate::catalog_gen::GOAL_SECTION_TEXT_TAIL
+    )
+}
+
+/// The `get_goal` parameter table (the catalog base; no parameters).
+///
+/// # Panics
+///
+/// Never in practice: the frozen table is the generator's canonical
+/// output, so the parse cannot drift.
+#[must_use]
+pub fn get_goal_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::GET_GOAL_PARAMETERS_JSON)
+        .expect("the frozen get_goal table parses")
+}
+
+/// The `create_goal` parameter table (the catalog-frozen base).
+#[must_use]
+pub fn create_goal_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "objective": {
+                "type": "string",
+                "description": crate::catalog_gen::CREATE_GOAL_OBJECTIVE_TEXT,
+            },
+            "max_goal_rounds": {
+                "type": "number",
+                "description": crate::catalog_gen::CREATE_GOAL_MAX_GOAL_ROUNDS_TEXT,
+            },
+        },
+        "required": ["objective"],
+    })
+}
+
+/// The `update_goal` parameter table (the catalog-frozen base).
+#[must_use]
+pub fn update_goal_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "goal_id": {
+                "type": "string",
+                "description": crate::catalog_gen::UPDATE_GOAL_GOAL_ID_TEXT,
+            },
+            "revision": {
+                "type": "number",
+                "description": crate::catalog_gen::UPDATE_GOAL_REVISION_TEXT,
+            },
+            "action": {
+                "type": "string",
+                "description": crate::catalog_gen::UPDATE_GOAL_ACTION_TEXT,
+                "enum": crate::goal_tools::UPDATE_ACTIONS,
+            },
+            "objective": {
+                "type": "string",
+                "description": crate::catalog_gen::UPDATE_GOAL_OBJECTIVE_TEXT,
+            },
+            "max_goal_rounds": {
+                "type": "number",
+                "description": crate::catalog_gen::UPDATE_GOAL_MAX_GOAL_ROUNDS_TEXT,
+            },
+            "blocked_reason": {
+                "type": "string",
+                "description": crate::catalog_gen::UPDATE_GOAL_BLOCKED_REASON_TEXT,
+            },
+        },
+        "required": ["goal_id", "revision", "action"],
+    })
+}
+
+/// The canonical goal-tool output contract (the dsh `GOAL_VALUE_SCHEMA`
+/// oneOf shape; the schemastery row form with the `required` flags).
+#[must_use]
+pub fn goal_output_schema() -> Value {
+    json!({
+        "oneOf": [
+            {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "goal": { "type": "null", "required": true },
+                },
+            },
+            {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "goal": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": true,
+                        "properties": {
+                            "id": { "type": "string", "required": true },
+                            "revision": { "type": "integer", "required": true },
+                            "objective": { "type": "string", "required": true },
+                            "phase": {
+                                "type": "string",
+                                "required": true,
+                                "enum": crate::goal::PHASES,
+                            },
+                            "roundsStarted": { "type": "integer", "required": true },
+                            "maxGoalRounds": { "type": "integer", "required": true },
+                            "blockedReason": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                    "code": { "type": "string", "required": true },
+                                    "message": { "type": "string", "required": true },
+                                },
+                            },
+                        },
+                    },
+                    "activation": {
+                        "type": "string",
+                        "required": true,
+                        "enum": ["armed", "disarmed"],
+                    },
+                },
+            },
+        ],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

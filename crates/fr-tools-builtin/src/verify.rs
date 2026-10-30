@@ -363,3 +363,162 @@ fn read_image_registration_matches_the_frozen_catalog() {
         serde_json::json!(["image/png", "image/jpeg", "image/webp", "image/gif"])
     );
 }
+
+/// The three goal controls equal the frozen catalog extraction and
+/// carry the exclusive scheduling face (the dsh sources register no
+/// `isConcurrencySafe` and no presentResult/presentationMeta endpoints;
+/// Q97-A's full-schema pins for the goal family, covering every shape
+/// and constraint scenario the catalog rows express).
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the family pin mirrors the catalog rows one assertion per face; splitting it would hide the correspondence"
+)]
+fn goal_registrations_match_the_frozen_catalog() {
+    // The descriptions ride the catalog-verbatim constants.
+    assert_eq!(
+        crate::catalog_gen::GET_GOAL_DESCRIPTION,
+        "Read the current session goal, including the id and revision that update_goal requires."
+    );
+    assert_eq!(
+        crate::catalog_gen::UPDATE_GOAL_DESCRIPTION,
+        "Update the current goal."
+    );
+    assert!(
+        crate::catalog_gen::CREATE_GOAL_DESCRIPTION
+            .starts_with("Create a persisted goal that keeps this session working"),
+        "{}",
+        crate::catalog_gen::CREATE_GOAL_DESCRIPTION
+    );
+    // The parameter tables equal the frozen catalog JSON.
+    for (composed, frozen) in [
+        (
+            crate::schema::get_goal_parameters(),
+            crate::catalog_gen::GET_GOAL_PARAMETERS_JSON,
+        ),
+        (
+            crate::schema::create_goal_parameters(),
+            crate::catalog_gen::CREATE_GOAL_PARAMETERS_JSON,
+        ),
+        (
+            crate::schema::update_goal_parameters(),
+            crate::catalog_gen::UPDATE_GOAL_PARAMETERS_JSON,
+        ),
+    ] {
+        let frozen: Value = serde_json::from_str(frozen).expect("the frozen table parses");
+        assert_eq!(composed, frozen);
+    }
+    // The create table pins the required row and the optional cap.
+    let create = crate::schema::create_goal_parameters();
+    assert_eq!(create["required"], json!(["objective"]));
+    assert_eq!(
+        create["properties"]["max_goal_rounds"]["type"],
+        json!("number")
+    );
+    // The update table pins the enum order and the required trio.
+    let update = crate::schema::update_goal_parameters();
+    assert_eq!(
+        update["properties"]["action"]["enum"],
+        json!(crate::goal_tools::UPDATE_ACTIONS)
+    );
+    assert_eq!(update["required"], json!(["goal_id", "revision", "action"]));
+    // The shared output contract: the oneOf null/plain pair, the goal
+    // key set, and the activation enum.
+    let output = crate::schema::goal_output_schema();
+    assert_eq!(output["oneOf"].as_array().expect("oneOf").len(), 2);
+    assert_eq!(
+        output["oneOf"][0]["properties"]["goal"]["type"],
+        json!("null")
+    );
+    assert_eq!(
+        output["oneOf"][1]["properties"]["goal"]["properties"]
+            .as_object()
+            .expect("properties")
+            .keys()
+            .collect::<Vec<_>>(),
+        vec![
+            "id",
+            "revision",
+            "objective",
+            "phase",
+            "roundsStarted",
+            "maxGoalRounds",
+            "blockedReason"
+        ]
+    );
+    assert_eq!(
+        output["oneOf"][1]["properties"]["goal"]["properties"]["phase"]["enum"],
+        json!(crate::goal::PHASES)
+    );
+    assert_eq!(
+        output["oneOf"][1]["properties"]["activation"]["enum"],
+        json!(["armed", "disarmed"])
+    );
+    // The scheduling faces: the three registrations stay exclusive
+    // with the partial endpoint set.
+    for registration in [
+        crate::plugin_shell::get_goal_registration(),
+        crate::plugin_shell::create_goal_registration(),
+        crate::plugin_shell::update_goal_registration(),
+    ] {
+        assert!(
+            registration.get("isConcurrencySafe").is_none(),
+            "the goal tools stay exclusive"
+        );
+        assert!(registration.get("presentResult").is_none());
+        assert!(
+            registration
+                .get("output")
+                .expect("output")
+                .get("presentationMeta")
+                .is_none()
+        );
+        assert_eq!(
+            registration["execute"]["service"],
+            crate::service::SERVICE_NAME
+        );
+    }
+    // The presentation families: get rides `read`, the other two ride
+    // `other`.
+    assert_eq!(
+        crate::goal_tools::present_call_get(&Value::Null)["kind"],
+        json!("read")
+    );
+    assert_eq!(
+        crate::goal_tools::present_call_create(&json!({ "objective": "o" }))["kind"],
+        json!("other")
+    );
+    assert_eq!(
+        crate::goal_tools::present_call_update(&json!({ "action": "edit", "goal_id": "g" }))["kind"],
+        json!("other")
+    );
+}
+
+/// The `tool:goal` section composes over the extracted threshold
+/// template: the default deployment reads threshold 3, the composed
+/// text equals the dsh `guidance(3)` byte-for-byte shape, and the
+/// registration rides the `TOOL_GOAL` order.
+#[test]
+fn goal_section_composes_over_the_extracted_template() {
+    let text = crate::schema::goal_section_text(crate::goal_tools::BAKED_BLOCKED_AFTER);
+    assert_eq!(
+        text,
+        format!(
+            "{}3{}",
+            crate::catalog_gen::GOAL_SECTION_TEXT_HEAD,
+            crate::catalog_gen::GOAL_SECTION_TEXT_TAIL
+        )
+    );
+    assert!(text.starts_with("create_goal may infer goal intent"));
+    assert!(text.ends_with("or useful remaining work is not blocked."));
+    assert!(text.contains("Mark blocked only after the same blocking condition persists for at least 3 consecutive goal rounds"));
+    // The sections table registers exactly one goal section at the
+    // TOOL_GOAL order.
+    let sections = crate::plugin_shell::prompt_sections();
+    let goal_sections: Vec<_> = sections
+        .iter()
+        .filter(|(name, _, _)| name == "tool:goal")
+        .collect();
+    assert_eq!(goal_sections.len(), 1);
+    assert_eq!(goal_sections[0].1, 2400.0);
+}

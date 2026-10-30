@@ -507,3 +507,112 @@ pub const TODO_WRITE_DESCRIPTION_TAIL: &str = r"Mark each todo `completed` as so
 
 /// The `todo_write` `todos` parameter description (catalog-verbatim).
 pub const TODO_WRITE_TODOS_TEXT: &str = r"The COMPLETE task list, replacing any previous list.";
+
+/// The `get_goal` tool description (catalog-verbatim).
+pub const GET_GOAL_DESCRIPTION: &str =
+    r"Read the current session goal, including the id and revision that update_goal requires.";
+
+/// The `get_goal` parameter table (the json block, verbatim).
+pub const GET_GOAL_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {}
+}"#;
+
+/// The `create_goal` tool description (catalog-verbatim).
+pub const CREATE_GOAL_DESCRIPTION: &str = r#"Create a persisted goal that keeps this session working across automatic continuation rounds. Use it when the direct human request is a long-running objective, even if the user did not say "goal"; not for single-turn work."#;
+
+/// The `create_goal` parameter table (the json block, verbatim).
+pub const CREATE_GOAL_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "objective": {
+      "type": "string",
+      "description": "The concrete completion objective inferred from the direct human request."
+    },
+    "max_goal_rounds": {
+      "type": "number",
+      "description": "Optional positive safe-integer limit on automatic continuation rounds."
+    }
+  },
+  "required": [
+    "objective"
+  ]
+}"#;
+
+/// The `tool:goal` prompt-section text before the blocked threshold (the dsh `guidance()` template's pre-interpolation segments, source-verbatim; the consumer composes HEAD + threshold + TAIL).
+pub const GOAL_SECTION_TEXT_HEAD: &str = r"create_goal may infer goal intent from a direct human request in any language. After session resume or fork, an active goal is disarmed: when a human asks to continue or resume in any wording or language, use update_goal action resume to rearm it. Mark complete only when the objective is actually achieved. Mark blocked only after the same blocking condition persists for at least ";
+
+/// The `tool:goal` prompt-section text after the blocked threshold (the dsh `guidance()` template's post-interpolation segments, source-verbatim).
+pub const GOAL_SECTION_TEXT_TAIL: &str = r" consecutive goal rounds, and report that concrete condition in blocked_reason; difficulty, uncertainty, or useful remaining work is not blocked.";
+
+/// The `create_goal` `objective` parameter description (catalog-verbatim).
+pub const CREATE_GOAL_OBJECTIVE_TEXT: &str =
+    r"The concrete completion objective inferred from the direct human request.";
+
+/// The `create_goal` `max_goal_rounds` parameter description (catalog-verbatim).
+pub const CREATE_GOAL_MAX_GOAL_ROUNDS_TEXT: &str =
+    r"Optional positive safe-integer limit on automatic continuation rounds.";
+
+/// The `update_goal` tool description (catalog-verbatim).
+pub const UPDATE_GOAL_DESCRIPTION: &str = r"Update the current goal.";
+
+/// The `update_goal` parameter table (the json block, verbatim).
+pub const UPDATE_GOAL_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "goal_id": {
+      "type": "string",
+      "description": "Exact id returned by get_goal."
+    },
+    "revision": {
+      "type": "number",
+      "description": "Exact positive revision returned by get_goal."
+    },
+    "action": {
+      "type": "string",
+      "description": "edit, pause, and resume require a direct top-level human request. complete and blocked are also allowed during an automatic continuation of this goal; blocked is rejected before the configured minimum round count.",
+      "enum": [
+        "edit",
+        "pause",
+        "resume",
+        "complete",
+        "blocked"
+      ]
+    },
+    "objective": {
+      "type": "string",
+      "description": "Replacement objective; valid only with action edit."
+    },
+    "max_goal_rounds": {
+      "type": "number",
+      "description": "Replacement cap; valid only with action edit."
+    },
+    "blocked_reason": {
+      "type": "string",
+      "description": "Required only with action blocked: the concrete condition that persisted across rounds and blocks progress."
+    }
+  },
+  "required": [
+    "goal_id",
+    "revision",
+    "action"
+  ]
+}"#;
+
+/// The `update_goal` `goal_id` parameter description (catalog-verbatim).
+pub const UPDATE_GOAL_GOAL_ID_TEXT: &str = r"Exact id returned by get_goal.";
+
+/// The `update_goal` `revision` parameter description (catalog-verbatim).
+pub const UPDATE_GOAL_REVISION_TEXT: &str = r"Exact positive revision returned by get_goal.";
+
+/// The `update_goal` `action` parameter description (catalog-verbatim).
+pub const UPDATE_GOAL_ACTION_TEXT: &str = r"edit, pause, and resume require a direct top-level human request. complete and blocked are also allowed during an automatic continuation of this goal; blocked is rejected before the configured minimum round count.";
+
+/// The `update_goal` `objective` parameter description (catalog-verbatim).
+pub const UPDATE_GOAL_OBJECTIVE_TEXT: &str = r"Replacement objective; valid only with action edit.";
+
+/// The `update_goal` `max_goal_rounds` parameter description (catalog-verbatim).
+pub const UPDATE_GOAL_MAX_GOAL_ROUNDS_TEXT: &str = r"Replacement cap; valid only with action edit.";
+
+/// The `update_goal` `blocked_reason` parameter description (catalog-verbatim).
+pub const UPDATE_GOAL_BLOCKED_REASON_TEXT: &str = r"Required only with action blocked: the concrete condition that persisted across rounds and blocks progress.";

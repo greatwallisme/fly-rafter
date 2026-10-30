@@ -148,6 +148,31 @@ TOOLS = {
         ],
         "none",
     ),
+    "get_goal": (
+        "GET_GOAL",
+        [],
+        "none",
+    ),
+    "create_goal": (
+        "CREATE_GOAL",
+        [
+            ("objective", "OBJECTIVE_TEXT"),
+            ("max_goal_rounds", "MAX_GOAL_ROUNDS_TEXT"),
+        ],
+        "none",
+    ),
+    "update_goal": (
+        "UPDATE_GOAL",
+        [
+            ("goal_id", "GOAL_ID_TEXT"),
+            ("revision", "REVISION_TEXT"),
+            ("action", "ACTION_TEXT"),
+            ("objective", "OBJECTIVE_TEXT"),
+            ("max_goal_rounds", "MAX_GOAL_ROUNDS_TEXT"),
+            ("blocked_reason", "BLOCKED_REASON_TEXT"),
+        ],
+        "none",
+    ),
 }
 
 HEADER = """\
@@ -297,6 +322,42 @@ def extract_todo_description_segments(source):
     return segments
 
 
+def extract_goal_section_segments(source):
+    """Extracts the `tool:goal` section text around its one interpolation
+    (the dsh `guidance(threshold)` template literal): the single-quoted
+    literals before `${blockedAfter}` join with the template's own head
+    fragment into HEAD, and the template's tail fragment with the
+    following literals into TAIL; the consumer composes
+    HEAD + threshold + TAIL."""
+    anchor = source.find("function guidance")
+    if anchor < 0:
+        raise ExtractError("tool-goal source carries no guidance function")
+    end = source.find("\n}", anchor)
+    if end < 0:
+        raise ExtractError("the guidance function never closes")
+    body = source[anchor:end]
+    marker = body.find("return")
+    if marker < 0:
+        raise ExtractError("the guidance function carries no return")
+    expression = body[marker + len("return"):]
+
+    placeholder = "${blockedAfter}"
+    if placeholder not in expression:
+        raise ExtractError("the guidance template carries no ${blockedAfter}")
+    before, after = expression.split(placeholder, 1)
+    head_literals = "".join(ts_unescape(s) for s in re.findall(r"'((?:[^'\\]|\\.)*)'", before))
+    template_head = re.search(r"`([^`]*)$", before)
+    if template_head is None:
+        raise ExtractError("the guidance template head never opens")
+    head = head_literals + template_head.group(1)
+    template_tail = re.search(r"^([^`]*)`", after)
+    if template_tail is None:
+        raise ExtractError("the guidance template tail never closes")
+    tail_literals = "".join(ts_unescape(s) for s in re.findall(r"'((?:[^'\\]|\\.)*)'", after))
+    tail = template_tail.group(1) + tail_literals
+    return head, tail
+
+
 def extract_overcap_variants(source):
     """Extracts the glob description's over-cap behavior phrases (the dsh
     `overCapDescription` ternary): the sampled phrase and the
@@ -425,6 +486,25 @@ def emit():
                 blocks.append(
                     f"pub const TODO_WRITE_DESCRIPTION_{name}: &str = {raw_literal(brand_map(segments[name]))};\n"
                 )
+        if tool == "create_goal":
+            with open(os.path.join(source_root, "packages", "goal", "tool-goal", "src", "index.ts"), encoding="utf-8") as handle:
+                source = handle.read()
+            head, tail = extract_goal_section_segments(source)
+            blocks.append(
+                "\n/// The `tool:goal` prompt-section text before the blocked threshold (the dsh"
+                " `guidance()` template's pre-interpolation segments, source-verbatim; the consumer"
+                " composes HEAD + threshold + TAIL).\n"
+            )
+            blocks.append(
+                f"pub const GOAL_SECTION_TEXT_HEAD: &str = {raw_literal(brand_map(head))};\n"
+            )
+            blocks.append(
+                "\n/// The `tool:goal` prompt-section text after the blocked threshold (the dsh"
+                " `guidance()` template's post-interpolation segments, source-verbatim).\n"
+            )
+            blocks.append(
+                f"pub const GOAL_SECTION_TEXT_TAIL: &str = {raw_literal(brand_map(tail))};\n"
+            )
         for key, suffix in keys:
             text = brand_map(parameter_text(parsed, key))
             blocks.append(

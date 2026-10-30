@@ -128,6 +128,27 @@ pub const METHOD_TODO_PRESENT_CALL: u32 = 92;
 /// Method selector: the `todos` projection fold (the non-tool band; the
 /// `workingDirectory` fold rides 900).
 pub const METHOD_TODOS_FOLD: u32 = 901;
+/// Method selector: the `get_goal` tool body.
+pub const METHOD_GET_GOAL_EXECUTE: u32 = 93;
+/// Method selector: the `get_goal` render projection.
+pub const METHOD_GET_GOAL_RENDER: u32 = 94;
+/// Method selector: the `get_goal` pending-call presentation.
+pub const METHOD_GET_GOAL_PRESENT_CALL: u32 = 95;
+/// Method selector: the `create_goal` tool body.
+pub const METHOD_CREATE_GOAL_EXECUTE: u32 = 96;
+/// Method selector: the `create_goal` render projection.
+pub const METHOD_CREATE_GOAL_RENDER: u32 = 97;
+/// Method selector: the `create_goal` pending-call presentation.
+pub const METHOD_CREATE_GOAL_PRESENT_CALL: u32 = 98;
+/// Method selector: the `update_goal` tool body.
+pub const METHOD_UPDATE_GOAL_EXECUTE: u32 = 99;
+/// Method selector: the `update_goal` render projection.
+pub const METHOD_UPDATE_GOAL_RENDER: u32 = 100;
+/// Method selector: the `update_goal` pending-call presentation.
+pub const METHOD_UPDATE_GOAL_PRESENT_CALL: u32 = 101;
+/// Method selector: the `goal` projection fold (the non-tool band;
+/// the `todos` fold rides 901).
+pub const METHOD_GOAL_FOLD: u32 = 902;
 
 /// The escalate-to modes this composition advertises (the dsh
 /// `ESCALATION_TARGETS` words in table order).
@@ -156,6 +177,7 @@ pub struct BuiltinTools {
     env: std::sync::Arc<ShellEnvRegistry>,
     directories: std::sync::Arc<working_directory::WorkingDirectories>,
     lists: std::sync::Arc<crate::todo::TodoLists>,
+    goals: std::sync::Arc<crate::goal_service::Goals>,
 }
 
 impl std::fmt::Debug for BuiltinTools {
@@ -176,12 +198,14 @@ impl BuiltinTools {
         env: std::sync::Arc<ShellEnvRegistry>,
         directories: std::sync::Arc<working_directory::WorkingDirectories>,
         lists: std::sync::Arc<crate::todo::TodoLists>,
+        goals: std::sync::Arc<crate::goal_service::Goals>,
     ) -> Result<Self, String> {
         Ok(Self {
             seams,
             env,
             directories,
             lists,
+            goals,
         })
     }
 
@@ -189,6 +213,12 @@ impl BuiltinTools {
     #[must_use]
     pub const fn lists(&self) -> &std::sync::Arc<crate::todo::TodoLists> {
         &self.lists
+    }
+
+    /// The hosted goal domain (the tool bodies' owning-session state).
+    #[must_use]
+    pub const fn goals(&self) -> &std::sync::Arc<crate::goal_service::Goals> {
+        &self.goals
     }
 
     /// The hosted environment registry (the plugin contributes facts
@@ -218,6 +248,10 @@ impl BuiltinTools {
     ///
     /// The payload decode refusal, an unknown method, or the tool
     /// body's own failure (the wire body-error shape).
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the match table mirrors the registration bands one arm per endpoint; splitting it would hide the correspondence"
+    )]
     pub fn serve(&self, method: u32, payload: &[u8]) -> Result<Vec<u8>, String> {
         let request: Value = if payload.is_empty() {
             json!({})
@@ -292,10 +326,102 @@ impl BuiltinTools {
                 let args = request.get("args").cloned().unwrap_or(Value::Null);
                 json!(crate::todo::present_call(&args))
             }
+            METHOD_GET_GOAL_EXECUTE => {
+                let call = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                return self.serve_goal_body(
+                    |goals, _arguments, agent| crate::goal_tools::execute_get(goals, agent),
+                    call,
+                );
+            }
+            METHOD_CREATE_GOAL_EXECUTE => {
+                let call = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                return self.serve_goal_body(
+                    |goals, arguments, agent| {
+                        crate::goal_tools::execute_create(goals, &arguments, agent)
+                    },
+                    call,
+                );
+            }
+            METHOD_UPDATE_GOAL_EXECUTE => {
+                let call = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                return self.serve_goal_body(
+                    |goals, arguments, agent| {
+                        crate::goal_tools::execute_update(
+                            goals,
+                            &arguments,
+                            agent,
+                            crate::goal_tools::BAKED_BLOCKED_AFTER,
+                        )
+                    },
+                    call,
+                );
+            }
+            METHOD_GET_GOAL_RENDER | METHOD_CREATE_GOAL_RENDER | METHOD_UPDATE_GOAL_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::goal_tools::render(&args, &value))
+            }
+            METHOD_GET_GOAL_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::goal_tools::present_call_get(&args))
+            }
+            METHOD_CREATE_GOAL_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::goal_tools::present_call_create(&args))
+            }
+            METHOD_UPDATE_GOAL_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::goal_tools::present_call_update(&args))
+            }
+            METHOD_GOAL_FOLD => {
+                let events = request
+                    .get("events")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                let state = crate::goal::fold_log(&events);
+                json!({ "state": state.to_value() })
+            }
             other => return Err(format!("unknown {PLUGIN_NAME} method {other}")),
         };
         serde_json::to_vec(&reply)
             .map_err(|error| format!("builtin-tools reply encode failed: {error}"))
+    }
+
+    /// Serves one goal tool body: decodes the execution frame, runs
+    /// the goal body, and maps the outcome onto the wire body protocol
+    /// (the coded error family keeps its code).
+    fn serve_goal_body(
+        &self,
+        body: impl Fn(
+            &crate::goal_service::Goals,
+            Value,
+            Option<&str>,
+        ) -> Result<Value, crate::tools::BodyError>,
+        call: &Value,
+    ) -> Result<Vec<u8>, String> {
+        let agent = call.get("agent").and_then(Value::as_str);
+        let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
+        match body(&self.goals, arguments, agent) {
+            Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                .map_err(|error| format!("body reply encode failed: {error}")),
+            Err(error) => {
+                let body = match error.code {
+                    Some(code) => {
+                        json!({ "error": { "code": code, "message": error.message, "name": error.name } })
+                    }
+                    None => json!({ "error": { "message": error.message, "name": error.name } }),
+                };
+                serde_json::to_vec(&body)
+                    .map_err(|error| format!("body error encode failed: {error}"))
+            }
+        }
     }
 
     /// Serves one tool body: decodes the execution frame, runs the dsh
@@ -400,7 +526,7 @@ pub fn fold_log(request: &Value) -> Value {
 /// two shell tools' bands, the read/write/edit/glob/grep bands, the
 /// spill listeners, the editor band, the todo band, and the two
 /// projection folds; excluded surfaces never appear here).
-const fn describe_methods() -> [&'static str; 49] {
+const fn describe_methods() -> [&'static str; 59] {
     [
         "describe",
         "bash.execute",
@@ -449,8 +575,18 @@ const fn describe_methods() -> [&'static str; 49] {
         "todo.execute",
         "todo.render",
         "todo.presentCall",
+        "get_goal.execute",
+        "get_goal.render",
+        "get_goal.presentCall",
+        "create_goal.execute",
+        "create_goal.render",
+        "create_goal.presentCall",
+        "update_goal.execute",
+        "update_goal.render",
+        "update_goal.presentCall",
         "todos.fold",
         "workingDirectory.fold",
+        "goal.fold",
     ]
 }
 
