@@ -832,7 +832,7 @@ fn register_tools(
             serde_json::to_vec(&registration).ok()?.as_slice(),
         )?;
     }
-    if crate::sre_tools::BAKED_STR_REPLACE_EDITOR {
+    if crate::sre_tools::str_replace_editor_registered() {
         let registration = json!({
             "name": "str_replace_editor",
             "description": crate::schema::str_replace_editor_description(),
@@ -1228,9 +1228,13 @@ mod tests {
     /// read/write/edit orders, and the discovery pair rides the
     /// glob/grep orders (the builtin-tools contract's section clause;
     /// the write and grep texts carry the composed conditional tails).
+    /// The count pins the absences too: the image tool and the opt-in
+    /// editor inject no systemPrompt (the dsh sources; the Q16b-4A and
+    /// Q16b-5A rulings).
     #[test]
     fn prompt_sections_pin_the_seven_tools() {
         let sections = super::prompt_sections();
+        assert_eq!(sections.len(), 7);
         assert_eq!(sections[0].0, "tool:bash");
         assert_eq!(sections[0].1, 1000.0);
         assert!(

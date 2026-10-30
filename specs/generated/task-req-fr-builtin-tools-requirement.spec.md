@@ -50,19 +50,19 @@ Scenario: persistent shell 需 opt-in
   那么 无 persistent bash 与 persistent pwsh
 
 Scenario: 工具 schema 与 catalog diff 为空
-  Test: registration_matches_the_frozen_catalog
+  Test: generated_catalog_matches_the_dsh_sources
   假设 以生成脚本从真实装配产出 tool-catalog
   当 与冻结的参数表比对时
   那么 diff 为空
 
 Scenario: ripgrep 缺失明确报错
-  Test: pending_req_fr_builtin_tools_ripgrep
+  Test: missing_rg_fails_with_the_launch_text
   假设 PATH 与 FR_RIPGREP 均无 rg
   当 调用 grep 工具时
   那么 返回明确错误而非静默降级
 
 Scenario: FR_RIPGREP 指认生效
-  Test: pending_req_fr_builtin_tools_fr_ripgrep
+  Test: fr_ripgrep_pointer_wins_over_the_bare_probe
   假设 FR_RIPGREP 指向一个 rg 可执行文件
   当 调用 grep 工具时
   那么 使用该指认的 rg 执行
@@ -85,7 +85,7 @@ Scenario: web_search provider 可切换
   那么 请求经 exa 适配位发出
 
 Scenario: 替代编辑器默认不装配
-  Test: pending_req_fr_builtin_tools_requirement
+  Test: baked_bundle_leaves_the_editor_unregistered
   假设 未启用 str_replace_editor 配置
   当 列举默认装配工具时
   那么 无 str_replace_editor
@@ -115,7 +115,7 @@ Scenario: bash 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: bash 说明 section 注册
-  Test: prompt_sections_pin_the_two_tools
+  Test: prompt_sections_pin_the_seven_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 bash 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -199,7 +199,7 @@ Scenario: pwsh 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: pwsh 说明 section 注册
-  Test: prompt_sections_pin_the_two_tools
+  Test: prompt_sections_pin_the_seven_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 pwsh 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -265,433 +265,433 @@ Scenario: persistent-pwsh 说明 section 注册
   那么 工具 persistent pwsh 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: read 调度与呈现
-  Test: pending_req_fr_builtin_tools_read
+  Test: read_round_trip_pins_the_shapes
   假设 合约要求的行为已实现
   当 读取工具 read 的声明时
   那么 executionMode 为 parallel（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 read
 
 Scenario: read 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_read
+  Test: read_refusals_pin_the_texts
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: read 说明 section 注册
-  Test: pending_req_fr_builtin_tools_read_section
+  Test: prompt_sections_pin_the_seven_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 read 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: read 参数 file_path 形状
-  Test: pending_req_fr_builtin_tools_read_file_path
+  Test: read_registration_matches_the_frozen_catalog
   假设 工具 read 已注册
   当 校验 schema 时
   那么 参数行 [file_path:string:req] 的名称与类型按目录行实现
 
 Scenario: read 参数 file_path 约束
-  Test: pending_req_fr_builtin_tools_read_file_path
+  Test: read_registration_matches_the_frozen_catalog
   假设 工具 read 已注册
   当 校验 schema 时
   那么 参数行 [file_path:string:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: read 参数 offset 形状
-  Test: pending_req_fr_builtin_tools_read_offset
+  Test: read_registration_matches_the_frozen_catalog
   假设 工具 read 已注册
   当 校验 schema 时
   那么 参数行 [offset:number:opt:1（1-based 起始行）] 的名称与类型按目录行实现
 
 Scenario: read 参数 offset 约束
-  Test: pending_req_fr_builtin_tools_read_offset
+  Test: read_registration_matches_the_frozen_catalog
   假设 工具 read 已注册
   当 校验 schema 时
   那么 参数行 [offset:number:opt:1（1-based 起始行）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: read 参数 limit 形状
-  Test: pending_req_fr_builtin_tools_read_limit
+  Test: read_registration_matches_the_frozen_catalog
   假设 工具 read 已注册
   当 校验 schema 时
   那么 参数行 [limit:number:opt:2000（最大行数）] 的名称与类型按目录行实现
 
 Scenario: read 参数 limit 约束
-  Test: pending_req_fr_builtin_tools_read_limit
+  Test: read_registration_matches_the_frozen_catalog
   假设 工具 read 已注册
   当 校验 schema 时
   那么 参数行 [limit:number:opt:2000（最大行数）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: read 行为 1
-  Test: pending_req_fr_builtin_tools_read_1
+  Test: read_round_trip_pins_the_shapes
   假设 工具 read 执行时
   当 达到触发条件时
   那么 返回行号内容；config readLimit（默认兼上限）/readMaxLineLength/readMaxBytes/readStreamMinSize（超限转流）；presence/absence 发 fs/observed
 
 Scenario: read_image 调度与呈现
-  Test: pending_req_fr_builtin_tools_read_image
+  Test: presentation_faces_pin_the_read_family_card_and_path_meta
   假设 合约要求的行为已实现
   当 读取工具 read_image 的声明时
   那么 executionMode 为 parallel（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: read_image 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_read_image
+  Test: blank_and_unsupported_paths_refuse_before_any_io
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
-Scenario: read_image 说明 section 注册
-  Test: pending_req_fr_builtin_tools_read_image_section
+Scenario: read_image 说明 section 注册缺席
+  Test: prompt_sections_pin_the_seven_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 工具 read_image 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
+  那么 工具 read_image 无说明 section（dsh 真源 read-image.ts 不注入 systemPrompt）；注册表恰七条 tool:* section 且 order 位于 1000-3000
 
 Scenario: read_image 参数 file_path 形状
-  Test: pending_req_fr_builtin_tools_read_image_file_path
+  Test: read_image_registration_matches_the_frozen_catalog
   假设 工具 read_image 已注册
   当 校验 schema 时
   那么 参数行 [file_path:string:req] 的名称与类型按目录行实现
 
 Scenario: read_image 参数 file_path 约束
-  Test: pending_req_fr_builtin_tools_read_image_file_path
+  Test: read_image_registration_matches_the_frozen_catalog
   假设 工具 read_image 已注册
   当 校验 schema 时
   那么 参数行 [file_path:string:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: read_image 行为 1
-  Test: pending_req_fr_builtin_tools_read_image_1
+  Test: happy_path_saves_observes_and_returns_the_reference
   假设 工具 read_image 执行时
   当 达到触发条件时
   那么 PNG/JPEG/WebP/GIF 返回图像本体，大图自动缩；无 ctx.attachments 不注册；仅精确路由模型声明 image input 才执行否则拒绝
 
 Scenario: write 调度与呈现
-  Test: pending_req_fr_builtin_tools_write
+  Test: edit_family_pins_the_arms
   假设 合约要求的行为已实现
   当 读取工具 write 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 diff
 
 Scenario: write 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_write
+  Test: write_create_then_guarded_update_round_trips
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: write 说明 section 注册
-  Test: pending_req_fr_builtin_tools_write_section
+  Test: prompt_sections_pin_the_seven_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 write 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: write 参数 file_path 形状
-  Test: pending_req_fr_builtin_tools_write_file_path
+  Test: write_registration_matches_the_frozen_catalog
   假设 工具 write 已注册
   当 校验 schema 时
   那么 参数行 [file_path:string:req（先于 content）] 的名称与类型按目录行实现
 
 Scenario: write 参数 file_path 约束
-  Test: pending_req_fr_builtin_tools_write_file_path
+  Test: write_registration_matches_the_frozen_catalog
   假设 工具 write 已注册
   当 校验 schema 时
   那么 参数行 [file_path:string:req（先于 content）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: write 参数 content 形状
-  Test: pending_req_fr_builtin_tools_write_content
+  Test: write_registration_matches_the_frozen_catalog
   假设 工具 write 已注册
   当 校验 schema 时
   那么 参数行 [content:string:req（完整 UTF-8）] 的名称与类型按目录行实现
 
 Scenario: write 参数 content 约束
-  Test: pending_req_fr_builtin_tools_write_content
+  Test: write_registration_matches_the_frozen_catalog
   假设 工具 write 已注册
   当 校验 schema 时
   那么 参数行 [content:string:req（完整 UTF-8）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: write 行为 1
-  Test: pending_req_fr_builtin_tools_write_1
+  Test: write_create_then_guarded_update_round_trips
   假设 工具 write 执行时
   当 达到触发条件时
   那么 创建或整文件替换；发 fs/write-intent；read-before-write 由 fs-observation-policy 施加
 
 Scenario: edit 调度与呈现
-  Test: pending_req_fr_builtin_tools_edit
+  Test: edit_family_pins_the_arms
   假设 合约要求的行为已实现
   当 读取工具 edit 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 diff
 
 Scenario: edit 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_edit
+  Test: edit_family_pins_the_arms
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: edit 说明 section 注册
-  Test: pending_req_fr_builtin_tools_edit_section
+  Test: prompt_sections_pin_the_seven_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 edit 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: edit 参数 file_path 形状
-  Test: pending_req_fr_builtin_tools_edit_file_path
+  Test: edit_registration_matches_the_frozen_catalog
   假设 工具 edit 已注册
   当 校验 schema 时
   那么 参数行 [file_path:string:req（先于 old/new）] 的名称与类型按目录行实现
 
 Scenario: edit 参数 file_path 约束
-  Test: pending_req_fr_builtin_tools_edit_file_path
+  Test: edit_registration_matches_the_frozen_catalog
   假设 工具 edit 已注册
   当 校验 schema 时
   那么 参数行 [file_path:string:req（先于 old/new）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: edit 参数 old_string 形状
-  Test: pending_req_fr_builtin_tools_edit_old_string
+  Test: edit_registration_matches_the_frozen_catalog
   假设 工具 edit 已注册
   当 校验 schema 时
   那么 参数行 [old_string:string:req] 的名称与类型按目录行实现
 
 Scenario: edit 参数 old_string 约束
-  Test: pending_req_fr_builtin_tools_edit_old_string
+  Test: edit_registration_matches_the_frozen_catalog
   假设 工具 edit 已注册
   当 校验 schema 时
   那么 参数行 [old_string:string:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: edit 参数 new_string 形状
-  Test: pending_req_fr_builtin_tools_edit_new_string
+  Test: edit_registration_matches_the_frozen_catalog
   假设 工具 edit 已注册
   当 校验 schema 时
   那么 参数行 [new_string:string:req（空串即删除）] 的名称与类型按目录行实现
 
 Scenario: edit 参数 new_string 约束
-  Test: pending_req_fr_builtin_tools_edit_new_string
+  Test: edit_registration_matches_the_frozen_catalog
   假设 工具 edit 已注册
   当 校验 schema 时
   那么 参数行 [new_string:string:req（空串即删除）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: edit 参数 replace_all 形状
-  Test: pending_req_fr_builtin_tools_edit_replace_all
+  Test: edit_registration_matches_the_frozen_catalog
   假设 工具 edit 已注册
   当 校验 schema 时
   那么 参数行 [replace_all:boolean:opt:false（false 时 old_string 须恰好出现一次）] 的名称与类型按目录行实现
 
 Scenario: edit 参数 replace_all 约束
-  Test: pending_req_fr_builtin_tools_edit_replace_all
+  Test: edit_registration_matches_the_frozen_catalog
   假设 工具 edit 已注册
   当 校验 schema 时
   那么 参数行 [replace_all:boolean:opt:false（false 时 old_string 须恰好出现一次）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: edit 行为 1
-  Test: pending_req_fr_builtin_tools_edit_1
+  Test: edit_family_pins_the_arms
   假设 工具 edit 执行时
   当 达到触发条件时
   那么 UTF-8 字面替换；发 fs/edit-intent；read-before-write 同 write
 
 Scenario: glob 调度与呈现
-  Test: pending_req_fr_builtin_tools_glob
+  Test: glob_round_trip_pins_the_shapes
   假设 合约要求的行为已实现
   当 读取工具 glob 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 search
 
 Scenario: glob 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_glob
+  Test: argument_refusals_pin_the_texts
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: glob 说明 section 注册
-  Test: pending_req_fr_builtin_tools_glob_section
+  Test: prompt_sections_pin_the_seven_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 glob 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: glob 参数 pattern 形状
-  Test: pending_req_fr_builtin_tools_glob_pattern
+  Test: glob_registration_matches_the_frozen_catalog
   假设 工具 glob 已注册
   当 校验 schema 时
   那么 参数行 [pattern:string:req（无分隔符按任意深度 basename 匹配，带分隔符锚定深度）] 的名称与类型按目录行实现
 
 Scenario: glob 参数 pattern 约束
-  Test: pending_req_fr_builtin_tools_glob_pattern
+  Test: glob_registration_matches_the_frozen_catalog
   假设 工具 glob 已注册
   当 校验 schema 时
   那么 参数行 [pattern:string:req（无分隔符按任意深度 basename 匹配，带分隔符锚定深度）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: glob 参数 path 形状
-  Test: pending_req_fr_builtin_tools_glob_path
+  Test: glob_registration_matches_the_frozen_catalog
   假设 工具 glob 已注册
   当 校验 schema 时
   那么 参数行 [path:string:opt（默认 session workspace）] 的名称与类型按目录行实现
 
 Scenario: glob 参数 path 约束
-  Test: pending_req_fr_builtin_tools_glob_path
+  Test: glob_registration_matches_the_frozen_catalog
   假设 工具 glob 已注册
   当 校验 schema 时
   那么 参数行 [path:string:opt（默认 session workspace）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: glob 行为 1
-  Test: pending_req_fr_builtin_tools_glob_1
+  Test: glob_round_trip_pins_the_shapes
   假设 工具 glob 执行时
   当 达到触发条件时
   那么 打包 ripgrep 经 ctx.subprocess 前台运行（永不后台 job、无 host rg 依赖、无 shell 层）；返回 ≤100 路径按 mtime 序；超限按 sampleOverCapGlobResults 顶层采样并报完整列表保存位置（spill 落盘）
 
 Scenario: grep 调度与呈现
-  Test: pending_req_fr_builtin_tools_grep
+  Test: grep_round_trip_pins_the_shapes
   假设 合约要求的行为已实现
   当 读取工具 grep 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 search
 
 Scenario: grep 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_grep
+  Test: argument_refusals_pin_the_texts
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: grep 说明 section 注册
-  Test: pending_req_fr_builtin_tools_grep_section
+  Test: prompt_sections_pin_the_seven_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 grep 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: grep 参数 pattern 形状
-  Test: pending_req_fr_builtin_tools_grep_pattern
+  Test: grep_registration_matches_the_frozen_catalog
   假设 工具 grep 已注册
   当 校验 schema 时
   那么 参数行 [pattern:string:req（ripgrep 正则）] 的名称与类型按目录行实现
 
 Scenario: grep 参数 pattern 约束
-  Test: pending_req_fr_builtin_tools_grep_pattern
+  Test: grep_registration_matches_the_frozen_catalog
   假设 工具 grep 已注册
   当 校验 schema 时
   那么 参数行 [pattern:string:req（ripgrep 正则）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: grep 参数 path 形状
-  Test: pending_req_fr_builtin_tools_grep_path
+  Test: grep_registration_matches_the_frozen_catalog
   假设 工具 grep 已注册
   当 校验 schema 时
   那么 参数行 [path:string:opt] 的名称与类型按目录行实现
 
 Scenario: grep 参数 path 约束
-  Test: pending_req_fr_builtin_tools_grep_path
+  Test: grep_registration_matches_the_frozen_catalog
   假设 工具 grep 已注册
   当 校验 schema 时
   那么 参数行 [path:string:opt] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: grep 参数 include 形状
-  Test: pending_req_fr_builtin_tools_grep_include
+  Test: grep_registration_matches_the_frozen_catalog
   假设 工具 grep 已注册
   当 校验 schema 时
   那么 参数行 [include:string:opt（单 glob，不支持否定）] 的名称与类型按目录行实现
 
 Scenario: grep 参数 include 约束
-  Test: pending_req_fr_builtin_tools_grep_include
+  Test: grep_registration_matches_the_frozen_catalog
   假设 工具 grep 已注册
   当 校验 schema 时
   那么 参数行 [include:string:opt（单 glob，不支持否定）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: grep 行为 1
-  Test: pending_req_fr_builtin_tools_grep_1
+  Test: grep_round_trip_pins_the_shapes
   假设 工具 grep 执行时
   当 达到触发条件时
   那么 匹配行+行号按文件分组 ≤250 匹配；超限报完整列表位置；config globMaxResults/grepMaxMatches/grepMaxLineBytes/searchMetaMaxBytes/rawOutputMaxBytes（溢出 SEARCH_RAW_OUTPUT_OVERFLOW
 
 Scenario: str_replace_editor 调度与呈现
-  Test: pending_req_fr_builtin_tools_str_replace_editor
+  Test: present_call_pins_the_four_arms
   假设 合约要求的行为已实现
   当 读取工具 str_replace_editor 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 diff(str_replace/create)+generic(view)
 
 Scenario: str_replace_editor 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_str_replace_editor
+  Test: required_parameter_refusals_pin_the_texts
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: str_replace_editor 说明逐字与呈现四臂
-  Test: pending_req_fr_builtin_tools_str_replace_editor_presentation
+  Test: present_call_pins_the_four_arms
   假设 工具 str_replace_editor 已注册且组装系统提示词时
   当 扫描 section 注册表与读取工具声明时
   那么 工具 str_replace_editor 无说明 section（dsh 真源不注入 systemPrompt）；description 12 句逐字抽取；presentCall 四臂=view 读卡/create 与 str_replace diff 卡/insert 行锚编辑卡
 
 Scenario: str_replace_editor 参数 command 形状
-  Test: pending_req_fr_builtin_tools_str_replace_editor_command
+  Test: str_replace_editor_registration_matches_the_frozen_catalog
   假设 工具 str_replace_editor 已注册
   当 校验 schema 时
   那么 参数行 [command:string:req:enum[view|create|str_replace|insert]] 的名称与类型按目录行实现
 
 Scenario: str_replace_editor 参数 command 约束
-  Test: pending_req_fr_builtin_tools_str_replace_editor_command
+  Test: str_replace_editor_registration_matches_the_frozen_catalog
   假设 工具 str_replace_editor 已注册
   当 校验 schema 时
   那么 参数行 [command:string:req:enum[view|create|str_replace|insert]] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: str_replace_editor 参数 path 形状
-  Test: pending_req_fr_builtin_tools_str_replace_editor_path
+  Test: str_replace_editor_registration_matches_the_frozen_catalog
   假设 工具 str_replace_editor 已注册
   当 校验 schema 时
   那么 参数行 [path:string:req（绝对路径）] 的名称与类型按目录行实现
 
 Scenario: str_replace_editor 参数 path 约束
-  Test: pending_req_fr_builtin_tools_str_replace_editor_path
+  Test: str_replace_editor_registration_matches_the_frozen_catalog
   假设 工具 str_replace_editor 已注册
   当 校验 schema 时
   那么 参数行 [path:string:req（绝对路径）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: str_replace_editor 参数 file_text 形状
-  Test: pending_req_fr_builtin_tools_str_replace_editor_file_text
+  Test: str_replace_editor_registration_matches_the_frozen_catalog
   假设 工具 str_replace_editor 已注册
   当 校验 schema 时
   那么 参数行 [file_text:string|null:opt（create 必填，已存在不可 create）] 的名称与类型按目录行实现
 
 Scenario: str_replace_editor 参数 file_text 约束
-  Test: pending_req_fr_builtin_tools_str_replace_editor_file_text
+  Test: str_replace_editor_registration_matches_the_frozen_catalog
   假设 工具 str_replace_editor 已注册
   当 校验 schema 时
   那么 参数行 [file_text:string|null:opt（create 必填，已存在不可 create）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: str_replace_editor 参数 insert_line 形状
-  Test: pending_req_fr_builtin_tools_str_replace_editor_insert_line
+  Test: str_replace_editor_registration_matches_the_frozen_catalog
   假设 工具 str_replace_editor 已注册
   当 校验 schema 时
   那么 参数行 [insert_line:integer|null:opt（insert 必填）] 的名称与类型按目录行实现
 
 Scenario: str_replace_editor 参数 insert_line 约束
-  Test: pending_req_fr_builtin_tools_str_replace_editor_insert_line
+  Test: str_replace_editor_registration_matches_the_frozen_catalog
   假设 工具 str_replace_editor 已注册
   当 校验 schema 时
   那么 参数行 [insert_line:integer|null:opt（insert 必填）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: str_replace_editor 参数 new_str 形状
-  Test: pending_req_fr_builtin_tools_str_replace_editor_new_str
+  Test: str_replace_editor_registration_matches_the_frozen_catalog
   假设 工具 str_replace_editor 已注册
   当 校验 schema 时
   那么 参数行 [new_str:string|null:opt（str_replace 可选=删除，insert 必填）] 的名称与类型按目录行实现
 
 Scenario: str_replace_editor 参数 new_str 约束
-  Test: pending_req_fr_builtin_tools_str_replace_editor_new_str
+  Test: str_replace_editor_registration_matches_the_frozen_catalog
   假设 工具 str_replace_editor 已注册
   当 校验 schema 时
   那么 参数行 [new_str:string|null:opt（str_replace 可选=删除，insert 必填）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: str_replace_editor 参数 old_str 形状
-  Test: pending_req_fr_builtin_tools_str_replace_editor_old_str
+  Test: str_replace_editor_registration_matches_the_frozen_catalog
   假设 工具 str_replace_editor 已注册
   当 校验 schema 时
   那么 参数行 [old_str:string|null:opt（str_replace 必填，须唯一匹配否则不替换）] 的名称与类型按目录行实现
 
 Scenario: str_replace_editor 参数 old_str 约束
-  Test: pending_req_fr_builtin_tools_str_replace_editor_old_str
+  Test: str_replace_editor_registration_matches_the_frozen_catalog
   假设 工具 str_replace_editor 已注册
   当 校验 schema 时
   那么 参数行 [old_str:string|null:opt（str_replace 必填，须唯一匹配否则不替换）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: str_replace_editor 参数 view_range 形状
-  Test: pending_req_fr_builtin_tools_str_replace_editor_view_range
+  Test: str_replace_editor_registration_matches_the_frozen_catalog
   假设 工具 str_replace_editor 已注册
   当 校验 schema 时
   那么 参数行 [view_range:array<integer>|null:opt（1-based，[start,-1] 到末尾）] 的名称与类型按目录行实现
 
 Scenario: str_replace_editor 参数 view_range 约束
-  Test: pending_req_fr_builtin_tools_str_replace_editor_view_range
+  Test: str_replace_editor_registration_matches_the_frozen_catalog
   假设 工具 str_replace_editor 已注册
   当 校验 schema 时
   那么 参数行 [view_range:array<integer>|null:opt（1-based，[start,-1] 到末尾）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: str_replace_editor 行为 1
-  Test: pending_req_fr_builtin_tools_str_replace_editor_1
+  Test: view_family_pins_the_arms
   假设 工具 str_replace_editor 执行时
   当 达到触发条件时
   那么 view=cat -n；目录 view 列非隐藏两层；长输出截断标 <response clipped>；未用命令的 null 占位视为省略

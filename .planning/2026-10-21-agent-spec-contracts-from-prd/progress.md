@@ -1222,3 +1222,14 @@
 - 五门全绿：fmt/clippy workspace 0/tests 1283（FR_DSH_SOURCE）/doc -D warnings/Windows msvc 未跑（本机无）。
 - 过程注记：生成退化贯穿本批（corrupted tokens 约 8 起、heredoc 引号战、rg -rn 误用再犯两回）——python line-list+小片段+逐段 cargo check 纪律；钉测自纠 5 起（PNG 手造 CRC 两轮+IHDR 位序、测试 scratch 误传 root 致 ensure_durable_home 上溯 "/" chmod EPERM、save_failure 删块误伤 if 行两处、base64 lenient tail 被 unwrap_err 钉测逮住=真 bug 修复、serve 尾括号连环）。
 - 下一动作：批 5=read_image 场景绑定全族+七步流 4-7 收口（TOOLS spec 408 场景绑定真实测试+guard/explain/stamp 闭环）。
+
+## 2026-10-30 — 16b 批 4 提交入库：ffaea4e（用户 /commit，同款 --no-verify 守卫设计态注记随提交信息；35 文件 +4907/-55，九新文件入库）
+
+## 2026-10-30 — 16b 批 5 落地：spec 绑定全族+七步流 4-7 收口（Q16b-5A 裁决 A），TOOLS 96 pass/312 pending/0 failed，workspace 1286 tests（1283→1286）
+- 绑定 70 场景→34 真实测试：registry 遗留 4（53 rebind=generated_catalog_matches（原绑不存在测试=批 4"19 vs 21"差额根源）、59 missing_rg、65 新增 FR_RIPGREP 钉测、88 新增 editor 不装配钉测）+read 9+read_image 5+write 7+edit 11+glob 7+grep 9+sre 18；另修 16a 错绑 2（bash/pwsh section 绑到不存在的 two_tools→seven_tools）。persistent(16e)/web(16f)/todo+goal+job+schedule(16c)/ask+session_query(16d) 场景保持 pending。
+- 码新增 3 钉测+2 臂+1 断言：verify.rs read_image_registration_matches_the_frozen_catalog（read_image_parameters==冻结表+output 形状）；search_core resolve_rg_path 拆纯函数 resolve_rg_path_for+search_tools SpawnSeams resolved 记录字段+fr_ripgrep_pointer_wins_over_the_bare_probe（指针逐字过 resolver+回退 probe 序）；fs_tools write 测试加 blank-file_path 校验拒绝臂（missing content 走 schema 校验器非工具体——dsh write.ts:25-27 证据，误设臂已删）+edit_family 加 blank-path 臂；sre_tools baked_bundle_leaves_the_editor_unregistered（assertions_on_constants 整改=editor_registered() 具名谓词 const fn，plugin_shell 注册门改调谓词）；plugin_shell prompt_sections 钉测加 len==7 断言（钉 read_image/editor 无 section 否定面）。
+- Q16b-5A（用户裁决 A）：场景 339 read_image 说明 section 注册=合同错误（dsh read-image.ts 不注入 systemPrompt、tool-catalog.md:32、fr prompt_sections 恰 7 条），改写为否定场景"说明 section 注册缺席"绑 prompt_sections 钉测。
+- 七步流：parse+lint exit 0；lifecycle 96 pass/312 skip/0 failed score 1.0（skip=未落家族 pending 设计态，exit 1 如实）；guard 16 spec 全 0 failed（设计态 --no-verify 注记惯例）；explain exit 0；stamp 96/0/312（首轮漏 FR_DSH_SOURCE 致 catalog check 臂 fail，带 env 复跑校正）。
+- 五门+三开关全绿：fmt --check 绿（verify.rs 一处 fmt 修码）；clippy workspace 0 警告（2 起新警自纠=map_or_else+assertions_on_constants→const fn 谓词）；tests 1286/0（FR_DSH_SOURCE）；doc -D warnings 绿；lint-knowledge/graph/plan 三开关 0 errors。最终码态复跑 lifecycle 复核 96/0/312。
+- 过程注记：Edit 笔误 1 起（"no no such"当场自纠）；write no-content 臂误设（工具体默认空串=dsh 逐字行为，删臂）。
+- 下一动作：16c 任务状态组（todo_write+create_goal/get_goal/update_goal+job_kill/job_list/job_output+schedule_create/delete/list/update，Q94-A 子批表）。

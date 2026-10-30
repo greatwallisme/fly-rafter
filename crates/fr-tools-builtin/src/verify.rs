@@ -278,3 +278,21 @@ fn output_schema_pinned_against_the_registration() {
     let schema = shell_output_schema();
     assert_eq!(schema["oneOf"].as_array().expect("oneOf").len(), 3);
 }
+
+/// The composed `read_image` registration equals the frozen catalog
+/// extraction: the single `file_path` row freezes verbatim and the
+/// output contract rides the dsh read-image shapes (the builtin-tools
+/// contract's freeze clause for the image tool).
+#[test]
+fn read_image_registration_matches_the_frozen_catalog() {
+    let frozen: Value = serde_json::from_str(crate::catalog_gen::READ_IMAGE_PARAMETERS_JSON)
+        .expect("the frozen table parses");
+    assert_eq!(crate::schema::read_image_parameters(), frozen);
+    let output = crate::schema::read_image_output_schema();
+    let properties = output["properties"].as_object().expect("properties");
+    assert_eq!(properties.keys().collect::<Vec<_>>(), vec!["path", "image"]);
+    assert_eq!(
+        output["properties"]["image"]["properties"]["mediaType"]["enum"],
+        serde_json::json!(["image/png", "image/jpeg", "image/webp", "image/gif"])
+    );
+}

@@ -246,10 +246,24 @@ pub fn complete_stdout(
 /// The resolution failure (the dsh launch-failure classification
 /// applies at the caller).
 pub fn resolve_rg_path(seams: &dyn Seams) -> Result<String, String> {
-    match std::env::var("FR_RIPGREP") {
-        Ok(pointer) if !pointer.trim().is_empty() => seams.subprocess_resolve_executable(&pointer),
-        _ => seams.subprocess_resolve_executable("rg"),
-    }
+    let pointer = match std::env::var("FR_RIPGREP") {
+        Ok(pointer) if !pointer.trim().is_empty() => Some(pointer),
+        _ => None,
+    };
+    resolve_rg_path_for(pointer.as_deref(), seams)
+}
+
+/// The pointer precedence with the environment factored out (the pin
+/// target): a set `FR_RIPGREP` pointer rides to the resolver verbatim,
+/// the bare `rg` PATH probe is the fallback.
+pub(crate) fn resolve_rg_path_for(
+    pointer: Option<&str>,
+    seams: &dyn Seams,
+) -> Result<String, String> {
+    pointer.map_or_else(
+        || seams.subprocess_resolve_executable("rg"),
+        |pointer| seams.subprocess_resolve_executable(pointer),
+    )
 }
 
 /// Runs ripgrep with a plain argv vector and returns its complete raw

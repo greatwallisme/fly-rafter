@@ -40,7 +40,13 @@ pub const DEFAULT_MAX_OUTPUT_CHARS: usize = 16_000;
 /// The baked opt-in knob (the `str-replace-editor` config key; the M1
 /// composition leaves it off — the builtin-tools contract's
 /// 「替代编辑器默认不装配」 ruling).
-pub const BAKED_STR_REPLACE_EDITOR: bool = false;
+const BAKED_STR_REPLACE_EDITOR: bool = false;
+
+/// The registration gate for the opt-in editor: the composition
+/// registers `str_replace_editor` only when this answers true.
+pub(crate) const fn str_replace_editor_registered() -> bool {
+    BAKED_STR_REPLACE_EDITOR
+}
 
 /// The word a string argument arrives as (absent keys stay empty).
 fn word<'a>(arguments: &'a Value, key: &str) -> &'a str {
@@ -1054,6 +1060,14 @@ mod tests {
                 "arguments": arguments,
             }
         })
+    }
+
+    /// The M1 bundle ships the opt-in editor off: the registration
+    /// gate answers false, so the default assembly never registers
+    /// `str_replace_editor` (the 「替代编辑器默认不装配」 ruling).
+    #[test]
+    fn baked_bundle_leaves_the_editor_unregistered() {
+        assert!(!str_replace_editor_registered());
     }
 
     /// The view family: the numbered file view, the window arm, the

@@ -1342,6 +1342,16 @@ mod tests {
     #[test]
     fn write_create_then_guarded_update_round_trips() {
         let fixture = Fixture::new("write-ok", "danger-full-access");
+        // The validation refusals ride the shared texts before any io.
+        let blank = fixture.serve_err(
+            METHOD_WRITE_EXECUTE,
+            &call_frame(&json!({ "file_path": "  ", "content": "x" })),
+        );
+        assert_eq!(
+            blank["error"]["message"],
+            "file_path must be a non-empty string"
+        );
+
         let created = fixture.serve_ok(
             METHOD_WRITE_EXECUTE,
             &call_frame(&json!({ "file_path": "a.txt", "content": "one\n" })),
@@ -1406,6 +1416,20 @@ then retry",
     fn edit_family_pins_the_arms() {
         let fixture = Fixture::new("edit-ok", "danger-full-access");
         std::fs::write(fixture.scratch.path("a.txt"), "alpha\nbeta\n").expect("seed");
+
+        // The validation refusal rides before the read gate.
+        let blank = fixture.serve_err(
+            METHOD_EDIT_EXECUTE,
+            &call_frame(&json!({
+                "file_path": "  ",
+                "old_string": "a",
+                "new_string": "b",
+            })),
+        );
+        assert_eq!(
+            blank["error"]["message"],
+            "file_path must be a non-empty string"
+        );
 
         // Unread: the gate refuses before the provider runs.
         let unread = fixture.serve_err(

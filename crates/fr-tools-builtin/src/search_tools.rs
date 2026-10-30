@@ -1263,6 +1263,7 @@ mod tests {
         scratch: Scratch,
         workdir: String,
         resolve_fail: bool,
+        resolved: Mutex<Vec<String>>,
         spills: Mutex<VecDeque<Result<Value, String>>>,
         saved: Mutex<Vec<Value>>,
         children: Mutex<HashMap<String, std::process::Child>>,
@@ -1281,6 +1282,7 @@ mod tests {
                 scratch,
                 workdir,
                 resolve_fail: false,
+                resolved: Mutex::new(Vec::new()),
                 spills: Mutex::new(VecDeque::new()),
                 saved: Mutex::new(Vec::new()),
                 children: Mutex::new(HashMap::new()),
@@ -1531,6 +1533,10 @@ mod tests {
         }
 
         fn subprocess_resolve_executable(&self, command: &str) -> Result<String, String> {
+            self.resolved
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(command.to_owned());
             if self.resolve_fail {
                 return Err("subprocess-local: no such executable".to_owned());
             }
@@ -1924,6 +1930,24 @@ mod tests {
         );
         assert_eq!(parsed["error"]["code"], "SEARCH_FAILED");
         assert_eq!(parsed["error"]["name"], "SearchError");
+    }
+
+    /// The `FR_RIPGREP` pointer rides to the resolver verbatim and
+    /// wins over the bare `rg` probe (the fr packaging judgment; the
+    /// env read stays outside the pin — the pure half carries the
+    /// precedence).
+    #[test]
+    fn fr_ripgrep_pointer_wins_over_the_bare_probe() {
+        let seams = SpawnSeams::new("rg-pointer");
+        let resolved = crate::search_core::resolve_rg_path_for(Some("/opt/tools/rg"), &seams);
+        assert_eq!(resolved.as_deref(), Ok("/opt/tools/rg"));
+        let _ = crate::search_core::resolve_rg_path_for(None, &seams);
+        let requested = seams
+            .resolved
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        assert_eq!(requested, vec!["/opt/tools/rg".to_owned(), "rg".to_owned()]);
     }
 
     /// The spill listener replaces an over-cap direct call's content
