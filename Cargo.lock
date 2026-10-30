@@ -831,6 +831,7 @@ version = "0.1.0"
 dependencies = [
  "dougong-abi",
  "fr-sandbox",
+ "fr-schema",
  "fr-timeout",
  "fr-wire",
  "libc",

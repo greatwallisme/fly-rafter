@@ -43,6 +43,8 @@
         mode: native
     - id: tools-builtin
       name: fr-tools-builtin
+      config:
+        allow-parallel-in-progress: true
     - id: shell
       name: fr-shell
     - id: compaction

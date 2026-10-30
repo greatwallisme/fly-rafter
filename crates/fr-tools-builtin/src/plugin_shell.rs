@@ -34,7 +34,7 @@ pub const PLUGIN_NAME: &str = "fr-tools-builtin";
 /// listeners — the spill listeners register at activation instead (the
 /// descriptor `listen` map stays a dylib event face, not a tools-pipeline
 /// registration).
-const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\",\"fs\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\",\"subprocess\",\"attachments\",\"llm\"],\"listen\":{}}";
+const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\",\"fs\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\",\"subprocess\",\"attachments\",\"llm\",\"session-projections\"],\"listen\":{}}";
 
 /// The maximum host reply the require loop grows its buffer toward (the
 /// approval judgment).
@@ -509,15 +509,22 @@ impl std::fmt::Debug for BuiltinState {
 }
 
 /// Declares the durable change vocabulary (a duplicate fails closed at
-/// the session service).
+/// the session service). The artifact owns `working-directory/change` and
+/// `todo/write` (the goal/schedule change events join with their
+/// batches).
 fn declare_change_event(link: &HostLink) -> Option<()> {
     step(
         link,
         fr_wire::services::session_persistence::SERVICE_NAME,
         fr_wire::services::session_persistence::METHOD_DECLARE_EVENT_TYPES,
-        serde_json::to_vec(&json!({ "types": [crate::working_directory::CHANGE_EVENT] }))
-            .ok()?
-            .as_slice(),
+        serde_json::to_vec(&json!({
+            "types": [
+                crate::working_directory::CHANGE_EVENT,
+                crate::todo::CHANGE_EVENT,
+            ]
+        }))
+        .ok()?
+        .as_slice(),
     )
 }
 
@@ -604,23 +611,38 @@ fn register_sections(link: &HostLink) -> Option<()> {
 }
 
 /// Registers the `workingDirectory` projection (the relay's third-party
-/// read face; the fold endpoint is the 900 selector).
+/// read face; the fold endpoint is the 900 selector) and the `todos`
+/// projection (stateVersion 2; the fold endpoint is the 901 selector).
 fn register_projection(link: &HostLink) -> Option<()> {
-    step(
-        link,
-        fr_wire::services::session_projections::SERVICE_NAME,
-        fr_wire::services::session_projections::METHOD_REGISTER,
-        serde_json::to_vec(&json!({
-            "key": crate::working_directory::PROJECTION_KEY,
-            "stateVersion": crate::working_directory::STATE_VERSION,
-            "fold": {
-                "service": crate::service::SERVICE_NAME,
-                "method": crate::service::METHOD_WORKING_DIRECTORY_FOLD,
-            },
-        }))
-        .ok()?
-        .as_slice(),
-    )
+    for (key, version, fold_method) in [
+        (
+            crate::working_directory::PROJECTION_KEY,
+            crate::working_directory::STATE_VERSION,
+            crate::service::METHOD_WORKING_DIRECTORY_FOLD,
+        ),
+        (
+            crate::todo::PROJECTION_KEY,
+            crate::todo::STATE_VERSION,
+            crate::service::METHOD_TODOS_FOLD,
+        ),
+    ] {
+        step(
+            link,
+            fr_wire::services::session_projections::SERVICE_NAME,
+            fr_wire::services::session_projections::METHOD_REGISTER,
+            serde_json::to_vec(&json!({
+                "key": key,
+                "stateVersion": version,
+                "fold": {
+                    "service": crate::service::SERVICE_NAME,
+                    "method": fold_method,
+                },
+            }))
+            .ok()?
+            .as_slice(),
+        )?;
+    }
+    Some(())
 }
 
 /// One registration-table row: the name, the composed facts, the five
@@ -860,8 +882,50 @@ fn register_tools(
             serde_json::to_vec(&registration).ok()?.as_slice(),
         )?;
     }
+    // The whole-list snapshot tool (dsh `tool-todo`; no opt-in gate, no
+    // presentResult/presentationMeta endpoints — the partial-face
+    // precedent). The baked `allow-parallel-in-progress` judgment mirrors
+    // the headless bundle row (`true`).
+    step(
+        link,
+        fr_wire::services::tools::SERVICE_NAME,
+        fr_wire::services::tools::METHOD_REGISTER,
+        serde_json::to_vec(&todo_write_registration())
+            .ok()?
+            .as_slice(),
+    )?;
     register_spill_listeners(link);
     Some(())
+}
+
+/// The `todo_write` registration row (dsh `ctx.tools.register(defineTool)`,
+/// call-for-call).
+///
+/// No `isConcurrencySafe` key (the fail-closed exclusive default), no
+/// presentResult/presentationMeta endpoints (the dsh source declares
+/// none), and the `other` presentation family riding presentCall.
+#[must_use]
+pub fn todo_write_registration() -> Value {
+    json!({
+        "name": "todo_write",
+        "description": crate::schema::todo_write_description(true),
+        "parameters": crate::schema::todo_write_parameters(),
+        "output": {
+            "schema": crate::schema::todo_write_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_TODO_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_TODO_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_TODO_PRESENT_CALL,
+        },
+    })
 }
 
 /// Registers the two capped-result spill listeners (dsh
@@ -931,6 +995,10 @@ impl BuiltinState {
             std::env::current_dir().ok()?.to_string_lossy().to_string(),
         );
 
+        // The todo domain over the wire append seam (the baked
+        // `allow-parallel-in-progress: true` bundle judgment).
+        let lists = crate::todo::TodoLists::new(true, Box::new(WireSessionAppend { link }));
+
         let env_arc = Arc::new(env);
         let directories_arc = Arc::new(directories);
         let seams = WireSeams {
@@ -938,7 +1006,8 @@ impl BuiltinState {
             directories: Arc::clone(&directories_arc),
             env: Arc::clone(&env_arc),
         };
-        let tools = BuiltinTools::new(Box::new(seams), env_arc, directories_arc).ok()?;
+        let tools =
+            BuiltinTools::new(Box::new(seams), env_arc, directories_arc, Arc::new(lists)).ok()?;
 
         // The fs domain over the standing-policy wire seam (the
         // composed single-arm backend; the Q16b-3B seam).
@@ -1032,6 +1101,30 @@ impl crate::working_directory::SessionLog for WireSessionLog {
             "id": id,
             "type": crate::working_directory::CHANGE_EVENT,
             "data": { "cwd": cwd },
+        }))
+        .map_err(|error| format!("session append encode failed: {error}"))?;
+        self.link.require(
+            fr_wire::services::session_persistence::SERVICE_NAME,
+            fr_wire::services::session_persistence::METHOD_SESSION_APPEND,
+            &bytes,
+        )?;
+        Ok(())
+    }
+}
+
+/// The durable todo snapshots over the `'session-persistence'` append
+/// face (the dsh `agent.session.append` consumption for the whole-list
+/// tool).
+struct WireSessionAppend {
+    link: HostLink,
+}
+
+impl crate::todo::SessionAppend for WireSessionAppend {
+    fn append(&self, session: &str, event_type: &str, data: &Value) -> Result<(), String> {
+        let bytes = serde_json::to_vec(&json!({
+            "id": session,
+            "type": event_type,
+            "data": data,
         }))
         .map_err(|error| format!("session append encode failed: {error}"))?;
         self.link.require(
@@ -1230,9 +1323,17 @@ mod tests {
     /// the write and grep texts carry the composed conditional tails).
     /// The count pins the absences too: the image tool and the opt-in
     /// editor inject no systemPrompt (the dsh sources; the Q16b-4A and
-    /// Q16b-5A rulings).
+    /// Q16b-5A rulings), and the whole-list snapshot tool registers no
+    /// section either (the dsh tool source injects no systemPrompt; the
+    /// Q16c batch-2 negative pin).
     #[test]
     fn prompt_sections_pin_the_seven_tools() {
+        let sections = super::prompt_sections();
+        assert_eq!(sections.len(), 7);
+        assert!(
+            sections.iter().all(|(name, _, _)| !name.contains("todo")),
+            "the tool registers no prompt section (the dsh truth)"
+        );
         let sections = super::prompt_sections();
         assert_eq!(sections.len(), 7);
         assert_eq!(sections[0].0, "tool:bash");

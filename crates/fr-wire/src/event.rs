@@ -496,6 +496,15 @@ pub mod event_type {
     pub const REQUEST_CONTEXT: &str = "request/context";
     /// `session/end-seed`.
     pub const SESSION_END_SEED: &str = "session/end-seed";
+    /// `todo/write`, the todo list snapshot (the `fr-tools-builtin` todo
+    /// group; dsh `known-event-types.ts:70`).
+    pub const TODO_WRITE: &str = "todo/write";
+    /// `goal/change`, the goal-state transition record (the goal group;
+    /// dsh `known-event-types.ts:41`).
+    pub const GOAL_CHANGE: &str = "goal/change";
+    /// `schedule/change`, the reminder create/delete/dispatch record (the
+    /// schedule group; dsh `known-event-types.ts:55`).
+    pub const SCHEDULE_CHANGE: &str = "schedule/change";
 }
 
 /// The append-only source of truth for one agent interaction: an immutable
@@ -988,6 +997,41 @@ mod tests {
             |json| serde_json::from_value(json).unwrap_or_else(|_| panic!("round trip")),
         );
         assert_eq!(back, event);
+    }
+
+    #[test]
+    fn plugin_change_events_stay_unknown_and_retain_verbatim() {
+        // The three plugin-owned durable types ride the vocabulary
+        // declaration face (declared at activation, folded from the
+        // retained data), so the decoder keeps them `Unknown` verbatim;
+        // the constant values themselves pin the dsh spellings
+        // (known-event-types.ts:41/55/70).
+        for (constant, spelling) in [
+            (event_type::TODO_WRITE, "todo/write"),
+            (event_type::GOAL_CHANGE, "goal/change"),
+            (event_type::SCHEDULE_CHANGE, "schedule/change"),
+        ] {
+            assert_eq!(constant, spelling);
+            let raw = serde_json::json!({
+                "type": spelling,
+                "seq": 9,
+                "time": 42,
+                "data": {"k": "v"},
+            });
+            let event: SessionEvent =
+                serde_json::from_value(raw.clone()).unwrap_or_else(|_| panic!("retained"));
+            match &event.data {
+                SessionEventData::Unknown(unknown) => {
+                    assert_eq!(unknown.type_name, spelling);
+                    assert_eq!(unknown.data.get("k"), Some(&serde_json::json!("v")));
+                }
+                _ => panic!("plugin change event must stay unknown"),
+            }
+            assert_eq!(
+                serde_json::to_value(&event).unwrap_or_else(|_| serde_json::Value::Null),
+                raw
+            );
+        }
     }
 
     #[test]

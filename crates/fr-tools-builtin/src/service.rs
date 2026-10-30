@@ -119,6 +119,15 @@ pub const METHOD_STR_REPLACE_EDITOR_EXECUTE: u32 = 80;
 pub const METHOD_STR_REPLACE_EDITOR_RENDER: u32 = 81;
 /// Method selector: the `str_replace_editor` pending-call presentation.
 pub const METHOD_STR_REPLACE_EDITOR_PRESENT_CALL: u32 = 82;
+/// Method selector: the todo tool body.
+pub const METHOD_TODO_EXECUTE: u32 = 90;
+/// Method selector: the todo render projection.
+pub const METHOD_TODO_RENDER: u32 = 91;
+/// Method selector: the todo pending-call presentation.
+pub const METHOD_TODO_PRESENT_CALL: u32 = 92;
+/// Method selector: the `todos` projection fold (the non-tool band; the
+/// `workingDirectory` fold rides 900).
+pub const METHOD_TODOS_FOLD: u32 = 901;
 
 /// The escalate-to modes this composition advertises (the dsh
 /// `ESCALATION_TARGETS` words in table order).
@@ -146,6 +155,7 @@ pub struct BuiltinTools {
     seams: Box<dyn tools::Seams>,
     env: std::sync::Arc<ShellEnvRegistry>,
     directories: std::sync::Arc<working_directory::WorkingDirectories>,
+    lists: std::sync::Arc<crate::todo::TodoLists>,
 }
 
 impl std::fmt::Debug for BuiltinTools {
@@ -165,12 +175,20 @@ impl BuiltinTools {
         seams: Box<dyn tools::Seams>,
         env: std::sync::Arc<ShellEnvRegistry>,
         directories: std::sync::Arc<working_directory::WorkingDirectories>,
+        lists: std::sync::Arc<crate::todo::TodoLists>,
     ) -> Result<Self, String> {
         Ok(Self {
             seams,
             env,
             directories,
+            lists,
         })
+    }
+
+    /// The hosted todo domain (the tool body's owning-session state).
+    #[must_use]
+    pub const fn lists(&self) -> &std::sync::Arc<crate::todo::TodoLists> {
+        &self.lists
     }
 
     /// The hosted environment registry (the plugin contributes facts
@@ -240,6 +258,39 @@ impl BuiltinTools {
             METHOD_WORKING_DIRECTORY_FOLD => {
                 let state = fold_log(&request);
                 json!({ "state": state })
+            }
+            METHOD_TODOS_FOLD => {
+                let state = crate::todo::fold(
+                    &request
+                        .get("events")
+                        .cloned()
+                        .unwrap_or(Value::Array(Vec::new())),
+                );
+                json!({ "state": state })
+            }
+            METHOD_TODO_EXECUTE => {
+                let call = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let agent = call.get("agent").and_then(Value::as_str);
+                let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
+                return match self.lists.execute(&arguments, agent) {
+                    Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                        .map_err(|error| format!("body reply encode failed: {error}")),
+                    Err(error) => serde_json::to_vec(&json!({
+                        "error": { "message": error.message, "name": error.name },
+                    }))
+                    .map_err(|error| format!("body error encode failed: {error}")),
+                };
+            }
+            METHOD_TODO_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::todo::render(&args, &value))
+            }
+            METHOD_TODO_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::todo::present_call(&args))
             }
             other => return Err(format!("unknown {PLUGIN_NAME} method {other}")),
         };
@@ -347,9 +398,9 @@ pub fn fold_log(request: &Value) -> Value {
 
 /// The describe surface's method names (the registration reality: the
 /// two shell tools' bands, the read/write/edit/glob/grep bands, the
-/// spill listeners, the editor band, and the projection fold; excluded
-/// surfaces never appear here).
-const fn describe_methods() -> [&'static str; 45] {
+/// spill listeners, the editor band, the todo band, and the two
+/// projection folds; excluded surfaces never appear here).
+const fn describe_methods() -> [&'static str; 49] {
     [
         "describe",
         "bash.execute",
@@ -395,6 +446,10 @@ const fn describe_methods() -> [&'static str; 45] {
         "str_replace_editor.execute",
         "str_replace_editor.render",
         "str_replace_editor.presentCall",
+        "todo.execute",
+        "todo.render",
+        "todo.presentCall",
+        "todos.fold",
         "workingDirectory.fold",
     ]
 }

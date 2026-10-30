@@ -614,6 +614,97 @@ pub fn str_replace_editor_output_schema() -> Value {
     json!({ "type": "string" })
 }
 
+/// The `todo_write` description for one activation (dsh `describe()`).
+///
+/// The head, the policy's active-status clause, and the tail join in
+/// source order; the composed true-variant equals the catalog-verbatim
+/// constant (the freeze test).
+#[must_use]
+pub fn todo_write_description(allow_parallel: bool) -> String {
+    let middle = if allow_parallel {
+        crate::catalog_gen::TODO_WRITE_DESCRIPTION_PARALLEL
+    } else {
+        crate::catalog_gen::TODO_WRITE_DESCRIPTION_SINGLE
+    };
+    format!(
+        "{}{}{}",
+        crate::catalog_gen::TODO_WRITE_DESCRIPTION_HEAD,
+        middle,
+        crate::catalog_gen::TODO_WRITE_DESCRIPTION_TAIL
+    )
+}
+
+/// The `todo_write` parameter table (the catalog-frozen base; the tool
+/// carries no escalation pair and no conditional composition).
+#[must_use]
+pub fn todo_write_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "todos": {
+                "type": "array",
+                "description": crate::catalog_gen::TODO_WRITE_TODOS_TEXT,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "description": "What the task is — a short imperative line.",
+                        },
+                        "status": {
+                            "type": "string",
+                            "description": "pending (not started) | in_progress (now) | completed (done).",
+                            "enum": crate::todo::STATUSES,
+                        },
+                    },
+                    "required": ["content", "status"],
+                },
+            },
+        },
+        "required": ["todos"],
+    })
+}
+
+/// The `todo_write` output contract (the dsh `output.schema`, the
+/// schemastery row form): the canonical list plus the status counts; the
+/// `inProgress` wire key is the protocol exemption.
+#[must_use]
+pub fn todo_write_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "todos": {
+                "type": "array",
+                "required": true,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "content": { "type": "string", "required": true },
+                        "status": {
+                            "type": "string",
+                            "required": true,
+                            "enum": crate::todo::STATUSES,
+                        },
+                    },
+                },
+            },
+            "counts": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": true,
+                "properties": {
+                    "pending": { "type": "integer", "required": true },
+                    "inProgress": { "type": "integer", "required": true },
+                    "completed": { "type": "integer", "required": true },
+                },
+            },
+        },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

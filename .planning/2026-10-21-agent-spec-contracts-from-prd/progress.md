@@ -1251,3 +1251,17 @@
 - 下一动作：16c 批 2=fr-wire 三事件常量（todo/write、goal/change、schedule/change）+fr-config 六组新键+todo_write 全件（projection todos v2+工具+catalog+section 否定钉测）。
 
 ## 2026-10-30 — 16c 批 1 提交入库：fff3742（用户 /commit，--no-verify 守卫设计态注记随提交信息；16 文件 +3190/-3，fr-storage 十源文件+PRD 4.5 行+计划三件+workspace 接线入库）
+
+## 2026-10-30 — 16c 批 2 落地：fr-wire 三事件常量+fr-schema 六组键+todo_write 全件
+- fr-wire event.rs：event_type 增 TODO_WRITE/GOAL_CHANGE/SCHEDULE_CHANGE 三常量（dsh known-event-types.ts:41/55/70 逐字），钉测 plugin_change_events_stay_unknown_and_retain_verbatim（解码保持 Unknown 逐字保留+三常量值断言）。
+- catalog 脚本+catalog_gen.rs：TOOLS 增 todo_write（catalog 抽取 DESCRIPTION/PARAMETERS_JSON/TODOS_TEXT，section kind=none）；增专用四段抽取器 extract_todo_description_segments（dsh 源 DESCRIPTION_HEAD/PARALLEL/SINGLE/TAIL 常量逐字），发射 TODO_WRITE_DESCRIPTION_{HEAD,PARALLEL,SINGLE,TAIL}——false 变体 description 组合面由此可测。
+- fr-schema registry 首批实条目：fr-shell（jobs-local 4 键）+fr-tools-builtin（goal/schedule/tool-goal/tool-jobs/tool-todo 五组 9 键平铺，键 kebab-case，dsh schemastery 约束直译：step1→Integer/min/max/enum→candidates/required 布尔无默认）；OnceLock 惰性表（Properties 构造唯一败因=重复键）；五件组钉测（shell_config_pins_jobs_local_group/builtin_config_pins_todo_switch/tool_jobs_group/goal_and_threshold_groups/delivery_history_group：默认投影+约束拒绝+边界通过+未声明键拒）。
+- headless bundle：tools-builtin 行增 config: {allow-parallel-in-progress: true}（dsh base :437-440 品牌映射唯一 config 行；fr-config 101 tests 绿=required 键装配校验生效）。
+- fr-shell：dev-dep fr-schema + registry_config_defaults_match_the_declared_schema（baked RegistryConfig 缺省==声明投影，跨 crate 等值钉测）。
+- fr-tools-builtin todo_write 全件：todo.rs 新模块（TodoLists 域+to_todo_list 三拒绝逐字+execute 先校验后判 agent+append todo/write+counts inProgress wire 键+render/presentCall/fold 折叠 replace/clear/keep）+session-persistence append 缝（WireSessionAppend）+service.rs 90/91/92/901 四方法+describe 45→49+plugin_shell 注册（部分面 json!：无 presentResult/presentationMeta/无 isConcurrencySafe）+todos 投影注册（stateVersion 2，fold 901）+declare todo/write+verify.rs 冻结钉测 todo_write_registration_matches_the_frozen_catalog（description 双变体+参数表逐字+输出三面+调度面）+prompt_sections 钉测否定臂（无 tool:todo section，恰 7 条）。
+- **装配缺陷修复**：fr-tools-builtin descriptor inject 缺 session-projections（16a 批 2 引入，dougong-abi require 未声明=STATUS_UNDECLARED，Phase 18 真实装配必败；测试假宿主不查声明面故未暴露）——inject 表补名（fr-sandbox 判例同形）。
+- spec 绑定：TOOLS spec 11 场景（todo 状态流转校验+todo_write 10；section 场景 Q16b-5A 判例改写否定"注册缺席"）；CONFIG spec 20 场景六组键（bind-config-tests.py PAIRS 增 20 对，幂等复放绿）；binding-audit.md 十一节（bash 11 场景判例同形的多映射核验记录+fr-schema 校验文案为 fr 自有面档载）。
+- 四门：fmt ✓ / clippy workspace -D warnings 0 / tests 1325+0（FR_DSH_SOURCE）/ doc ✓；lifecycle：TOOLS 107/0/302、CONFIG 80/0/239；三合约开关 0 errors。
+- 过程注记：生成退化 5 起（registry.rs 两度截断+python heredoc 乱码+describe 表漏 glob.spill+WireSessionLog 误毁）全部当场自纠；hook 误报两类（todo 子串/脚本既有 print）透明接受。
+- 下一动作：16c 批 3=goal 域（fold 全量含 goal 源推进 Q16c-2A+service+投影 goal v6）+create/get/update_goal 三工具+tool:goal section（{{blocked_after}} 模板抽取）。
+- guard 复跑（带 FR_DSH_SOURCE）：16 checks 全 0 failed（pending 设计态 skip 计 not passing=16b 收口同态；首跑漏传 FR_DSH_SOURCE 致 catalog --check 按设计 fail 1 起，非码面缺陷）。

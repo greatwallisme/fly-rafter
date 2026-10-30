@@ -2448,3 +2448,26 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - domain.ts 运行时：**权威态在内存**；每域单写链 FIFO（chain.then；link 恒 settle）；写序=后端耐久 FIRST→内存→emit domain/changed（listener 失败吞 warn `domain '${name}': domain/changed listener failed: ${err}`）；后端拒→内存不动（无读写分叉）；KvTable{get/entries/keys/size(内存快照),put(整记录无合并),delete(存在性在链槽判定,false 无写无事件),update(原子 RMW,缺键→missing-key)}；global{get(initial),set(首 set 才落盘)}；close: disposing 拒新写→drain 链→unit.close→closed 拒读→名字释放（幂等共享 teardown）
 - storage-json：文件=<root>/<name>.json 恒为当前净态（pretty 2 空格+插入序+尾 \n；文档={unit:{name,version},global,tables}）；parse 错误=malformed-medium（非 JSON/非对象/头缺失或异名/tables 非对象或数组/表非对象）+version-mismatch（stored≠expected）；**atomic 协议=同目录 .{uuid}.tmp(wx 0o600)→fsync→rename 整替→POSIX fsync 目录**（win 跳过目录 fsync；session-log 的 link+unlink no-clobber 是另一协议，单元文件单写者 last-write-wins 正确）；single-unit：内存权威，每写原语变更后整文件重发布；发布失败回滚内存（put 恢复 previous/删除；delete/global 同）；close 恒 drain inFlight；写序归 caller（域层写链）——后端只保证单调用发布完整耐久文件
 - 缺文件=空单元（物化延至首写）；M1 消费者 schedule=单表 tasks+无 global+single layout
+
+### 16c 批 2 码面勘察（2026-10-30，实现前终勘）
+
+**装配缺陷实锤（本批顺手修）**：fr-tools-builtin descriptor inject 表缺 `session-projections`（6c93d6d 16a 批 2 引入），而 register_projection 会 require 该服务——dougong-abi lib.rs:30-31/198-201 明文「inject 未声明且无 grant 覆盖 → STATUS_UNDECLARED」，真实装配（Phase 18）激活必败；测试假宿主不查声明面故未暴露。fr-sandbox 壳判例 inject 含该名（plugin_shell.rs:52）。修复=descriptor inject 增名。
+
+**六组键约束真源（dsh schemastery 逐条）**：
+- jobs-local（fr-shell，RegistryConfig 已有同值字段）：maxConcurrentJobsPerOwner/retainBytes/settledRetainBytes/pumpPollMs = number.step(1).min(1).max(MAX_SAFE_INTEGER).default(10/262144/16384/150)（index.ts:131-150）
+- tool-todo：allowParallelInProgress z.boolean().required() 无默认（index.ts:41-43）
+- tool-jobs：waitTimeoutMs min1 default 30000/maxWaitTimeoutMs min1 default 600000/completionDelivery union[quiet,wakeup] default wakeup/maxConsecutiveWakes min1 可选（index.ts:59-64）
+- goal：defaultMaxGoalRounds z.number().default(256)（schema 无 min；运行时 resolveMaxGoalRounds 正 safe int）（index.ts:244）
+- tool-goal：blockedAfterConsecutiveRounds number.step(1).min(1).default(3)（index.ts:38-40）
+- schedule：deliveryHistoryDays step1 min1 max3650 default 30/deliveryHistoryRecords step1 min1 max10000 default 200（index.ts:102-105）
+- fr-schema 映射：step(1)→Integer；无 step→Number；MAX_SAFE_INTEGER=9007199254740991 入 i64 max
+- 落点：fr-schema registry 两条目（"fr-shell" 4 键/"fr-tools-builtin" 5 组 9 键平铺，键 kebab-case：allow-parallel-in-progress 等，additionalProperties false）；headless bundle 仅 tools-builtin 行增 `config: {allow-parallel-in-progress: true}`（dsh base :437-440 品牌映射，唯一带 config 的 16c 行；jobs-local/goal/tool-goal/schedule/tool-jobs 行 dsh 本就无 config=走缺省）；插件侧 baked 只落 todo 消费臂（dylib 不收 config，判例同 approval/fr-shell）
+
+**tool-todo 源码 212 行全钉**：description 四段常量（HEAD/PARALLEL/SINGLE/TAIL，describe() 拼装）；toTodoList 三拒绝（trim 空 `invalid todo: \`content\` must be a non-empty string`/重复 `invalid todos: duplicate content ${JSON.stringify}`/!allowParallel 多活跃 `invalid todos: at most one task may be in_progress (got ${active})`）；execute 先校验后判 agent 缺席（`todo_write requires an owning agent session`）→append('todo/write',{todos})→{todos:[{content,status}],counts:{pending,inProgress,completed}}（wire 键 inProgress=协议豁免）；render `Updated todo list: ${pending} pending, ${inProgress} in progress, ${completed} completed.`；presentCall {card:'generic',title:'Update todo list',kind:'other',rawInput:args.todos}；投影 key todos/stateVersion 2/init null/apply todo/write→data.todos|turn/start→null|其他保持/wire view=state；**无 section 注册/无 presentResult/无 presentationMeta**；注册参数 catalog JSON-Schema 形（required 数组），output schemastery 形（属性行 required:true，todos 前 counts 后）
+- catalog docs/tool-catalog.md:2565-2611 载拼装后 description（true 变体）+完整参数表→脚本抽取面齐；SINGLE 段仅存源码→脚本增专用四段抽取（仿 glob overcap 特例臂）
+- fr-tools-builtin 方法号新段：todo 90(execute)/91(render)/92(presentCall)，todos fold=901（working_directory fold=900 已占）；registration 用部分面 json!（read_image/str_replace_editor 判例：无 presentResult/presentationMeta 键）
+- 投影继电帧（fr-session projections.rs 已核）：register{key,stateVersion,fold{service,method}}，fold 请求{header,inheritedEventCount,events}→应答{state}
+- grant 判例已备：grant("session-projections","builtin-tools") 在位（继电调 fold 免声明）
+- CONFIG spec 六组场景=4 组 20 条（jobs-local 8/schedule 4/tool-jobs 6/tool-todo 2；goal/tool-goal 键无独立 config 场景，行为面在 TOOLS spec :997）→bind-config-tests.py PAIRS 增对+binding-audit.md 增验证条目（一测多场景>2 判例=16b bash 11 场景）
+- TOOLS spec todo_write 场景组 :771-829 共 10 条；section 场景改否定跟 Q16b-5A 判例（15601a0：标题加「缺席」+Then 改「无说明 section（dsh 真源…不注入 systemPrompt）；注册表恰七条 tool:* section 且 order 位于 1000-3000」）；绑 bash 判例（全 schema 钉测一测多场景）
+- dump_cli 钉测为内容断言（complete:true/contains）——注册表加条目安全；compile 校验槽 schema_of 由宿主传 lookup，加条目即生效

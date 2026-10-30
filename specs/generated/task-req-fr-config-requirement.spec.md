@@ -1030,49 +1030,49 @@ Scenario: config dsh-headless json 约束
   那么 配置行 [json:false] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-jobs-local maxConcurrentJobsPerOwner 默认
-  Test: pending_req_fr_config_config_dsh_jobs_local_maxconcurrentjobsperowner
+  Test: shell_config_pins_jobs_local_group
   假设 插件 dsh-jobs-local 已注册
   当 读取解析后配置时
   那么 配置行 [maxConcurrentJobsPerOwner:10] 的默认值按目录行实现
 
 Scenario: config dsh-jobs-local maxConcurrentJobsPerOwner 约束
-  Test: pending_req_fr_config_config_dsh_jobs_local_maxconcurrentjobsperowner
+  Test: shell_config_pins_jobs_local_group
   假设 插件 dsh-jobs-local 已注册
   当 校验与生效时
   那么 配置行 [maxConcurrentJobsPerOwner:10] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-jobs-local retainBytes 默认
-  Test: pending_req_fr_config_config_dsh_jobs_local_retainbytes
+  Test: shell_config_pins_jobs_local_group
   假设 插件 dsh-jobs-local 已注册
   当 读取解析后配置时
   那么 配置行 [retainBytes:262144] 的默认值按目录行实现
 
 Scenario: config dsh-jobs-local retainBytes 约束
-  Test: pending_req_fr_config_config_dsh_jobs_local_retainbytes
+  Test: shell_config_pins_jobs_local_group
   假设 插件 dsh-jobs-local 已注册
   当 校验与生效时
   那么 配置行 [retainBytes:262144] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-jobs-local settledRetainBytes 默认
-  Test: pending_req_fr_config_config_dsh_jobs_local_settledretainbytes
+  Test: shell_config_pins_jobs_local_group
   假设 插件 dsh-jobs-local 已注册
   当 读取解析后配置时
   那么 配置行 [settledRetainBytes:16384] 的默认值按目录行实现
 
 Scenario: config dsh-jobs-local settledRetainBytes 约束
-  Test: pending_req_fr_config_config_dsh_jobs_local_settledretainbytes
+  Test: shell_config_pins_jobs_local_group
   假设 插件 dsh-jobs-local 已注册
   当 校验与生效时
   那么 配置行 [settledRetainBytes:16384] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-jobs-local pumpPollMs 默认
-  Test: pending_req_fr_config_config_dsh_jobs_local_pumppollms
+  Test: shell_config_pins_jobs_local_group
   假设 插件 dsh-jobs-local 已注册
   当 读取解析后配置时
   那么 配置行 [pumpPollMs:150] 的默认值按目录行实现
 
 Scenario: config dsh-jobs-local pumpPollMs 约束
-  Test: pending_req_fr_config_config_dsh_jobs_local_pumppollms
+  Test: shell_config_pins_jobs_local_group
   假设 插件 dsh-jobs-local 已注册
   当 校验与生效时
   那么 配置行 [pumpPollMs:150] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
@@ -1246,25 +1246,25 @@ Scenario: config dsh-sandbox-policy workspaceRoot 约束
   那么 配置行 [workspaceRoot:process.cwd()] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-schedule deliveryHistoryDays 默认
-  Test: pending_req_fr_config_config_dsh_schedule_deliveryhistorydays
+  Test: builtin_config_pins_delivery_history_group
   假设 插件 dsh-schedule 已注册
   当 读取解析后配置时
   那么 配置行 [deliveryHistoryDays:30] 的默认值按目录行实现
 
 Scenario: config dsh-schedule deliveryHistoryDays 约束
-  Test: pending_req_fr_config_config_dsh_schedule_deliveryhistorydays
+  Test: builtin_config_pins_delivery_history_group
   假设 插件 dsh-schedule 已注册
   当 校验与生效时
   那么 配置行 [deliveryHistoryDays:30] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-schedule deliveryHistoryRecords 默认
-  Test: pending_req_fr_config_config_dsh_schedule_deliveryhistoryrecords
+  Test: builtin_config_pins_delivery_history_group
   假设 插件 dsh-schedule 已注册
   当 读取解析后配置时
   那么 配置行 [deliveryHistoryRecords:200] 的默认值按目录行实现
 
 Scenario: config dsh-schedule deliveryHistoryRecords 约束
-  Test: pending_req_fr_config_config_dsh_schedule_deliveryhistoryrecords
+  Test: builtin_config_pins_delivery_history_group
   假设 插件 dsh-schedule 已注册
   当 校验与生效时
   那么 配置行 [deliveryHistoryRecords:200] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
@@ -1606,37 +1606,37 @@ Scenario: config dsh-tool-fs-search sampleOverCapGlobResults 约束
   那么 配置行 [sampleOverCapGlobResults:必填] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-jobs waitTimeoutMs 默认
-  Test: pending_req_fr_config_config_dsh_tool_jobs_waittimeoutms
+  Test: builtin_config_pins_tool_jobs_group
   假设 插件 dsh-tool-jobs 已注册
   当 读取解析后配置时
   那么 配置行 [waitTimeoutMs:30s] 的默认值按目录行实现
 
 Scenario: config dsh-tool-jobs waitTimeoutMs 约束
-  Test: pending_req_fr_config_config_dsh_tool_jobs_waittimeoutms
+  Test: builtin_config_pins_tool_jobs_group
   假设 插件 dsh-tool-jobs 已注册
   当 校验与生效时
   那么 配置行 [waitTimeoutMs:30s] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-jobs maxWaitTimeoutMs 默认
-  Test: pending_req_fr_config_config_dsh_tool_jobs_maxwaittimeoutms
+  Test: builtin_config_pins_tool_jobs_group
   假设 插件 dsh-tool-jobs 已注册
   当 读取解析后配置时
   那么 配置行 [maxWaitTimeoutMs:10min] 的默认值按目录行实现
 
 Scenario: config dsh-tool-jobs maxWaitTimeoutMs 约束
-  Test: pending_req_fr_config_config_dsh_tool_jobs_maxwaittimeoutms
+  Test: builtin_config_pins_tool_jobs_group
   假设 插件 dsh-tool-jobs 已注册
   当 校验与生效时
   那么 配置行 [maxWaitTimeoutMs:10min] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-jobs completionDelivery 默认
-  Test: pending_req_fr_config_config_dsh_tool_jobs_completiondelivery
+  Test: builtin_config_pins_tool_jobs_group
   假设 插件 dsh-tool-jobs 已注册
   当 读取解析后配置时
   那么 配置行 [completionDelivery:'wakeup'] 的默认值按目录行实现
 
 Scenario: config dsh-tool-jobs completionDelivery 约束
-  Test: pending_req_fr_config_config_dsh_tool_jobs_completiondelivery
+  Test: builtin_config_pins_tool_jobs_group
   假设 插件 dsh-tool-jobs 已注册
   当 校验与生效时
   那么 配置行 [completionDelivery:'wakeup'] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
@@ -1750,13 +1750,13 @@ Scenario: config dsh-tool-terminal enableRunInBackground 约束
   那么 配置行 [enableRunInBackground:true] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-todo allowParallelInProgress 默认
-  Test: pending_req_fr_config_config_dsh_tool_todo_allowparallelinprogress
+  Test: builtin_config_pins_todo_switch
   假设 插件 dsh-tool-todo 已注册
   当 读取解析后配置时
   那么 配置行 [allowParallelInProgress:必填部署选择（true=多 in_progress；false=恰一且多标拒绝）] 的默认值按目录行实现
 
 Scenario: config dsh-tool-todo allowParallelInProgress 约束
-  Test: pending_req_fr_config_config_dsh_tool_todo_allowparallelinprogress
+  Test: builtin_config_pins_todo_switch
   假设 插件 dsh-tool-todo 已注册
   当 校验与生效时
   那么 配置行 [allowParallelInProgress:必填部署选择（true=多 in_progress；false=恰一且多标拒绝）] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写

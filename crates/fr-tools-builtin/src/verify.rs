@@ -222,6 +222,73 @@ fn fs_escalation_variant_differs_exactly_by_the_escalation_pair() {
     );
 }
 
+/// The `todo_write` registration equals the frozen catalog extraction and
+/// carries the exclusive scheduling face (the dsh source registers no
+/// `isConcurrencySafe` and no presentResult/presentationMeta endpoints,
+/// so the composed row is the base outright; Q97-A's full-schema pin for
+/// the tool family).
+#[test]
+fn todo_write_registration_matches_the_frozen_catalog() {
+    assert_eq!(
+        crate::schema::todo_write_description(true),
+        crate::catalog_gen::TODO_WRITE_DESCRIPTION
+    );
+    // The false variant differs exactly by the middle segment (the dsh
+    // describe() composition).
+    assert_eq!(
+        crate::schema::todo_write_description(false),
+        format!(
+            "{}{}{}",
+            crate::catalog_gen::TODO_WRITE_DESCRIPTION_HEAD,
+            crate::catalog_gen::TODO_WRITE_DESCRIPTION_SINGLE,
+            crate::catalog_gen::TODO_WRITE_DESCRIPTION_TAIL
+        )
+    );
+    let frozen: Value = serde_json::from_str(crate::catalog_gen::TODO_WRITE_PARAMETERS_JSON)
+        .expect("the frozen table parses");
+    assert_eq!(crate::schema::todo_write_parameters(), frozen);
+    // The output contract rides the dsh source surface (the schemastery
+    // row form; the inProgress wire key is the protocol exemption).
+    let output = crate::schema::todo_write_output_schema();
+    assert_eq!(
+        output["properties"]
+            .as_object()
+            .expect("properties")
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["todos", "counts"]
+    );
+    assert_eq!(
+        output["properties"]["counts"]["properties"]
+            .as_object()
+            .expect("counts properties")
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["pending", "inProgress", "completed"]
+    );
+    assert_eq!(
+        output["properties"]["todos"]["items"]["properties"]["status"]["enum"],
+        serde_json::json!(["pending", "in_progress", "completed"])
+    );
+    // The scheduling face: no `isConcurrencySafe` key (fail-closed
+    // exclusive) and the `other` presentation family riding presentCall.
+    let registration = crate::plugin_shell::todo_write_registration();
+    assert!(
+        registration.get("isConcurrencySafe").is_none(),
+        "the tool stays exclusive"
+    );
+    assert_eq!(
+        registration["presentCall"]["service"],
+        crate::service::SERVICE_NAME
+    );
+    assert_eq!(
+        crate::todo::present_call(&serde_json::json!({
+            "todos": [{"content": "a", "status": "pending"}]
+        }))["kind"],
+        serde_json::json!("other")
+    );
+}
+
 /// The fs output contracts pin the canonical shapes (the catalog
 /// documents parameters alone; the output schemas ride the dsh tool
 /// sources).

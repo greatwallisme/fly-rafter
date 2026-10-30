@@ -97,7 +97,7 @@ Scenario: run_in_background 产生可管理作业
   那么 job_list 可见、job_output 可读、job_kill 可终止
 
 Scenario: todo 状态流转校验
-  Test: pending_req_fr_builtin_tools_todo
+  Test: execute_appends_and_counts_and_refuses_without_an_agent
   假设 todo 列表含 pending、in_progress 与 completed 项
   当 todo_write 提交状态变更时
   那么 非法流转被拒，合法流转写入
@@ -769,61 +769,61 @@ Scenario: web_fetch 行为 1
   那么 解码为文本；config fetchTimeoutMs 30000、fetchMaxOutputChars 200000、search/fetch 注册开关默认 true
 
 Scenario: todo_write 调度与呈现
-  Test: pending_req_fr_builtin_tools_todo_write
+  Test: todo_write_registration_matches_the_frozen_catalog
   假设 合约要求的行为已实现
   当 读取工具 todo_write 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 other
 
 Scenario: todo_write 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_todo_write
+  Test: todo_write_registration_matches_the_frozen_catalog
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
-Scenario: todo_write 说明 section 注册
-  Test: pending_req_fr_builtin_tools_todo_write_section
+Scenario: todo_write 说明 section 注册缺席
+  Test: prompt_sections_pin_the_seven_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 工具 todo_write 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
+  那么 工具 todo_write 无说明 section（dsh 真源 tool-todo 不注入 systemPrompt）；注册表恰七条 tool:* section 且 order 位于 1000-3000
 
 Scenario: todo_write 参数 todos 形状
-  Test: pending_req_fr_builtin_tools_todo_write_todos
+  Test: todo_write_registration_matches_the_frozen_catalog
   假设 工具 todo_write 已注册
   当 校验 schema 时
   那么 参数行 [todos:array<object>:req（完整表替换）] 的名称与类型按目录行实现
 
 Scenario: todo_write 参数 todos 约束
-  Test: pending_req_fr_builtin_tools_todo_write_todos
+  Test: todo_write_registration_matches_the_frozen_catalog
   假设 工具 todo_write 已注册
   当 校验 schema 时
   那么 参数行 [todos:array<object>:req（完整表替换）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: todo_write 参数 todos[].content 形状
-  Test: pending_req_fr_builtin_tools_todo_write_todos_content
+  Test: todo_write_registration_matches_the_frozen_catalog
   假设 工具 todo_write 已注册
   当 校验 schema 时
   那么 参数行 [todos[].content:string:req] 的名称与类型按目录行实现
 
 Scenario: todo_write 参数 todos[].content 约束
-  Test: pending_req_fr_builtin_tools_todo_write_todos_content
+  Test: todo_write_registration_matches_the_frozen_catalog
   假设 工具 todo_write 已注册
   当 校验 schema 时
   那么 参数行 [todos[].content:string:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: todo_write 参数 todos[].status 形状
-  Test: pending_req_fr_builtin_tools_todo_write_todos_status
+  Test: todo_write_registration_matches_the_frozen_catalog
   假设 工具 todo_write 已注册
   当 校验 schema 时
   那么 参数行 [todos[].status:string:req:enum[pending|in_progress|completed]] 的名称与类型按目录行实现
 
 Scenario: todo_write 参数 todos[].status 约束
-  Test: pending_req_fr_builtin_tools_todo_write_todos_status
+  Test: todo_write_registration_matches_the_frozen_catalog
   假设 工具 todo_write 已注册
   当 校验 schema 时
   那么 参数行 [todos[].status:string:req:enum[pending|in_progress|completed]] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: todo_write 行为 1
-  Test: pending_req_fr_builtin_tools_todo_write_1
+  Test: execute_appends_and_counts_and_refuses_without_an_agent
   假设 工具 todo_write 执行时
   当 达到触发条件时
   那么 session 持有状态；并行工作可多个 in_progress（allowParallelInProgress:true），false 则恰一活跃且多标拒绝

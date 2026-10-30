@@ -451,3 +451,59 @@ pub const STR_REPLACE_EDITOR_OLD_STR_TEXT: &str = r"Required string parameter of
 
 /// The `str_replace_editor` `view_range` parameter description (catalog-verbatim).
 pub const STR_REPLACE_EDITOR_VIEW_RANGE_TEXT: &str = r"Optional parameter of `view` command when `path` points to a file. If omitted or null, the full file is shown. If provided, the file will be shown in the indicated line number range, e.g. [11, 12] will show lines 11 and 12. Indexing at 1 to start. Setting `[start_line, -1]` shows all lines from `start_line` to the end of the file.";
+
+/// The `todo_write` tool description (catalog-verbatim).
+pub const TODO_WRITE_DESCRIPTION: &str = r"Record and update a task list to plan multi-step work and show progress; skip it for trivial single-step tasks. Add one todo per concrete step before you start. While work remains, keep the todos being worked on `in_progress`, several only when work runs in parallel. Mark each todo `completed` as soon as it is done.";
+
+/// The `todo_write` parameter table (the json block, verbatim).
+pub const TODO_WRITE_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "todos": {
+      "type": "array",
+      "description": "The COMPLETE task list, replacing any previous list.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "What the task is — a short imperative line."
+          },
+          "status": {
+            "type": "string",
+            "description": "pending (not started) | in_progress (now) | completed (done).",
+            "enum": [
+              "pending",
+              "in_progress",
+              "completed"
+            ]
+          }
+        },
+        "required": [
+          "content",
+          "status"
+        ]
+      }
+    }
+  },
+  "required": [
+    "todos"
+  ]
+}"#;
+
+/// The `todo_write` description head segment (the policy-stable prefix, source-verbatim; the composed description prepends it to the active-status clause).
+pub const TODO_WRITE_DESCRIPTION_HEAD: &str = r"Record and update a task list to plan multi-step work and show progress; skip it for trivial single-step tasks. Add one todo per concrete step before you start. ";
+
+/// The `todo_write` description middle segment (the dsh `DESCRIPTION_PARALLEL` constant, source-verbatim; the parallel variant's active-status clause).
+pub const TODO_WRITE_DESCRIPTION_PARALLEL: &str = r"While work remains, keep the todos being worked on `in_progress`, several only when work runs in parallel. ";
+
+/// The `todo_write` description middle segment (the dsh `DESCRIPTION_SINGLE` constant, source-verbatim; the single-active variant's active-status clause).
+pub const TODO_WRITE_DESCRIPTION_SINGLE: &str =
+    r"While work remains, keep exactly one todo `in_progress`. ";
+
+/// The `todo_write` description tail segment (the policy-stable suffix, source-verbatim).
+pub const TODO_WRITE_DESCRIPTION_TAIL: &str = r"Mark each todo `completed` as soon as it is done.";
+
+/// The `todo_write` `todos` parameter description (catalog-verbatim).
+pub const TODO_WRITE_TODOS_TEXT: &str = r"The COMPLETE task list, replacing any previous list.";

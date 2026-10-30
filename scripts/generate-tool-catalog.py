@@ -141,6 +141,13 @@ TOOLS = {
         ],
         "none",
     ),
+    "todo_write": (
+        "TODO_WRITE",
+        [
+            ("todos", "TODOS_TEXT"),
+        ],
+        "none",
+    ),
 }
 
 HEADER = """\
@@ -272,6 +279,24 @@ def extract_section_text_segments(source, tool):
     return kept
 
 
+def extract_todo_description_segments(source):
+    """Extracts the todo description's four dsh constants (HEAD, PARALLEL,
+    SINGLE, TAIL): each is a single-quoted-literal concatenation whose
+    statement body sits inside its blank-line-delimited statement block."""
+    segments = {}
+    for name in ("HEAD", "PARALLEL", "SINGLE", "TAIL"):
+        anchor = source.find(f"const DESCRIPTION_{name}")
+        if anchor < 0:
+            raise ExtractError(f"todo source carries no DESCRIPTION_{name}")
+        end = source.find("\n\n", anchor)
+        statements = source[anchor:end if end > 0 else len(source)]
+        literals = re.findall(r"'((?:[^'\\]|\\.)*)'", statements)
+        if not literals:
+            raise ExtractError(f"DESCRIPTION_{name} parses no literals")
+        segments[name] = "".join(ts_unescape(segment) for segment in literals)
+    return segments
+
+
 def extract_overcap_variants(source):
     """Extracts the glob description's over-cap behavior phrases (the dsh
     `overCapDescription` ternary): the sampled phrase and the
@@ -383,6 +408,23 @@ def emit():
             blocks.append(
                 f"pub const GLOB_OVERCAP_HEAD_TEXT: &str = {raw_literal(head)};\n"
             )
+        if tool == "todo_write":
+            with open(os.path.join(source_root, "packages", "todo", "tool-todo", "src", "index.ts"), encoding="utf-8") as handle:
+                source = handle.read()
+            segments = extract_todo_description_segments(source)
+            labels = {
+                "HEAD": "head segment (the policy-stable prefix, source-verbatim; the composed description prepends it to the active-status clause)",
+                "PARALLEL": "middle segment (the dsh `DESCRIPTION_PARALLEL` constant, source-verbatim; the parallel variant's active-status clause)",
+                "SINGLE": "middle segment (the dsh `DESCRIPTION_SINGLE` constant, source-verbatim; the single-active variant's active-status clause)",
+                "TAIL": "tail segment (the policy-stable suffix, source-verbatim)",
+            }
+            for name in ("HEAD", "PARALLEL", "SINGLE", "TAIL"):
+                blocks.append(
+                    f"\n/// The `todo_write` description {labels[name]}.\n"
+                )
+                blocks.append(
+                    f"pub const TODO_WRITE_DESCRIPTION_{name}: &str = {raw_literal(brand_map(segments[name]))};\n"
+                )
         for key, suffix in keys:
             text = brand_map(parameter_text(parsed, key))
             blocks.append(

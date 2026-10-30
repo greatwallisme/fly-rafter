@@ -1243,6 +1243,48 @@ mod tests {
     use super::*;
     use serde_json::Value;
 
+    /// The baked `RegistryConfig` defaults equal the declared config-schema
+    /// defaults for the jobs-local group (the fr-schema `fr-shell`
+    /// declaration; the dual-source drift pin — the wire judgment's
+    /// equivalent-value test for the config face).
+    #[test]
+    fn registry_config_defaults_match_the_declared_schema() {
+        let schema = fr_schema::lookup("fr-shell").expect("the fr-shell declaration");
+        let projected = fr_schema::to_json_schema(schema);
+        let rows = projected
+            .pointer("/anyOf/0/properties")
+            .expect("projection properties");
+        let config = RegistryConfig::default();
+        for (key, expected) in [
+            (
+                "max-concurrent-jobs-per-owner",
+                i64::try_from(config.max_concurrent_jobs_per_owner)
+                    .expect("the job limit fits i64"),
+            ),
+            (
+                "retain-bytes",
+                i64::try_from(config.retain_bytes).expect("the retention cap fits i64"),
+            ),
+            (
+                "settled-retain-bytes",
+                i64::try_from(config.settled_retain_bytes).expect("the settled cap fits i64"),
+            ),
+            (
+                "pump-poll-ms",
+                i64::try_from(config.pump_poll_ms).expect("the poll interval fits i64"),
+            ),
+        ] {
+            let row = rows
+                .get(key)
+                .unwrap_or_else(|| panic!("projection carries {key}"));
+            assert_eq!(
+                row.get("default"),
+                Some(&serde_json::json!(expected)),
+                "{key} drifted between the baked config and the declaration"
+            );
+        }
+    }
+
     /// One recording session log (the durable lifecycle records).
     #[derive(Debug, Default)]
     struct RecordingLog {

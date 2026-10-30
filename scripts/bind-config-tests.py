@@ -92,6 +92,30 @@ PAIRS = [
     ("注册表命中投影 configN", "pending_req_fr_config", "registry_hit_projects_config_defs"),
     ("同名异 schema 投影分裂告警", "pending_req_fr_config", "ambiguous_name_splits_projections_and_warns"),
     ("查无 schema 标注 absent", "pending_req_fr_config", "absent_entries_reference_unknown_config"),
+    # 16c batch 2: the six config groups land as the fr-shell and
+    # fr-tools-builtin fr-schema declarations; each group's 默认+约束
+    # scenario pair binds to the group's declaration pin test (one test
+    # per group asserts every key's default and constraint face).
+    ("config dsh-jobs-local maxConcurrentJobsPerOwner 默认", "pending_req_fr_config", "shell_config_pins_jobs_local_group"),
+    ("config dsh-jobs-local maxConcurrentJobsPerOwner 约束", "pending_req_fr_config", "shell_config_pins_jobs_local_group"),
+    ("config dsh-jobs-local retainBytes 默认", "pending_req_fr_config", "shell_config_pins_jobs_local_group"),
+    ("config dsh-jobs-local retainBytes 约束", "pending_req_fr_config", "shell_config_pins_jobs_local_group"),
+    ("config dsh-jobs-local settledRetainBytes 默认", "pending_req_fr_config", "shell_config_pins_jobs_local_group"),
+    ("config dsh-jobs-local settledRetainBytes 约束", "pending_req_fr_config", "shell_config_pins_jobs_local_group"),
+    ("config dsh-jobs-local pumpPollMs 默认", "pending_req_fr_config", "shell_config_pins_jobs_local_group"),
+    ("config dsh-jobs-local pumpPollMs 约束", "pending_req_fr_config", "shell_config_pins_jobs_local_group"),
+    ("config dsh-schedule deliveryHistoryDays 默认", "pending_req_fr_config", "builtin_config_pins_delivery_history_group"),
+    ("config dsh-schedule deliveryHistoryDays 约束", "pending_req_fr_config", "builtin_config_pins_delivery_history_group"),
+    ("config dsh-schedule deliveryHistoryRecords 默认", "pending_req_fr_config", "builtin_config_pins_delivery_history_group"),
+    ("config dsh-schedule deliveryHistoryRecords 约束", "pending_req_fr_config", "builtin_config_pins_delivery_history_group"),
+    ("config dsh-tool-jobs waitTimeoutMs 默认", "pending_req_fr_config", "builtin_config_pins_tool_jobs_group"),
+    ("config dsh-tool-jobs waitTimeoutMs 约束", "pending_req_fr_config", "builtin_config_pins_tool_jobs_group"),
+    ("config dsh-tool-jobs maxWaitTimeoutMs 默认", "pending_req_fr_config", "builtin_config_pins_tool_jobs_group"),
+    ("config dsh-tool-jobs maxWaitTimeoutMs 约束", "pending_req_fr_config", "builtin_config_pins_tool_jobs_group"),
+    ("config dsh-tool-jobs completionDelivery 默认", "pending_req_fr_config", "builtin_config_pins_tool_jobs_group"),
+    ("config dsh-tool-jobs completionDelivery 约束", "pending_req_fr_config", "builtin_config_pins_tool_jobs_group"),
+    ("config dsh-tool-todo allowParallelInProgress 默认", "pending_req_fr_config", "builtin_config_pins_todo_switch"),
+    ("config dsh-tool-todo allowParallelInProgress 约束", "pending_req_fr_config", "builtin_config_pins_todo_switch"),
 ]
 
 

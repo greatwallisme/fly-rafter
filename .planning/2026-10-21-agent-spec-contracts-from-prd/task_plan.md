@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 16 **16c 批 1 已落**（fr-storage crate 全绿：27 tests 四门，workspace 1313；Q16c-3B PRD 4.5 增行生效）。**下一动作=16c 批 2：fr-wire 三事件常量（todo/write、goal/change、schedule/change）+fr-config 六组新键+todo_write 全件（projection todos v2+工具+catalog+section 否定钉测）。**
+Phase 16 **16c 批 2 已落**（fr-wire 三事件常量+fr-schema 六组键首两 slug 条目+bundle 行+todo_write 全件：fr-tools-builtin 124 tests、workspace 1325/0、TOOLS 107/0/302、CONFIG 80/0/239、装配缺陷修复 descriptor inject 补 session-projections）。**下一动作=16c 批 3：goal 域（fold 全量含 goal 源推进 Q16c-2A+service+投影 goal v6）+create/get/update_goal 三工具+tool:goal section（{{blocked_after}} 模板抽取）。**
 
 ## Phases
 
@@ -145,7 +145,7 @@ Phase 16 **16c 批 1 已落**（fr-storage crate 全绿：27 tests 四门，work
 - [x] 16a 批 3（收口）：fr-tools watcher（signal→jobs 1008）+切片 wait+四投影 trait 接线+SHELL spec 21 场景绑定+Q95-A catalog 脚本+七步流 4-7（lifecycle 21 pass/387 skip；1168 tests 五门绿；section 文本抽取缺口待裁决）
 - [x] 16b 文件组 7 件（批 1-5 全收口：fs 七件+read_image 全家+spec 绑定 70 场景+七步流 4-7；1286 tests 五门绿，Q16b-1A/3A/3B/4A/5A 裁决闭）
 - [x] 16c 批 1：fr-storage crate（dsh storage/storage-domain/storage-json 三包等价插件：spec+facility+domain 写链+JSON single-unit 后端+atomic 协议）+PRD 4.5 增行（Q16c-3B）——27 tests，四门绿，workspace 1313
-- [ ] 16c 批 2：fr-wire 三事件常量（todo/write、goal/change、schedule/change）+fr-config 六组新键+todo_write 全件（投影 todos v2+工具+catalog+section 否定钉测）
+- [ ] 16c 批 2：fr-wire 三事件常量（todo/write、goal/change、schedule/change）+fr-config 六组新键+todo_write 全件（投影 todos v2+工具+catalog+section 否定钉测）——**已落 2026-10-30**（workspace 1325；TOOLS 107/0/302+CONFIG 80/0/239；descriptor inject 缺陷修复）
 - [ ] 16c 批 3：goal 域（fold 全量含 goal 源推进 Q16c-2A+service+投影 goal v6）+create/get/update_goal 三工具+tool:goal section（{{blocked_after}} 模板抽取）
 - [ ] 16c 批 4：job_output/list/kill 三工具+完成通知机全落（Q16c-1A：settled→fitCompletionNotice 截断梯→inject/followup+wakeBudget）+tool:jobs section
 - [ ] 16c 批 5：schedule 域（六规则+jiff Q16c-4A）+fr-storage 接线+service+runtime 投递+schedule 四工具

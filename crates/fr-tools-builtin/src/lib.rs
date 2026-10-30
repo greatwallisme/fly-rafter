@@ -53,6 +53,7 @@ pub mod search_views;
 pub mod service;
 pub mod shell_env;
 pub mod sre_tools;
+pub mod todo;
 pub mod tools;
 #[cfg(test)]
 mod verify;
