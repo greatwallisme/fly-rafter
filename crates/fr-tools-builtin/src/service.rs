@@ -77,6 +77,38 @@ pub const METHOD_EDIT_PRESENT_CALL: u32 = 42;
 pub const METHOD_EDIT_PRESENT_RESULT: u32 = 43;
 /// Method selector: the edit presentation metadata.
 pub const METHOD_EDIT_PRESENTATION_META: u32 = 44;
+/// Method selector: the glob tool body.
+pub const METHOD_GLOB_EXECUTE: u32 = 60;
+/// Method selector: the glob render projection.
+pub const METHOD_GLOB_RENDER: u32 = 61;
+/// Method selector: the glob pending-call presentation.
+pub const METHOD_GLOB_PRESENT_CALL: u32 = 62;
+/// Method selector: the glob completed-result presentation.
+pub const METHOD_GLOB_PRESENT_RESULT: u32 = 63;
+/// Method selector: the glob presentation metadata.
+pub const METHOD_GLOB_PRESENTATION_META: u32 = 64;
+/// Method selector: the glob capped-result spill listener (the
+/// post-execute CPS arm).
+pub const METHOD_GLOB_SPILL: u32 = 65;
+/// Method selector: the grep tool body.
+pub const METHOD_GREP_EXECUTE: u32 = 70;
+/// Method selector: the grep render projection.
+pub const METHOD_GREP_RENDER: u32 = 71;
+/// Method selector: the grep pending-call presentation.
+pub const METHOD_GREP_PRESENT_CALL: u32 = 72;
+/// Method selector: the grep completed-result presentation.
+pub const METHOD_GREP_PRESENT_RESULT: u32 = 73;
+/// Method selector: the grep presentation metadata.
+pub const METHOD_GREP_PRESENTATION_META: u32 = 74;
+/// Method selector: the grep capped-result spill listener (the
+/// post-execute CPS arm).
+pub const METHOD_GREP_SPILL: u32 = 75;
+/// Method selector: the `str_replace_editor` tool body.
+pub const METHOD_STR_REPLACE_EDITOR_EXECUTE: u32 = 80;
+/// Method selector: the `str_replace_editor` render projection.
+pub const METHOD_STR_REPLACE_EDITOR_RENDER: u32 = 81;
+/// Method selector: the `str_replace_editor` pending-call presentation.
+pub const METHOD_STR_REPLACE_EDITOR_PRESENT_CALL: u32 = 82;
 
 /// The escalate-to modes this composition advertises (the dsh
 /// `ESCALATION_TARGETS` words in table order).
@@ -169,7 +201,7 @@ impl BuiltinTools {
             METHOD_DESCRIBE => json!({
                 "plugin": PLUGIN_NAME,
                 "service": SERVICE_NAME,
-                "methods": describe_methods(),
+                "methods": describe_methods().as_slice(),
             }),
             METHOD_BASH_EXECUTE => {
                 return self.serve_execute(tools::ShellVariant::Bash, &request);
@@ -304,9 +336,10 @@ pub fn fold_log(request: &Value) -> Value {
 }
 
 /// The describe surface's method names (the registration reality: the
-/// two shell tools' bands, the read/write/edit bands, and the
-/// projection fold; excluded surfaces never appear here).
-const fn describe_methods() -> [&'static str; 26] {
+/// two shell tools' bands, the read/write/edit/glob/grep bands, the
+/// spill listeners, the editor band, and the projection fold; excluded
+/// surfaces never appear here).
+const fn describe_methods() -> [&'static str; 41] {
     [
         "describe",
         "bash.execute",
@@ -333,6 +366,21 @@ const fn describe_methods() -> [&'static str; 26] {
         "edit.presentCall",
         "edit.presentResult",
         "edit.presentationMeta",
+        "glob.execute",
+        "glob.render",
+        "glob.presentCall",
+        "glob.presentResult",
+        "glob.presentationMeta",
+        "glob.spill",
+        "grep.execute",
+        "grep.render",
+        "grep.presentCall",
+        "grep.presentResult",
+        "grep.presentationMeta",
+        "grep.spill",
+        "str_replace_editor.execute",
+        "str_replace_editor.render",
+        "str_replace_editor.presentCall",
         "workingDirectory.fold",
     ]
 }

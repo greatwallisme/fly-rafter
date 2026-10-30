@@ -97,6 +97,95 @@ fn edit_registration_matches_the_frozen_catalog() {
     );
 }
 
+#[test]
+fn glob_registration_matches_the_frozen_catalog() {
+    // The catalog freezes the sampled over-cap variant: the composed
+    // sampled=true description IS the frozen text, and the baked
+    // bundle switch (false) differs by exactly the one phrase.
+    assert_eq!(
+        crate::schema::glob_description(true),
+        crate::catalog_gen::GLOB_DESCRIPTION
+    );
+    let baked = crate::schema::glob_description(
+        crate::search_core::baked_caps().sample_over_cap_glob_results,
+    );
+    assert_eq!(
+        baked,
+        crate::catalog_gen::GLOB_DESCRIPTION.replace(
+            crate::catalog_gen::GLOB_OVERCAP_SAMPLED_TEXT,
+            crate::catalog_gen::GLOB_OVERCAP_HEAD_TEXT,
+        )
+    );
+    assert!(
+        baked.contains("a larger result keeps the first paths and reports"),
+        "{baked}"
+    );
+    let frozen: Value = serde_json::from_str(crate::catalog_gen::GLOB_PARAMETERS_JSON)
+        .expect("the frozen table parses");
+    assert_eq!(crate::schema::glob_parameters(), frozen);
+    let output = crate::schema::glob_output_schema();
+    assert_eq!(
+        output["properties"]
+            .as_object()
+            .expect("properties")
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["root", "paths"]
+    );
+    assert_eq!(output["properties"]["paths"]["items"]["type"], "string");
+}
+
+#[test]
+fn grep_registration_matches_the_frozen_catalog() {
+    assert_eq!(
+        crate::schema::grep_description(),
+        crate::catalog_gen::GREP_DESCRIPTION
+    );
+    let frozen: Value = serde_json::from_str(crate::catalog_gen::GREP_PARAMETERS_JSON)
+        .expect("the frozen table parses");
+    assert_eq!(crate::schema::grep_parameters(), frozen);
+    let output = crate::schema::grep_output_schema();
+    let item = &output["properties"]["matches"]["items"];
+    assert_eq!(
+        item["properties"]
+            .as_object()
+            .expect("properties")
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["path", "lineNumber", "line"]
+    );
+    assert_eq!(item["properties"]["lineNumber"]["type"], "integer");
+}
+
+#[test]
+fn str_replace_editor_registration_matches_the_frozen_catalog() {
+    // The opt-in editor carries no escalation pair and no section (the
+    // dsh source injects no systemPrompt; the Q16b-4A ruling), so the
+    // table is the catalog base outright.
+    assert_eq!(
+        crate::schema::str_replace_editor_description(),
+        crate::catalog_gen::STR_REPLACE_EDITOR_DESCRIPTION
+    );
+    let frozen: Value =
+        serde_json::from_str(crate::catalog_gen::STR_REPLACE_EDITOR_PARAMETERS_JSON)
+            .expect("the frozen table parses");
+    assert_eq!(crate::schema::str_replace_editor_parameters(), frozen);
+    assert_eq!(
+        crate::schema::str_replace_editor_output_schema(),
+        serde_json::json!({ "type": "string" })
+    );
+    // The command enum rides the catalog row verbatim.
+    let parameters = crate::schema::str_replace_editor_parameters();
+    assert_eq!(
+        parameters["properties"]["command"]["enum"],
+        serde_json::json!(["view", "create", "str_replace", "insert"])
+    );
+    assert_eq!(
+        parameters["required"],
+        serde_json::json!(["command", "path"])
+    );
+}
+
 /// The fs escalation variants differ from the frozen bases exactly by
 /// the escalation pair, whose description carries the operation
 /// subject (the dsh `FsSandboxController` judgment).

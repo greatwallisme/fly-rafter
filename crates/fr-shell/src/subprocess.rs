@@ -569,6 +569,9 @@ struct HandleState {
     termination_started: AtomicBool,
     /// The managed range confirmed empty.
     range_gone: AtomicBool,
+    /// The recorded kill cause (the tool-call kill carrier; the first
+    /// writer wins, so a racing settlement still reports the cause).
+    kill_reason: Mutex<Option<String>>,
     /// POSIX group leader pid (`-pid` signalling; negative on Windows).
     group_pid: i32,
     grace_ms: f64,
@@ -599,6 +602,23 @@ impl SubprocessHandle {
     #[must_use]
     pub fn stderr_collector(&self) -> Option<&Arc<OutputCollector>> {
         self.collected.as_ref().map(|(_, stderr)| stderr)
+    }
+
+    /// Records the kill cause before the termination starts (the
+    /// tool-call kill carrier; the first writer wins so a racing
+    /// settlement still reports the cause).
+    pub fn record_kill_reason(&self, reason: &str) {
+        let mut slot = recover(&self.state.kill_reason);
+        if slot.is_none() {
+            *slot = Some(reason.to_owned());
+        }
+    }
+
+    /// The recorded kill cause, when the tool-call carrier killed this
+    /// process.
+    #[must_use]
+    pub fn kill_reason(&self) -> Option<String> {
+        recover(&self.state.kill_reason).clone()
     }
 
     /// Begins the provider's termination procedure on the managed range:
@@ -1016,6 +1036,7 @@ fn new_handle_state(pid: u32, grace_ms: f64) -> HandleState {
         outcome_ready: Condvar::new(),
         termination_started: AtomicBool::new(false),
         range_gone: AtomicBool::new(false),
+        kill_reason: Mutex::new(None),
         group_pid: if is_windows { -1 } else { group_pid_of(pid) },
         grace_ms,
         direct_settled: AtomicBool::new(false),

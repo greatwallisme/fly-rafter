@@ -2228,6 +2228,34 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - **五门全绿**：fmt/clippy workspace -D warnings 0/tests 1186+0（+18=observation 5+fs_domain 13）/doc -D warnings/Windows msvc check fr-tools-builtin 零警告（has_parent_segment cfg(unix) 门）。
 - 过程注记：本批 3 起 Write/heredoc 生成退化全部当场截停（fs_types 两度+补丁期 is::none 签名自检逮住）——小片段+逐段校验纪律再次生效；三处真缺陷由钉测逮住自纠（diff basis 归一/fence 测试前提（/tmp 本为可写根，dsh 同语义）/错误体双编码）。
 
+## 16b 批 3 设计钉（2026-10-30，真源全读+执法点实证后钉存）
+
+### 真源补充全读（批 3 面）
+- dsh tool-fs-search 五文件全读（search-core 413/glob 368/grep 366/presentation 205/direct-call 28）+tool-str-replace-editor/index.ts 532 行全读；tool-catalog.md glob/grep/str_replace_editor 三节（json fence 全在）。
+- fr 侧执法点实证：fr-tools service.rs 监听协议（RegisterListenerRequest{stage,endpoint}/PostEnter→Delegate→PostExit{decision}→Final）；WireToolRegistration.execute 载 AbortWatcher（50ms 轮询 fused signal→jobs 1008 kill，reason "tool call aborted"）；fr-guard-timeout 在 process/插件双形态都是 execute 包裹：own timer fired→替换 tool_timeout_result（TOOL_TIMEOUT，对齐 dsh guard/timeout-policy/src/index.ts:73-75 逐字语义）；fr-shell subprocess face：spawn(WireSpawnSpec{argv,cwd,stdio,grace_ms,env})→{handle}/wait(handle,timeout_ms)→{settled}|outcome{exit_code,signal}/terminate/resolve_executable（PATH）；**subprocess 表无 tool-call 绑定、spawn 信号参恒 None**；jobs kill_by_tool_call 只扫 jobs store。
+- dsh registry abort 语义实证（core/tools/src/index.ts dispatchToolBody）：`isAborted→toolAbortedResult` 只在成功臂（createSuccessResult 之后）；体抛错走 catch→toolErrorResult 原样浮出（含 abort 竞态）。timeout 腿模型最终看到 TOOL_TIMEOUT（guard 替换，含体的 SEARCH_ABORTED）；caller-abort 腿体的 SEARCH_ABORTED 逐字浮出（registry 的 callerCancelled 替换仅及非 isError）。
+- fr 现状偏差实证：registry.rs dispatch_tool_body 在体返回后**无条件** `fused.is_aborted()→tool_aborted_result`（含体错误）——与 dsh 成功臂限定不符，caller-abort 时体的 SEARCH_ABORTED 会被通用 abort 文本吞掉。
+
+### 设计钉（非分叉）
+1. 模块：search_core（SEARCH_* 四码词表+spawn/等待切片+head 保留+workdir 相对化+spill 三 warn 臂）/search_glob/search_grep/search_presentation（SearchMeta 投影+capMetaBytes 尾部丢弃保单件+防御收窄零结果合法）/sre_tools（四命令体+MutationPolicy 简形）。
+2. 方法号（批 0 钉 9 兑现+补）：glob 60-64/grep 70-74/sre 80-82（execute/render/presentCall；sre 无 presentationMeta/presentResult——dsh 同）；spill 监听两法 glob=65/grep=75（工具段延续判例）；describe_methods 26→39。
+3. spawn 经 fr-shell subprocess face（Seams 增 subprocess_spawn/read/wait/terminate/resolve_executable 五法）；DESCRIPTOR inject += "subprocess"（dylib 能力基础；未声明=STATUS_UNDECLARED）；spill-store 不入 inject（机会式 require——UNDECLARED/INACTIVE=dsh ctx.get undefined 同型=臂 2）。
+4. rg 解析序=FR_RIPGREP（绝对+可执行才用）→resolve_executable("rg")（PATH）→SEARCH_FAILED 逐字 dsh 启动失败文案 `could not start its search command (ripgrep launch failed)`；argv 前置 --no-config。
+5. 体等待=wait 切片循环（200ms，jobs 判例）；settle 后 readFrom(0) 双流；completeStdout 双 OVERFLOW 文案逐字；classifyRunFailure（regex parse error|error parsing glob→INVALID_PATTERN）。entry 信号预检结构性缺席（F3 signal 不过线；前置由 dispatch ABORTED_BEFORE_DISPATCH 覆盖，slice-7 判例族）。
+6. spill 三 warn 臂逐字（no session owner/no ctx.spillStore backend/saveText failed）；owner=agent；source {kind:'tool',toolName,callId,label:'result'}；成功不转 isError；M1 无 provider=臂 2 常态如实档载；测试真实文件后端供缝（Q16b-2A）。
+7. post-execute CPS：acceptedDirectCallValue port=accept+content/value 均空+parent 无+name 匹配+!isError+值形状守卫；dsh ctx.tools.get 同一性检查结构性缺席（registry 身份不过线；模块 doc veracity 注记）。
+8. glob/grep 描述组合：catalog 冻结 sampled=true 文案≠baked false 注册变体（恰一短语差，pwsh appendix 判例）；脚本从 glob.ts/grep.ts 源段抽取 head/overcap 两变体/tail+maxResults/maxMatches 插值；冻结钉测 sampled=true 组合对 catalog 逐字。section：tool:glob 1400 单段；tool:grep 1500=base+(read 注册?tail) 段抽取条件组合（write 判例）。
+9. caps 烘焙（bundle 判例）：glob_max_results 100/grep_max_matches 250/grep_max_line_bytes 2000/search_meta_max_bytes 65536/raw_output_max_bytes 20971520/grace_ms 3000/stderr_max_bytes 65536/timeout_ms 30000/sample_over_cap_glob_results=false（bundle 实证）；isConcurrencySafe 缺省（exclusive）；timeoutMs=30000 注册携带。
+10. sre 逐字序（dsh index.ts）：四命令臂；edit_intent 槽在 remap 链外（dsh waterfall 序）；ambiguous 行号表/`%6d` 双空格/view_range 四拒绝/insert_line 界文案/maybeTruncate（UTF-16 单位预算+不劈代理对）；目录两层列唯独（隐藏/node_modules/__pycache__ 排除+`d\troot` 头行+codepoint 序）；MutationPolicy 简形=裸 denial marker 无 hint。
+11. sre 注册门=baked opt-in 旋钮 false→M1 不注册（spec「替代编辑器默认不装配」既裁）；体经 serve 全臂钉测；schema required=[command,path]+五键 oneOf(type|null)；description=DEFAULT_DESCRIPTION catalog 逐字。
+12. catalog 脚本扩源：TOOLS 增 glob(pattern,path)/grep(pattern,path,include)/str_replace_editor 七键；TOOL_SOURCES 增 glob.ts/grep.ts；sre section 旗标=none；emit 侧 sre 跳过 section 抽取。
+13. spec 修场景④（Q16b-4A 已裁）：「str_replace_editor 说明 section 注册」经 authoring 改「description 逐字+presentCall 四臂呈现」；改后 parse+lint 0.7 复验。
+14. freeze 钉测扩 glob/grep/sre 三注册（sre 表即 catalog 原样、无 escalation 对）。
+
+### 分叉裁决（2026-10-30 用户确认，Q16b-3A/3B 双 A）
+- **Q16b-3A** 扩 Q16a-6 载体到 subprocess face：spawn wire spec 增 `tool_call` 绑定；jobs 1008 同扫 subprocess 表（terminate+记 kill 原因）；wait 回执带 kill 原因；search 体映射 dsh SEARCH_ABORTED 逐字文案（超时与 caller-abort 两腿全对齐）。
+- **Q16b-3B** 修码对齐 dsh：fr registry 中止替换臂移入成功臂（仅成功结果被替换，体错误原样浮出），钉测加验。
+
 ## 16b 批 2 设计钉（2026-10-30，真源全读后实施前钉存）
 ### 真源补充全读（批 2 面）
 - dsh tool-fs read/write/edit/read-render/diff/error/mutation-result/sandbox/session-cwd/read-target/index 全读（1561 行）；tool-catalog.md read/write/edit 三节参数表抽得；jsdiff 9.0.0（tool-fs 锁定版）base.js Myers 核心+create.js structuredPatch/buildPatch/splitLines 全读（npm tarball /tmp/jsdiff-src）；dsh-util-code-language 全表读（50 语言扩展+READ_LANG_BY_EXTENSION 5 短名覆盖+SHORT_BY_LANGUAGE）。
@@ -2247,3 +2275,14 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 12. presentResult：read=meta 收窄（语义校验逐字）+信封正则体抽取→card read；write=diffsFromMeta ?? args 兜底（meta 无/空 diff 均兜底）；edit=diffsFromMeta 缺→undefined；write/edit isError→undefined。
 13. working_directory 收尾：FsStat trait+StdFsStat 删除；is_directory=直调 fsio::probe；测试换真实临时目录（fs_domain Scratch 判例）。
 14. regex 入 fr-tools-builtin 依赖（read presentResult 信封解析）；DESCRIPTOR 不动（gate/fs in-crate）。
+
+### 16b 批 3 落地（2026-10-30）：glob/grep+spill 消费+str_replace_editor+修场景④+双裁决载体，workspace 1245 tests（1214→1245）
+- **双裁决落地**：Q16b-3A=kill 载体扩 subprocess face（fr-shell spawn spec 增 `tool_call` 绑定+SubprocessEntry 表+1008 同扫 subprocess 表+HandleState.kill_reason 槽+wait 回执带 kill_reason）；Q16b-3B=fr-tools registry 中止替换臂移入成功臂（dsh dispatchToolBody 对齐：体错误原样浮出，成功结果被 aborted 替换；钉测 caller_abort_keeps_a_thrown_body_error）。
+- **新模块四件**：search_core（SEARCH_* 四码+run_ripgrep 管线+FR_RIPGREP→PATH 解析+to_workdir_relative 词法归一版+head_text/head_items 保留+try_save_formatted_result 三 warn 臂=eprintln 通道）/search_views（SearchMeta 投影+capMetaBytes 尾丢保单件+防御收窄）/search_tools（glob/grep 体+sampleAcrossTopLevel 两阶段化+formatGlobPage/GrepOutput+presentCall/presentResult+spill 监听 CPS enter 帕克/exit 消费+accepted_direct_call_value 条件 port）/sre_tools（四命令体+resolve_view_range f64 全程+maybe_truncate UTF-16 预算+MutationPolicy 简形裸 denial marker+presentCall 四臂）。
+- **接线**：方法号 60-65/70-75/80-82+describe 41 法；DESCRIPTOR inject+="subprocess"；seams 增 subprocess_spawn/read/wait/resolve_executable+spill_store_save_text（UNDECLARED/INACTIVE→Ok(None)=臂 2）；BuiltinState.pending CPS stash；sections 增 glob 1400/grep 1500（段组合 read tail）；注册表七工具+glob/grep timeoutMs=30000+sre BAKED=false 不注册；spill 监听 REGISTER_LISTENER×2。
+- **catalog 脚本**：TOOLS 三元组（stem,keys,section 旗标 plain/segments/none）+TOOL_SOURCES 增 glob.ts/grep.ts+extract_overcap_variants（overCapDescription 三元对）+sre 无 section；catalog_gen.rs 重生成（GLOB/GREP/SRE 常量族+OVERCAP 对+GREP_SECTION_TEXTS 2 段）。
+- **场景④（Q16b-4A）**：spec「str_replace_editor 说明 section 注册」→「说明逐字与呈现四臂」（无 section+description 逐字+presentCall 四臂）；parse+lint Quality 100% exit 0。
+- **钉测**：+31（kill 载体 2/registry abort 1/search_core 9/search_views 3/search_tools 9 含真实 rg 回合/spill 七臂/sre 6 含只读栅/verify 冻结 3/plugin sections 1）。真实 rg 14.1.1 载体：空工作区 exit 2（"No files were searched"）语义入钉测前提。
+- **五门全绿**：fmt/clippy workspace -D warnings 0/tests 1245+0（FR_DSH_SOURCE 必需）/doc 0/Windows msvc 0。合约三开关 0 errors。
+- **过程注记**：本批 6 起 Write/Edit 生成退化当场截停（constructor 碎片×2/serde 占位/describe_methods 占位数组/spill_exec 键坏/" METHOD"键）；clippy 全量清 92→0（doc 段长/反引号/# Errors/# Panics/wildcard map_err→具名弃因/f64 全程比较重构 resolve_view_range/useless_let_if_seq→助手函数）；fr-llm begin_drain 一次负载计时抖动（两次复跑全绿，非本批改动面）。
+- 下一动作：批 4=read_image 全落（fr-attachment durable store+fr-llm resolve-model-info 缝+session 路由头缝）；批 5=spec 绑定全族+七步流 4-7 收口。

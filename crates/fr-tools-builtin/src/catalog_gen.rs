@@ -13,7 +13,7 @@
 /// The `bash` tool description (catalog-verbatim).
 pub const BASH_DESCRIPTION: &str = r"Execute a bash command (`bash -c`) and return its stdout/stderr. Each call runs in a fresh shell; pass `workdir` instead of using `cd`. Managed `$FR_*` variables expose current harness environment facts. Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. Provide `description` before `command` in the arguments. Before any delete or move, verify that the resolved absolute target path is the intended one; never run it against a computed path you have not checked. An unset variable expands to an empty string, so guard variables in such paths with `${VAR:?}`. Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]`, a policy denial: do not retry another way.";
 
-/// The `bash` parameter table (the catalog json block, verbatim).
+/// The `bash` parameter table (the json block, verbatim).
 pub const BASH_PARAMETERS_JSON: &str = r#"{
   "type": "object",
   "properties": {
@@ -66,7 +66,7 @@ pub const BASH_RUN_IN_BACKGROUND_TEXT: &str = r"Run in the background and return
 /// The `pwsh` tool description (catalog-verbatim).
 pub const PWSH_DESCRIPTION: &str = r"Execute a PowerShell command (`pwsh -Command`) and return its stdout/stderr. Each call runs in a fresh pwsh process; pass `workdir` instead of using `cd`. Paths use native Windows form (`C:\...`); read environment variables with `$env:NAME`. Managed `$env:FR_*` variables expose current harness environment facts. Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. On Windows a force-killed command settles as `[exit code: 1]` without a signal marker — treat it as an interruption, not a command failure. Provide `description` before `command` in the arguments. Before any delete or move, verify that the resolved absolute target path is the intended one; never run it against a computed path you have not checked. Do not assign to automatic variables such as `$HOME`; variable names are case-insensitive, so `$home` is the same read-only variable. Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]`, a policy denial: do not retry another way.";
 
-/// The `pwsh` parameter table (the catalog json block, verbatim).
+/// The `pwsh` parameter table (the json block, verbatim).
 pub const PWSH_PARAMETERS_JSON: &str = r#"{
   "type": "object",
   "properties": {
@@ -118,7 +118,7 @@ pub const PWSH_RUN_IN_BACKGROUND_TEXT: &str = r"Run in the background and return
 /// The `read` tool description (catalog-verbatim).
 pub const READ_DESCRIPTION: &str = r"Read a UTF-8 text file and return line-numbered content.";
 
-/// The `read` parameter table (the catalog json block, verbatim).
+/// The `read` parameter table (the json block, verbatim).
 pub const READ_PARAMETERS_JSON: &str = r#"{
   "type": "object",
   "properties": {
@@ -155,7 +155,7 @@ pub const READ_LIMIT_TEXT: &str = r"Maximum number of lines to return. Defaults 
 /// The `write` tool description (catalog-verbatim).
 pub const WRITE_DESCRIPTION: &str = r"Create or fully replace a UTF-8 text file.";
 
-/// The `write` parameter table (the catalog json block, verbatim).
+/// The `write` parameter table (the json block, verbatim).
 pub const WRITE_PARAMETERS_JSON: &str = r#"{
   "type": "object",
   "properties": {
@@ -190,7 +190,7 @@ pub const WRITE_CONTENT_TEXT: &str = r"Full UTF-8 text content to write.";
 /// The `edit` tool description (catalog-verbatim).
 pub const EDIT_DESCRIPTION: &str = r"Edit an existing UTF-8 text file by replacing literal text.";
 
-/// The `edit` parameter table (the catalog json block, verbatim).
+/// The `edit` parameter table (the json block, verbatim).
 pub const EDIT_PARAMETERS_JSON: &str = r#"{
   "type": "object",
   "properties": {
@@ -234,3 +234,199 @@ pub const EDIT_NEW_STRING_TEXT: &str =
 /// The `edit` `replace_all` parameter description (catalog-verbatim).
 pub const EDIT_REPLACE_ALL_TEXT: &str =
     r"Replace all matches. Defaults to false; when false, old_string must appear exactly once.";
+
+/// The `glob` tool description (catalog-verbatim).
+pub const GLOB_DESCRIPTION: &str = r"Find files, not directories, whose paths match a glob pattern, including hidden and ignored files. Returns up to 100 paths in modification-time order; a larger result is sampled across top-level entries and reports where the complete list was saved.";
+
+/// The `glob` parameter table (the json block, verbatim).
+pub const GLOB_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "pattern": {
+      "type": "string",
+      "description": "Glob pattern to match file paths against (e.g. \"**/*.ts\", \"src/**/*.test.js\"). A pattern with no \"/\" matches the basename at any depth, so \"*\" and \"*.ts\" both search the whole tree; include a separator to anchor the depth."
+    },
+    "path": {
+      "type": "string",
+      "description": "Directory to search in. Defaults to the session workspace; a relative path resolves against it."
+    }
+  },
+  "required": [
+    "pattern"
+  ]
+}"#;
+
+/// The `tool:glob` prompt-section text (the dsh `ctx.systemPrompt.section` call, source-verbatim).
+pub const GLOB_SECTION_TEXT: &str =
+    r"Use the glob tool — not shell find — to discover files by path pattern.";
+
+/// The sampled over-cap phrase of the `glob` description (the dsh `overCapDescription` ternary's true arm, source-verbatim; the composed registration swaps by the baked sampling switch).
+pub const GLOB_OVERCAP_SAMPLED_TEXT: &str = r"is sampled across top-level entries";
+
+/// The head over-cap phrase of the `glob` description (the dsh `overCapDescription` ternary's false arm, source-verbatim).
+pub const GLOB_OVERCAP_HEAD_TEXT: &str = r"keeps the first paths";
+
+/// The `glob` `pattern` parameter description (catalog-verbatim).
+pub const GLOB_PATTERN_TEXT: &str = r#"Glob pattern to match file paths against (e.g. "**/*.ts", "src/**/*.test.js"). A pattern with no "/" matches the basename at any depth, so "*" and "*.ts" both search the whole tree; include a separator to anchor the depth."#;
+
+/// The `glob` `path` parameter description (catalog-verbatim).
+pub const GLOB_PATH_TEXT: &str = r"Directory to search in. Defaults to the session workspace; a relative path resolves against it.";
+
+/// The `grep` tool description (catalog-verbatim).
+pub const GREP_DESCRIPTION: &str = r"Search file contents with a ripgrep regular expression. Returns matching lines with line numbers, grouped by file. Returns up to 250 matches; a larger result reports where the complete match list was saved.";
+
+/// The `grep` parameter table (the json block, verbatim).
+pub const GREP_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "pattern": {
+      "type": "string",
+      "description": "Regular expression to search for (ripgrep syntax)."
+    },
+    "path": {
+      "type": "string",
+      "description": "File or directory to search. Defaults to the session workspace; a relative path resolves against it."
+    },
+    "include": {
+      "type": "string",
+      "description": "One glob filter for which files to search (e.g. \"*.ts\", \"*.{js,jsx}\"). Not a list; negation is not supported."
+    }
+  },
+  "required": [
+    "pattern"
+  ]
+}"#;
+
+/// The `tool:grep` prompt-section text segments (the dsh `ctx.systemPrompt.section` call, source-verbatim; the consumer composes them with the source's conditional rule).
+pub const GREP_SECTION_TEXTS: [&str; 2] = [
+    r"Use the grep tool — not shell grep or rg — to search file contents.",
+    r" Use read on a matched file when you need surrounding context.",
+];
+
+/// The `grep` `pattern` parameter description (catalog-verbatim).
+pub const GREP_PATTERN_TEXT: &str = r"Regular expression to search for (ripgrep syntax).";
+
+/// The `grep` `path` parameter description (catalog-verbatim).
+pub const GREP_PATH_TEXT: &str = r"File or directory to search. Defaults to the session workspace; a relative path resolves against it.";
+
+/// The `grep` `include` parameter description (catalog-verbatim).
+pub const GREP_INCLUDE_TEXT: &str = r#"One glob filter for which files to search (e.g. "*.ts", "*.{js,jsx}"). Not a list; negation is not supported."#;
+
+/// The `str_replace_editor` tool description (catalog-verbatim).
+pub const STR_REPLACE_EDITOR_DESCRIPTION: &str = r"Custom editing tool for viewing, creating and editing files
+* State is persistent across command calls and discussions with the user
+* If `path` is a file, `view` displays the result of applying `cat -n`. If `path` is a directory, `view` lists non-hidden files and directories up to 2 levels deep
+* The `create` command cannot be used if the specified `path` already exists as a file
+* If a `command` generates a long output, it will be truncated and marked with `<response clipped>`
+* A null placeholder for a parameter unused by the selected command is treated as omitted. Required parameters still need values; omit `str_replace.new_str` rather than setting it to null when deleting a match
+
+Notes for using the `str_replace` command:
+* The `old_str` parameter should match EXACTLY one or more consecutive lines from the original file. Be mindful of whitespaces!
+* If the `old_str` parameter is not unique in the file, the replacement will not be performed. Make sure to include enough context in `old_str` to make it unique
+* The `new_str` parameter should contain the edited lines that should replace the `old_str`";
+
+/// The `str_replace_editor` parameter table (the json block, verbatim).
+pub const STR_REPLACE_EDITOR_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "description": "The commands to run. Allowed options are: `view`, `create`, `str_replace`, `insert`.",
+      "enum": [
+        "view",
+        "create",
+        "str_replace",
+        "insert"
+      ]
+    },
+    "path": {
+      "type": "string",
+      "description": "Absolute path to file or directory, e.g. `/repo/file.py` or `/repo`."
+    },
+    "file_text": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Required string parameter of `create` command, with the content of the file to be created. A null placeholder is treated as omitted by commands that do not use this parameter."
+    },
+    "insert_line": {
+      "oneOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Required integer parameter of `insert` command. The `new_str` will be inserted AFTER the line `insert_line` of `path`. A null placeholder is treated as omitted by commands that do not use this parameter."
+    },
+    "new_str": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Optional string parameter of `str_replace` command containing the new string (if omitted, no string will be added). Required string parameter of `insert` command containing the string to insert. A null placeholder is accepted only by commands that do not use this parameter."
+    },
+    "old_str": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Required string parameter of `str_replace` command containing the string in `path` to replace. A null placeholder is treated as omitted by commands that do not use this parameter."
+    },
+    "view_range": {
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Optional parameter of `view` command when `path` points to a file. If omitted or null, the full file is shown. If provided, the file will be shown in the indicated line number range, e.g. [11, 12] will show lines 11 and 12. Indexing at 1 to start. Setting `[start_line, -1]` shows all lines from `start_line` to the end of the file."
+    }
+  },
+  "required": [
+    "command",
+    "path"
+  ]
+}"#;
+
+/// The `str_replace_editor` `command` parameter description (catalog-verbatim).
+pub const STR_REPLACE_EDITOR_COMMAND_TEXT: &str =
+    r"The commands to run. Allowed options are: `view`, `create`, `str_replace`, `insert`.";
+
+/// The `str_replace_editor` `path` parameter description (catalog-verbatim).
+pub const STR_REPLACE_EDITOR_PATH_TEXT: &str =
+    r"Absolute path to file or directory, e.g. `/repo/file.py` or `/repo`.";
+
+/// The `str_replace_editor` `file_text` parameter description (catalog-verbatim).
+pub const STR_REPLACE_EDITOR_FILE_TEXT_TEXT: &str = r"Required string parameter of `create` command, with the content of the file to be created. A null placeholder is treated as omitted by commands that do not use this parameter.";
+
+/// The `str_replace_editor` `insert_line` parameter description (catalog-verbatim).
+pub const STR_REPLACE_EDITOR_INSERT_LINE_TEXT: &str = r"Required integer parameter of `insert` command. The `new_str` will be inserted AFTER the line `insert_line` of `path`. A null placeholder is treated as omitted by commands that do not use this parameter.";
+
+/// The `str_replace_editor` `new_str` parameter description (catalog-verbatim).
+pub const STR_REPLACE_EDITOR_NEW_STR_TEXT: &str = r"Optional string parameter of `str_replace` command containing the new string (if omitted, no string will be added). Required string parameter of `insert` command containing the string to insert. A null placeholder is accepted only by commands that do not use this parameter.";
+
+/// The `str_replace_editor` `old_str` parameter description (catalog-verbatim).
+pub const STR_REPLACE_EDITOR_OLD_STR_TEXT: &str = r"Required string parameter of `str_replace` command containing the string in `path` to replace. A null placeholder is treated as omitted by commands that do not use this parameter.";
+
+/// The `str_replace_editor` `view_range` parameter description (catalog-verbatim).
+pub const STR_REPLACE_EDITOR_VIEW_RANGE_TEXT: &str = r"Optional parameter of `view` command when `path` points to a file. If omitted or null, the full file is shown. If provided, the file will be shown in the indicated line number range, e.g. [11, 12] will show lines 11 and 12. Indexing at 1 to start. Setting `[start_line, -1]` shows all lines from `start_line` to the end of the file.";

@@ -128,7 +128,20 @@ pub struct WireStdio {
     pub stderr: WireOutputMode,
 }
 
-/// The spawn request on the wire (dsh `SubprocessSpawnSpec`).
+/// The tool-call binding a spawn can carry (the Q16b-3A kill carrier:
+/// the abort watcher kills by call id through the jobs 1008 face, which
+/// now sweeps this table too).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WireToolCall {
+    /// Model-issued call identity.
+    pub call_id: String,
+    /// Root model-requested call, when nested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_call_id: Option<String>,
+}
+
+/// The spawn request on the wire (dsh `SubprocessSpawnSpec` plus the
+/// fr kill-carrier binding).
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WireSpawnSpec {
     /// Executable and arguments.
@@ -142,6 +155,10 @@ pub struct WireSpawnSpec {
     /// Explicit environment entries over the scrubbed base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<HashMap<String, Option<String>>>,
+    /// The tool-call binding the kill carrier sweeps (the search tools'
+    /// foreground spawns).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call: Option<WireToolCall>,
 }
 
 impl WireSpawnSpec {
@@ -306,6 +323,14 @@ struct StartedJob {
     cwd: String,
 }
 
+/// One live subprocess table row: the handle plus its kill-carrier
+/// binding (the Q16b-3A carrier sweeps rows by call id).
+#[derive(Debug, Clone)]
+struct SubprocessEntry {
+    handle: Arc<SubprocessHandle>,
+    tool_call: Option<WireToolCall>,
+}
+
 /// The three-band shell service: the registry, the subprocess handle
 /// table, the per-kind executors, and the absorbed-process table.
 pub struct ShellService {
@@ -315,7 +340,7 @@ pub struct ShellService {
     /// its controller in one artifact, so the dsh no-controller refusal
     /// text stays pinned but unreachable).
     _controller: ControllerGuard,
-    subprocesses: Mutex<HashMap<String, Arc<SubprocessHandle>>>,
+    subprocesses: Mutex<HashMap<String, SubprocessEntry>>,
     executors: HashMap<ShellKind, Arc<dyn ShellExecutorFace>>,
     started: Mutex<HashMap<String, StartedJob>>,
     run_threads: Arc<Mutex<Vec<std::thread::JoinHandle<()>>>>,
@@ -542,7 +567,7 @@ impl ShellService {
     pub fn dispose(&self) {
         let handles: Vec<Arc<SubprocessHandle>> = {
             let mut table = recover(&self.subprocesses);
-            table.drain().map(|(_, handle)| handle).collect()
+            table.drain().map(|(_, entry)| entry.handle).collect()
         };
         for handle in handles {
             handle.terminate();
@@ -631,14 +656,19 @@ impl ShellService {
                 "methods": ["describe", "spawn", "read", "wait", "terminate", "resolveExecutable"],
             })),
             1 => {
-                let spec: WireSpawnSpec = serde_json::from_value(request.clone())
+                let mut spec: WireSpawnSpec = serde_json::from_value(request.clone())
                     .map_err(|error| format!("subprocess spawn payload decode failed: {error}"))?;
+                let tool_call = spec.tool_call.take();
                 let handle = crate::subprocess::spawn(&spec.into_domain(), None)?;
                 let id = uuid::Uuid::new_v4().simple().to_string();
+                let entry = SubprocessEntry {
+                    handle: Arc::new(handle),
+                    tool_call,
+                };
                 self.subprocesses
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(id.clone(), Arc::new(handle));
+                    .insert(id.clone(), entry);
                 Ok(json!({ "handle": id }))
             }
             2 => {
@@ -648,7 +678,7 @@ impl ShellService {
                         .subprocesses
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    table.get(&handle).map(Arc::clone)
+                    table.get(&handle).map(|entry| Arc::clone(&entry.handle))
                 }
                 .ok_or_else(|| format!("unknown subprocess handle {handle}"))?;
                 let read = match stream.as_str() {
@@ -682,7 +712,7 @@ impl ShellService {
                         .subprocesses
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    table.get(&handle).map(Arc::clone)
+                    table.get(&handle).map(|entry| Arc::clone(&entry.handle))
                 }
                 .ok_or_else(|| format!("unknown subprocess handle {handle}"))?;
                 let settled = entry
@@ -690,7 +720,10 @@ impl ShellService {
                 if !settled {
                     return Ok(json!({ "settled": false }));
                 }
-                Ok(outcome_message(entry.settled_outcome()))
+                Ok(outcome_message(
+                    entry.settled_outcome(),
+                    entry.kill_reason(),
+                ))
             }
             4 => {
                 let handle = require_str(request, "handle", "subprocess terminate")?;
@@ -699,7 +732,7 @@ impl ShellService {
                         .subprocesses
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    table.get(&handle).map(Arc::clone)
+                    table.get(&handle).map(|entry| Arc::clone(&entry.handle))
                 }
                 .ok_or_else(|| format!("unknown subprocess handle {handle}"))?;
                 entry.terminate();
@@ -787,10 +820,50 @@ impl ShellService {
                 let result = self
                     .registry
                     .kill_by_tool_call(&call_id, reason.as_deref())?;
-                Ok(json!({ "result": result }))
+                // The Q16b-3A carrier leg: the same call id kills the
+                // bound subprocess handles (the search tools' foreground
+                // spawns); "requested" wins over the jobs word so one
+                // live target reports the kill.
+                let swept = self.sweep_subprocesses_by_tool_call(&call_id, reason.as_deref());
+                let word = if swept > 0 && result == "absent" {
+                    "requested"
+                } else {
+                    result
+                };
+                Ok(json!({ "result": word }))
             }
             other => Err(format!("unknown jobs method {other}")),
         }
+    }
+
+    /// Terminates every subprocess bound to one tool call, recording the
+    /// kill cause first so the waiting body reads the cause from the
+    /// wait reply (the Q16b-3A carrier leg; the count of killed handles
+    /// rides back).
+    fn sweep_subprocesses_by_tool_call(&self, call_id: &str, reason: Option<&str>) -> usize {
+        let handles: Vec<Arc<SubprocessHandle>> = {
+            let table = self
+                .subprocesses
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            table
+                .values()
+                .filter(|entry| {
+                    entry
+                        .tool_call
+                        .as_ref()
+                        .is_some_and(|call| call.call_id == call_id)
+                })
+                .map(|entry| Arc::clone(&entry.handle))
+                .collect()
+        };
+        for handle in &handles {
+            if let Some(reason) = reason {
+                handle.record_kill_reason(reason);
+            }
+            handle.terminate();
+        }
+        handles.len()
     }
 
     /// Serves the `'shell'` 2000+ band.
@@ -899,7 +972,7 @@ fn stream_request(request: &Value) -> Result<(String, String, u64), String> {
 }
 
 /// The wait reply: settled carries the exit facts, unsettled does not.
-fn outcome_message(outcome: Option<Outcome>) -> Value {
+fn outcome_message(outcome: Option<Outcome>, kill_reason: Option<String>) -> Value {
     match outcome {
         Some(outcome) => {
             let mut message = json!({ "settled": true });
@@ -909,6 +982,9 @@ fn outcome_message(outcome: Option<Outcome>) -> Value {
             }
             if let Some(signal) = outcome.signal {
                 object.insert("signal".to_owned(), json!(signal));
+            }
+            if let Some(reason) = kill_reason {
+                object.insert("kill_reason".to_owned(), json!(reason));
             }
             message
         }
@@ -1354,6 +1430,80 @@ mod tests {
         )
         .expect("decode");
         assert!(executable["path"].as_str().expect("path").ends_with("sh"));
+    }
+
+    /// The kill carrier's subprocess leg (the Q16b-3A ruling): a spawn
+    /// bound to a tool call dies at the jobs killByToolCall face with the
+    /// recorded kill cause riding the wait reply; an unbound spawn is
+    /// untouched by the same sweep.
+    #[test]
+    fn kill_by_tool_call_sweeps_bound_subprocesses() {
+        let service = danger_service();
+        let spawn = |tool_call: Value| {
+            let spawned: Value = serde_json::from_slice(
+                &service
+                    .serve(
+                        1,
+                        &serde_json::to_vec(&json!({
+                            "argv": ["/bin/sh", "-c", "sleep 30"],
+                            "cwd": std::env::temp_dir().to_string_lossy(),
+                            "stdio": {
+                                "stdin": "ignore",
+                                "stdout": { "max_bytes": 4096 },
+                                "stderr": { "max_bytes": 4096 },
+                            },
+                            "grace_ms": 1000.0,
+                            "tool_call": tool_call,
+                        }))
+                        .expect("encode"),
+                    )
+                    .expect("spawn"),
+            )
+            .expect("decode");
+            spawned["handle"].as_str().expect("handle").to_owned()
+        };
+        let bound = spawn(json!({ "call_id": "c-search", "root_call_id": "c-search" }));
+        let unbound = spawn(json!(null));
+        let killed: Value = serde_json::from_slice(
+            &service
+                .serve(
+                    1008,
+                    &serde_json::to_vec(&json!({
+                        "call_id": "c-search",
+                        "reason": "tool call aborted",
+                    }))
+                    .expect("encode"),
+                )
+                .expect("kill by call"),
+        )
+        .expect("decode");
+        assert_eq!(killed["result"], "requested");
+        let waited: Value = serde_json::from_slice(
+            &service
+                .serve(
+                    3,
+                    &serde_json::to_vec(&json!({ "handle": bound, "timeout_ms": 5000.0 }))
+                        .expect("encode"),
+                )
+                .expect("wait"),
+        )
+        .expect("decode");
+        assert_eq!(waited["settled"], true);
+        assert_eq!(waited["kill_reason"], "tool call aborted");
+        // The unbound spawn is invisible to the same call id: one short
+        // slice stays unsettled (the sweep never touched it).
+        let untouched: Value = serde_json::from_slice(
+            &service
+                .serve(
+                    3,
+                    &serde_json::to_vec(&json!({ "handle": unbound, "timeout_ms": 200.0 }))
+                        .expect("encode"),
+                )
+                .expect("wait"),
+        )
+        .expect("decode");
+        assert_eq!(untouched["settled"], false);
+        service.dispose();
     }
 
     /// The registry's fence and removal texts ride the jobs face

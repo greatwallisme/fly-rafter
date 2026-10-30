@@ -432,6 +432,55 @@ fn caller_abort_after_body_supersedes_success() {
     assert_eq!(info.code, "ABORTED");
 }
 
+/// The supersession scope is the success arm only (the dsh
+/// `dispatchToolBody` catch): a thrown body error surfaces as itself
+/// even when the signal aborted mid-run, so a coded abort error from a
+/// body (the search tools' `SEARCH_ABORTED` family) reaches the model.
+#[test]
+fn caller_abort_keeps_a_thrown_body_error() {
+    let registry = ToolRegistry::new(ToolPresentationMode::Native, Arc::new(Recorder::default()));
+    let mut fields = echo_tool_fields("echo");
+    fields.execute = Arc::new(|_args: &Value, _run| {
+        Err(crate::types::ToolError::new(
+            "ABORTED",
+            "echo",
+            "echo was aborted before completion (tool timeout or caller cancellation)",
+        ))
+    });
+    let _registration = registry
+        .register(Arc::new(fields.build().expect("builds")))
+        .expect("registers");
+    let caller = DeadlineSignal::new();
+    let caller_clone = caller.clone();
+    let _listener = registry.on_execute(Arc::new(move |view, next| {
+        let restored = Arc::clone(&view.signal);
+        view.signal = ToolSignal::plain(DeadlineSignal::new());
+        let result = next(view);
+        view.signal = restored;
+        caller_clone.abort_upstream();
+        ToolExecuteOutcome::Canonical(result)
+    }));
+    let input = ToolExecutionInput {
+        signal: ToolSignal::plain(caller),
+        ..input_for("echo", json!({"value": "hi"}))
+    };
+    let result = registry.execute(&input);
+    let ToolExecutionResult::Failure(failure) = &result else {
+        panic!("the thrown error must fail the call")
+    };
+    // The body's own coded error survives the abort race: the message and
+    // the info identity stay the body's, not the generic abort pass.
+    assert_eq!(
+        text_of(&failure.content),
+        "Error: echo was aborted before completion (tool timeout or caller cancellation)"
+    );
+    let info = failure.error.info.as_ref().expect("coded");
+    assert_eq!(
+        (info.name.as_str(), info.code.as_str()),
+        ("echo", "ABORTED")
+    );
+}
+
 #[test]
 fn authored_success_is_re_rendered() {
     let registry = ToolRegistry::new(ToolPresentationMode::Native, Arc::new(Recorder::default()));

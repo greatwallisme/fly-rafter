@@ -46,10 +46,14 @@ TOOL_SOURCES = {
     "read": os.path.join("packages", "fs", "tool-fs", "src", "read.ts"),
     "write": os.path.join("packages", "fs", "tool-fs", "src", "write.ts"),
     "edit": os.path.join("packages", "fs", "tool-fs", "src", "edit.ts"),
+    "glob": os.path.join("packages", "fs", "tool-fs-search", "src", "glob.ts"),
+    "grep": os.path.join("packages", "fs", "tool-fs-search", "src", "grep.ts"),
 }
 
-# The extracted tools: the Rust constant stem and the parameter-text keys
-# each tool's section emits.
+# The extracted tools: the Rust constant stem, the parameter-text keys
+# each tool's section emits, and the section-text kind (`plain` one-call
+# text, `segments` the conditionally composed literals, `none` the
+# sources register no section — dsh `str_replace_editor`).
 TOOLS = {
     "bash": (
         "BASH",
@@ -60,6 +64,7 @@ TOOLS = {
             ("workdir", "WORKDIR_TEXT"),
             ("run_in_background", "RUN_IN_BACKGROUND_TEXT"),
         ],
+        "plain",
     ),
     "pwsh": (
         "PWSH",
@@ -70,6 +75,7 @@ TOOLS = {
             ("workdir", "WORKDIR_TEXT"),
             ("run_in_background", "RUN_IN_BACKGROUND_TEXT"),
         ],
+        "plain",
     ),
     "read": (
         "READ",
@@ -78,6 +84,7 @@ TOOLS = {
             ("offset", "OFFSET_TEXT"),
             ("limit", "LIMIT_TEXT"),
         ],
+        "segments",
     ),
     "write": (
         "WRITE",
@@ -85,6 +92,7 @@ TOOLS = {
             ("file_path", "FILE_PATH_TEXT"),
             ("content", "CONTENT_TEXT"),
         ],
+        "segments",
     ),
     "edit": (
         "EDIT",
@@ -94,6 +102,37 @@ TOOLS = {
             ("new_string", "NEW_STRING_TEXT"),
             ("replace_all", "REPLACE_ALL_TEXT"),
         ],
+        "segments",
+    ),
+    "glob": (
+        "GLOB",
+        [
+            ("pattern", "PATTERN_TEXT"),
+            ("path", "PATH_TEXT"),
+        ],
+        "segments",
+    ),
+    "grep": (
+        "GREP",
+        [
+            ("pattern", "PATTERN_TEXT"),
+            ("path", "PATH_TEXT"),
+            ("include", "INCLUDE_TEXT"),
+        ],
+        "segments",
+    ),
+    "str_replace_editor": (
+        "STR_REPLACE_EDITOR",
+        [
+            ("command", "COMMAND_TEXT"),
+            ("path", "PATH_TEXT"),
+            ("file_text", "FILE_TEXT_TEXT"),
+            ("insert_line", "INSERT_LINE_TEXT"),
+            ("new_str", "NEW_STR_TEXT"),
+            ("old_str", "OLD_STR_TEXT"),
+            ("view_range", "VIEW_RANGE_TEXT"),
+        ],
+        "none",
     ),
 }
 
@@ -226,6 +265,23 @@ def extract_section_text_segments(source, tool):
     return kept
 
 
+def extract_overcap_variants(source):
+    """Extracts the glob description's over-cap behavior phrases (the dsh
+    `overCapDescription` ternary): the sampled phrase and the
+    modification-time-head phrase, in ternary order."""
+    anchor = source.find("const overCapDescription = caps.sampleOverCapGlobResults")
+    if anchor < 0:
+        raise ExtractError("glob source carries no overCapDescription ternary")
+    line_end = source.find("\n", anchor)
+    line = source[anchor:line_end if line_end > 0 else len(source)]
+    literals = re.findall(r"'((?:[^'\\]|\\.)*)'", line)
+    if len(literals) != 2:
+        raise ExtractError(
+            f"the overCapDescription ternary parses {len(literals)} literals, expected 2"
+        )
+    return literals[0], literals[1]
+
+
 def brand_map(text):
     """The FR_ prefix ruling: the managed-variable prefix alone maps."""
     return text.replace("$env:DSH_", "$env:FR_").replace("DSH_", "FR_")
@@ -254,7 +310,7 @@ def emit():
     catalog = read_catalog(source_root)
     blocks = [HEADER]
     extracted = {}
-    for tool, (stem, keys) in TOOLS.items():
+    for tool, (stem, keys, section_kind) in TOOLS.items():
         description, _, parsed = extract_tool(catalog, tool)
         description = brand_map(description)
         parameters = brand_map(json.dumps(parsed, indent=2, ensure_ascii=False))
@@ -262,43 +318,64 @@ def emit():
         blocks.append(f"\n/// The `{tool}` tool description (catalog-verbatim).\n")
         blocks.append(f"pub const {stem}_DESCRIPTION: &str = {raw_literal(description)};\n")
         blocks.append(
-            f"\n/// The `{tool}` parameter table (the catalog json block, verbatim).\n"
+            f"\n/// The `{tool}` parameter table (the json block, verbatim).\n"
         )
         blocks.append(
             f"pub const {stem}_PARAMETERS_JSON: &str = {raw_literal(parameters)};\n"
         )
-        source_root_tool = os.path.join(source_root, TOOL_SOURCES[tool])
-        with open(source_root_tool, encoding="utf-8") as handle:
-            source = handle.read()
-        if tool in ("bash", "pwsh"):
-            section_text = brand_map(extract_section_text(source, tool))
-            blocks.append(
-                f"\n/// The `tool:{tool}` prompt-section text (the dsh"
-                f" `ctx.systemPrompt.section` call, source-verbatim).\n"
-            )
-            blocks.append(
-                f"pub const {stem}_SECTION_TEXT: &str = {raw_literal(section_text)};\n"
-            )
-        else:
-            segments = [brand_map(s) for s in extract_section_text_segments(source, tool)]
-            if len(segments) == 1:
+        if section_kind != "none":
+            source_root_tool = os.path.join(source_root, TOOL_SOURCES[tool])
+            with open(source_root_tool, encoding="utf-8") as handle:
+                source = handle.read()
+            if section_kind == "plain":
+                section_text = brand_map(extract_section_text(source, tool))
                 blocks.append(
                     f"\n/// The `tool:{tool}` prompt-section text (the dsh"
                     f" `ctx.systemPrompt.section` call, source-verbatim).\n"
                 )
                 blocks.append(
-                    f"pub const {stem}_SECTION_TEXT: &str = {raw_literal(segments[0])};\n"
+                    f"pub const {stem}_SECTION_TEXT: &str = {raw_literal(section_text)};\n"
                 )
             else:
-                rendered = ", ".join(raw_literal(segment) for segment in segments)
-                blocks.append(
-                    f"\n/// The `tool:{tool}` prompt-section text segments (the dsh"
-                    f" `ctx.systemPrompt.section` call, source-verbatim; the consumer"
-                    f" composes them with the source's conditional rule).\n"
-                )
-                blocks.append(
-                    f"pub const {stem}_SECTION_TEXTS: [&str; {len(segments)}] = [{rendered}];\n"
-                )
+                segments = [brand_map(s) for s in extract_section_text_segments(source, tool)]
+                if len(segments) == 1:
+                    blocks.append(
+                        f"\n/// The `tool:{tool}` prompt-section text (the dsh"
+                        f" `ctx.systemPrompt.section` call, source-verbatim).\n"
+                    )
+                    blocks.append(
+                        f"pub const {stem}_SECTION_TEXT: &str = {raw_literal(segments[0])};\n"
+                    )
+                else:
+                    rendered = ", ".join(raw_literal(segment) for segment in segments)
+                    blocks.append(
+                        f"\n/// The `tool:{tool}` prompt-section text segments (the dsh"
+                        f" `ctx.systemPrompt.section` call, source-verbatim; the consumer"
+                        f" composes them with the source's conditional rule).\n"
+                    )
+                    blocks.append(
+                        f"pub const {stem}_SECTION_TEXTS: [&str; {len(segments)}] = [{rendered}];\n"
+                    )
+        if tool == "glob":
+            source_root_tool = os.path.join(source_root, TOOL_SOURCES["glob"])
+            with open(source_root_tool, encoding="utf-8") as handle:
+                source = handle.read()
+            sampled, head = extract_overcap_variants(source)
+            blocks.append(
+                "\n/// The sampled over-cap phrase of the `glob` description (the dsh"
+                " `overCapDescription` ternary's true arm, source-verbatim; the composed"
+                " registration swaps by the baked sampling switch).\n"
+            )
+            blocks.append(
+                f"pub const GLOB_OVERCAP_SAMPLED_TEXT: &str = {raw_literal(sampled)};\n"
+            )
+            blocks.append(
+                "\n/// The head over-cap phrase of the `glob` description (the dsh"
+                " `overCapDescription` ternary's false arm, source-verbatim).\n"
+            )
+            blocks.append(
+                f"pub const GLOB_OVERCAP_HEAD_TEXT: &str = {raw_literal(head)};\n"
+            )
         for key, suffix in keys:
             text = brand_map(parameter_text(parsed, key))
             blocks.append(

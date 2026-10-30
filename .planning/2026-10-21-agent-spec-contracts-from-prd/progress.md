@@ -1201,3 +1201,9 @@
 - 下一动作：批 3=glob/grep+spill 消费+str_replace_editor+修场景④（Q16b-4A）。
 
 ## 2026-10-30 — 16b 批 2 提交入库：af43854（用户 /commit 裁决 --no-verify，守卫 16 checks 设计态注记随提交信息；17 文件 +4294/-128）
+
+## 2026-10-30 — 16b 批 3：glob/grep+spill 消费+str_replace_editor+修场景④+Q16b-3A/3B 双 A 裁决，workspace 1245 tests（1214→1245）
+- 用户双 A 裁决：3A kill 载体扩 subprocess face（tool_call 绑定+1008 同扫+kill_reason 回执）；3B registry 中止替换臂移入成功臂。
+- 全落：search_core/search_views/search_tools/sre_tools 四模块+方法带 60-82+describe 41 法+spill 监听 CPS+DESCRIPTOR inject+=subprocess+seams 五新法+catalog 脚本三元组扩源+重生成；场景④ spec 修正（lint 100%）。
+- 五门全绿+合约三开关 0 errors。6 起生成退化截停、clippy 92→0 全清、真实 rg 载体钉测（含空工作区 exit 2 语义）。
+- 下一动作：批 4=read_image 全落（attachment store+llm 缝+路由头缝）。

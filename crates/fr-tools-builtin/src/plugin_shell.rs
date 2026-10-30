@@ -29,9 +29,12 @@ use crate::working_directory::WorkingDirectories;
 /// The plugin name the host registers the artifact under.
 pub const PLUGIN_NAME: &str = "fr-tools-builtin";
 
-/// The static descriptor: one provided service, seven injected seams,
-/// no listeners.
-const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\",\"fs\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\"],\"listen\":{}}";
+/// The static descriptor: one provided service, eight injected seams
+/// (the search tools' subprocess face rides the injection), no
+/// listeners — the spill listeners register at activation instead (the
+/// descriptor `listen` map stays a dylib event face, not a tools-pipeline
+/// registration).
+const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\",\"fs\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\",\"subprocess\"],\"listen\":{}}";
 
 /// The maximum host reply the require loop grows its buffer toward (the
 /// approval judgment).
@@ -326,6 +329,86 @@ impl Seams for WireSeams {
             agent: agent.map(str::to_owned),
         })
     }
+
+    fn subprocess_spawn(&self, spec: &Value) -> Result<String, String> {
+        let bytes =
+            serde_json::to_vec(spec).map_err(|error| format!("spawn encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::subprocess::SERVICE_NAME,
+            fr_wire::services::subprocess::METHOD_SPAWN,
+            &bytes,
+        )?;
+        let parsed: Value = serde_json::from_slice(&reply)
+            .map_err(|error| format!("spawn decode failed: {error}"))?;
+        parsed
+            .get("handle")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| "subprocess spawn reply lacks handle".to_owned())
+    }
+
+    fn subprocess_read(&self, handle: &str, stream: &str, from: u64) -> Result<Value, String> {
+        let payload = json!({ "handle": handle, "stream": stream, "from": from });
+        let bytes =
+            serde_json::to_vec(&payload).map_err(|error| format!("read encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::subprocess::SERVICE_NAME,
+            fr_wire::services::subprocess::METHOD_READ,
+            &bytes,
+        )?;
+        serde_json::from_slice(&reply).map_err(|error| format!("read decode failed: {error}"))
+    }
+
+    fn subprocess_wait(&self, handle: &str, timeout_ms: f64) -> Result<Value, String> {
+        let payload = json!({ "handle": handle, "timeout_ms": timeout_ms });
+        let bytes =
+            serde_json::to_vec(&payload).map_err(|error| format!("wait encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::subprocess::SERVICE_NAME,
+            fr_wire::services::subprocess::METHOD_WAIT,
+            &bytes,
+        )?;
+        serde_json::from_slice(&reply).map_err(|error| format!("wait decode failed: {error}"))
+    }
+
+    fn subprocess_resolve_executable(&self, command: &str) -> Result<String, String> {
+        let payload = json!({ "command": command });
+        let bytes = serde_json::to_vec(&payload)
+            .map_err(|error| format!("resolveExecutable encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::subprocess::SERVICE_NAME,
+            fr_wire::services::subprocess::METHOD_RESOLVE_EXECUTABLE,
+            &bytes,
+        )?;
+        let parsed: Value = serde_json::from_slice(&reply)
+            .map_err(|error| format!("resolveExecutable decode failed: {error}"))?;
+        parsed
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| "subprocess resolve reply lacks path".to_owned())
+    }
+
+    fn spill_store_save_text(&self, save: &Value) -> Result<Option<Value>, String> {
+        let bytes =
+            serde_json::to_vec(save).map_err(|error| format!("saveText encode failed: {error}"))?;
+        match self.link.require(
+            fr_wire::services::spill_store::SERVICE_NAME,
+            fr_wire::services::spill_store::METHOD_SAVE_TEXT,
+            &bytes,
+        ) {
+            Ok(reply) => {
+                let parsed: Value = serde_json::from_slice(&reply)
+                    .map_err(|error| format!("saveText decode failed: {error}"))?;
+                Ok(Some(parsed))
+            }
+            // The opportunistic consumption mirrors the dsh `ctx.get`:
+            // a service no provider committed (undeclared or inactive)
+            // is the absent backend, not a storage failure.
+            Err(text) if text.contains("status -3") || text.contains("status -4") => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
 }
 /// One activation-sequence step: one require, `None` on any refusal
 /// (the fail-closed decline).
@@ -349,6 +432,9 @@ pub struct BuiltinState {
     tools: BuiltinTools,
     fs: Arc<crate::fs_domain::FsDomain>,
     gate: crate::observation::ObservedStateGate,
+    /// The spill listeners' CPS pairing stash (the enter leg parks the
+    /// call and result; the exit leg consumes them).
+    pending: std::sync::Mutex<std::collections::HashMap<u64, (Value, Value)>>,
 }
 
 impl std::fmt::Debug for BuiltinState {
@@ -385,12 +471,14 @@ fn read_default_mode(link: &HostLink) -> Option<Vec<&'static str>> {
     Some(escalation_modes_from(mode_word))
 }
 
-/// The five prompt sections (dsh `ctx.systemPrompt.section`): the names,
+/// The seven prompt sections (dsh `ctx.systemPrompt.section`): the names,
 /// the dsh orders, and the script-extracted verbatim texts (the catalog
 /// generator; the PRD 22 rule — the texts live in the dsh tool sources,
 /// not the catalog). The write text composes with the source's
 /// conditional (the edit tail rides while edit registers, which the M1
-/// composition always does).
+/// composition always does); the grep text composes the same way (the
+/// read tail). The `str_replace_editor` registers no section (the dsh
+/// source injects no systemPrompt; the Q16b-4A ruling).
 fn prompt_sections() -> Vec<(String, f64, String)> {
     vec![
         (
@@ -417,6 +505,16 @@ fn prompt_sections() -> Vec<(String, f64, String)> {
             "tool:edit".to_owned(),
             1300.0,
             crate::catalog_gen::EDIT_SECTION_TEXT.to_owned(),
+        ),
+        (
+            "tool:glob".to_owned(),
+            1400.0,
+            crate::catalog_gen::GLOB_SECTION_TEXT.to_owned(),
+        ),
+        (
+            "tool:grep".to_owned(),
+            1500.0,
+            crate::search_tools::grep_section_text(true),
         ),
     ]
 }
@@ -460,26 +558,34 @@ fn register_projection(link: &HostLink) -> Option<()> {
     )
 }
 
-/// Registers the five tools (the fr-tools register face; the endpoints
-/// point back at this artifact's own service). The read tool opts into
-/// sibling overlap (`isConcurrencySafe`); the exclusives stay absent.
+/// One registration-table row: the name, the composed facts, the five
+/// endpoint selectors, the sibling-overlap flag, and the timeout.
+type RegistrationRow = (
+    &'static str,
+    String,
+    Value,
+    Value,
+    bool,
+    u32,
+    u32,
+    u32,
+    u32,
+    u32,
+    Option<f64>,
+);
+
+/// Registers the tools (the fr-tools register face; the endpoints point
+/// back at this artifact's own service). The read tool opts into sibling
+/// overlap (`isConcurrencySafe`); the exclusives stay absent. The
+/// glob/grep declarations carry the cooperative timeout budget; the
+/// opt-in editor registers only when the composition bakes the knob on
+/// (the M1 bundle leaves it off).
 #[expect(
     clippy::too_many_lines,
-    reason = "the five-tuple table mirrors the dsh registrations one arm per tool; splitting it would hide the correspondence"
+    reason = "the tuple table mirrors the dsh registrations one arm per tool; splitting it would hide the correspondence"
 )]
 fn register_tools(link: &HostLink, advertise_escalation: bool) -> Option<()> {
-    for (
-        name,
-        description,
-        parameters,
-        output_schema,
-        concurrency_safe,
-        execute,
-        render_m,
-        present_call,
-        present_result,
-        presentation_meta,
-    ) in [
+    let tools: Vec<RegistrationRow> = vec![
         (
             "bash",
             crate::schema::bash_description(),
@@ -491,6 +597,7 @@ fn register_tools(link: &HostLink, advertise_escalation: bool) -> Option<()> {
             crate::service::METHOD_BASH_PRESENT_CALL,
             crate::service::METHOD_BASH_PRESENT_RESULT,
             crate::service::METHOD_PRESENTATION_META,
+            None,
         ),
         (
             "pwsh",
@@ -503,6 +610,7 @@ fn register_tools(link: &HostLink, advertise_escalation: bool) -> Option<()> {
             crate::service::METHOD_PWSH_PRESENT_CALL,
             crate::service::METHOD_PWSH_PRESENT_RESULT,
             crate::service::METHOD_PRESENTATION_META,
+            None,
         ),
         (
             "read",
@@ -515,6 +623,7 @@ fn register_tools(link: &HostLink, advertise_escalation: bool) -> Option<()> {
             crate::service::METHOD_READ_PRESENT_CALL,
             crate::service::METHOD_READ_PRESENT_RESULT,
             crate::service::METHOD_READ_PRESENTATION_META,
+            None,
         ),
         (
             "write",
@@ -527,6 +636,7 @@ fn register_tools(link: &HostLink, advertise_escalation: bool) -> Option<()> {
             crate::service::METHOD_WRITE_PRESENT_CALL,
             crate::service::METHOD_WRITE_PRESENT_RESULT,
             crate::service::METHOD_WRITE_PRESENTATION_META,
+            None,
         ),
         (
             "edit",
@@ -539,8 +649,51 @@ fn register_tools(link: &HostLink, advertise_escalation: bool) -> Option<()> {
             crate::service::METHOD_EDIT_PRESENT_CALL,
             crate::service::METHOD_EDIT_PRESENT_RESULT,
             crate::service::METHOD_EDIT_PRESENTATION_META,
+            None,
         ),
-    ] {
+        (
+            "glob",
+            crate::schema::glob_description(
+                crate::search_core::baked_caps().sample_over_cap_glob_results,
+            ),
+            crate::schema::glob_parameters(),
+            crate::schema::glob_output_schema(),
+            false,
+            crate::service::METHOD_GLOB_EXECUTE,
+            crate::service::METHOD_GLOB_RENDER,
+            crate::service::METHOD_GLOB_PRESENT_CALL,
+            crate::service::METHOD_GLOB_PRESENT_RESULT,
+            crate::service::METHOD_GLOB_PRESENTATION_META,
+            Some(crate::search_core::baked_caps().timeout_ms),
+        ),
+        (
+            "grep",
+            crate::schema::grep_description(),
+            crate::schema::grep_parameters(),
+            crate::schema::grep_output_schema(),
+            false,
+            crate::service::METHOD_GREP_EXECUTE,
+            crate::service::METHOD_GREP_RENDER,
+            crate::service::METHOD_GREP_PRESENT_CALL,
+            crate::service::METHOD_GREP_PRESENT_RESULT,
+            crate::service::METHOD_GREP_PRESENTATION_META,
+            Some(crate::search_core::baked_caps().timeout_ms),
+        ),
+    ];
+    for (
+        name,
+        description,
+        parameters,
+        output_schema,
+        concurrency_safe,
+        execute,
+        render_m,
+        present_call,
+        present_result,
+        presentation_meta,
+        timeout_ms,
+    ) in tools
+    {
         let mut registration = json!({
             "name": name,
             "description": description,
@@ -563,11 +716,70 @@ fn register_tools(link: &HostLink, advertise_escalation: bool) -> Option<()> {
         if concurrency_safe {
             registration["isConcurrencySafe"] = serde_json::Value::Bool(true);
         }
+        if let Some(timeout_ms) = timeout_ms {
+            registration["timeoutMs"] = json!(timeout_ms);
+        }
         step(
             link,
             fr_wire::services::tools::SERVICE_NAME,
             fr_wire::services::tools::METHOD_REGISTER,
             serde_json::to_vec(&registration).ok()?.as_slice(),
+        )?;
+    }
+    if crate::sre_tools::BAKED_STR_REPLACE_EDITOR {
+        let registration = json!({
+            "name": "str_replace_editor",
+            "description": crate::schema::str_replace_editor_description(),
+            "parameters": crate::schema::str_replace_editor_parameters(),
+            "output": {
+                "schema": crate::schema::str_replace_editor_output_schema(),
+                "render": {
+                    "service": crate::service::SERVICE_NAME,
+                    "method": crate::service::METHOD_STR_REPLACE_EDITOR_RENDER,
+                },
+            },
+            "execute": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_STR_REPLACE_EDITOR_EXECUTE,
+            },
+            "presentCall": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_STR_REPLACE_EDITOR_PRESENT_CALL,
+            },
+        });
+        step(
+            link,
+            fr_wire::services::tools::SERVICE_NAME,
+            fr_wire::services::tools::METHOD_REGISTER,
+            serde_json::to_vec(&registration).ok()?.as_slice(),
+        )?;
+    }
+    register_spill_listeners(link);
+    Some(())
+}
+
+/// Registers the two capped-result spill listeners (dsh
+/// `ctx.on('tools/post-execute')` in the apply functions; the fr
+/// tools-pipeline registration face).
+fn register_spill_listeners(link: &HostLink) -> Option<()> {
+    for (method, tool_name) in [
+        (crate::service::METHOD_GLOB_SPILL, "glob"),
+        (crate::service::METHOD_GREP_SPILL, "grep"),
+    ] {
+        let _ = tool_name;
+        step(
+            link,
+            fr_wire::services::tools::SERVICE_NAME,
+            fr_wire::services::tools::METHOD_REGISTER_LISTENER,
+            serde_json::to_vec(&json!({
+                "stage": "post-execute",
+                "endpoint": {
+                    "service": crate::service::SERVICE_NAME,
+                    "method": method,
+                },
+            }))
+            .ok()?
+            .as_slice(),
         )?;
     }
     Some(())
@@ -623,6 +835,7 @@ impl BuiltinState {
             tools,
             fs,
             gate: crate::observation::ObservedStateGate::new(),
+            pending: std::sync::Mutex::new(std::collections::HashMap::new()),
         })
     }
 
@@ -772,7 +985,7 @@ unsafe extern "C" fn call(
     // matching `teardown`; the host serializes calls per the
     // export-table contract.
     let state = unsafe { &*(handle.cast::<BuiltinState>()) };
-    // The fs domain and fs-tool bands ride the same export table (the
+    // The fs domain and the tool bands ride the same export table (the
     // per-artifact method-space judgment; the fr-shell three-band
     // precedent).
     let reply = if (fr_wire::services::fs::METHOD_DESCRIBE..=fr_wire::services::fs::METHOD_WATCH)
@@ -789,6 +1002,25 @@ unsafe extern "C" fn call(
             advertised: state.fs().sandbox_mode().is_some(),
         };
         crate::fs_tools::serve(&deps, method, payload)
+    } else if (crate::service::METHOD_GLOB_EXECUTE..=crate::service::METHOD_GREP_SPILL)
+        .contains(&method)
+    {
+        let deps = crate::search_tools::SearchToolDeps {
+            seams: state.tools().seams(),
+            pending: &state.pending,
+        };
+        crate::search_tools::serve(&deps, method, payload)
+    } else if (crate::service::METHOD_STR_REPLACE_EDITOR_EXECUTE
+        ..=crate::service::METHOD_STR_REPLACE_EDITOR_PRESENT_CALL)
+        .contains(&method)
+    {
+        let deps = crate::fs_tools::FsToolDeps {
+            fs: state.fs(),
+            gate: state.gate(),
+            seams: state.tools().seams(),
+            advertised: state.fs().sandbox_mode().is_some(),
+        };
+        crate::sre_tools::serve(&deps, method, payload)
     } else {
         state.tools().serve(method, payload)
     };
@@ -862,13 +1094,14 @@ pub static DOUGONG_PLUGIN_EXPORTS: PluginExports = PluginExports {
 
 #[cfg(test)]
 mod tests {
-    /// The five tool sections ride the dsh orders and their verbatim
+    /// The seven tool sections ride the dsh orders and their verbatim
     /// texts: the bash order opens the 1000-3000 tool band, the pwsh
-    /// twin sits ten above it, and the fs trio rides the dsh
-    /// read/write/edit orders (the builtin-tools contract's section
-    /// clause; the write text carries the composed edit tail).
+    /// twin sits ten above it, the fs trio rides the dsh
+    /// read/write/edit orders, and the discovery pair rides the
+    /// glob/grep orders (the builtin-tools contract's section clause;
+    /// the write and grep texts carry the composed conditional tails).
     #[test]
-    fn prompt_sections_pin_the_five_tools() {
+    fn prompt_sections_pin_the_seven_tools() {
         let sections = super::prompt_sections();
         assert_eq!(sections[0].0, "tool:bash");
         assert_eq!(sections[0].1, 1000.0);
@@ -910,6 +1143,24 @@ mod tests {
             sections[4].2.starts_with("Read a file before editing it"),
             "{}",
             sections[4].2
+        );
+        assert_eq!(sections[5].0, "tool:glob");
+        assert_eq!(sections[5].1, 1400.0);
+        assert!(
+            sections[5]
+                .2
+                .starts_with("Use the glob tool — not shell find"),
+            "{}",
+            sections[5].2
+        );
+        assert_eq!(sections[6].0, "tool:grep");
+        assert_eq!(sections[6].1, 1500.0);
+        assert!(
+            sections[6]
+                .2
+                .ends_with("Use read on a matched file when you need surrounding context."),
+            "{}",
+            sections[6].2
         );
         for (name, order, _) in sections {
             assert!(name.starts_with("tool:"));

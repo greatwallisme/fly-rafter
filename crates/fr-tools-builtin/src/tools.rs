@@ -177,6 +177,43 @@ pub trait Seams: Send + Sync {
     ///
     /// The collection refusal family.
     fn shell_env_collect(&self, agent: Option<&str>) -> Result<FrozenEnv, String>;
+    /// Spawns one fully-specified subprocess and returns its handle id
+    /// (dsh `ctx.subprocess.spawn`; the search tools' foreground runs).
+    ///
+    /// # Errors
+    ///
+    /// The spawn refusal family.
+    fn subprocess_spawn(&self, spec: &Value) -> Result<String, String>;
+    /// Reads one collected stream from a byte offset (dsh
+    /// `handle.collected.*.readFrom`).
+    ///
+    /// # Errors
+    ///
+    /// The read refusal family.
+    fn subprocess_read(&self, handle: &str, stream: &str, from: u64) -> Result<Value, String>;
+    /// Settles one handle's exit facts under a bounded wait (dsh
+    /// `handle.done`, sliced).
+    ///
+    /// # Errors
+    ///
+    /// The wait refusal family.
+    fn subprocess_wait(&self, handle: &str, timeout_ms: f64) -> Result<Value, String>;
+    /// Resolves a bare PATH name or absolute path to an executable (dsh
+    /// has no analog: the packaged binary; the fr `FR_RIPGREP`/PATH
+    /// resolution rides this face).
+    ///
+    /// # Errors
+    ///
+    /// The resolution refusal family.
+    fn subprocess_resolve_executable(&self, command: &str) -> Result<String, String>;
+    /// Persists one complete formatted result (dsh
+    /// `ctx.spillStore.saveText`); `Ok(None)` is the absent backend (the
+    /// dsh `ctx.get` miss), not a storage failure.
+    ///
+    /// # Errors
+    ///
+    /// The storage failure family (the dsh `saveText` rejection).
+    fn spill_store_save_text(&self, save: &Value) -> Result<Option<Value>, String>;
 }
 
 /// The shell variant the bodies parameterize over (dsh's two tool
@@ -1301,6 +1338,31 @@ mod tests {
 
         fn working_directory_ensure(&self, _agent: &str) -> Result<String, String> {
             Ok(self.existing_dir.to_owned())
+        }
+
+        fn subprocess_spawn(&self, _spec: &Value) -> Result<String, String> {
+            Err("unused".to_owned())
+        }
+
+        fn subprocess_read(
+            &self,
+            _handle: &str,
+            _stream: &str,
+            _from: u64,
+        ) -> Result<Value, String> {
+            Err("unused".to_owned())
+        }
+
+        fn subprocess_wait(&self, _handle: &str, _timeout_ms: f64) -> Result<Value, String> {
+            Err("unused".to_owned())
+        }
+
+        fn subprocess_resolve_executable(&self, _command: &str) -> Result<String, String> {
+            Err("unused".to_owned())
+        }
+
+        fn spill_store_save_text(&self, _save: &Value) -> Result<Option<Value>, String> {
+            Err("unused".to_owned())
         }
 
         fn shell_env_collect(&self, agent: Option<&str>) -> Result<FrozenEnv, String> {

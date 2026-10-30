@@ -23,7 +23,10 @@
 //! fence, the read/write/edit tool bodies, and the contextual-diff
 //! engine ([`fs_types`], [`fsio`], [`fs_domain`], [`observation`],
 //! [`fence`], [`fs_read_render`], [`fs_diff`], [`fs_sandbox`],
-//! [`fs_tools`]).
+//! [`fs_tools`]), then the discovery group — the glob/grep ripgrep
+//! spawns with their capped-result spill listeners ([`search_core`],
+//! [`search_views`], [`search_tools`]) — and the opt-in
+//! `str_replace_editor` ([`sre_tools`]).
 //!
 //! The domain vocabulary lands module-for-module ([`shell_env`],
 //! [`working_directory`], [`render`], [`schema`], [`tools`],
@@ -43,8 +46,12 @@ pub mod observation;
 pub mod plugin_shell;
 pub mod render;
 pub mod schema;
+pub mod search_core;
+pub mod search_tools;
+pub mod search_views;
 pub mod service;
 pub mod shell_env;
+pub mod sre_tools;
 pub mod tools;
 #[cfg(test)]
 mod verify;

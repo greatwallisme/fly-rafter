@@ -386,6 +386,171 @@ pub fn edit_output_schema() -> Value {
     })
 }
 
+/// The glob tool description (the composed registration fact).
+///
+/// The catalog-frozen base carries the sampled over-cap phrase; the
+/// baked bundle switch swaps exactly that phrase (the pwsh-appendix
+/// composition judgment). The baked cap count equals the catalog's
+/// frozen 100, so the counts ride the frozen text.
+#[must_use]
+pub fn glob_description(sample_over_cap: bool) -> String {
+    let base = catalog_gen::GLOB_DESCRIPTION.to_owned();
+    if sample_over_cap {
+        return base;
+    }
+    base.replace(
+        catalog_gen::GLOB_OVERCAP_SAMPLED_TEXT,
+        catalog_gen::GLOB_OVERCAP_HEAD_TEXT,
+    )
+}
+
+/// The grep tool description (the catalog-frozen constant; the baked
+/// match cap equals the catalog's frozen 250).
+#[must_use]
+pub fn grep_description() -> String {
+    catalog_gen::GREP_DESCRIPTION.to_owned()
+}
+
+/// The `str_replace_editor` description (the catalog-frozen default).
+#[must_use]
+pub fn str_replace_editor_description() -> String {
+    catalog_gen::STR_REPLACE_EDITOR_DESCRIPTION.to_owned()
+}
+
+/// The glob parameter table (the catalog-frozen base).
+#[must_use]
+pub fn glob_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "pattern": {
+                "type": "string",
+                "description": catalog_gen::GLOB_PATTERN_TEXT,
+            },
+            "path": {
+                "type": "string",
+                "description": catalog_gen::GLOB_PATH_TEXT,
+            },
+        },
+        "required": ["pattern"],
+    })
+}
+
+/// The grep parameter table (the catalog-frozen base).
+#[must_use]
+pub fn grep_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "pattern": {
+                "type": "string",
+                "description": catalog_gen::GREP_PATTERN_TEXT,
+            },
+            "path": {
+                "type": "string",
+                "description": catalog_gen::GREP_PATH_TEXT,
+            },
+            "include": {
+                "type": "string",
+                "description": catalog_gen::GREP_INCLUDE_TEXT,
+            },
+        },
+        "required": ["pattern"],
+    })
+}
+
+/// The `str_replace_editor` parameter table (the catalog-frozen base; the
+/// five command-scoped keys are the `oneOf` null-tolerant shapes).
+#[must_use]
+pub fn str_replace_editor_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "command": {
+                "type": "string",
+                "enum": ["view", "create", "str_replace", "insert"],
+                "description": catalog_gen::STR_REPLACE_EDITOR_COMMAND_TEXT,
+            },
+            "path": {
+                "type": "string",
+                "description": catalog_gen::STR_REPLACE_EDITOR_PATH_TEXT,
+            },
+            "file_text": {
+                "oneOf": [{ "type": "string" }, { "type": "null" }],
+                "description": catalog_gen::STR_REPLACE_EDITOR_FILE_TEXT_TEXT,
+            },
+            "insert_line": {
+                "oneOf": [{ "type": "integer" }, { "type": "null" }],
+                "description": catalog_gen::STR_REPLACE_EDITOR_INSERT_LINE_TEXT,
+            },
+            "new_str": {
+                "oneOf": [{ "type": "string" }, { "type": "null" }],
+                "description": catalog_gen::STR_REPLACE_EDITOR_NEW_STR_TEXT,
+            },
+            "old_str": {
+                "oneOf": [{ "type": "string" }, { "type": "null" }],
+                "description": catalog_gen::STR_REPLACE_EDITOR_OLD_STR_TEXT,
+            },
+            "view_range": {
+                "oneOf": [
+                    { "type": "array", "items": { "type": "integer" } },
+                    { "type": "null" },
+                ],
+                "description": catalog_gen::STR_REPLACE_EDITOR_VIEW_RANGE_TEXT,
+            },
+        },
+        "required": ["command", "path"],
+    })
+}
+
+/// The glob output contract (the dsh `defineTool` `output.schema`).
+#[must_use]
+pub fn glob_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "root": { "type": "string", "required": true },
+            "paths": {
+                "type": "array",
+                "required": true,
+                "items": { "type": "string" },
+            },
+        },
+    })
+}
+
+/// The grep output contract (the dsh `defineTool` `output.schema`).
+#[must_use]
+pub fn grep_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "matches": {
+                "type": "array",
+                "required": true,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "path": { "type": "string", "required": true },
+                        "lineNumber": { "type": "integer", "required": true },
+                        "line": { "type": "string", "required": true },
+                    },
+                },
+            },
+        },
+    })
+}
+
+/// The `str_replace_editor` output contract (the dsh `output.schema`):
+/// the plain string.
+#[must_use]
+pub fn str_replace_editor_output_schema() -> Value {
+    json!({ "type": "string" })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

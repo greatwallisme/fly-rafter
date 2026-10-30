@@ -289,6 +289,31 @@ mod tests {
         ) -> Result<crate::shell_env::FrozenEnv, String> {
             Err("unused".to_owned())
         }
+
+        fn subprocess_spawn(&self, _spec: &Value) -> Result<String, String> {
+            Err("unused".to_owned())
+        }
+
+        fn subprocess_read(
+            &self,
+            _handle: &str,
+            _stream: &str,
+            _from: u64,
+        ) -> Result<Value, String> {
+            Err("unused".to_owned())
+        }
+
+        fn subprocess_wait(&self, _handle: &str, _timeout_ms: f64) -> Result<Value, String> {
+            Err("unused".to_owned())
+        }
+
+        fn subprocess_resolve_executable(&self, _command: &str) -> Result<String, String> {
+            Err("unused".to_owned())
+        }
+
+        fn spill_store_save_text(&self, _save: &Value) -> Result<Option<Value>, String> {
+            Err("unused".to_owned())
+        }
     }
 
     fn seams() -> ScriptSeams {

@@ -994,11 +994,21 @@ impl ToolRegistry {
         }));
         let (deferred, concluded) = (run.take_deferred_contexts(), run.concluded_turn());
         self.record_body_outcome(view.exec, deferred, concluded);
+        // The replacement scope mirrors the dsh `dispatchToolBody` shape:
+        // the aborted-signal pass reads ONLY the success arm — a thrown
+        // body error (or an output-contract violation) surfaces as
+        // itself even when the signal aborted mid-run, because the dsh
+        // `catch` materializes thrown errors ahead of the abort pass.
         let result = match outcome {
             Ok(Ok(value)) => match self.create_success_result(view.exec, &tool, value) {
                 Ok(mut success) => {
                     success.concludes_turn |= concluded;
-                    ToolExecutionResult::Success(success)
+                    let result = ToolExecutionResult::Success(success);
+                    if fused.is_aborted() {
+                        tool_aborted_result(Some(&result))
+                    } else {
+                        result
+                    }
                 }
                 Err(error) => tool_error_result(&error),
             },
@@ -1006,9 +1016,6 @@ impl ToolRegistry {
             Err(panic) => tool_error_result(&ToolError::plain(&panic_message(&panic))),
         };
         view.signal = wrapper_signal;
-        if fused.is_aborted() {
-            return tool_aborted_result(Some(&result));
-        }
         result
     }
 

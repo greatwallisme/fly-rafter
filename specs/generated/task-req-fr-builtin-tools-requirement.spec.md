@@ -598,11 +598,11 @@ Scenario: str_replace_editor 参数越界拒绝
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
-Scenario: str_replace_editor 说明 section 注册
-  Test: pending_req_fr_builtin_tools_str_replace_editor_section
-  假设 组装系统提示词时
-  当 扫描 section 注册表
-  那么 工具 str_replace_editor 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
+Scenario: str_replace_editor 说明逐字与呈现四臂
+  Test: pending_req_fr_builtin_tools_str_replace_editor_presentation
+  假设 工具 str_replace_editor 已注册且组装系统提示词时
+  当 扫描 section 注册表与读取工具声明时
+  那么 工具 str_replace_editor 无说明 section（dsh 真源不注入 systemPrompt）；description 12 句逐字抽取；presentCall 四臂=view 读卡/create 与 str_replace diff 卡/insert 行锚编辑卡
 
 Scenario: str_replace_editor 参数 command 形状
   Test: pending_req_fr_builtin_tools_str_replace_editor_command
