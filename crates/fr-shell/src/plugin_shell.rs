@@ -24,6 +24,7 @@ use serde_json::json;
 use crate::executors::{ExecutorConfigs, PolicyResolve, SandboxConfine};
 use crate::jobs_local::LocalJobRegistry;
 use crate::jobs_local::SessionLogAppend;
+use crate::jobs_local::SettlementAnnounce;
 use crate::jobs_types::JOB_REGISTERED_EVENT;
 use crate::jobs_types::JOB_SETTLED_EVENT;
 use crate::service::ShellService;
@@ -136,6 +137,29 @@ impl HostLink {
             ))
         }
     }
+
+    /// Publishes one fire-and-forget kernel event (the fr-agent-loop
+    /// `Outbound::emit` judgment shape; the payload must be valid JSON
+    /// and the name must stay outside the `internal/*` prefix).
+    pub(crate) fn emit(&self, name: &str, payload: &[u8]) -> Result<(), String> {
+        // SAFETY: the copied vtable is live until this activation's
+        // `teardown` returns; both byte strings are read-only for the
+        // call, and emit never takes the emitter's instance lock (C6).
+        let status = unsafe {
+            (self.host.emit)(
+                self.host.host_handle,
+                name.as_ptr(),
+                name.len(),
+                payload.as_ptr(),
+                payload.len(),
+            )
+        };
+        if status == dougong_abi::STATUS_OK {
+            Ok(())
+        } else {
+            Err(format!("emit {name} failed with host status {status}"))
+        }
+    }
 }
 
 /// The durable job lifecycle records over the `'session-persistence'`
@@ -155,6 +179,21 @@ impl SessionLogAppend for WireSessionLog {
             &bytes,
         )?;
         Ok(())
+    }
+}
+
+/// The kernel-bus settlement announce (the dsh hub leg; a failure
+/// contains and never blocks the registry — the session-log judgment).
+struct WireJobAnnounce {
+    link: HostLink,
+}
+
+impl SettlementAnnounce for WireJobAnnounce {
+    fn settled(&self, payload: &Value) {
+        let Ok(bytes) = serde_json::to_vec(payload) else {
+            return;
+        };
+        let _ignored = self.link.emit(crate::jobs_types::JOB_SETTLED_EVENT, &bytes);
     }
 }
 
@@ -252,7 +291,8 @@ impl ShellState {
         .ok()?;
 
         let sessions = Arc::new(WireSessionLog { link });
-        let registry = LocalJobRegistry::new(sessions);
+        let announce = Arc::new(WireJobAnnounce { link });
+        let registry = LocalJobRegistry::new(sessions, announce);
         let confine = Arc::new(WireConfine { link });
         let policy = Arc::new(WirePolicy { link });
         let service =

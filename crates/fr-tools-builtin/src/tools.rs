@@ -153,6 +153,20 @@ pub trait Seams: Send + Sync {
     ///
     /// An unknown or foreign job.
     fn jobs_read(&self, id: &str, caller: Option<&str>) -> Result<Value, String>;
+    /// Lists the visible jobs in registration order (dsh
+    /// `registry.list`; caller-owned plus unowned).
+    ///
+    /// # Errors
+    ///
+    /// The transport family.
+    fn jobs_list(&self, caller: Option<&str>) -> Result<Value, String>;
+    /// Projects one job without moving its cursor (dsh
+    /// `registry.get`).
+    ///
+    /// # Errors
+    ///
+    /// An unknown or foreign job.
+    fn jobs_get(&self, id: &str, caller: Option<&str>) -> Result<Value, String>;
     /// Kills one job (dsh `registry.kill`); the reply word rides
     /// through.
     ///
@@ -1368,6 +1382,14 @@ mod tests {
                 "detail": job.wait_detail,
                 "output": { "total": 0, "earliest": 0 },
             }))
+        }
+
+        fn jobs_list(&self, _caller: Option<&str>) -> Result<Value, String> {
+            Ok(json!([]))
+        }
+
+        fn jobs_get(&self, _id: &str, _caller: Option<&str>) -> Result<Value, String> {
+            Err("unknown job".to_owned())
         }
 
         fn jobs_read(&self, _id: &str, _caller: Option<&str>) -> Result<Value, String> {

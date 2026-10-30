@@ -549,8 +549,18 @@ unsafe extern "C" fn setup(host: *const HostExports) -> *mut std::os::raw::c_voi
     // SAFETY: the host exports pointer is valid for the duration of
     // `setup`; the vtable is copied by value (v3 contract).
     let host = unsafe { *host };
+    let outbound = Outbound::new(host);
+    // The D31 grant behind the completion-notice machine: the tools
+    // plugin's notice worker requires `agent` status/inject/followup
+    // through the grant (runtime grants, not a static inject — an absent
+    // consumer fails the require immediately instead of parking a worker
+    // thread; the 16a watcher judgment). The target must be committed,
+    // so the assembler loads `fr-tools-builtin` before this artifact; a
+    // composition without the consumer keeps the loop alive — the offer
+    // lapses and the notice machine skips fail-closed.
+    let _ignored = outbound.grant("builtin-tools", crate::agent_service::SERVICE_NAME);
     Box::into_raw(Box::new(ShellState {
-        sessions: SessionMap::new(Outbound::new(host)),
+        sessions: SessionMap::new(outbound),
         drivers: Mutex::new(HashMap::new()),
     }))
     .cast::<std::os::raw::c_void>()

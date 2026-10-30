@@ -10,6 +10,8 @@
 //! projection frames follow the register-wire projector protocol
 //! (`{args, value}` / `{args, result}` in, the view out).
 
+use std::sync::Arc;
+
 use serde_json::{Value, json};
 
 use crate::render;
@@ -149,6 +151,30 @@ pub const METHOD_UPDATE_GOAL_PRESENT_CALL: u32 = 101;
 /// Method selector: the `goal` projection fold (the non-tool band;
 /// the `todos` fold rides 901).
 pub const METHOD_GOAL_FOLD: u32 = 902;
+/// Method selector: the `job_output` tool body.
+pub const METHOD_JOB_OUTPUT_EXECUTE: u32 = 102;
+/// Method selector: the `job_output` render projection.
+pub const METHOD_JOB_OUTPUT_RENDER: u32 = 103;
+/// Method selector: the `job_output` pending-call presentation.
+pub const METHOD_JOB_OUTPUT_PRESENT_CALL: u32 = 104;
+/// Method selector: the `job_list` tool body.
+pub const METHOD_JOB_LIST_EXECUTE: u32 = 105;
+/// Method selector: the `job_list` render projection.
+pub const METHOD_JOB_LIST_RENDER: u32 = 106;
+/// Method selector: the `job_list` pending-call presentation.
+pub const METHOD_JOB_LIST_PRESENT_CALL: u32 = 107;
+/// Method selector: the `job_kill` tool body.
+pub const METHOD_JOB_KILL_EXECUTE: u32 = 108;
+/// Method selector: the `job_kill` render projection.
+pub const METHOD_JOB_KILL_RENDER: u32 = 109;
+/// Method selector: the `job_kill` pending-call presentation.
+pub const METHOD_JOB_KILL_PRESENT_CALL: u32 = 110;
+/// Method selector: the `job_output` finalize listener (the post-execute
+/// CPS arm; the dsh `finalizeContent` carrier).
+pub const METHOD_JOB_OUTPUT_FINALIZE: u32 = 111;
+/// Method selector: the `job_kill` finalize listener (the post-execute
+/// CPS arm; the dsh `finalizeContent` carrier).
+pub const METHOD_JOB_KILL_FINALIZE: u32 = 112;
 
 /// The escalate-to modes this composition advertises (the dsh
 /// `ESCALATION_TARGETS` words in table order).
@@ -170,7 +196,7 @@ pub fn js_number(value: f64) -> String {
 }
 
 /// The composed runtime the wire face dispatches against: the scripted
-/// seams and the two in-crate domains (the domains ride `Arc` so the
+/// seams and the in-crate domains (the domains ride `Arc` so the
 /// activation shares them with the wire seam implementation).
 pub struct BuiltinTools {
     seams: Box<dyn tools::Seams>,
@@ -178,6 +204,7 @@ pub struct BuiltinTools {
     directories: std::sync::Arc<working_directory::WorkingDirectories>,
     lists: std::sync::Arc<crate::todo::TodoLists>,
     goals: std::sync::Arc<crate::goal_service::Goals>,
+    notices: std::sync::Arc<crate::job_tools::NoticeState>,
 }
 
 impl std::fmt::Debug for BuiltinTools {
@@ -199,6 +226,7 @@ impl BuiltinTools {
         directories: std::sync::Arc<working_directory::WorkingDirectories>,
         lists: std::sync::Arc<crate::todo::TodoLists>,
         goals: std::sync::Arc<crate::goal_service::Goals>,
+        notices: std::sync::Arc<crate::job_tools::NoticeState>,
     ) -> Result<Self, String> {
         Ok(Self {
             seams,
@@ -206,7 +234,15 @@ impl BuiltinTools {
             directories,
             lists,
             goals,
+            notices,
         })
+    }
+
+    /// The hosted notice state (the completion-notice machine's shared
+    /// ledger; the shell level owns the worker).
+    #[must_use]
+    pub const fn notices(&self) -> &std::sync::Arc<crate::job_tools::NoticeState> {
+        &self.notices
     }
 
     /// The hosted todo domain (the tool body's owning-session state).
@@ -388,6 +424,80 @@ impl BuiltinTools {
                 let state = crate::goal::fold_log(&events);
                 json!({ "state": state.to_value() })
             }
+            METHOD_JOB_OUTPUT_EXECUTE => {
+                let call = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let agent = call.get("agent").and_then(Value::as_str);
+                let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
+                return self.serve_job_body(
+                    |seams, arguments, agent, _| {
+                        crate::job_tools::execute_output(seams, &arguments, agent)
+                    },
+                    arguments,
+                    agent,
+                    Arc::clone(&self.notices),
+                );
+            }
+            METHOD_JOB_LIST_EXECUTE => {
+                let call = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let agent = call.get("agent").and_then(Value::as_str);
+                let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
+                return self.serve_job_body(
+                    |seams, _arguments, agent, _| crate::job_tools::execute_list(seams, agent),
+                    arguments,
+                    agent,
+                    Arc::clone(&self.notices),
+                );
+            }
+            METHOD_JOB_KILL_EXECUTE => {
+                let call = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let agent = call.get("agent").and_then(Value::as_str);
+                let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
+                let notices = Arc::clone(&self.notices);
+                return self.serve_job_body(
+                    |seams, arguments, agent, notices| {
+                        crate::job_tools::execute_kill(seams, &notices, &arguments, agent)
+                    },
+                    arguments,
+                    agent,
+                    notices,
+                );
+            }
+            METHOD_JOB_OUTPUT_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::job_tools::render_output(&args, &value))
+            }
+            METHOD_JOB_LIST_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::job_tools::render_list(&args, &value))
+            }
+            METHOD_JOB_KILL_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::job_tools::render_kill(&args, &value))
+            }
+            METHOD_JOB_OUTPUT_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::job_tools::present_call_output(&args))
+            }
+            METHOD_JOB_LIST_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::job_tools::present_call_list(&args))
+            }
+            METHOD_JOB_KILL_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::job_tools::present_call_kill(&args))
+            }
+            METHOD_JOB_OUTPUT_FINALIZE | METHOD_JOB_KILL_FINALIZE => {
+                return serve_job_finalize(self, &request);
+            }
             other => return Err(format!("unknown {PLUGIN_NAME} method {other}")),
         };
         serde_json::to_vec(&reply)
@@ -409,6 +519,37 @@ impl BuiltinTools {
         let agent = call.get("agent").and_then(Value::as_str);
         let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
         match body(&self.goals, arguments, agent) {
+            Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                .map_err(|error| format!("body reply encode failed: {error}")),
+            Err(error) => {
+                let body = match error.code {
+                    Some(code) => {
+                        json!({ "error": { "code": code, "message": error.message, "name": error.name } })
+                    }
+                    None => json!({ "error": { "message": error.message, "name": error.name } }),
+                };
+                serde_json::to_vec(&body)
+                    .map_err(|error| format!("body error encode failed: {error}"))
+            }
+        }
+    }
+
+    /// Serves one job tool body: the same wire body protocol over the
+    /// seams and the shared notice state (the kill body consumes the
+    /// ledger; the read/list bodies ignore it).
+    fn serve_job_body(
+        &self,
+        body: impl Fn(
+            &dyn crate::tools::Seams,
+            Value,
+            Option<&str>,
+            Arc<crate::job_tools::NoticeState>,
+        ) -> Result<Value, crate::tools::BodyError>,
+        arguments: Value,
+        agent: Option<&str>,
+        notices: Arc<crate::job_tools::NoticeState>,
+    ) -> Result<Vec<u8>, String> {
+        match body(self.seams.as_ref(), arguments, agent, notices) {
             Ok(value) => serde_json::to_vec(&json!({ "value": value }))
                 .map_err(|error| format!("body reply encode failed: {error}")),
             Err(error) => {
@@ -469,6 +610,151 @@ impl BuiltinTools {
     }
 }
 
+/// Serves one finalize listener call over the post-execute CPS protocol
+/// (the dsh `finalizeContent` carrier; the spill-serve judgment): the
+/// enter leg parks the call and result and answers delegate; the exit
+/// leg takes the downstream decision and, when the fitting applies,
+/// replaces the content with the byte-capped render.
+fn serve_job_finalize(tools: &BuiltinTools, request: &Value) -> Result<Vec<u8>, String> {
+    let finalizes = tools.notices().finalizes();
+    let token = request.get("token").and_then(Value::as_u64);
+    let Some(token) = token else {
+        return Err("finalize listener frame requires token".to_owned());
+    };
+    if request.get("leg").and_then(Value::as_str) == Some("enter") {
+        let call = request.get("call").cloned().unwrap_or(Value::Null);
+        let result = request.get("result").cloned().unwrap_or(Value::Null);
+        finalizes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(token, (call, result));
+        return serde_json::to_vec(&json!({ "kind": "delegate" }))
+            .map_err(|error| format!("finalize reply encode failed: {error}"));
+    }
+    let Some((call, result)) = finalizes
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .remove(&token)
+    else {
+        return Err(format!(
+            "finalize exit leg has no parked enter for token {token}"
+        ));
+    };
+    let decision = request.get("decision").cloned().unwrap_or(Value::Null);
+    if decision.get("kind").and_then(Value::as_str) != Some("accept") {
+        // A downstream replacement or block rides through verbatim: the
+        // dsh finalizer only adjusts the default rendering.
+        return serde_json::to_vec(&json!({ "kind": "final", "decision": decision }))
+            .map_err(|error| format!("finalize reply encode failed: {error}"));
+    }
+    let Some(content) = finalize_job_content(tools, &call, &result) else {
+        return serde_json::to_vec(&json!({ "kind": "final", "decision": decision }))
+            .map_err(|error| format!("finalize reply encode failed: {error}"));
+    };
+    let contexts = decision
+        .get("additionalContexts")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    serde_json::to_vec(&json!({
+        "kind": "final",
+        "decision": {
+            "kind": "accept",
+            "content": content,
+            "additionalContexts": contexts,
+        },
+    }))
+    .map_err(|error| format!("finalize reply encode failed: {error}"))
+}
+
+/// The dsh `finalizeJobContent`: the producer's cap for the named job
+/// bounds the rendered content — the default rendering keeps its
+/// output/status split only while intact; anything else gets the
+/// single-text tail fit; a multi-block or non-text content passes
+/// through.
+fn finalize_job_content(tools: &BuiltinTools, call: &Value, result: &Value) -> Option<Vec<Value>> {
+    let max_bytes = visible_output_limit(tools.seams(), call)?;
+    let is_error = result.get("kind").and_then(Value::as_str) == Some("failure");
+    let content_blocks = result.get("content").and_then(Value::as_array)?.clone();
+    if call.get("name").and_then(Value::as_str) == Some("job_output") && !is_error {
+        let value = result.get("value").cloned().unwrap_or(Value::Null);
+        let text = value.get("text").and_then(Value::as_str).unwrap_or("");
+        let body = if text.is_empty() {
+            "(no new output)".to_owned()
+        } else {
+            text.to_owned()
+        };
+        let content = body.strip_suffix('\n').unwrap_or(&body).to_owned();
+        let suffix = format!(
+            "\n{}",
+            crate::job_tools::status_line(&value.get("job").cloned().unwrap_or(Value::Null))
+        );
+        if raw_single_text(&content_blocks) == Some(format!("{content}{suffix}")) {
+            return Some(vec![json!({
+                "type": "text",
+                "text": crate::job_tools::fit_with_suffix(
+                    &content,
+                    &suffix,
+                    Some(max_bytes),
+                    "\n[output truncated]",
+                ),
+            })]);
+        }
+    }
+    bound_single_text(&content_blocks, max_bytes)
+}
+
+/// The producer's cap for the job a `job_output` or `job_kill` call
+/// names, when it is visible to the caller (dsh `visibleOutputLimit`).
+fn visible_output_limit(seams: &dyn crate::tools::Seams, call: &Value) -> Option<f64> {
+    let name = call.get("name").and_then(Value::as_str)?;
+    if name != "job_output" && name != "job_kill" {
+        return None;
+    }
+    let job_id = call
+        .get("arguments")
+        .and_then(|arguments| arguments.get("job_id"))
+        .and_then(Value::as_str)?;
+    if job_id.is_empty() {
+        return None;
+    }
+    let jobs = seams
+        .jobs_list(call.get("agent").and_then(Value::as_str))
+        .ok()?;
+    jobs.as_array()?.iter().find_map(|job| {
+        let matches = job.get("id").and_then(Value::as_str) == Some(job_id);
+        matches.then(|| job.get("output_limit_bytes").and_then(Value::as_f64))?
+    })
+}
+
+/// The exactly-one-text-block shape test (dsh `rawSingleText`).
+fn raw_single_text(content: &[Value]) -> Option<String> {
+    if content.len() != 1 {
+        return None;
+    }
+    let block = &content[0];
+    if block.get("type").and_then(Value::as_str) != Some("text") {
+        return None;
+    }
+    block.get("text").and_then(Value::as_str).map(str::to_owned)
+}
+
+/// The single-text tail fit (dsh `boundSingleText`): one text block
+/// bounds; anything else passes through untouched.
+fn bound_single_text(content: &[Value], max_bytes: f64) -> Option<Vec<Value>> {
+    if content.len() != 1 {
+        return None;
+    }
+    let block = &content[0];
+    if block.get("type").and_then(Value::as_str) != Some("text") {
+        return None;
+    }
+    let text = block.get("text").and_then(Value::as_str)?;
+    Some(vec![json!({
+        "type": "text",
+        "text": crate::job_tools::fit_with_suffix(text, "", Some(max_bytes), "\n[result truncated]"),
+    })])
+}
+
 /// Renders one canonical output value onto the model-facing text block
 /// (dsh `output.render`): the background acknowledgement, the promoted
 /// hand-off, or the finished-run marker stack.
@@ -524,9 +810,11 @@ pub fn fold_log(request: &Value) -> Value {
 
 /// The describe surface's method names (the registration reality: the
 /// two shell tools' bands, the read/write/edit/glob/grep bands, the
-/// spill listeners, the editor band, the todo band, and the two
-/// projection folds; excluded surfaces never appear here).
-const fn describe_methods() -> [&'static str; 59] {
+/// spill listeners, the editor band, the todo band, the goal band, the
+/// three job bands with their finalize listeners, and the two
+/// projection folds plus the jobless fold; excluded surfaces never
+/// appear here).
+const fn describe_methods() -> [&'static str; 70] {
     [
         "describe",
         "bash.execute",
@@ -584,6 +872,17 @@ const fn describe_methods() -> [&'static str; 59] {
         "update_goal.execute",
         "update_goal.render",
         "update_goal.presentCall",
+        "job_output.execute",
+        "job_output.render",
+        "job_output.presentCall",
+        "job_list.execute",
+        "job_list.render",
+        "job_list.presentCall",
+        "job_kill.execute",
+        "job_kill.render",
+        "job_kill.presentCall",
+        "job_output.finalize",
+        "job_kill.finalize",
         "todos.fold",
         "workingDirectory.fold",
         "goal.fold",

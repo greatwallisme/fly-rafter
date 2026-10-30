@@ -115,7 +115,7 @@ Scenario: bash 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: bash 说明 section 注册
-  Test: prompt_sections_pin_the_eight_tools
+  Test: prompt_sections_pin_the_nine_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 bash 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -199,7 +199,7 @@ Scenario: pwsh 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: pwsh 说明 section 注册
-  Test: prompt_sections_pin_the_eight_tools
+  Test: prompt_sections_pin_the_nine_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 pwsh 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -277,7 +277,7 @@ Scenario: read 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: read 说明 section 注册
-  Test: prompt_sections_pin_the_eight_tools
+  Test: prompt_sections_pin_the_nine_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 read 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -337,7 +337,7 @@ Scenario: read_image 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: read_image 说明 section 注册缺席
-  Test: prompt_sections_pin_the_eight_tools
+  Test: prompt_sections_pin_the_nine_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 read_image 无说明 section（dsh 真源 read-image.ts 不注入 systemPrompt）；注册表恰七条 tool:* section 且 order 位于 1000-3000
@@ -373,7 +373,7 @@ Scenario: write 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: write 说明 section 注册
-  Test: prompt_sections_pin_the_eight_tools
+  Test: prompt_sections_pin_the_nine_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 write 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -421,7 +421,7 @@ Scenario: edit 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: edit 说明 section 注册
-  Test: prompt_sections_pin_the_eight_tools
+  Test: prompt_sections_pin_the_nine_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 edit 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -493,7 +493,7 @@ Scenario: glob 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: glob 说明 section 注册
-  Test: prompt_sections_pin_the_eight_tools
+  Test: prompt_sections_pin_the_nine_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 glob 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -541,7 +541,7 @@ Scenario: grep 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: grep 说明 section 注册
-  Test: prompt_sections_pin_the_eight_tools
+  Test: prompt_sections_pin_the_nine_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 grep 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -781,7 +781,7 @@ Scenario: todo_write 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: todo_write 说明 section 注册缺席
-  Test: prompt_sections_pin_the_eight_tools
+  Test: prompt_sections_pin_the_nine_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 todo_write 无说明 section（dsh 真源 tool-todo 不注入 systemPrompt）；注册表恰七条 tool:* section 且 order 位于 1000-3000
@@ -997,127 +997,127 @@ Scenario: update_goal 行为 1
   那么 edit/pause/resume 需直接人类 root 权威；blocked 在最小轮前被拒（blockedAfterConsecutiveRounds 默认 3）
 
 Scenario: job_kill 调度与呈现
-  Test: pending_req_fr_builtin_tools_job_kill
+  Test: job_registrations_match_the_frozen_catalog
   假设 合约要求的行为已实现
   当 读取工具 job_kill 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 execute
 
 Scenario: job_kill 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_job_kill
+  Test: job_registrations_match_the_frozen_catalog
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: job_kill 说明 section 注册
-  Test: pending_req_fr_builtin_tools_job_kill_section
+  Test: jobs_section_pins_the_extracted_text
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 job_kill 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: job_kill 参数 job_id 形状
-  Test: pending_req_fr_builtin_tools_job_kill_job_id
+  Test: job_registrations_match_the_frozen_catalog
   假设 工具 job_kill 已注册
   当 校验 schema 时
   那么 参数行 [job_id:string:req] 的名称与类型按目录行实现
 
 Scenario: job_kill 参数 job_id 约束
-  Test: pending_req_fr_builtin_tools_job_kill_job_id
+  Test: job_registrations_match_the_frozen_catalog
   假设 工具 job_kill 已注册
   当 校验 schema 时
   那么 参数行 [job_id:string:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: job_kill 参数 reason 形状
-  Test: pending_req_fr_builtin_tools_job_kill_reason
+  Test: job_registrations_match_the_frozen_catalog
   假设 工具 job_kill 已注册
   当 校验 schema 时
   那么 参数行 [reason:string:opt（入日志并转发）] 的名称与类型按目录行实现
 
 Scenario: job_kill 参数 reason 约束
-  Test: pending_req_fr_builtin_tools_job_kill_reason
+  Test: job_registrations_match_the_frozen_catalog
   假设 工具 job_kill 已注册
   当 校验 schema 时
   那么 参数行 [reason:string:opt（入日志并转发）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: job_list 调度与呈现
-  Test: pending_req_fr_builtin_tools_job_list
+  Test: job_registrations_match_the_frozen_catalog
   假设 合约要求的行为已实现
   当 读取工具 job_list 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 read
 
 Scenario: job_list 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_job_list
+  Test: job_registrations_match_the_frozen_catalog
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: job_list 说明 section 注册
-  Test: pending_req_fr_builtin_tools_job_list_section
+  Test: jobs_section_pins_the_extracted_text
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 job_list 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: job_list 行为 1
-  Test: pending_req_fr_builtin_tools_job_list_1
+  Test: output_and_list_bodies_drive_the_registry_faces
   假设 工具 job_list 执行时
   当 达到触发条件时
   那么 列 running+finished 的 id/kind/status
 
 Scenario: job_output 调度与呈现
-  Test: pending_req_fr_builtin_tools_job_output
+  Test: job_registrations_match_the_frozen_catalog
   假设 合约要求的行为已实现
   当 读取工具 job_output 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 read
 
 Scenario: job_output 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_job_output
+  Test: job_registrations_match_the_frozen_catalog
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: job_output 说明 section 注册
-  Test: pending_req_fr_builtin_tools_job_output_section
+  Test: jobs_section_pins_the_extracted_text
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 job_output 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: job_output 参数 job_id 形状
-  Test: pending_req_fr_builtin_tools_job_output_job_id
+  Test: job_registrations_match_the_frozen_catalog
   假设 工具 job_output 已注册
   当 校验 schema 时
   那么 参数行 [job_id:string:req] 的名称与类型按目录行实现
 
 Scenario: job_output 参数 job_id 约束
-  Test: pending_req_fr_builtin_tools_job_output_job_id
+  Test: job_registrations_match_the_frozen_catalog
   假设 工具 job_output 已注册
   当 校验 schema 时
   那么 参数行 [job_id:string:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: job_output 参数 wait 形状
-  Test: pending_req_fr_builtin_tools_job_output_wait
+  Test: job_registrations_match_the_frozen_catalog
   假设 工具 job_output 已注册
   当 校验 schema 时
   那么 参数行 [wait:boolean:opt:false] 的名称与类型按目录行实现
 
 Scenario: job_output 参数 wait 约束
-  Test: pending_req_fr_builtin_tools_job_output_wait
+  Test: job_registrations_match_the_frozen_catalog
   假设 工具 job_output 已注册
   当 校验 schema 时
   那么 参数行 [wait:boolean:opt:false] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: job_output 参数 timeout_ms 形状
-  Test: pending_req_fr_builtin_tools_job_output_timeout_ms
+  Test: job_registrations_match_the_frozen_catalog
   假设 工具 job_output 已注册
   当 校验 schema 时
   那么 参数行 [timeout_ms:number:opt（默认 30s，钳至 maxWaitTimeoutMs 10min）] 的名称与类型按目录行实现
 
 Scenario: job_output 参数 timeout_ms 约束
-  Test: pending_req_fr_builtin_tools_job_output_timeout_ms
+  Test: job_registrations_match_the_frozen_catalog
   假设 工具 job_output 已注册
   当 校验 schema 时
   那么 参数行 [timeout_ms:number:opt（默认 30s，钳至 maxWaitTimeoutMs 10min）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: job_output 行为 1
-  Test: pending_req_fr_builtin_tools_job_output_1
+  Test: output_and_list_bodies_drive_the_registry_faces
   假设 工具 job_output 执行时
   当 达到触发条件时
   那么 流式增量读取；wait 超时留 job 运行

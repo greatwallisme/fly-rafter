@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 16 **16c 批 3 已落待提交**（goal.rs/goal_service.rs/goal_tools.rs 三模块+catalog 模板抽取+schema/service/plugin_shell 接线+verify 钉测+TOOLS 28 场景绑定与 9 处选择器勘误+binding-audit 十二节：workspace 1344/0、TOOLS lifecycle 135/0/273、guard 16 检查全 0 failed、七步流 4-7 闭）。**下一动作=16c 批 4：job_output/list/kill 三工具+完成通知机全落（Q16c-1A）+tool:jobs section（提交由用户 /commit 决定）。**
+Phase 16 **16c 批 4 已落待提交**（jobs 三工具+完成通知机全落 Q16c-1A+tool:jobs section；workspace 1364/0、TOOLS 156/0/252、四门绿、七步流 4-7 闭、binding-audit 十三节）。**下一动作=16c 批 5：schedule 域（六规则+jiff Q16c-4A）+fr-storage 接线+service+runtime 投递+schedule 四工具（提交由用户 /commit 决定）。**
 
 ## Phases
 
@@ -147,13 +147,13 @@ Phase 16 **16c 批 3 已落待提交**（goal.rs/goal_service.rs/goal_tools.rs �
 - [x] 16c 批 1：fr-storage crate（dsh storage/storage-domain/storage-json 三包等价插件：spec+facility+domain 写链+JSON single-unit 后端+atomic 协议）+PRD 4.5 增行（Q16c-3B）——27 tests，四门绿，workspace 1313
 - [ ] 16c 批 2：fr-wire 三事件常量（todo/write、goal/change、schedule/change）+fr-config 六组新键+todo_write 全件（投影 todos v2+工具+catalog+section 否定钉测）——**已落 2026-10-30（84c34ed）**（workspace 1325；TOOLS 107/0/302+CONFIG 80/0/239；descriptor inject 缺陷修复）
 - [ ] 16c 批 3：goal 域（fold 全量含 goal 源推进 Q16c-2A+service+投影 goal v6）+create/get/update_goal 三工具+tool:goal section（{{blocked_after}} 模板抽取）——**已落 2026-10-30**（goal.rs+goal_service.rs+goal_tools.rs 三模块；catalog 模板抽取 HEAD/TAIL；TOOLS 135/0/273=28 goal 场景绑+9 选择器勘误转 pass；workspace 1344/0；批 0 M1 缺席裁决执行+blockedReason 泄漏与 failure 门控两真缺陷测试暴露修复）
-- [ ] 16c 批 4：job_output/list/kill 三工具+完成通知机全落（Q16c-1A：settled→fitCompletionNotice 截断梯→inject/followup+wakeBudget）+tool:jobs section
+- [x] 16c 批 4：job_output/list/kill 三工具+完成通知机全落（Q16c-1A：fr-shell settle 发 job/settled 内核事件+awaited 等待者计数；fr-tools-builtin listen+notice worker+fitCompletionNotice 五梯+wakeBudget；fr-agent-loop grant+claimed 载荷增 sessionId）+tool:jobs section——**已落 2026-10-31**（job_tools.rs 新模块+Seams 增两法+两 finalize 监听器+describe 59→70+sections 钉测 8→9；TOOLS 156/0/252=21 场景绑+9 引用勘误；wait() 自死锁真缺陷测试暴露修复；workspace 1364/0）
 - [ ] 16c 批 5：schedule 域（六规则+jiff Q16c-4A）+fr-storage 接线+service+runtime 投递+schedule 四工具
 - [ ] 16c 批 6（收口）：五 section 场景改否定（Q16b-5A 判例）+92 场景绑定+七步流 4-7+五门
 - [ ] 16d 交互+会话查询 / 16e PTY+persistent / 16f web+skill+lsp+目录全量+内省
 - [ ] 每工具参数 schema 对照 dsh tool-catalog.md 逐字冻结（16a bash/pwsh 已逐字落 schema.rs，catalog 脚本随批 3）
 - [ ] 对照 REQ-FR-BUILTIN-TOOLS 场景逐条落测试（随各子批 spec 绑定）
-- **Status:** in_progress（16c 批 3 已落待提交；下一片=批 4 jobs 三工具+完成通知机）
+- **Status:** in_progress（16c 批 4 已落待提交；下一片=批 5 schedule 域六规则+jiff+fr-storage 接线+四工具）
 
 ### Phase 17: fr-compaction + fr-mcp + fr-ptc
 - [ ] fr-compaction：剪枝 8192/4096/1024、压缩契约与自动触发、图片卸载、spill max-inline-tokens 12500、replace-op 落地

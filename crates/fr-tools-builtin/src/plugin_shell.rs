@@ -29,12 +29,25 @@ use crate::working_directory::WorkingDirectories;
 /// The plugin name the host registers the artifact under.
 pub const PLUGIN_NAME: &str = "fr-tools-builtin";
 
+/// The kernel-event ids the descriptor's listen map binds (the
+/// fr-agent-loop `EV_CHUNK_READY` judgment: the map value rides the
+/// `on_event` dispatch).
+pub const EV_JOB_SETTLED: u32 = 1;
+/// The claimed-event id (the wake-budget reset leg).
+pub const EV_INBOX_CLAIMED: u32 = 2;
+
+/// The kernel event names this artifact listens for (the fr-shell owner
+/// crate keeps the same words; the string stays verbatim).
+pub const EVENT_JOB_SETTLED: &str = "job/settled";
+/// The claimed event (the fr-agent-loop owner crate's word).
+pub const EVENT_INBOX_CLAIMED: &str = "agent/inbox/claimed";
+
 /// The static descriptor: one provided service, eight injected seams
-/// (the search tools' subprocess face rides the injection), no
-/// listeners — the spill listeners register at activation instead (the
-/// descriptor `listen` map stays a dylib event face, not a tools-pipeline
-/// registration).
-const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\",\"fs\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\",\"subprocess\",\"attachments\",\"llm\",\"session-projections\"],\"listen\":{}}";
+/// (the search tools' subprocess face rides the injection), and the two
+/// completion-notice events — the spill listeners register at activation
+/// instead (the descriptor `listen` map stays a dylib event face, not a
+/// tools-pipeline registration).
+const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\",\"fs\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\",\"subprocess\",\"attachments\",\"llm\",\"session-projections\"],\"listen\":{\"job/settled\":1,\"agent/inbox/claimed\":2}}";
 
 /// The maximum host reply the require loop grows its buffer toward (the
 /// approval judgment).
@@ -336,6 +349,28 @@ impl Seams for WireSeams {
         serde_json::from_slice(&reply).map_err(|e| format!("read decode failed: {e}"))
     }
 
+    fn jobs_list(&self, caller: Option<&str>) -> Result<Value, String> {
+        let payload = json!({ "caller": caller });
+        let bytes = serde_json::to_vec(&payload).map_err(|e| format!("list encode failed: {e}"))?;
+        let reply = self.link.require(
+            fr_wire::services::jobs::SERVICE_NAME,
+            fr_wire::services::jobs::METHOD_LIST,
+            &bytes,
+        )?;
+        serde_json::from_slice(&reply).map_err(|e| format!("list decode failed: {e}"))
+    }
+
+    fn jobs_get(&self, id: &str, caller: Option<&str>) -> Result<Value, String> {
+        let payload = json!({ "id": id, "caller": caller });
+        let bytes = serde_json::to_vec(&payload).map_err(|e| format!("get encode failed: {e}"))?;
+        let reply = self.link.require(
+            fr_wire::services::jobs::SERVICE_NAME,
+            fr_wire::services::jobs::METHOD_GET,
+            &bytes,
+        )?;
+        serde_json::from_slice(&reply).map_err(|e| format!("get decode failed: {e}"))
+    }
+
     fn jobs_kill(
         &self,
         id: &str,
@@ -500,6 +535,11 @@ pub struct BuiltinState {
     /// The spill listeners' CPS pairing stash (the enter leg parks the
     /// call and result; the exit leg consumes them).
     pending: std::sync::Mutex<std::collections::HashMap<u64, (Value, Value)>>,
+    /// The completion-notice machine's queue sender; dropping it ends
+    /// the worker at teardown.
+    tasks: Option<std::sync::mpsc::Sender<crate::job_tools::NoticeTask>>,
+    /// The notice worker's join handle (joined before the state drops).
+    worker: Option<std::thread::JoinHandle<()>>,
 }
 
 impl std::fmt::Debug for BuiltinState {
@@ -594,6 +634,11 @@ pub(crate) fn prompt_sections() -> Vec<(String, f64, String)> {
             "tool:goal".to_owned(),
             2400.0,
             crate::schema::goal_section_text(crate::goal_tools::BAKED_BLOCKED_AFTER),
+        ),
+        (
+            "tool:jobs".to_owned(),
+            1600.0,
+            crate::catalog_gen::JOBS_SECTION_TEXT.to_owned(),
         ),
     ]
 }
@@ -923,7 +968,128 @@ fn register_tools(
             serde_json::to_vec(&registration).ok()?.as_slice(),
         )?;
     }
+    // The three job controls (dsh `tool-jobs`; the same partial-face
+    // shape: exclusive scheduling, no presentResult/presentationMeta;
+    // the finalize listeners register separately below — the dsh
+    // finalizeContent hook rides the post-execute CPS face).
+    for registration in [
+        job_output_registration(),
+        job_list_registration(),
+        job_kill_registration(),
+    ] {
+        step(
+            link,
+            fr_wire::services::tools::SERVICE_NAME,
+            fr_wire::services::tools::METHOD_REGISTER,
+            serde_json::to_vec(&registration).ok()?.as_slice(),
+        )?;
+    }
     register_spill_listeners(link);
+    register_finalize_listeners(link);
+    Some(())
+}
+
+/// The `job_output` registration row (dsh `ctx.tools.register`,
+/// call-for-call).
+#[must_use]
+pub fn job_output_registration() -> Value {
+    json!({
+        "name": "job_output",
+        "description": crate::catalog_gen::JOB_OUTPUT_DESCRIPTION,
+        "parameters": crate::schema::job_output_parameters(),
+        "output": {
+            "schema": crate::schema::job_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_JOB_OUTPUT_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_JOB_OUTPUT_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_JOB_OUTPUT_PRESENT_CALL,
+        },
+    })
+}
+
+/// The `job_list` registration row (dsh `ctx.tools.register`,
+/// call-for-call).
+#[must_use]
+pub fn job_list_registration() -> Value {
+    json!({
+        "name": "job_list",
+        "description": crate::catalog_gen::JOB_LIST_DESCRIPTION,
+        "parameters": crate::schema::job_list_parameters(),
+        "output": {
+            "schema": crate::schema::job_list_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_JOB_LIST_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_JOB_LIST_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_JOB_LIST_PRESENT_CALL,
+        },
+    })
+}
+
+/// The `job_kill` registration row (dsh `ctx.tools.register`,
+/// call-for-call).
+#[must_use]
+pub fn job_kill_registration() -> Value {
+    json!({
+        "name": "job_kill",
+        "description": crate::catalog_gen::JOB_KILL_DESCRIPTION,
+        "parameters": crate::schema::job_kill_parameters(),
+        "output": {
+            "schema": crate::schema::job_kill_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_JOB_KILL_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_JOB_KILL_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_JOB_KILL_PRESENT_CALL,
+        },
+    })
+}
+
+/// Registers the two finalize listeners (the dsh `finalizeContent` of
+/// `job_output`/`job_kill`; the spill-listener registration shape over
+/// the post-execute CPS face).
+fn register_finalize_listeners(link: &HostLink) -> Option<()> {
+    for method in [
+        crate::service::METHOD_JOB_OUTPUT_FINALIZE,
+        crate::service::METHOD_JOB_KILL_FINALIZE,
+    ] {
+        step(
+            link,
+            fr_wire::services::tools::SERVICE_NAME,
+            fr_wire::services::tools::METHOD_REGISTER_LISTENER,
+            serde_json::to_vec(&json!({
+                "stage": "post-execute",
+                "endpoint": {
+                    "service": crate::service::SERVICE_NAME,
+                    "method": method,
+                },
+            }))
+            .ok()?
+            .as_slice(),
+        )?;
+    }
     Some(())
 }
 
@@ -1088,6 +1254,18 @@ impl BuiltinState {
                 b"{}",
             )
             .is_ok();
+        // The completion-notice machine: the queue and the plugin-owned
+        // worker thread (joined at teardown; the pump discipline). The
+        // worker rides a copy of the shared HostLink — its requires
+        // serialize through the host contract like every other consumer
+        // thread.
+        let (tasks, receiver) = std::sync::mpsc::channel::<crate::job_tools::NoticeTask>();
+        let notices = Arc::new(crate::job_tools::NoticeState::new(
+            tasks.clone(),
+            crate::job_tools::BAKED_DELIVERY,
+            crate::job_tools::BAKED_WAKE_BUDGET,
+        ));
+        let worker = crate::job_tools::spawn_notice_worker(Arc::clone(&notices), receiver, link);
         register_sections(&link)?;
         register_projection(&link)?;
         register_tools(&link, !escalation.is_empty(), attachments_mounted)?;
@@ -1125,6 +1303,7 @@ impl BuiltinState {
             directories_arc,
             Arc::new(lists),
             Arc::new(goals),
+            notices,
         )
         .ok()?;
 
@@ -1142,6 +1321,8 @@ impl BuiltinState {
             fs,
             gate: crate::observation::ObservedStateGate::new(),
             pending: std::sync::Mutex::new(std::collections::HashMap::new()),
+            tasks: Some(tasks),
+            worker: Some(worker),
         })
     }
 
@@ -1456,19 +1637,55 @@ unsafe extern "C" fn call(
     }
 }
 
-const unsafe extern "C" fn on_event(
-    _handle: *mut c_void,
-    _event: u32,
+// The two listened events (emit dispatch): the settlement handler runs
+// the notice machine's judge-and-enqueue fast path (no require, no
+// blocking — the AGENT-LOOP spec invariant); the claimed handler
+// resets the wake budget. Both write `{}` and answer OK.
+unsafe extern "C" fn on_event(
+    handle: *mut c_void,
+    event: u32,
     _mode: u32,
-    _in_data: *const u8,
-    _in_len: usize,
+    in_data: *const u8,
+    in_len: usize,
     _next_available: u32,
-    _out: *mut u8,
-    _cap: usize,
-    _out_len: *mut usize,
+    out: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
 ) -> i32 {
-    // No listeners are declared; the host never routes events here.
-    STATUS_FAILED
+    if handle.is_null() {
+        return STATUS_FAILED;
+    }
+    // SAFETY: live handle per the export-table contract.
+    let state = unsafe { &*(handle.cast::<BuiltinState>()) };
+    // Same empty-payload shape as `call` (null/0 pairs).
+    let payload: &[u8] = if in_len == 0 || in_data.is_null() {
+        &[]
+    } else {
+        // SAFETY: `in_len` is nonzero and `in_data` non-null here, valid
+        // for `in_len` readable bytes per the host contract.
+        unsafe { std::slice::from_raw_parts(in_data, in_len) }
+    };
+    let outcome = match event {
+        EV_JOB_SETTLED => handle_job_settled(state, payload),
+        EV_INBOX_CLAIMED => handle_inbox_claimed(state, payload),
+        _ => Err(format!("unknown event id {event}")),
+    };
+    match outcome {
+        Ok(()) => {
+            // SAFETY: host buffer contract; an empty JSON object reply.
+            if unsafe { write_out(b"{}", out, cap, out_len) } {
+                STATUS_OK
+            } else {
+                STATUS_CAPACITY
+            }
+        }
+        Err(message) => {
+            let body = json!({ "error": message }).to_string();
+            // SAFETY: host buffer contract.
+            let _ = unsafe { write_out(body.as_bytes(), out, cap, out_len) };
+            STATUS_FAILED
+        }
+    }
 }
 
 const unsafe extern "C" fn on_next(
@@ -1489,9 +1706,74 @@ unsafe extern "C" fn teardown(handle: *mut c_void) {
         return;
     }
     // SAFETY: the handle was produced by `setup` and torn down exactly
-    // once; the runtime owns no plugin threads (every wait rides the
-    // bounded foreign faces), so the drop is the whole unwinding.
-    let _ = unsafe { Box::from_raw(handle.cast::<BuiltinState>()) };
+    // once; the notice worker joins before the state drops (the sender
+    // drops first, so the worker's recv unwinds and the join waits for
+    // the in-flight delivery to contain).
+    let mut state = unsafe { Box::from_raw(handle.cast::<BuiltinState>()) };
+    drop(state.tasks.take());
+    if let Some(worker) = state.worker.take() {
+        let _ignored = worker.join();
+    }
+    drop(state);
+}
+
+/// Handles one `job/settled` notification: the notice machine's
+/// judge-and-enqueue fast path (no require, no blocking — the
+/// AGENT-LOOP spec invariant). The dsh skip arms ride in order: a
+/// model-requested kill (`killedByModel.delete`), a released wait
+/// (`awaited`), a teardown settlement, and an unowned job.
+fn handle_job_settled(state: &BuiltinState, payload: &[u8]) -> Result<(), String> {
+    let event: Value = serde_json::from_slice(payload)
+        .map_err(|error| format!("{EVENT_JOB_SETTLED} payload is invalid: {error}"))?;
+    if event.get("type").and_then(Value::as_str) != Some("settled") {
+        return Ok(());
+    }
+    let job = event.get("job").cloned().unwrap_or(Value::Null);
+    let Some(id) = job.get("id").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let delivered = state.tools().notices().consumes_model_kill(id)
+        || event
+            .get("awaited")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+    if delivered
+        || event.get("cause").and_then(Value::as_str) == Some("teardown")
+        || job.get("owner").and_then(Value::as_str).is_none()
+    {
+        return Ok(());
+    }
+    let Some(session_id) = job.get("owner").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    state
+        .tools()
+        .notices()
+        .enqueue(crate::job_tools::NoticeTask {
+            session_id: session_id.to_owned(),
+            message: crate::job_tools::notice_message(&job),
+        });
+    Ok(())
+}
+
+/// Handles one `agent/inbox/claimed` notification: the wake-budget
+/// reset when the claimed message carries a user source (the dsh
+/// claimed filter; a no-op while no budget is configured — the dsh
+/// listener would not even register).
+fn handle_inbox_claimed(state: &BuiltinState, payload: &[u8]) -> Result<(), String> {
+    let event: Value = serde_json::from_slice(payload)
+        .map_err(|error| format!("{EVENT_INBOX_CLAIMED} payload is invalid: {error}"))?;
+    let Some(session_id) = event.get("sessionId").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let is_user = matches!(
+        event.pointer("/message/source/kind").cloned().unwrap_or(Value::Null),
+        Value::String(kind) if kind == "user"
+    );
+    if is_user {
+        state.tools().notices().reset_wake_budget(session_id);
+    }
+    Ok(())
 }
 
 /// Export table for the fr-tools-builtin dylib artifact.
@@ -1509,37 +1791,54 @@ pub static DOUGONG_PLUGIN_EXPORTS: PluginExports = PluginExports {
 
 #[cfg(test)]
 mod tests {
-    /// The seven tool sections ride the dsh orders and their verbatim
-    /// texts: the bash order opens the 1000-3000 tool band, the pwsh
-    /// twin sits ten above it, the fs trio rides the dsh
-    /// read/write/edit orders, and the discovery pair rides the
-    /// glob/grep orders (the builtin-tools contract's section clause;
-    /// the write and grep texts carry the composed conditional tails).
-    /// The count pins the absences too: the image tool and the opt-in
-    /// editor inject no systemPrompt (the dsh sources; the Q16b-4A and
-    /// Q16b-5A rulings), and the whole-list snapshot tool registers no
-    /// section either (the dsh tool source injects no systemPrompt; the
-    /// Q16c batch-2 negative pin).
-    /// The eight tool sections ride the dsh orders and their verbatim
+    /// The nine tool sections ride the dsh orders and their verbatim
     /// texts: the bash order opens the 1000-3000 tool band, the pwsh
     /// twin sits ten above it, the fs trio rides the dsh
     /// read/write/edit orders, the discovery pair rides the glob/grep
-    /// orders, and the goal guidance rides the `TOOL_GOAL` order with its
-    /// threshold-composed text (the builtin-tools contract's section
-    /// clause; the write and grep texts carry the composed conditional
-    /// tails). The count pins the absences too: the image tool, the
-    /// opt-in editor, and the whole-list snapshot tool register no
-    /// section (the dsh sources inject no systemPrompt; the Q16b-4A,
-    /// Q16b-5A, and Q16c batch-2 rulings).
+    /// orders, the jobs guidance rides the `TOOL_JOBS` order (one
+    /// section serving the three controls), and the goal guidance rides
+    /// the `TOOL_GOAL` order with its threshold-composed text (the
+    /// builtin-tools contract's section clause; the write and grep texts
+    /// carry the composed conditional tails). The count pins the
+    /// absences too: the image tool, the opt-in editor, and the
+    /// whole-list snapshot tool register no section (the dsh sources
+    /// inject no systemPrompt; the Q16b-4A, Q16b-5A, and Q16c batch-2
+    /// rulings).
     #[test]
-    fn prompt_sections_pin_the_eight_tools() {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the pin mirrors the nine dsh sections one anchor per section; splitting it would hide the band correspondence"
+    )]
+    fn prompt_sections_pin_the_nine_tools() {
         let sections = super::prompt_sections();
-        assert_eq!(sections.len(), 8);
+        assert_eq!(sections.len(), 9);
         assert!(
             sections
                 .iter()
                 .all(|(name, _, _)| !name.contains("todo") && !name.contains("image")),
             "the section-free tools stay absent (the dsh truth)"
+        );
+        let jobs = sections
+            .iter()
+            .find(|(name, _, _)| name == "tool:jobs")
+            .expect("the jobs section registers");
+        assert_eq!(jobs.1, 1600.0);
+        assert!(
+            jobs.2
+                .starts_with("Track every background job id you start."),
+            "{}",
+            jobs.2
+        );
+        assert!(
+            jobs.2.contains("do not busy-poll or sleep on one"),
+            "{}",
+            jobs.2
+        );
+        assert!(
+            jobs.2
+                .ends_with("and job_kill jobs that stopped mattering."),
+            "{}",
+            jobs.2
         );
         let goal = sections
             .iter()
@@ -1633,5 +1932,22 @@ mod tests {
             assert!(name.starts_with("tool:"));
             assert!((1000.0..=3000.0).contains(&order));
         }
+    }
+
+    /// The descriptor declares the two completion-notice events with
+    /// their dispatch ids (the fr-agent-loop listen-map judgment), and
+    /// the event ids stay paired with the on-event dispatch constants.
+    #[test]
+    fn descriptor_declares_the_notice_events() {
+        let parsed: serde_json::Value =
+            serde_json::from_str(super::DESCRIPTOR).expect("descriptor json");
+        assert_eq!(
+            parsed["listen"],
+            serde_json::json!({ "job/settled": 1, "agent/inbox/claimed": 2 })
+        );
+        assert_eq!(super::EV_JOB_SETTLED, 1);
+        assert_eq!(super::EV_INBOX_CLAIMED, 2);
+        assert_eq!(super::EVENT_JOB_SETTLED, "job/settled");
+        assert_eq!(super::EVENT_INBOX_CLAIMED, "agent/inbox/claimed");
     }
 }

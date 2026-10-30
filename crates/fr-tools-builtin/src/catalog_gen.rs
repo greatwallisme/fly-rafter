@@ -616,3 +616,81 @@ pub const UPDATE_GOAL_MAX_GOAL_ROUNDS_TEXT: &str = r"Replacement cap; valid only
 
 /// The `update_goal` `blocked_reason` parameter description (catalog-verbatim).
 pub const UPDATE_GOAL_BLOCKED_REASON_TEXT: &str = r"Required only with action blocked: the concrete condition that persisted across rounds and blocks progress.";
+
+/// The `job_kill` tool description (catalog-verbatim).
+pub const JOB_KILL_DESCRIPTION: &str = r"Request cancellation of a running background job.";
+
+/// The `job_kill` parameter table (the json block, verbatim).
+pub const JOB_KILL_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "job_id": {
+      "type": "string",
+      "description": "Job id returned by the tool that started the background work."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Optional short reason, recorded in the log and forwarded to the job."
+    }
+  },
+  "required": [
+    "job_id"
+  ]
+}"#;
+
+/// The `job_kill` `job_id` parameter description (catalog-verbatim).
+pub const JOB_KILL_JOB_ID_TEXT: &str =
+    r"Job id returned by the tool that started the background work.";
+
+/// The `job_kill` `reason` parameter description (catalog-verbatim).
+pub const JOB_KILL_REASON_TEXT: &str =
+    r"Optional short reason, recorded in the log and forwarded to the job.";
+
+/// The `job_list` tool description (catalog-verbatim).
+pub const JOB_LIST_DESCRIPTION: &str =
+    r"List your background jobs (running and finished) with their ids, kinds, and statuses.";
+
+/// The `job_list` parameter table (the json block, verbatim).
+pub const JOB_LIST_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {}
+}"#;
+
+/// The `job_output` tool description (catalog-verbatim).
+pub const JOB_OUTPUT_DESCRIPTION: &str = r"Read a background job: output since the previous read for stream jobs, or the result of a finished final-output job.";
+
+/// The `job_output` parameter table (the json block, verbatim).
+pub const JOB_OUTPUT_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "job_id": {
+      "type": "string",
+      "description": "Job id returned by the tool that started the background work."
+    },
+    "wait": {
+      "type": "boolean",
+      "description": "Block until the job finishes or the timeout expires; a timed-out wait leaves the job running. Defaults to false."
+    },
+    "timeout_ms": {
+      "type": "number",
+      "description": "Max wait in milliseconds with wait: true. Defaults to and is capped by configuration."
+    }
+  },
+  "required": [
+    "job_id"
+  ]
+}"#;
+
+/// The `tool:jobs` prompt-section text (the dsh `ctx.systemPrompt.section` call in the tool-jobs plugin's apply, source-verbatim; one section serves the three job controls).
+pub const JOBS_SECTION_TEXT: &str = r"Track every background job id you start. You are notified in-session when a job finishes — do not busy-poll or sleep on one; keep working on independent steps and do not duplicate a running job's work. Before giving a final answer, collect every still-relevant job with job_output (set wait: true only when you are genuinely blocked on it), and job_kill jobs that stopped mattering.";
+
+/// The `job_output` `job_id` parameter description (catalog-verbatim).
+pub const JOB_OUTPUT_JOB_ID_TEXT: &str =
+    r"Job id returned by the tool that started the background work.";
+
+/// The `job_output` `wait` parameter description (catalog-verbatim).
+pub const JOB_OUTPUT_WAIT_TEXT: &str = r"Block until the job finishes or the timeout expires; a timed-out wait leaves the job running. Defaults to false.";
+
+/// The `job_output` `timeout_ms` parameter description (catalog-verbatim).
+pub const JOB_OUTPUT_TIMEOUT_MS_TEXT: &str =
+    r"Max wait in milliseconds with wait: true. Defaults to and is capped by configuration.";

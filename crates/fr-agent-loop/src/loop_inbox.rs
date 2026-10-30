@@ -170,6 +170,7 @@ impl LoopInbox {
         }
         for message in &claimed {
             self.events.emit_inbox_claimed(&InboxClaimedPayload {
+                session_id: self.client.session_id().to_owned(),
                 message: message.clone(),
                 turn,
             });

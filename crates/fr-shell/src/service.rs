@@ -1028,6 +1028,13 @@ mod tests {
         }
     }
 
+    /// The silent announce double (the `jobs_local` test judgment).
+    struct QuietAnnounce;
+
+    impl crate::jobs_local::SettlementAnnounce for QuietAnnounce {
+        fn settled(&self, _payload: &Value) {}
+    }
+
     /// The danger policy: the executor runs direct and decorates.
     #[derive(Debug)]
     struct DangerPolicy;
@@ -1083,8 +1090,11 @@ mod tests {
     }
 
     fn danger_service() -> ShellService {
-        let registry =
-            LocalJobRegistry::with_config(Arc::new(FakeLog::default()), RegistryConfig::default());
+        let registry = LocalJobRegistry::with_config(
+            Arc::new(FakeLog::default()),
+            Arc::new(QuietAnnounce),
+            RegistryConfig::default(),
+        );
         ShellService::new(
             registry,
             Arc::new(ConfinedPolicy {
@@ -1287,7 +1297,7 @@ mod tests {
     /// rides only when the composition advertises targets.
     #[test]
     fn denial_notes_and_escalation_hint_gate() {
-        let registry = LocalJobRegistry::new(Arc::new(FakeLog::default()));
+        let registry = LocalJobRegistry::new(Arc::new(FakeLog::default()), Arc::new(QuietAnnounce));
         let service = ShellService::new(
             registry,
             Arc::new(ConfinedPolicy {
@@ -1664,7 +1674,7 @@ mod tests {
     #[test]
     fn bundle_rows_pin_the_per_kind_timeouts() {
         let service = ShellService::new(
-            LocalJobRegistry::new(Arc::new(FakeLog::default())),
+            LocalJobRegistry::new(Arc::new(FakeLog::default()), Arc::new(QuietAnnounce)),
             Arc::new(ConfinedPolicy {
                 argv: Vec::new(),
                 signatures: Vec::new(),

@@ -114,6 +114,10 @@ pub struct AssistantStreamPayload {
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InboxClaimedPayload {
+    /// The session whose inbox claimed the message (the dsh payload
+    /// carries the agent object itself; the honest wire serialization
+    /// names the session).
+    pub session_id: String,
     /// The message claimed for the turn.
     pub message: Message,
     /// The turn that owns the claimed batch.
@@ -691,6 +695,7 @@ mod tests {
         let (events, _log) = face_with(outbound);
         events.emit_status(AgentStatus::Running);
         events.emit_inbox_claimed(&InboxClaimedPayload {
+            session_id: "s1".to_owned(),
             message: user_message("task"),
             turn: 4,
         });
@@ -893,10 +898,12 @@ mod tests {
             })
         );
         let claimed = InboxClaimedPayload {
+            session_id: "s1".to_owned(),
             message: user_message("task"),
             turn: 4,
         };
         let value = serde_json::to_value(&claimed).expect("serializes");
+        assert_eq!(value["sessionId"], "s1");
         assert_eq!(value["turn"], 4);
         assert_eq!(value["message"]["id"], "msg-task");
         let inserted = InboxMessagePayload {
@@ -1096,9 +1103,8 @@ mod tests {
             "100k frames dispatched in {elapsed:?}"
         );
         let crossings = log.lock().expect("mirror log").len();
-        println!(
-            "assistant-stream dispatch: {chunks} frames in {elapsed:?} ({:.0} frames/s, {crossings} mirror crossings)",
-            f64::from(u32::try_from(chunks).expect("fits u32")) / elapsed.as_secs_f64()
-        );
+        // Throughput rides the assertion message on failure; the passing
+        // case stays silent (the hook discipline: no debug prints).
+        let _ = (chunks, crossings);
     }
 }

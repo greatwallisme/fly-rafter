@@ -836,6 +836,105 @@ pub fn goal_output_schema() -> Value {
     })
 }
 
+/// The `job_output` parameter table (the catalog-frozen base).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON stops parsing — the generation
+/// contract, pinned by the verify suite.
+#[must_use]
+pub fn job_output_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::JOB_OUTPUT_PARAMETERS_JSON)
+        .expect("the frozen job_output table parses")
+}
+
+/// The `job_list` parameter table (the catalog-frozen base; no rows).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON stops parsing — the generation
+/// contract, pinned by the verify suite.
+#[must_use]
+pub fn job_list_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::JOB_LIST_PARAMETERS_JSON)
+        .expect("the frozen job_list table parses")
+}
+
+/// The `job_kill` parameter table (the catalog-frozen base).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON stops parsing — the generation
+/// contract, pinned by the verify suite.
+#[must_use]
+pub fn job_kill_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::JOB_KILL_PARAMETERS_JSON)
+        .expect("the frozen job_kill table parses")
+}
+
+/// The shared job-control projection row (the dsh `PUBLIC_JOB_SCHEMA`):
+/// seven keys, the terminal-status enum, camelCase timestamps.
+#[must_use]
+pub fn public_job_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "id": { "type": "string", "required": true },
+            "kind": { "type": "string", "required": true },
+            "label": { "type": "string", "required": true },
+            "status": {
+                "type": "string",
+                "required": true,
+                "enum": ["running", "stopping", "completed", "killed", "failed"],
+            },
+            "detail": { "type": "string" },
+            "startedAt": { "type": "integer", "required": true },
+            "finishedAt": { "type": "integer" },
+        },
+    })
+}
+
+/// The `job_output` output contract (the dsh `output.schema`).
+#[must_use]
+pub fn job_output_schema() -> Value {
+    let mut row = public_job_schema();
+    row["required"] = json!(true);
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "text": { "type": "string", "required": true },
+            "job": row,
+        },
+    })
+}
+
+/// The `job_list` output contract (the dsh `output.schema` array).
+#[must_use]
+pub fn job_list_schema() -> Value {
+    json!({ "type": "array", "items": public_job_schema() })
+}
+
+/// The `job_kill` output contract (the dsh `output.schema`).
+#[must_use]
+pub fn job_kill_schema() -> Value {
+    let mut row = public_job_schema();
+    row["required"] = json!(true);
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "outcome": {
+                "type": "string",
+                "required": true,
+                "enum": ["cancellation-requested", "already-finished"],
+            },
+            "job": row,
+        },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -935,6 +935,14 @@ mod tests {
             Err("unused".to_owned())
         }
 
+        fn jobs_list(&self, _caller: Option<&str>) -> Result<Value, String> {
+            Ok(json!([]))
+        }
+
+        fn jobs_get(&self, _id: &str, _caller: Option<&str>) -> Result<Value, String> {
+            Err("unknown job".to_owned())
+        }
+
         fn jobs_read(&self, _id: &str, _caller: Option<&str>) -> Result<Value, String> {
             Err("unused".to_owned())
         }

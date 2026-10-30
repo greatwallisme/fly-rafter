@@ -173,6 +173,28 @@ TOOLS = {
         ],
         "none",
     ),
+    "job_kill": (
+        "JOB_KILL",
+        [
+            ("job_id", "JOB_ID_TEXT"),
+            ("reason", "REASON_TEXT"),
+        ],
+        "none",
+    ),
+    "job_list": (
+        "JOB_LIST",
+        [],
+        "none",
+    ),
+    "job_output": (
+        "JOB_OUTPUT",
+        [
+            ("job_id", "JOB_ID_TEXT"),
+            ("wait", "WAIT_TEXT"),
+            ("timeout_ms", "TIMEOUT_MS_TEXT"),
+        ],
+        "none",
+    ),
 }
 
 HEADER = """\
@@ -504,6 +526,18 @@ def emit():
             )
             blocks.append(
                 f"pub const GOAL_SECTION_TEXT_TAIL: &str = {raw_literal(brand_map(tail))};\n"
+            )
+        if tool == "job_output":
+            with open(os.path.join(source_root, "packages", "jobs", "tool-jobs", "src", "index.ts"), encoding="utf-8") as handle:
+                source = handle.read()
+            section_text = brand_map(extract_section_text(source, "jobs"))
+            blocks.append(
+                "\n/// The `tool:jobs` prompt-section text (the dsh `ctx.systemPrompt.section`"
+                " call in the tool-jobs plugin's apply, source-verbatim; one section serves"
+                " the three job controls).\n"
+            )
+            blocks.append(
+                f"pub const JOBS_SECTION_TEXT: &str = {raw_literal(section_text)};\n"
             )
         for key, suffix in keys:
             text = brand_map(parameter_text(parsed, key))

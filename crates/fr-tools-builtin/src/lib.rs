@@ -46,6 +46,7 @@ pub mod fsio;
 pub mod goal;
 pub mod goal_service;
 pub mod goal_tools;
+pub mod job_tools;
 pub mod observation;
 pub mod plugin_shell;
 pub mod render;

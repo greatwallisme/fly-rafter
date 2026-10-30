@@ -522,3 +522,162 @@ fn goal_section_composes_over_the_extracted_template() {
     assert_eq!(goal_sections.len(), 1);
     assert_eq!(goal_sections[0].1, 2400.0);
 }
+
+/// Q97-A's full-schema pin for the job family: the three descriptions
+/// and parameter tables ride the frozen catalog, the shared
+/// projection row keeps the seven-key shape, and the registrations
+/// stay exclusive with the partial endpoint set (the goal-family pin
+/// judgment, one assertion per face).
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the family pin mirrors the catalog rows one assertion per face; splitting it would hide the correspondence"
+)]
+fn job_registrations_match_the_frozen_catalog() {
+    // The descriptions ride the catalog-verbatim constants.
+    assert_eq!(
+        crate::catalog_gen::JOB_OUTPUT_DESCRIPTION,
+        "Read a background job: output since the previous read for stream jobs, or the result of a finished final-output job."
+    );
+    assert_eq!(
+        crate::catalog_gen::JOB_LIST_DESCRIPTION,
+        "List your background jobs (running and finished) with their ids, kinds, and statuses."
+    );
+    assert_eq!(
+        crate::catalog_gen::JOB_KILL_DESCRIPTION,
+        "Request cancellation of a running background job."
+    );
+    // The parameter tables equal the frozen catalog JSON.
+    for (composed, frozen) in [
+        (
+            crate::schema::job_output_parameters(),
+            crate::catalog_gen::JOB_OUTPUT_PARAMETERS_JSON,
+        ),
+        (
+            crate::schema::job_list_parameters(),
+            crate::catalog_gen::JOB_LIST_PARAMETERS_JSON,
+        ),
+        (
+            crate::schema::job_kill_parameters(),
+            crate::catalog_gen::JOB_KILL_PARAMETERS_JSON,
+        ),
+    ] {
+        let frozen: Value = serde_json::from_str(frozen).expect("the frozen table parses");
+        assert_eq!(composed, frozen);
+    }
+    // The output table pins the optional wait and timeout rows; the
+    // kill table pins the required id.
+    let output = crate::schema::job_output_parameters();
+    assert_eq!(output["required"], json!(["job_id"]));
+    assert_eq!(output["properties"]["wait"]["type"], json!("boolean"));
+    assert_eq!(output["properties"]["timeout_ms"]["type"], json!("number"));
+    let kill = crate::schema::job_kill_parameters();
+    assert_eq!(kill["required"], json!(["job_id"]));
+    assert!(kill["properties"].get("wait").is_none());
+    let list = crate::schema::job_list_parameters();
+    assert_eq!(list["properties"].as_object().expect("properties").len(), 0);
+    // The shared projection row: seven keys, the terminal-status enum,
+    // and the optional detail/finishedAt rows.
+    let row = crate::schema::public_job_schema();
+    assert_eq!(
+        row["properties"]
+            .as_object()
+            .expect("properties")
+            .keys()
+            .collect::<Vec<_>>(),
+        vec![
+            "id",
+            "kind",
+            "label",
+            "status",
+            "detail",
+            "startedAt",
+            "finishedAt"
+        ]
+    );
+    assert_eq!(
+        row["properties"]["status"]["enum"],
+        json!(["running", "stopping", "completed", "killed", "failed"])
+    );
+    // The three output contracts compose the row.
+    let output_schema = crate::schema::job_output_schema();
+    assert_eq!(output_schema["properties"]["text"]["required"], json!(true));
+    assert_eq!(output_schema["properties"]["job"]["required"], json!(true));
+    let list_schema = crate::schema::job_list_schema();
+    assert_eq!(list_schema["type"], json!("array"));
+    assert!(list_schema["items"].is_object());
+    let kill_schema = crate::schema::job_kill_schema();
+    assert_eq!(
+        kill_schema["properties"]["outcome"]["enum"],
+        json!(["cancellation-requested", "already-finished"])
+    );
+    // The scheduling faces: the three registrations stay exclusive
+    // with the partial endpoint set and the self-service endpoints.
+    for registration in [
+        crate::plugin_shell::job_output_registration(),
+        crate::plugin_shell::job_list_registration(),
+        crate::plugin_shell::job_kill_registration(),
+    ] {
+        assert!(
+            registration.get("isConcurrencySafe").is_none(),
+            "the job tools stay exclusive"
+        );
+        assert!(registration.get("presentResult").is_none());
+        assert!(
+            registration
+                .get("output")
+                .expect("output")
+                .get("presentationMeta")
+                .is_none()
+        );
+        assert_eq!(
+            registration["execute"]["service"],
+            crate::service::SERVICE_NAME
+        );
+    }
+    // The presentation families: the two read faces and the kill's
+    // execute face, with the raw input on the named-call controls.
+    let output_call = crate::job_tools::present_call_output(&json!({ "job_id": "j1" }));
+    assert_eq!(output_call["kind"], json!("read"));
+    assert_eq!(output_call["rawInput"], json!("j1"));
+    assert_eq!(
+        crate::job_tools::present_call_list(&Value::Null)["kind"],
+        json!("read")
+    );
+    let kill_call = crate::job_tools::present_call_kill(&json!({ "job_id": "j1" }));
+    assert_eq!(kill_call["kind"], json!("execute"));
+    assert_eq!(kill_call["rawInput"], json!("j1"));
+}
+
+/// The `tool:jobs` section rides the extracted static text verbatim:
+/// the dsh `TOOL_JOBS` order 1600, the opening and closing anchors,
+/// and the one-section-serves-three shape (the extract-then-freeze
+/// judgment).
+#[test]
+fn jobs_section_pins_the_extracted_text() {
+    let sections = crate::plugin_shell::prompt_sections();
+    let jobs = sections
+        .iter()
+        .find(|(name, _, _)| name == "tool:jobs")
+        .expect("the jobs section registers");
+    assert_eq!(jobs.1, 1600.0);
+    assert_eq!(jobs.2, crate::catalog_gen::JOBS_SECTION_TEXT);
+    assert!(
+        crate::catalog_gen::JOBS_SECTION_TEXT
+            .starts_with("Track every background job id you start."),
+        "{}",
+        crate::catalog_gen::JOBS_SECTION_TEXT
+    );
+    assert!(
+        crate::catalog_gen::JOBS_SECTION_TEXT
+            .contains("job_output (set wait: true only when you are genuinely blocked on it)"),
+        "{}",
+        crate::catalog_gen::JOBS_SECTION_TEXT
+    );
+    assert!(
+        crate::catalog_gen::JOBS_SECTION_TEXT
+            .ends_with("and job_kill jobs that stopped mattering."),
+        "{}",
+        crate::catalog_gen::JOBS_SECTION_TEXT
+    );
+}

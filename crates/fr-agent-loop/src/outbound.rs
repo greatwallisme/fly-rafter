@@ -171,6 +171,40 @@ impl Outbound {
             Err(EmitError { status })
         }
     }
+
+    /// Grants one committed target activation runtime access to the
+    /// `'agent'`-class provided service (the D31 registration primitive;
+    /// the fr-shell `HostLink::grant` judgment shape).
+    ///
+    /// # Errors
+    ///
+    /// Returns the host status for an uncommitted target or a name not
+    /// in this activation's provide table.
+    pub fn grant(&self, target_service: &str, granted_service: &str) -> Result<(), GrantError> {
+        // SAFETY: same vtable lifetime and thread discipline as `require`.
+        let status = unsafe {
+            (self.host.grant)(
+                self.host.host_handle,
+                target_service.as_ptr(),
+                target_service.len(),
+                granted_service.as_ptr(),
+                granted_service.len(),
+            )
+        };
+        if status == STATUS_OK {
+            Ok(())
+        } else {
+            Err(GrantError { status })
+        }
+    }
+}
+
+/// The failure of one D31 grant registration (the host status only; the
+/// grant performs no call and carries no JSON detail).
+#[derive(Debug, Clone, Copy)]
+pub struct GrantError {
+    /// The host status the grant returned.
+    pub status: i32,
 }
 
 /// Test double for the host side of `grant` (the kernel validates grant
@@ -278,6 +312,44 @@ mod tests {
         STATUS_OK
     }
 
+    /// Test double for the host side of `grant`: records the two names
+    /// verbatim (the notice machine's registration face).
+    struct GrantFake {
+        grants: Mutex<Vec<(Vec<u8>, Vec<u8>)>>,
+    }
+
+    unsafe extern "C" fn recording_grant(
+        host: *mut c_void,
+        target: *const u8,
+        target_len: usize,
+        granted: *const u8,
+        granted_len: usize,
+    ) -> i32 {
+        // SAFETY: `host` is the `GrantFake` pointer installed by the test.
+        let fake = unsafe { &*host.cast::<GrantFake>() };
+        // SAFETY: slice-validity contract as in `recording_emit`.
+        let target = unsafe { std::slice::from_raw_parts(target, target_len) }.to_vec();
+        // SAFETY: same contract as `target`.
+        let granted = unsafe { std::slice::from_raw_parts(granted, granted_len) }.to_vec();
+        fake.grants
+            .lock()
+            .expect("test grant lock")
+            .push((target, granted));
+        STATUS_OK
+    }
+
+    /// Test double for the host side of `grant`: always refuses (the
+    /// uncommitted-target shape).
+    unsafe extern "C" fn failed_grant(
+        _host: *mut c_void,
+        _target: *const u8,
+        _target_len: usize,
+        _granted: *const u8,
+        _granted_len: usize,
+    ) -> i32 {
+        dougong_abi::STATUS_FAILED
+    }
+
     /// Test double for the host side of `emit` used by tests that never
     /// publish: accepts and does nothing.
     unsafe extern "C" fn quiet_emit(
@@ -324,6 +396,37 @@ mod tests {
     }
 
     fn assert_send<T: Send>() {}
+
+    #[test]
+    fn grant_passes_both_names_and_reports_failure() {
+        let fake = GrantFake {
+            grants: Mutex::new(Vec::new()),
+        };
+        let outbound = Outbound::new(HostExports {
+            grant: recording_grant,
+            host_handle: &raw const fake as *mut c_void,
+            require: undeclared_require,
+            emit: quiet_emit,
+        });
+        outbound
+            .grant("builtin-tools", "agent")
+            .expect("the grant registers");
+        assert_eq!(
+            fake.grants.lock().expect("test grant lock").as_slice(),
+            [(b"builtin-tools".to_vec(), b"agent".to_vec())]
+        );
+
+        let refusing = Outbound::new(HostExports {
+            grant: failed_grant,
+            host_handle: std::ptr::null_mut(),
+            require: undeclared_require,
+            emit: quiet_emit,
+        });
+        let error = refusing
+            .grant("builtin-tools", "agent")
+            .expect_err("uncommitted target");
+        assert_eq!(error.status, dougong_abi::STATUS_FAILED);
+    }
 
     #[test]
     fn require_doubles_the_buffer_until_the_reply_fits() {

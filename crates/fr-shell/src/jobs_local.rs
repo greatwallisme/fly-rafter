@@ -94,6 +94,19 @@ pub trait SessionLogAppend: Send + Sync {
     ) -> Result<(), String>;
 }
 
+/// The kernel-bus announce seam for one settlement (the dsh
+/// `events.emit({type:'settled', …})` hub leg).
+///
+/// The wire implementation rides the host `emit` vtable entry — the
+/// fr-llm judgment; the lane dispatch is asynchronous, so no listener
+/// can re-enter the registry.
+pub trait SettlementAnnounce: Send + Sync {
+    /// Announces one settlement on the kernel bus. Fire-and-forget: the
+    /// bus queues the listener dispatches and answers only the emit
+    /// status; the hub's containment lives on the subscriber side.
+    fn settled(&self, payload: &serde_json::Value);
+}
+
 /// The producer face of one registered job (dsh `JobHandle`).
 ///
 /// All methods are synchronous; writes staged inside the starter are
@@ -223,6 +236,9 @@ struct TrackedJob {
     kill_reason: Option<String>,
     /// Set once a kill or teardown cancel ran.
     settle_cause: Option<JobSettleCause>,
+    /// The pump stop latch, registered waiters released by the next
+    /// settlement (the dsh `waitResolvers.length > 0` awaited fact).
+    waiters: usize,
     /// The pump stop latch, when the spec named pull sources.
     pump: Option<PumpStop>,
 }
@@ -277,6 +293,7 @@ pub struct LocalJobRegistry {
     /// Pump threads of pumped jobs, joined at settlement and removal.
     pumps: Mutex<HashMap<String, std::thread::JoinHandle<()>>>,
     sessions: Arc<dyn SessionLogAppend>,
+    announce: Arc<dyn SettlementAnnounce>,
     config: RegistryConfig,
     clock: Box<dyn Fn() -> f64 + Send + Sync>,
 }
@@ -411,16 +428,24 @@ impl GuardedSource {
 }
 
 impl LocalJobRegistry {
-    /// Creates the registry over one session-log seam.
+    /// Creates the registry over one session-log seam and one
+    /// kernel-bus announce seam.
     #[must_use]
-    pub fn new(sessions: Arc<dyn SessionLogAppend>) -> Arc<Self> {
-        Self::with_config(sessions, RegistryConfig::default())
+    pub fn new(
+        sessions: Arc<dyn SessionLogAppend>,
+        announce: Arc<dyn SettlementAnnounce>,
+    ) -> Arc<Self> {
+        Self::with_config(sessions, announce, RegistryConfig::default())
     }
 
     /// Creates the registry with explicit configuration (the dsh
     /// schemastery-defaulted knobs).
     #[must_use]
-    pub fn with_config(sessions: Arc<dyn SessionLogAppend>, config: RegistryConfig) -> Arc<Self> {
+    pub fn with_config(
+        sessions: Arc<dyn SessionLogAppend>,
+        announce: Arc<dyn SettlementAnnounce>,
+        config: RegistryConfig,
+    ) -> Arc<Self> {
         Arc::new(Self {
             state: Mutex::new(RegistryState {
                 store: HashMap::new(),
@@ -430,6 +455,7 @@ impl LocalJobRegistry {
             spills: Mutex::new(HashMap::new()),
             pumps: Mutex::new(HashMap::new()),
             sessions,
+            announce,
             config,
             clock: Box::new(epoch_ms),
         })
@@ -537,6 +563,7 @@ impl LocalJobRegistry {
             finished_at: None,
             kill_reason: None,
             settle_cause: None,
+            waiters: 0,
             pump: None,
         };
         {
@@ -809,11 +836,18 @@ impl LocalJobRegistry {
     }
 
     /// Waits for settlement or the bounded timeout without cancelling the
-    /// job (dsh `wait`; the wire face drives it in bounded slices).
+    /// job (dsh `wait`; the wire face drives it in bounded slices). A
+    /// live park registers one waiter, and the next settlement reports
+    /// `awaited` while the count is nonzero (the dsh
+    /// `waitResolvers.length > 0` fact the settled event carries).
     ///
     /// # Errors
     ///
     /// An invalid timeout, or an unknown or foreign job.
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "the registry guard spans the park loop: the Condvar wait releases and re-acquires it per wakeup, and no other registry state is touched while parked"
+    )]
     pub fn wait(&self, id: &str, timeout_ms: f64, caller: Option<&str>) -> Result<JobView, String> {
         if !timeout_ms.is_finite() || timeout_ms <= 0.0 {
             return Err(format!(
@@ -824,24 +858,50 @@ impl LocalJobRegistry {
         let deadline = std::time::Instant::now() + Duration::from_millis(ms_u64(timeout_ms));
         let spill_paths = self.spill_paths_for(id);
         let mut guard = recover(&self.state);
-        loop {
+        {
+            let job = Self::expect(&mut guard, id, caller)?;
+            if job.status.is_terminal() {
+                // An already-settled wait never registers a resolver (the
+                // dsh shape; no future settlement releases it).
+                return Ok(Self::projection(job, spill_paths));
+            }
+            job.waiters += 1;
+        }
+        let outcome = loop {
             {
-                let job = Self::expect(&mut guard, id, caller)?;
+                let job = match Self::expect(&mut guard, id, caller) {
+                    Ok(job) => job,
+                    Err(error) => break Err(error),
+                };
                 if job.status.is_terminal() {
-                    return Ok(Self::projection(job, spill_paths));
+                    break Ok(Self::projection(job, spill_paths));
                 }
             }
             let now = std::time::Instant::now();
             if now >= deadline {
-                let job = Self::expect(&mut guard, id, caller)?;
-                return Ok(Self::projection(job, spill_paths));
+                let job = match Self::expect(&mut guard, id, caller) {
+                    Ok(job) => job,
+                    Err(error) => break Err(error),
+                };
+                break Ok(Self::projection(job, spill_paths));
             }
             let (next, _timeout) = self
                 .settled
                 .wait_timeout(guard, deadline - now)
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             guard = next;
+        };
+        // Release the park loop's guard before the decrement re-locks:
+        // the std mutex is not reentrant, and a held guard here would
+        // self-deadlock every later registry call in the process.
+        drop(guard);
+        {
+            let mut state = recover(&self.state);
+            if let Some(job) = state.store.get_mut(id) {
+                job.waiters = job.waiters.saturating_sub(1);
+            }
         }
+        outcome
     }
 
     /// Drops one settled job's record from the visible set.
@@ -1102,8 +1162,10 @@ impl LocalJobRegistry {
     }
 
     /// Records the first terminal outcome, releases the pump, and marks
-    /// the settlement (dsh `settle`; the event announcements have no M1
-    /// subscriber face).
+    /// the settlement (dsh `settle`). The announcement rides two seams:
+    /// the durable record appends through the session log, and the hub
+    /// leg emits the dsh `{type:'settled', job, cause, awaited}` shape on
+    /// the kernel bus (the queued listener dispatch cannot re-enter).
     #[expect(
         clippy::significant_drop_tightening,
         reason = "the first-wins settlement is one atomic critical section under the lock"
@@ -1150,28 +1212,45 @@ impl LocalJobRegistry {
             // never below the bytes the model cursor has not consumed.
             let floor = job.ring.total().saturating_sub(job.model_cursor);
             job.ring.trim(self.config.settled_retain_bytes.max(floor));
-            (job.owner.is_some()).then(|| JobSettledData {
-                registered: JobRegisteredData {
-                    job_id: job.id.clone(),
-                    owner: job.owner.clone().unwrap_or_default(),
-                    kind: job.kind.clone(),
-                    label: job.label.clone(),
-                    started_at: job.started_at,
-                    tool_call: job.tool_call.clone(),
-                },
-                finished_at: job.finished_at.unwrap_or_default(),
-                status: outcome.status,
-                cause,
-                producer_reported,
-                detail: job.detail.clone(),
+            // The awaited fact: a live waiter exists right now (the dsh
+            // `waitResolvers.length > 0`; the parked wait wakes below).
+            let awaited = job.waiters > 0;
+            let view = Self::projection(job, self.spill_paths_for(id));
+            (job.owner.is_some()).then(|| {
+                (
+                    JobSettledData {
+                        registered: JobRegisteredData {
+                            job_id: job.id.clone(),
+                            owner: job.owner.clone().unwrap_or_default(),
+                            kind: job.kind.clone(),
+                            label: job.label.clone(),
+                            started_at: job.started_at,
+                            tool_call: job.tool_call.clone(),
+                        },
+                        finished_at: job.finished_at.unwrap_or_default(),
+                        status: outcome.status,
+                        cause,
+                        producer_reported,
+                        detail: job.detail.clone(),
+                    },
+                    view,
+                    awaited,
+                )
             })
         };
-        if let Some(data) = settled_event
-            && let Ok(payload) = serde_json::to_value(&data)
-        {
-            let _ignored =
-                self.sessions
-                    .append(&data.registered.owner, JOB_SETTLED_EVENT, &payload);
+        if let Some((data, view, awaited)) = settled_event {
+            if let Ok(payload) = serde_json::to_value(&data) {
+                let _ignored =
+                    self.sessions
+                        .append(&data.registered.owner, JOB_SETTLED_EVENT, &payload);
+            }
+            let payload = serde_json::json!({
+                "type": "settled",
+                "job": view,
+                "cause": cause,
+                "awaited": awaited,
+            });
+            self.announce.settled(&payload);
         }
         self.settled.notify_all();
     }
@@ -1301,8 +1380,16 @@ mod tests {
         }
     }
 
+    /// The silent announce double (tests assert the registry's own
+    /// behavior; the hub leg has its own pin).
+    struct QuietAnnounce;
+
+    impl SettlementAnnounce for QuietAnnounce {
+        fn settled(&self, _payload: &Value) {}
+    }
+
     fn registry() -> Arc<LocalJobRegistry> {
-        LocalJobRegistry::new(Arc::new(RecordingLog::default()))
+        LocalJobRegistry::new(Arc::new(RecordingLog::default()), Arc::new(QuietAnnounce))
     }
 
     fn noop_hooks() -> JobHooks {
@@ -1357,6 +1444,7 @@ mod tests {
         // The per-owner cap counts active records per exact owner.
         let limited = LocalJobRegistry::with_config(
             Arc::new(RecordingLog::default()),
+            Arc::new(QuietAnnounce),
             RegistryConfig {
                 max_concurrent_jobs_per_owner: 1,
                 ..RegistryConfig::default()
@@ -1433,6 +1521,7 @@ mod tests {
     fn settlement_merges_trim_and_result_once() {
         let registry = LocalJobRegistry::with_config(
             Arc::new(RecordingLog::default()),
+            Arc::new(QuietAnnounce),
             RegistryConfig {
                 settled_retain_bytes: 64,
                 ..RegistryConfig::default()
@@ -1529,7 +1618,10 @@ mod tests {
     #[test]
     fn session_records_land_for_owned_jobs() {
         let log = Arc::new(RecordingLog::default());
-        let registry = LocalJobRegistry::new(Arc::clone(&log) as Arc<dyn SessionLogAppend>);
+        let registry = LocalJobRegistry::new(
+            Arc::clone(&log) as Arc<dyn SessionLogAppend>,
+            Arc::new(QuietAnnounce),
+        );
         let _controller = registry.attach_controller();
         let spec = |owner: Option<String>| JobSpec {
             kind: "bash".to_owned(),
@@ -1580,5 +1672,139 @@ mod tests {
             2,
             "an unowned job records nothing, got {kinds:?}"
         );
+    }
+
+    /// The announce double that records the kernel-bus payloads (the
+    /// hub leg's pin).
+    struct RecordingAnnounce {
+        payloads: std::sync::Mutex<Vec<Value>>,
+    }
+
+    impl RecordingAnnounce {
+        fn new() -> Self {
+            Self {
+                payloads: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl SettlementAnnounce for RecordingAnnounce {
+        fn settled(&self, payload: &Value) {
+            self.payloads.lock().expect("lock").push(payload.clone());
+        }
+    }
+
+    /// The settlement rides the kernel bus in the dsh hub shape
+    /// (`{type:'settled', job, cause, awaited}`): owned jobs announce,
+    /// unowned jobs stay silent, and the view carries the terminal
+    /// facts.
+    #[test]
+    fn settlement_announces_the_hub_payload_for_owned_jobs() {
+        let announce = Arc::new(RecordingAnnounce::new());
+        let registry = LocalJobRegistry::new(
+            Arc::new(RecordingLog::default()),
+            Arc::clone(&announce) as Arc<dyn SettlementAnnounce>,
+        );
+        let _controller = registry.attach_controller();
+        let spec = JobSpec {
+            kind: "bash".to_owned(),
+            label: "label".to_owned(),
+            owner: Some("s1".to_owned()),
+            tool_call: None,
+            output_limit_bytes: Some(1024.0),
+            output: Vec::new(),
+            run: Box::new(|_handle| Ok(noop_hooks())),
+        };
+        let owned = registry.start(spec).expect("owned");
+        registry.producer_settled(
+            &owned,
+            JobOutcome {
+                status: JobStatus::Completed,
+                detail: Some("done".to_owned()),
+                result: None,
+            },
+            true,
+        );
+        let payloads = announce.payloads.lock().expect("lock");
+        assert_eq!(payloads.len(), 1, "one settlement, one emit");
+        let payload = payloads[0].clone();
+        drop(payloads);
+        assert_eq!(payload["type"], "settled");
+        assert_eq!(payload["cause"], "producer");
+        assert_eq!(payload["awaited"], false);
+        assert_eq!(payload["job"]["id"], payload["job"]["id"]);
+        assert_eq!(payload["job"]["status"], "completed");
+        assert_eq!(payload["job"]["detail"], "done");
+        assert_eq!(payload["job"]["output_limit_bytes"], 1024.0);
+        assert_eq!(payload["job"]["owner"], "s1");
+    }
+
+    /// A settlement that releases a live waiter reports `awaited`, so
+    /// the subscriber skips the notice the wait result already carried;
+    /// a settlement with no parked waiter reports `false` (the dsh
+    /// `waitResolvers.length > 0` fact).
+    #[test]
+    fn awaited_rides_live_waiter_registration() {
+        let announce = Arc::new(RecordingAnnounce::new());
+        let registry = LocalJobRegistry::new(
+            Arc::new(RecordingLog::default()),
+            Arc::clone(&announce) as Arc<dyn SettlementAnnounce>,
+        );
+        let _controller = registry.attach_controller();
+        let spec = || JobSpec {
+            kind: "bash".to_owned(),
+            label: "label".to_owned(),
+            owner: Some("s1".to_owned()),
+            tool_call: None,
+            output_limit_bytes: None,
+            output: Vec::new(),
+            run: Box::new(|_handle| Ok(noop_hooks())),
+        };
+        let waited = registry.start(spec()).expect("waited");
+        let plain = registry.start(spec()).expect("plain");
+
+        // The waiter parks until the settlement releases it; the
+        // released view confirms the settled status.
+        let park = {
+            let registry = Arc::clone(&registry);
+            let waited = waited.clone();
+            std::thread::spawn(move || {
+                registry
+                    .wait(&waited, 5_000.0, Some("s1"))
+                    .expect("waited view")
+            })
+        };
+        // Give the park a beat to register, then settle both jobs.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        registry.producer_settled(
+            &waited,
+            JobOutcome {
+                status: JobStatus::Completed,
+                detail: None,
+                result: None,
+            },
+            true,
+        );
+        registry.producer_settled(
+            &plain,
+            JobOutcome {
+                status: JobStatus::Completed,
+                detail: None,
+                result: None,
+            },
+            true,
+        );
+        let view = park.join().expect("park joins");
+        assert_eq!(view.status, JobStatus::Completed);
+
+        let payloads = announce.payloads.lock().expect("lock");
+        let awaited: Vec<Value> = payloads
+            .iter()
+            .filter(|payload| payload["awaited"] == true)
+            .cloned()
+            .collect();
+        drop(payloads);
+        assert_eq!(awaited.len(), 1, "one released waiter");
+        assert_eq!(awaited[0]["job"]["id"], waited);
     }
 }
