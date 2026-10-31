@@ -47,6 +47,7 @@ impl Dimensions for SessionSize {
 
 use crate::terminal::{TerminalForeground, TerminalHandle};
 use crate::terminal_buffer::BoundedTextBuffer;
+use crate::terminal_registry::BackendSession;
 use crate::terminal_sanitize::{CONTROLLED_PROMPT, TerminalSanitizer};
 
 /// Why one interactive send returned control to its caller.
@@ -122,7 +123,7 @@ impl std::fmt::Debug for SendOperation {
 }
 
 impl SendOperation {
-    fn new(max_read_bytes: usize, started_at: Instant) -> Arc<Self> {
+    pub(crate) fn new(max_read_bytes: usize, started_at: Instant) -> Arc<Self> {
         Arc::new(Self {
             output: Mutex::new(BoundedTextBuffer::new(max_read_bytes, None)),
             settled: Mutex::new(None),
@@ -159,6 +160,28 @@ impl SendOperation {
                 .wait_timeout(slot, Duration::from_millis(200))
                 .expect("send settle lock");
             slot = next;
+        }
+    }
+
+    /// Whether the operation has settled (successfully or not).
+    #[must_use]
+    pub fn is_settled(&self) -> bool {
+        self.settled_now()
+    }
+
+    /// Settles the operation with a canned result (test support).
+    #[cfg(test)]
+    pub(crate) fn test_settle(&self, result: SendResult) {
+        let first = {
+            let mut slot = self.settled.lock().expect("send settle lock");
+            let first = slot.is_none();
+            if first {
+                *slot = Some(Ok(result));
+            }
+            first
+        };
+        if first {
+            self.settled_ready.notify_all();
         }
     }
 
@@ -752,6 +775,40 @@ impl LocalPtySession {
             .spawn(move || run_close(&session, &close_slot))
             .expect("spawning the close thread never fails under the plugin contract");
         slot
+    }
+}
+
+/// Bridges the local session into the registry-facing session surface (the
+/// dsh `TerminalBackendSession`).
+impl BackendSession for LocalPtySession {
+    fn pid(&self) -> Option<u32> {
+        Some(self.handle.pid)
+    }
+
+    fn status(&self) -> SessionStatus {
+        Self::status(self)
+    }
+
+    fn motd(&self) -> String {
+        Self::motd(self)
+    }
+
+    fn read(&self, offset: Option<usize>, count: Option<usize>) -> Result<ReadPage, String> {
+        Self::read(self, offset, count)
+    }
+
+    fn signal(&self, name: &str) -> Result<i64, String> {
+        Self::signal(self, name)
+    }
+
+    fn start_send(self: Arc<Self>, text: &str, submit: bool) -> Result<Arc<SendOperation>, String> {
+        Self::start_send(&self, text, submit)
+    }
+
+    fn close(self: Arc<Self>, _reason: &str) -> Arc<CloseSlot> {
+        // The close reason is diagnostic-only in the dsh session close; the
+        // local session close carries no reason plumbing.
+        Self::close(&self)
     }
 }
 

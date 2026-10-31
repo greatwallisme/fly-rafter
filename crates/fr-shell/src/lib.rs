@@ -36,5 +36,6 @@ pub mod shell_types;
 pub mod subprocess;
 pub mod terminal;
 pub mod terminal_buffer;
+pub mod terminal_registry;
 pub mod terminal_sanitize;
 pub mod terminal_session;
