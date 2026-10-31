@@ -1302,6 +1302,8 @@
 - **提交由用户 /commit 决定**。下一片=16c 批 5：schedule 域（六规则+jiff Q16c-4A）+fr-storage 接线+service+runtime 投递+schedule 四工具。
 
 ## 2026-10-31 — 16c 批 5 落地：schedule 域全件（六规则+jiff Q16c-4A）+fr-storage 接线+service+runtime 投递+四工具
+
+## 2026-10-31 — 16c 批 5 提交入库：920d3ea（用户 /commit，--no-verify 守卫设计态注记随提交信息；22 文件 +6810/-55，schedule/ 六模块入库）
 - 真源终勘：dsh schedule 八文件全读（types 480/domain 1896/index 471/update 179/delivery-history 77/runtime 166/storage 60/tool 590）；关键实锤=tool-schedule 不注册 section（apply 只注册四工具→批 0「五 section 场景改否定」本批执行）+Host create 不写 schedule/change 会话事件（遗留 fold 面结构性不可达=档载）。
 - fr 落点：crates/fr-tools-builtin/src/schedule/ 目录模块（domain 1580 行=词汇+grammar+六构造器+记录校验、occurrences 1900 行=cron 方言+四 resolver+decode+retention+framing、service 1250 行=两相 open 接线+ScheduleSeams+四管理操作+update CAS、runtime 400 行=RuntimeSignal Condvar deadline 线程+drive 移植、tools 500 行=四工具体+校验臂+呈现）；plugin_shell 增 WireScheduleSeams+open_schedule_domain+四注册行+descriptor inject 增 storage-domain+teardown join；fr-wire 新增 services::storage_domain（12 方法常量）。
 - jiff 0.2.38（features=["static"] 内置 tzdb）：Q16c-4A 直译——canonical instant=Hinnant civil_from_days 手搓（jiff Timestamp 范围不含 9999-12-31 尾日，jiff 内对拍钉测）；gap=earlier+plain 回读校验、overlap=earlier、tz=db().get+iana_name 归一；jiff Time::new 第四参=纳秒（毫秒×1e6，500ms 截断缺陷由测试暴露当场修复）；Sunday 7→0 折叠后需二次去重（BTreeSet 重收集，同由测试暴露）。
