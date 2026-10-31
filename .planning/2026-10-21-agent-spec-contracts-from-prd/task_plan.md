@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 16 **16c 批 4 已落待提交**（jobs 三工具+完成通知机全落 Q16c-1A+tool:jobs section；workspace 1364/0、TOOLS 156/0/252、四门绿、七步流 4-7 闭、binding-audit 十三节）。**下一动作=16c 批 5：schedule 域（六规则+jiff Q16c-4A）+fr-storage 接线+service+runtime 投递+schedule 四工具（提交由用户 /commit 决定）。**
+Phase 16 **16c 批 5 已落待提交**（schedule 域全件：六规则+jiff Q16c-4A+fr-storage 接线+service+runtime 投递+四工具；workspace 1381/0、TOOLS 180/0/228、四门绿、七步流 4-7 闭、binding-audit 十四节）。**下一动作=16d：交互+会话查询组（ask_user_question/exit_plan_mode+session 五件）（提交由用户 /commit 决定）。**
 
 ## Phases
 

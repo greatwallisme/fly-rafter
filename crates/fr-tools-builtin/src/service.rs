@@ -175,6 +175,30 @@ pub const METHOD_JOB_OUTPUT_FINALIZE: u32 = 111;
 /// Method selector: the `job_kill` finalize listener (the post-execute
 /// CPS arm; the dsh `finalizeContent` carrier).
 pub const METHOD_JOB_KILL_FINALIZE: u32 = 112;
+/// Method selector: the `schedule_create` tool body.
+pub const METHOD_SCHEDULE_CREATE_EXECUTE: u32 = 113;
+/// Method selector: the `schedule_create` render projection.
+pub const METHOD_SCHEDULE_CREATE_RENDER: u32 = 114;
+/// Method selector: the `schedule_create` pending-call presentation.
+pub const METHOD_SCHEDULE_CREATE_PRESENT_CALL: u32 = 115;
+/// Method selector: the `schedule_list` tool body.
+pub const METHOD_SCHEDULE_LIST_EXECUTE: u32 = 116;
+/// Method selector: the `schedule_list` render projection.
+pub const METHOD_SCHEDULE_LIST_RENDER: u32 = 117;
+/// Method selector: the `schedule_list` pending-call presentation.
+pub const METHOD_SCHEDULE_LIST_PRESENT_CALL: u32 = 118;
+/// Method selector: the `schedule_delete` tool body.
+pub const METHOD_SCHEDULE_DELETE_EXECUTE: u32 = 119;
+/// Method selector: the `schedule_delete` render projection.
+pub const METHOD_SCHEDULE_DELETE_RENDER: u32 = 120;
+/// Method selector: the `schedule_delete` pending-call presentation.
+pub const METHOD_SCHEDULE_DELETE_PRESENT_CALL: u32 = 121;
+/// Method selector: the `schedule_update` tool body.
+pub const METHOD_SCHEDULE_UPDATE_EXECUTE: u32 = 122;
+/// Method selector: the `schedule_update` render projection.
+pub const METHOD_SCHEDULE_UPDATE_RENDER: u32 = 123;
+/// Method selector: the `schedule_update` pending-call presentation.
+pub const METHOD_SCHEDULE_UPDATE_PRESENT_CALL: u32 = 124;
 
 /// The escalate-to modes this composition advertises (the dsh
 /// `ESCALATION_TARGETS` words in table order).
@@ -205,6 +229,7 @@ pub struct BuiltinTools {
     lists: std::sync::Arc<crate::todo::TodoLists>,
     goals: std::sync::Arc<crate::goal_service::Goals>,
     notices: std::sync::Arc<crate::job_tools::NoticeState>,
+    schedules: std::sync::Arc<crate::schedule::Schedules>,
 }
 
 impl std::fmt::Debug for BuiltinTools {
@@ -227,6 +252,7 @@ impl BuiltinTools {
         lists: std::sync::Arc<crate::todo::TodoLists>,
         goals: std::sync::Arc<crate::goal_service::Goals>,
         notices: std::sync::Arc<crate::job_tools::NoticeState>,
+        schedules: std::sync::Arc<crate::schedule::Schedules>,
     ) -> Result<Self, String> {
         Ok(Self {
             seams,
@@ -235,7 +261,14 @@ impl BuiltinTools {
             lists,
             goals,
             notices,
+            schedules,
         })
+    }
+
+    /// The hosted schedule domain (the tool bodies' owning state).
+    #[must_use]
+    pub const fn schedules(&self) -> &std::sync::Arc<crate::schedule::Schedules> {
+        &self.schedules
     }
 
     /// The hosted notice state (the completion-notice machine's shared
@@ -497,6 +530,69 @@ impl BuiltinTools {
             }
             METHOD_JOB_OUTPUT_FINALIZE | METHOD_JOB_KILL_FINALIZE => {
                 return serve_job_finalize(self, &request);
+            }
+            METHOD_SCHEDULE_CREATE_EXECUTE => {
+                let call = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let agent = call.get("agent").and_then(Value::as_str);
+                let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
+                let value = crate::schedule::execute_create(&self.schedules, &arguments, agent);
+                return serde_json::to_vec(&json!({ "value": value }))
+                    .map_err(|error| format!("body reply encode failed: {error}"));
+            }
+            METHOD_SCHEDULE_LIST_EXECUTE => {
+                let call = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let agent = call.get("agent").and_then(Value::as_str);
+                let value = crate::schedule::execute_list(&self.schedules, agent);
+                return serde_json::to_vec(&json!({ "value": value }))
+                    .map_err(|error| format!("body reply encode failed: {error}"));
+            }
+            METHOD_SCHEDULE_DELETE_EXECUTE => {
+                let call = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let agent = call.get("agent").and_then(Value::as_str);
+                let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
+                let value = crate::schedule::execute_delete(&self.schedules, &arguments, agent);
+                return serde_json::to_vec(&json!({ "value": value }))
+                    .map_err(|error| format!("body reply encode failed: {error}"));
+            }
+            METHOD_SCHEDULE_UPDATE_EXECUTE => {
+                let call = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let agent = call.get("agent").and_then(Value::as_str);
+                let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
+                let value = crate::schedule::execute_update(&self.schedules, &arguments, agent);
+                return serde_json::to_vec(&json!({ "value": value }))
+                    .map_err(|error| format!("body reply encode failed: {error}"));
+            }
+            METHOD_SCHEDULE_CREATE_RENDER
+            | METHOD_SCHEDULE_LIST_RENDER
+            | METHOD_SCHEDULE_DELETE_RENDER
+            | METHOD_SCHEDULE_UPDATE_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::schedule::render(&args, &value))
+            }
+            METHOD_SCHEDULE_CREATE_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::schedule::present_call_create(&args))
+            }
+            METHOD_SCHEDULE_LIST_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::schedule::present_call_list(&args))
+            }
+            METHOD_SCHEDULE_DELETE_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::schedule::present_call_delete(&args))
+            }
+            METHOD_SCHEDULE_UPDATE_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::schedule::present_call_update(&args))
             }
             other => return Err(format!("unknown {PLUGIN_NAME} method {other}")),
         };
@@ -814,7 +910,7 @@ pub fn fold_log(request: &Value) -> Value {
 /// three job bands with their finalize listeners, and the two
 /// projection folds plus the jobless fold; excluded surfaces never
 /// appear here).
-const fn describe_methods() -> [&'static str; 70] {
+const fn describe_methods() -> [&'static str; 82] {
     [
         "describe",
         "bash.execute",
@@ -883,6 +979,18 @@ const fn describe_methods() -> [&'static str; 70] {
         "job_kill.presentCall",
         "job_output.finalize",
         "job_kill.finalize",
+        "schedule_create.execute",
+        "schedule_create.render",
+        "schedule_create.presentCall",
+        "schedule_list.execute",
+        "schedule_list.render",
+        "schedule_list.presentCall",
+        "schedule_delete.execute",
+        "schedule_delete.render",
+        "schedule_delete.presentCall",
+        "schedule_update.execute",
+        "schedule_update.render",
+        "schedule_update.presentCall",
         "todos.fold",
         "workingDirectory.fold",
         "goal.fold",

@@ -681,3 +681,172 @@ fn jobs_section_pins_the_extracted_text() {
         crate::catalog_gen::JOBS_SECTION_TEXT
     );
 }
+
+/// Q97-A's full-schema pin for the schedule family: the four
+/// descriptions and parameter tables ride the frozen catalog, the
+/// shared view union keeps its six rule variants and the nine-code
+/// error union, and the registrations stay exclusive with the partial
+/// endpoint set (the goal-family pin judgment, one assertion per face).
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the family pin mirrors the catalog rows one assertion per face; splitting it would hide the correspondence"
+)]
+fn schedule_registrations_match_the_frozen_catalog() {
+    // The descriptions ride the catalog-verbatim constants.
+    assert_eq!(
+        crate::catalog_gen::SCHEDULE_CREATE_DESCRIPTION,
+        "Create a reminder in the current session that delivers prompt when it becomes due. \
+Supply exactly one timing parameter: after_seconds, at, every_seconds, daily, weekly, or cron. \
+Local times that do not exist in the zone are skipped; repeated local times fire once, at the earlier instant. \
+After downtime, a recurring reminder delivers only its latest missed occurrence. Delivery can repeat after a crash."
+    );
+    assert_eq!(
+        crate::catalog_gen::SCHEDULE_LIST_DESCRIPTION,
+        "List the active reminders in the current session."
+    );
+    assert_eq!(
+        crate::catalog_gen::SCHEDULE_DELETE_DESCRIPTION,
+        "Delete a reminder in the current session, active or inactive. \
+Deletion does not retract a reminder message that is already queued."
+    );
+    assert!(
+        crate::catalog_gen::SCHEDULE_UPDATE_DESCRIPTION
+            .starts_with("Change a reminder in place, keeping its id."),
+        "{}",
+        crate::catalog_gen::SCHEDULE_UPDATE_DESCRIPTION
+    );
+    // The parameter tables equal the frozen catalog JSON.
+    for (composed, frozen) in [
+        (
+            crate::schema::schedule_create_parameters(),
+            crate::catalog_gen::SCHEDULE_CREATE_PARAMETERS_JSON,
+        ),
+        (
+            crate::schema::schedule_list_parameters(),
+            crate::catalog_gen::SCHEDULE_LIST_PARAMETERS_JSON,
+        ),
+        (
+            crate::schema::schedule_delete_parameters(),
+            crate::catalog_gen::SCHEDULE_DELETE_PARAMETERS_JSON,
+        ),
+        (
+            crate::schema::schedule_update_parameters(),
+            crate::catalog_gen::SCHEDULE_UPDATE_PARAMETERS_JSON,
+        ),
+    ] {
+        let frozen: Value = serde_json::from_str(frozen).expect("the frozen table parses");
+        assert_eq!(composed, frozen);
+    }
+    // The create table pins the required pair and the six timing
+    // selectors; the update table pins the required id and its
+    // optional content rows.
+    let create = crate::schema::schedule_create_parameters();
+    assert_eq!(create["required"], json!(["prompt", "title"]));
+    for selector in [
+        "after_seconds",
+        "at",
+        "every_seconds",
+        "daily",
+        "weekly",
+        "cron",
+    ] {
+        assert!(
+            create["properties"].get(selector).is_some(),
+            "{selector} rides the table"
+        );
+    }
+    assert!(
+        create["properties"]["title"]["description"]
+            .as_str()
+            .expect("description")
+            .contains("at most 120 characters"),
+        "{}",
+        create["properties"]["title"]["description"]
+    );
+    let update = crate::schema::schedule_update_parameters();
+    assert_eq!(update["required"], json!(["id"]));
+    assert!(update["properties"].get("after_seconds").is_none());
+    // The shared view union: six rule variants, the state/deliveryMode
+    // rows, and the nine-code error union on every output contract.
+    for output in [
+        crate::schema::schedule_create_output_schema(),
+        crate::schema::schedule_list_output_schema(),
+        crate::schema::schedule_delete_output_schema(),
+        crate::schema::schedule_update_output_schema(),
+    ] {
+        let variants = output["oneOf"].as_array().expect("oneOf");
+        let errors = &variants[variants.len() - 9..];
+        assert_eq!(errors.len(), 9);
+        assert_eq!(
+            errors[0]["properties"]["code"]["const"],
+            json!("invalid_prompt")
+        );
+        assert_eq!(
+            errors[8]["properties"]["code"]["const"],
+            json!("internal_error")
+        );
+    }
+    let create_output = crate::schema::schedule_create_output_schema();
+    let create_variants = create_output["oneOf"].as_array().expect("oneOf");
+    let view = &create_variants[0];
+    assert_eq!(view["oneOf"].as_array().expect("view variants").len(), 6);
+    let first = &view["oneOf"][0]["properties"];
+    assert_eq!(first["kind"]["const"], json!("after"));
+    assert_eq!(first["state"]["enum"], json!(["scheduled", "overdue"]));
+    assert_eq!(first["deliveryMode"]["const"], json!("host"));
+    // The delete contract keeps its two non-mutating arms.
+    let delete_output = crate::schema::schedule_delete_output_schema();
+    let delete_variants = delete_output["oneOf"].as_array().expect("oneOf");
+    assert_eq!(
+        delete_variants[0]["properties"]["deleted"]["const"],
+        json!(true)
+    );
+    assert_eq!(
+        delete_variants[1]["properties"]["code"]["const"],
+        json!("schedule_not_found")
+    );
+    // The scheduling faces: the four registrations stay exclusive
+    // with the partial endpoint set and the self-service endpoints.
+    for registration in [
+        crate::plugin_shell::schedule_create_registration(),
+        crate::plugin_shell::schedule_list_registration(),
+        crate::plugin_shell::schedule_delete_registration(),
+        crate::plugin_shell::schedule_update_registration(),
+    ] {
+        assert!(
+            registration.get("isConcurrencySafe").is_none(),
+            "the schedule tools stay exclusive"
+        );
+        assert!(registration.get("presentResult").is_none());
+        assert!(
+            registration
+                .get("output")
+                .expect("output")
+                .get("presentationMeta")
+                .is_none()
+        );
+        assert_eq!(
+            registration["execute"]["service"],
+            crate::service::SERVICE_NAME
+        );
+    }
+    // The presentation families: list rides `read`, the other three
+    // ride `other` with the raw input on the named controls.
+    assert_eq!(
+        crate::schedule::present_call_list(&Value::Null)["kind"],
+        json!("read")
+    );
+    assert_eq!(
+        crate::schedule::present_call_create(&json!({ "prompt": "p" }))["kind"],
+        json!("other")
+    );
+    assert_eq!(
+        crate::schedule::present_call_delete(&json!({ "id": "schedule-1" }))["kind"],
+        json!("other")
+    );
+    assert_eq!(
+        crate::schedule::present_call_update(&json!({ "id": "schedule-1" }))["kind"],
+        json!("other")
+    );
+}

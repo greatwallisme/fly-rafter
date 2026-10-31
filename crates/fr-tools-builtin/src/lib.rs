@@ -50,6 +50,7 @@ pub mod job_tools;
 pub mod observation;
 pub mod plugin_shell;
 pub mod render;
+pub mod schedule;
 pub mod schema;
 pub mod search_core;
 pub mod search_tools;

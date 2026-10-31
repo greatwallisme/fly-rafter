@@ -2489,3 +2489,20 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 **接线事实**：jobs wire 面全在（fr-wire services::jobs 1000-1008；fr-shell serve_jobs 1001 list→{jobs}、1002 get→view）；Seams 需增 jobs_list/jobs_get；fr-schema registry tool-jobs 四键已落（批 2）；'agent' 服务 inject=2/followup=3/status=6（session_mailbox 按需创建=死会话臂结构注记）；TOOL_JOBS order=1600（system-prompt/src/index.ts:145；tool:goal 2400 判例延续）；catalog 三条目在 dsh docs/tool-catalog.md :2202-2272（kill/list/output 序）；参数表=目录 JSON 冻结直解（get_goal_parameters 判例）；输出 schema=源逐字手建（public job 七键）。
 
 **Spec 绑定面**：TOOLS spec 21 场景（kill 7/list 4/output 10：调度与呈现+越界+section+参数形状/约束+行为 1×2）→job_registrations_match_the_frozen_catalog（声明族，goal 判例）+jobs section 钉测+行为流测；goal 绑定形=场景 Test: 行照抄。binding-audit 增十三节。通知机本体无独立 spec 场景（实现内行为，crate 测试钉）；Q16c-1A liveness 骑 crate 钉测。
+
+### 16c 批 5 码面勘察（2026-10-31，实现前终勘）：schedule 域全件
+
+**真源全读完成**（本批终勘补齐：types.ts/domain.ts/index.ts/update.ts/delivery-history.ts/runtime.ts/storage.ts/tool-schedule index.ts 逐行）。dsh 遵循要点补录（超出前批深读的部分）：
+- **create 不写 schedule/change 会话事件**：Host 路径只 put storage+emitChanged；schedule/change 事件仅由会话遗留面读写（session/created fold+事件 admission 校验），而 fr 无 session/created 内核事件→**遗留 fold 面（decodeScheduleChange/applyScheduleChanges/foldScheduleEvents/dispatchedRecord/allocateScheduleId/legacy 三记录形）结构性不可达=批 0 判例族档载**；Host 存储只需 decodeScheduleRecord（Host 三形恰键+title 必经）+legacy 形拒绝。
+- **tool-schedule 不注册 section**（apply 只注册四工具）→批 0 已裁「五 section 场景改否定」批 5 执行；sections 钉测保持 9 条+schedule 缺席断言。
+- dsh create 里选择器>1 判定文案='Exactly one reminder selector is required.'（服务层）；工具层 validateCreateArgs 文案='schedule_create accepts exactly one of…'——两层并存，工具层先拦。
+- subagent 拒绝臂两层：tool subagentCallerRefusal（delegationDepthOf>0→'A delegated subagent cannot use reminders.'，agent 缺席=undefined）+service reminderTargetRefusal（'This Session belongs to subagent routing, which never receives reminder delivery.'）——批 0 判例执行项「拒绝臂在位+纯函数钉测+档载」：纯函数收 depth 参数，生产装配 M1 恒传 0（delegation 注册表 Phase 18+）。
+- dsh runtime.ts:122 确证 followup **同步追加** inbox splice 后 flush 观察；fr followup=信箱异步（NextTurn+wake）→投递确认臂= followup→require session-persistence flush（METHOD_SESSION_FLUSH=4）→Err='Session persistence did not acknowledge the reminder'；消息落日志时序差=批 4 TOCTOU 档载同族。
+- resolveAgent 会话恢复臂：fr 无 session-controller 服务，M1 投递不恢复死会话（require 失败=owner 缺席臂族）；恢复后重滤 admitted（墙钟回滚防护）随恢复面缺席同档载——M1 admitted=group 原样。
+- delivery-history 分页面（deliveryHistoryPage+service history）M1 无消费者（四工具不暴露）→档载；appendDelivery+retention（写路径必需）全量移植。
+- M1 装配：ScheduleService 归 fr-tools-builtin（Q93-A），storage 经 require fr-storage 'storage-domain'（fr-wire 新增 services::storage_domain 词汇模块，12 方法常量同 fr-storage service.rs）；descriptor inject 增 'storage-domain'；激活序=storage open→逐记录 decodeScheduleRecord+task 形校验→key≠id 先 close 后抛→commit/refuse→build service→spawn runtime 线程（plugin-owned，teardown join，判例 notice worker/fr-session persist scheduler）。
+- **方法号**：schedule_create 113/114/115、schedule_list 116/117/118、schedule_delete 119/120/121、schedule_update 122/123/124；describe 70→82。declare_change_event 不增 schedule/change（M1 无写入者；fr-wire SCHEDULE_CHANGE 常量已在）。
+- **jiff 0.2.38**（Q16c-4A）：canonical instant 串=自写 strftime %Y-%m-%dT%H:%M:%S.3fZ（dsh toISOString 恒 3 位毫秒；jiff Display 变长不合规）；解析以 dsh 五正则为准（UTC_INSTANT/OFFSET_INSTANT/LOCAL_DATE/LOCAL_TIME/LOCAL_CLOCK_TIME）+calendarEpoch 舍入拒绝（jiff 构造即拒无效日）；localInstant=to_zoned disambiguation Earlier+**plain 回读相等校验**（gap 时 jiff Earlier 返回转移前即时，回读不等→undefined=dsh 语义）；canonicalizeTimeZone=UTC 特判+IANA_ZONE 正则门+jiff tz::TimeZone::get 归一名；ISO weekday=jiff Weekday to_monday_one_offset；MIN/MAX_FOUR_DIGIT_YEAR_MS=-62135596800000/253402300799999 常量+jiff 回读钉测。
+- 服务序列化=dsh FIFO promise chain→fr Mutex 临界区（管理操作原子性=可观察契约；双调用者间顺序 M1 单会话组合不可观察，now=入锁前取样保留）。
+- **spec 绑定面**（27 场景）：调度与呈现 4+越界拒绝 4+参数形状/约束 8（create prompt/title、delete id、update id）→schedule_registrations_match_the_frozen_catalog 一测（goal/jobs 判例，audit 十四节）；section 4 场景批 0 已裁改否定→绑 prompt_sections 钉测（扩 schedule 缺席）；行为 4→四条流测（create 视图+存储行/delete 绑定匹配/list 活动+/update CAS 内容与 timing）。
+- CONFIG 面：4 场景批 2 已绑（builtin_config_pins_delivery_history_group）零工作。

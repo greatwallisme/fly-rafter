@@ -389,6 +389,42 @@ pub mod attachments {
     pub const METHOD_IMAGE_LIMITS: u32 = 3;
 }
 
+/// The `'storage-domain'` service face (the Q16c-3B fr-storage seam).
+///
+/// Owner crate `fr-storage`. The two-phase open protocol is the dsh
+/// facility shape: the consumer validates the prepared snapshot's records
+/// against its own schemas, then commits or refuses the open. The method
+/// numbers are the owner's 0-11 band (the spill-store precedent: the
+/// vocabulary module mirrors the owner's own selectors).
+pub mod storage_domain {
+    /// The provided service name consumers inject.
+    pub const SERVICE_NAME: &str = "storage-domain";
+    /// Face metadata echo.
+    pub const METHOD_DESCRIBE: u32 = 0;
+    /// Prepares one declared domain → the raw stored snapshot.
+    pub const METHOD_OPEN: u32 = 1;
+    /// Reads the validated full snapshot of one open domain.
+    pub const METHOD_LOAD_ALL: u32 = 2;
+    /// Reads one record (`{domain, table, key}` → `{value}`).
+    pub const METHOD_GET_RECORD: u32 = 3;
+    /// Snapshots one table's entries in insertion order.
+    pub const METHOD_TABLE_ENTRIES: u32 = 4;
+    /// Upserts one record durably.
+    pub const METHOD_PUT_RECORD: u32 = 5;
+    /// Deletes one record durably (`{deleted: bool}`).
+    pub const METHOD_DELETE_RECORD: u32 = 6;
+    /// Writes the global singleton durably.
+    pub const METHOD_SET_GLOBAL: u32 = 7;
+    /// Reads the global singleton.
+    pub const METHOD_GLOBAL_GET: u32 = 8;
+    /// Closes one open domain.
+    pub const METHOD_CLOSE: u32 = 9;
+    /// Commits one prepared open after consumer validation.
+    pub const METHOD_COMMIT: u32 = 10;
+    /// Refuses one prepared open after an invalid record.
+    pub const METHOD_REFUSE: u32 = 11;
+}
+
 /// The `'llm'` service face (the fr-llm shell's provided service).
 ///
 /// The generation trio rides the runtime generation hub; the

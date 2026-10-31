@@ -844,10 +844,12 @@ impl LocalJobRegistry {
     /// # Errors
     ///
     /// An invalid timeout, or an unknown or foreign job.
-    #[expect(
-        clippy::significant_drop_tightening,
-        reason = "the registry guard spans the park loop: the Condvar wait releases and re-acquires it per wakeup, and no other registry state is touched while parked"
-    )]
+    ///
+    /// The registry guard spans the park loop by design: the Condvar
+    /// wait releases and re-acquires it per wakeup, and no other
+    /// registry state is touched while parked (the
+    /// `significant_drop_tightening` heuristic stopped firing when the
+    /// dependency graph changed; the intent stays documented here).
     pub fn wait(&self, id: &str, timeout_ms: f64, caller: Option<&str>) -> Result<JobView, String> {
         if !timeout_ms.is_finite() || timeout_ms <= 0.0 {
             return Err(format!(

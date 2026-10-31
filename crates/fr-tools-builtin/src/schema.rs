@@ -935,6 +935,226 @@ pub fn job_kill_schema() -> Value {
     })
 }
 
+// The schedule family (dsh `tool-schedule/index.ts`): the four
+// parameter tables freeze the catalog rows outright; the output
+// contracts ride the dsh source shapes (the schemastery row form with
+// property-level `required`).
+
+/// The `schedule_create` parameter table (the catalog-frozen base).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON drifts (the generation gate
+/// keeps the constant in sync).
+#[must_use]
+pub fn schedule_create_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::SCHEDULE_CREATE_PARAMETERS_JSON)
+        .expect("the frozen schedule_create table parses")
+}
+
+/// The `schedule_delete` parameter table (the catalog-frozen base).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON drifts (the generation gate
+/// keeps the constant in sync).
+#[must_use]
+pub fn schedule_delete_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::SCHEDULE_DELETE_PARAMETERS_JSON)
+        .expect("the frozen schedule_delete table parses")
+}
+
+/// The `schedule_list` parameter table (the catalog-frozen base).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON drifts (the generation gate
+/// keeps the constant in sync).
+#[must_use]
+pub fn schedule_list_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::SCHEDULE_LIST_PARAMETERS_JSON)
+        .expect("the frozen schedule_list table parses")
+}
+
+/// The `schedule_update` parameter table (the catalog-frozen base).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON drifts (the generation gate
+/// keeps the constant in sync).
+#[must_use]
+pub fn schedule_update_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::SCHEDULE_UPDATE_PARAMETERS_JSON)
+        .expect("the frozen schedule_update table parses")
+}
+
+/// The shared view-variant rows (dsh `SHARED_VIEW_PROPERTIES`).
+fn schedule_view_properties() -> serde_json::Map<String, Value> {
+    serde_json::from_value(json!({
+        "id": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "prompt": { "type": "string", "required": true },
+        "scheduledAt": { "type": "string", "required": true },
+        "state": { "type": "string", "required": true, "enum": ["scheduled", "overdue"] },
+        "deliveryMode": { "type": "string", "required": true, "const": "host" },
+    }))
+    .expect("the shared view rows parse")
+}
+
+/// One view variant with the rule rows appended (dsh `AFTER_VIEW_SCHEMA`
+/// and its five siblings).
+fn schedule_view_schema(rule_rows: Value) -> Value {
+    let mut object = serde_json::Map::new();
+    object.insert("type".to_owned(), json!("object"));
+    object.insert("additionalProperties".to_owned(), json!(false));
+    let mut properties = schedule_view_properties();
+    if let Value::Object(rule) = rule_rows {
+        for (key, value) in rule {
+            properties.insert(key, value);
+        }
+    }
+    object.insert("properties".to_owned(), Value::Object(properties));
+    Value::Object(object)
+}
+
+/// The full view union (dsh `VIEW_SCHEMA`).
+fn schedule_view_union() -> Value {
+    json!({
+        "oneOf": [
+            schedule_view_schema(json!({
+                "kind": { "type": "string", "required": true, "const": "after" },
+                "afterSeconds": { "type": "integer", "required": true },
+            })),
+            schedule_view_schema(json!({
+                "kind": { "type": "string", "required": true, "const": "at" },
+            })),
+            schedule_view_schema(json!({
+                "kind": { "type": "string", "required": true, "const": "every" },
+                "everySeconds": { "type": "integer", "required": true },
+            })),
+            schedule_view_schema(json!({
+                "kind": { "type": "string", "required": true, "const": "daily" },
+                "time": { "type": "string", "required": true },
+                "timeZone": { "type": "string", "required": true },
+            })),
+            schedule_view_schema(json!({
+                "kind": { "type": "string", "required": true, "const": "weekly" },
+                "time": { "type": "string", "required": true },
+                "timeZone": { "type": "string", "required": true },
+                "weekdays": {
+                    "type": "array",
+                    "required": true,
+                    "items": { "type": "integer" },
+                },
+            })),
+            schedule_view_schema(json!({
+                "kind": { "type": "string", "required": true, "const": "cron" },
+                "expression": { "type": "string", "required": true },
+                "timeZone": { "type": "string", "required": true },
+            })),
+        ]
+    })
+}
+
+/// One exact two-field error schema (dsh `basicErrorSchema`).
+fn schedule_error_schema(code: &str) -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "code": { "type": "string", "required": true, "const": code },
+            "message": { "type": "string", "required": true },
+        },
+    })
+}
+
+/// The nine-code error union (dsh `ERROR_SCHEMAS`).
+fn schedule_error_union() -> Vec<Value> {
+    [
+        "invalid_prompt",
+        "invalid_selector",
+        "invalid_rule",
+        "invalid_time_zone",
+        "not_future",
+        "time_out_of_range",
+        "frequency_too_high",
+        "subagent_session",
+        "internal_error",
+    ]
+    .iter()
+    .map(|code| schedule_error_schema(code))
+    .collect()
+}
+
+/// The `schedule_create` output contract (dsh `CREATE_OUTPUT_SCHEMA`).
+#[must_use]
+pub fn schedule_create_output_schema() -> Value {
+    let mut one_of = vec![schedule_view_union()];
+    one_of.extend(schedule_error_union());
+    json!({ "oneOf": one_of })
+}
+
+/// The `schedule_list` output contract (dsh `LIST_OUTPUT_SCHEMA`).
+#[must_use]
+pub fn schedule_list_output_schema() -> Value {
+    let mut one_of = vec![json!({ "type": "array", "items": schedule_view_union() })];
+    one_of.extend(schedule_error_union());
+    json!({ "oneOf": one_of })
+}
+
+/// The `schedule_delete` output contract (dsh `DELETE_OUTPUT_SCHEMA`).
+#[must_use]
+pub fn schedule_delete_output_schema() -> Value {
+    let mut one_of = vec![
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "id": { "type": "string", "required": true },
+                "deleted": { "type": "boolean", "required": true, "const": true },
+            },
+        }),
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "id": { "type": "string", "required": true },
+                "deleted": { "type": "boolean", "required": true, "const": false },
+                "code": {
+                    "type": "string",
+                    "required": true,
+                    "const": "schedule_not_found",
+                },
+            },
+        }),
+    ];
+    one_of.extend(schedule_error_union());
+    json!({ "oneOf": one_of })
+}
+
+/// The `schedule_update` output contract (dsh `UPDATE_OUTPUT_SCHEMA`).
+#[must_use]
+pub fn schedule_update_output_schema() -> Value {
+    let mut one_of = vec![
+        schedule_view_union(),
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "id": { "type": "string", "required": true },
+                "updated": { "type": "boolean", "required": true, "const": false },
+                "code": {
+                    "type": "string",
+                    "required": true,
+                    "enum": ["schedule_not_found", "schedule_ended", "schedule_conflict"],
+                },
+            },
+        }),
+    ];
+    one_of.extend(schedule_error_union());
+    json!({ "oneOf": one_of })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

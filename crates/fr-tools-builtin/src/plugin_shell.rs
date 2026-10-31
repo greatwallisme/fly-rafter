@@ -47,7 +47,7 @@ pub const EVENT_INBOX_CLAIMED: &str = "agent/inbox/claimed";
 /// completion-notice events — the spill listeners register at activation
 /// instead (the descriptor `listen` map stays a dylib event face, not a
 /// tools-pipeline registration).
-const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\",\"fs\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\",\"subprocess\",\"attachments\",\"llm\",\"session-projections\"],\"listen\":{\"job/settled\":1,\"agent/inbox/claimed\":2}}";
+const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\",\"fs\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\",\"subprocess\",\"attachments\",\"llm\",\"session-projections\",\"storage-domain\"],\"listen\":{\"job/settled\":1,\"agent/inbox/claimed\":2}}";
 
 /// The maximum host reply the require loop grows its buffer toward (the
 /// approval judgment).
@@ -124,6 +124,22 @@ impl HostLink {
                 String::from_utf8_lossy(&buf)
             ));
         }
+    }
+
+    /// Publishes one kernel event with a JSON payload (the
+    /// `schedule/changed` notifier; the fr-storage emit shape).
+    pub(crate) fn emit(&self, event: &str, payload: &str) {
+        // SAFETY: the vtable contract guarantees validity for this call;
+        // byte-string arguments are read-only for the call's duration.
+        let _status = unsafe {
+            (self.host.emit)(
+                self.host.host_handle,
+                event.as_ptr(),
+                event.len(),
+                payload.as_ptr(),
+                payload.len(),
+            )
+        };
     }
 
     /// Grants one committed target activation access to a provided
@@ -540,6 +556,9 @@ pub struct BuiltinState {
     tasks: Option<std::sync::mpsc::Sender<crate::job_tools::NoticeTask>>,
     /// The notice worker's join handle (joined before the state drops).
     worker: Option<std::thread::JoinHandle<()>>,
+    /// The schedule runtime's join handle (joined before the state
+    /// drops).
+    schedule_worker: Option<std::thread::JoinHandle<()>>,
 }
 
 impl std::fmt::Debug for BuiltinState {
@@ -984,6 +1003,23 @@ fn register_tools(
             serde_json::to_vec(&registration).ok()?.as_slice(),
         )?;
     }
+    // The four reminder controls (dsh `tool-schedule`; the same
+    // partial-face shape: exclusive scheduling, no
+    // presentResult/presentationMeta, the shared oneOf view/error
+    // contract).
+    for registration in [
+        schedule_create_registration(),
+        schedule_list_registration(),
+        schedule_delete_registration(),
+        schedule_update_registration(),
+    ] {
+        step(
+            link,
+            fr_wire::services::tools::SERVICE_NAME,
+            fr_wire::services::tools::METHOD_REGISTER,
+            serde_json::to_vec(&registration).ok()?.as_slice(),
+        )?;
+    }
     register_spill_listeners(link);
     register_finalize_listeners(link);
     Some(())
@@ -1063,6 +1099,110 @@ pub fn job_kill_registration() -> Value {
         "presentCall": {
             "service": crate::service::SERVICE_NAME,
             "method": crate::service::METHOD_JOB_KILL_PRESENT_CALL,
+        },
+    })
+}
+
+/// The `schedule_create` registration row (dsh `ctx.tools.register`,
+/// call-for-call).
+#[must_use]
+pub fn schedule_create_registration() -> Value {
+    json!({
+        "name": "schedule_create",
+        "description": crate::catalog_gen::SCHEDULE_CREATE_DESCRIPTION,
+        "parameters": crate::schema::schedule_create_parameters(),
+        "output": {
+            "schema": crate::schema::schedule_create_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_SCHEDULE_CREATE_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SCHEDULE_CREATE_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SCHEDULE_CREATE_PRESENT_CALL,
+        },
+    })
+}
+
+/// The `schedule_list` registration row (dsh `ctx.tools.register`,
+/// call-for-call).
+#[must_use]
+pub fn schedule_list_registration() -> Value {
+    json!({
+        "name": "schedule_list",
+        "description": crate::catalog_gen::SCHEDULE_LIST_DESCRIPTION,
+        "parameters": crate::schema::schedule_list_parameters(),
+        "output": {
+            "schema": crate::schema::schedule_list_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_SCHEDULE_LIST_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SCHEDULE_LIST_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SCHEDULE_LIST_PRESENT_CALL,
+        },
+    })
+}
+
+/// The `schedule_delete` registration row (dsh `ctx.tools.register`,
+/// call-for-call).
+#[must_use]
+pub fn schedule_delete_registration() -> Value {
+    json!({
+        "name": "schedule_delete",
+        "description": crate::catalog_gen::SCHEDULE_DELETE_DESCRIPTION,
+        "parameters": crate::schema::schedule_delete_parameters(),
+        "output": {
+            "schema": crate::schema::schedule_delete_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_SCHEDULE_DELETE_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SCHEDULE_DELETE_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SCHEDULE_DELETE_PRESENT_CALL,
+        },
+    })
+}
+
+/// The `schedule_update` registration row (dsh `ctx.tools.register`,
+/// call-for-call).
+#[must_use]
+pub fn schedule_update_registration() -> Value {
+    json!({
+        "name": "schedule_update",
+        "description": crate::catalog_gen::SCHEDULE_UPDATE_DESCRIPTION,
+        "parameters": crate::schema::schedule_update_parameters(),
+        "output": {
+            "schema": crate::schema::schedule_update_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_SCHEDULE_UPDATE_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SCHEDULE_UPDATE_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SCHEDULE_UPDATE_PRESENT_CALL,
         },
     })
 }
@@ -1228,6 +1368,167 @@ fn register_spill_listeners(link: &HostLink) -> Option<()> {
     Some(())
 }
 
+/// The schedule domain's wire seams (dsh `ctx.agents`/`ctx.sessions`
+/// delivery faces plus the fr-storage task rows and the kernel emit).
+struct WireScheduleSeams {
+    link: HostLink,
+}
+
+impl std::fmt::Debug for WireScheduleSeams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WireScheduleSeams").finish_non_exhaustive()
+    }
+}
+
+impl crate::schedule::ScheduleSeams for WireScheduleSeams {
+    fn table_entries(&self) -> Result<Vec<(String, Value)>, String> {
+        let reply = self.link.require(
+            fr_wire::services::storage_domain::SERVICE_NAME,
+            fr_wire::services::storage_domain::METHOD_TABLE_ENTRIES,
+            &serde_json::to_vec(&json!({
+                "domain": crate::schedule::DOMAIN_NAME,
+                "table": crate::schedule::DOMAIN_TABLE,
+            }))
+            .map_err(|error| format!("entries encode failed: {error}"))?,
+        )?;
+        let parsed: Value = serde_json::from_slice(&reply)
+            .map_err(|error| format!("entries decode failed: {error}"))?;
+        let mut rows = Vec::new();
+        for entry in parsed
+            .get("entries")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            let key = entry
+                .get("key")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "entries reply carries a non-string key".to_owned())?
+                .to_owned();
+            let value = entry.get("value").cloned().unwrap_or(Value::Null);
+            rows.push((key, value));
+        }
+        Ok(rows)
+    }
+
+    fn put_task(&self, id: &str, task: &Value) -> Result<(), String> {
+        self.link.require(
+            fr_wire::services::storage_domain::SERVICE_NAME,
+            fr_wire::services::storage_domain::METHOD_PUT_RECORD,
+            &serde_json::to_vec(&json!({
+                "domain": crate::schedule::DOMAIN_NAME,
+                "table": crate::schedule::DOMAIN_TABLE,
+                "key": id,
+                "value": task,
+            }))
+            .map_err(|error| format!("put encode failed: {error}"))?,
+        )?;
+        Ok(())
+    }
+
+    fn delete_task(&self, id: &str) -> Result<(), String> {
+        self.link.require(
+            fr_wire::services::storage_domain::SERVICE_NAME,
+            fr_wire::services::storage_domain::METHOD_DELETE_RECORD,
+            &serde_json::to_vec(&json!({
+                "domain": crate::schedule::DOMAIN_NAME,
+                "table": crate::schedule::DOMAIN_TABLE,
+                "key": id,
+            }))
+            .map_err(|error| format!("delete encode failed: {error}"))?,
+        )?;
+        Ok(())
+    }
+
+    fn emit_changed(&self) {
+        self.link.emit("schedule/changed", "{}");
+    }
+
+    fn delegation_depth(&self, _session: &str) -> u32 {
+        // The M1 composition has no delegation registry yet (the batch-0
+        // refusal-arm-in-place ruling): every session reads as a
+        // top-level caller until the Phase-18 wiring lands.
+        0
+    }
+
+    fn followup(&self, session: &str, message: &Value) -> Result<(), String> {
+        self.link.require(
+            fr_wire::services::agent::SERVICE_NAME,
+            fr_wire::services::agent::METHOD_FOLLOWUP,
+            &serde_json::to_vec(&json!({ "sessionId": session, "message": message }))
+                .map_err(|error| format!("followup encode failed: {error}"))?,
+        )?;
+        Ok(())
+    }
+
+    fn flush(&self, session: &str) -> Result<(), String> {
+        self.link.require(
+            fr_wire::services::session_persistence::SERVICE_NAME,
+            fr_wire::services::session_persistence::METHOD_SESSION_FLUSH,
+            &serde_json::to_vec(&json!({ "id": session }))
+                .map_err(|error| format!("flush encode failed: {error}"))?,
+        )?;
+        Ok(())
+    }
+}
+
+/// Opens the schedule storage domain over the two-phase protocol: the
+/// prepared snapshot's rows decode against the task schema, a stored key
+/// that differs from its record id closes the domain before the refusal,
+/// and the validated open commits (the dsh `ready` arm; a refusal
+/// declines the activation fail-closed).
+fn open_schedule_domain(link: &HostLink) -> Option<()> {
+    let payload = serde_json::to_vec(&json!({
+        "name": crate::schedule::DOMAIN_NAME,
+        "version": crate::schedule::DOMAIN_VERSION,
+        "tables": [crate::schedule::DOMAIN_TABLE],
+        "hasGlobal": false,
+    }))
+    .ok()?;
+    let reply = link
+        .require(
+            fr_wire::services::storage_domain::SERVICE_NAME,
+            fr_wire::services::storage_domain::METHOD_OPEN,
+            &payload,
+        )
+        .ok()?;
+    let snapshot: Value = serde_json::from_slice(&reply).ok()?;
+    let rows = snapshot.pointer("/records/tasks")?.as_object()?.clone();
+    let mut valid = true;
+    for (key, row) in &rows {
+        let task = crate::schedule::validate_task_row(row).is_ok();
+        let binding = row
+            .get("record")
+            .and_then(|record| record.get("id"))
+            .and_then(Value::as_str)
+            .is_some_and(|id| id == key);
+        if !task || !binding {
+            eprintln!(
+                "schedule: stored task key \"{key}\" is not a valid row bound to its record id"
+            );
+            valid = false;
+            break;
+        }
+    }
+    let method = if valid {
+        fr_wire::services::storage_domain::METHOD_COMMIT
+    } else {
+        fr_wire::services::storage_domain::METHOD_REFUSE
+    };
+    let settle = serde_json::to_vec(&json!({ "name": crate::schedule::DOMAIN_NAME })).ok()?;
+    if link
+        .require(
+            fr_wire::services::storage_domain::SERVICE_NAME,
+            method,
+            &settle,
+        )
+        .is_err()
+    {
+        return None;
+    }
+    valid.then_some(())
+}
+
 impl BuiltinState {
     /// Assembles the state over one copied vtable, wiring the whole
     /// registration sequence; `None` declines the activation
@@ -1290,6 +1591,19 @@ impl BuiltinState {
         // adds no goal config rows — the dsh base judgment).
         let goals = crate::goal_service::Goals::new(Box::new(WireGoalSeams { link }));
 
+        // The schedule domain over the fr-storage seam (the Q16c-3B
+        // wiring): the two-phase open validates every stored row before
+        // the commit, so a corrupt task refuses the activation
+        // fail-closed (the dsh constructor throw, carried by the
+        // activation decline).
+        let schedules = Arc::new(crate::schedule::Schedules::new(Box::new(
+            WireScheduleSeams { link },
+        )));
+        open_schedule_domain(&link)?;
+        let signal = crate::schedule::runtime_handle();
+        schedules.bind_signal(Arc::clone(&signal));
+        let schedule_worker = crate::schedule::spawn_runtime(Arc::clone(&schedules), signal);
+
         let env_arc = Arc::new(env);
         let directories_arc = Arc::new(directories);
         let seams = WireSeams {
@@ -1304,6 +1618,7 @@ impl BuiltinState {
             Arc::new(lists),
             Arc::new(goals),
             notices,
+            Arc::clone(&schedules),
         )
         .ok()?;
 
@@ -1323,6 +1638,7 @@ impl BuiltinState {
             pending: std::sync::Mutex::new(std::collections::HashMap::new()),
             tasks: Some(tasks),
             worker: Some(worker),
+            schedule_worker: Some(schedule_worker),
         })
     }
 
@@ -1714,6 +2030,9 @@ unsafe extern "C" fn teardown(handle: *mut c_void) {
     if let Some(worker) = state.worker.take() {
         let _ignored = worker.join();
     }
+    if let Some(worker) = state.schedule_worker.take() {
+        let _ignored = worker.join();
+    }
     drop(state);
 }
 
@@ -1813,10 +2132,10 @@ mod tests {
         let sections = super::prompt_sections();
         assert_eq!(sections.len(), 9);
         assert!(
-            sections
-                .iter()
-                .all(|(name, _, _)| !name.contains("todo") && !name.contains("image")),
-            "the section-free tools stay absent (the dsh truth)"
+            sections.iter().all(|(name, _, _)| !name.contains("todo")
+                && !name.contains("image")
+                && !name.contains("schedule")),
+            "the section-free tools stay absent (the dsh truth; the Q16b-4A, Q16b-5A, Q16c batch-2, and Q16c batch-0 schedule rulings)"
         );
         let jobs = sections
             .iter()

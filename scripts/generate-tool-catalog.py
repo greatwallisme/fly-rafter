@@ -195,6 +195,26 @@ TOOLS = {
         ],
         "none",
     ),
+    "schedule_create": (
+        "SCHEDULE_CREATE",
+        [],
+        "none",
+    ),
+    "schedule_delete": (
+        "SCHEDULE_DELETE",
+        [],
+        "none",
+    ),
+    "schedule_list": (
+        "SCHEDULE_LIST",
+        [],
+        "none",
+    ),
+    "schedule_update": (
+        "SCHEDULE_UPDATE",
+        [],
+        "none",
+    ),
 }
 
 HEADER = """\

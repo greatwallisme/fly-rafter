@@ -1300,3 +1300,14 @@
 - **真缺陷一起由测试暴露当场修复**：wait() 等待者计数减法在持有 park 循环 guard 时重入 self.state=自死锁（std Mutex 不可重入），拖挂三个既有 kill 测试 60s+——drop(guard) 后再减计数，fr-shell 30/0/0 即回。教训入档：fr-shell 套件此前后台超时两轮（bhvn4uboy/bnj102za0）皆此根因，workspace 全量跑绿后才算数。
 - 过程注记：生成退化仍高发（路径损坏/语法破坏/占位符混入/参数序反转 grant(target,granted)/serve_goal_body 整函数重复/serve_execute 签名吞并/括号失配共 10+ 起）全部分块写入+逐块编译校验自纠；5 处测试期望错误（dsh retainTail 尾保留语义/recovery 臂长 id 可达性/预算耗尽-重置序列/UTF-16 帽字符数 vs 字节数/UTF-8 边界 3 字节=hé）由测试暴露修正；hook 误报三类透明接受（CLI print 契约/模板字面量标记/todo 产品名）。
 - **提交由用户 /commit 决定**。下一片=16c 批 5：schedule 域（六规则+jiff Q16c-4A）+fr-storage 接线+service+runtime 投递+schedule 四工具。
+
+## 2026-10-31 — 16c 批 5 落地：schedule 域全件（六规则+jiff Q16c-4A）+fr-storage 接线+service+runtime 投递+四工具
+- 真源终勘：dsh schedule 八文件全读（types 480/domain 1896/index 471/update 179/delivery-history 77/runtime 166/storage 60/tool 590）；关键实锤=tool-schedule 不注册 section（apply 只注册四工具→批 0「五 section 场景改否定」本批执行）+Host create 不写 schedule/change 会话事件（遗留 fold 面结构性不可达=档载）。
+- fr 落点：crates/fr-tools-builtin/src/schedule/ 目录模块（domain 1580 行=词汇+grammar+六构造器+记录校验、occurrences 1900 行=cron 方言+四 resolver+decode+retention+framing、service 1250 行=两相 open 接线+ScheduleSeams+四管理操作+update CAS、runtime 400 行=RuntimeSignal Condvar deadline 线程+drive 移植、tools 500 行=四工具体+校验臂+呈现）；plugin_shell 增 WireScheduleSeams+open_schedule_domain+四注册行+descriptor inject 增 storage-domain+teardown join；fr-wire 新增 services::storage_domain（12 方法常量）。
+- jiff 0.2.38（features=["static"] 内置 tzdb）：Q16c-4A 直译——canonical instant=Hinnant civil_from_days 手搓（jiff Timestamp 范围不含 9999-12-31 尾日，jiff 内对拍钉测）；gap=earlier+plain 回读校验、overlap=earlier、tz=db().get+iana_name 归一；jiff Time::new 第四参=纳秒（毫秒×1e6，500ms 截断缺陷由测试暴露当场修复）；Sunday 7→0 折叠后需二次去重（BTreeSet 重收集，同由测试暴露）。
+- 方法号：schedule 四工具 113-124（create 113/114/115、list 116/117/118、delete 119/120/121、update 122/123/124）；describe 70→82。
+- spec 绑定：TOOLS schedule 24 场景全绑（16→schedule_registrations_match_the_frozen_catalog/4 section 场景批 0 已裁改否定→prompt_sections 钉测扩缺席断言/4 行为→the_management_flows_drive_the_storage_rows 伞测：gap 拒+overlap earlier+every 重对齐+CAS 冲突+session 过滤+storage 行落表）；binding-audit.md 十四节（含八项 M1 档载）。
+- 四门：fmt ✓ / clippy workspace -D warnings 0（~130 起全修，map_err 忽略族 21 处收敛为 fixed() 单助手+单处 expect）/ tests **1381+0**（FR_DSH_SOURCE，1364→1381=+17 schedule 测试）/ doc ✓；lifecycle TOOLS **180/0/228**（156→180，0 failed；228 skip=16d/16e/16f pending 按设计）；guard 与批 4 基线逐条一致（仅 TOOLS skip 252→228）；三合约开关 0 errors；explain+stamp dry-run 闭（180/408, 0 failed）。
+- 批内顺带修复：fr-shell jobs_local wait 的 stale expect（significant_drop_tightening 因依赖图变化不再触发；意图注记保留在文档注释=死注解移除非压制）；catalog 脚本+regen（四工具条目 +271 行，--check 绿）。
+- 过程注记：本批生成退化高发（mod.rs 三连废+domain.rs 常量乱码+括号失衡+标识符截断 sal/efusal 共 10+ 起）全部小步 heredoc+逐块校验自纠；测试期望错误 6 起（epoch 手算错×3/cron 最短拼写误判×2/retention floor 语义误读×1）由测试暴露修正——其中 cron 编码与 retention 两处为代码对 dsh 正确、期望错。
+- **提交由用户 /commit 决定**。下一片=16d 交互+会话查询（ask_user_question/exit_plan_mode+session_search/trace/event_read/event_search/event_trace）。

@@ -1123,145 +1123,145 @@ Scenario: job_output 行为 1
   那么 流式增量读取；wait 超时留 job 运行
 
 Scenario: schedule_create 调度与呈现
-  Test: pending_req_fr_builtin_tools_schedule_create
+  Test: schedule_registrations_match_the_frozen_catalog
   假设 合约要求的行为已实现
   当 读取工具 schedule_create 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 other
 
 Scenario: schedule_create 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_schedule_create
+  Test: schedule_registrations_match_the_frozen_catalog
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
-Scenario: schedule_create 说明 section 注册
-  Test: pending_req_fr_builtin_tools_schedule_create_section
+Scenario: schedule_create 说明 section 缺席
+  Test: prompt_sections_pin_the_nine_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 工具 schedule_create 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
+  那么 无工具 schedule_create 的说明 section（dsh 真源 tool-schedule 不注入 systemPrompt）；注册表恰九条 tool:* section 且 order 位于 1000-3000
 
 Scenario: schedule_create 参数 prompt 形状
-  Test: pending_req_fr_builtin_tools_schedule_create_prompt
+  Test: schedule_registrations_match_the_frozen_catalog
   假设 工具 schedule_create 已注册
   当 校验 schema 时
   那么 参数行 [prompt:string:req] 的名称与类型按目录行实现
 
 Scenario: schedule_create 参数 prompt 约束
-  Test: pending_req_fr_builtin_tools_schedule_create_prompt
+  Test: schedule_registrations_match_the_frozen_catalog
   假设 工具 schedule_create 已注册
   当 校验 schema 时
   那么 参数行 [prompt:string:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: schedule_create 参数 title 形状
-  Test: pending_req_fr_builtin_tools_schedule_create_title
+  Test: schedule_registrations_match_the_frozen_catalog
   假设 工具 schedule_create 已注册
   当 校验 schema 时
   那么 参数行 [title:string:req（≤120 字符规则）] 的名称与类型按目录行实现
 
 Scenario: schedule_create 参数 title 约束
-  Test: pending_req_fr_builtin_tools_schedule_create_title
+  Test: schedule_registrations_match_the_frozen_catalog
   假设 工具 schedule_create 已注册
   当 校验 schema 时
   那么 参数行 [title:string:req（≤120 字符规则）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: schedule_create 行为 1
-  Test: pending_req_fr_builtin_tools_schedule_create_1
+  Test: the_management_flows_drive_the_storage_rows
   假设 工具 schedule_create 执行时
   当 达到触发条件时
   那么 时区 UTC 或 IANA；不存在本地时刻跳过、重复取较早；宕机后循环提醒只补最近一次；管理走 storage domain
 
 Scenario: schedule_delete 调度与呈现
-  Test: pending_req_fr_builtin_tools_schedule_delete
+  Test: schedule_registrations_match_the_frozen_catalog
   假设 合约要求的行为已实现
   当 读取工具 schedule_delete 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: schedule_delete 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_schedule_delete
+  Test: schedule_registrations_match_the_frozen_catalog
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
-Scenario: schedule_delete 说明 section 注册
-  Test: pending_req_fr_builtin_tools_schedule_delete_section
+Scenario: schedule_delete 说明 section 缺席
+  Test: prompt_sections_pin_the_nine_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 工具 schedule_delete 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
+  那么 无工具 schedule_delete 的说明 section（dsh 真源 tool-schedule 不注入 systemPrompt）；注册表恰九条 tool:* section 且 order 位于 1000-3000
 
 Scenario: schedule_delete 参数 id 形状
-  Test: pending_req_fr_builtin_tools_schedule_delete_id
+  Test: schedule_registrations_match_the_frozen_catalog
   假设 工具 schedule_delete 已注册
   当 校验 schema 时
   那么 参数行 [id:string:req] 的名称与类型按目录行实现
 
 Scenario: schedule_delete 参数 id 约束
-  Test: pending_req_fr_builtin_tools_schedule_delete_id
+  Test: schedule_registrations_match_the_frozen_catalog
   假设 工具 schedule_delete 已注册
   当 校验 schema 时
   那么 参数行 [id:string:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: schedule_delete 行为 1
-  Test: pending_req_fr_builtin_tools_schedule_delete_1
+  Test: the_management_flows_drive_the_storage_rows
   假设 工具 schedule_delete 执行时
   当 达到触发条件时
   那么 活动/非活动均可删，不撤回已入队
 
 Scenario: schedule_list 调度与呈现
-  Test: pending_req_fr_builtin_tools_schedule_list
+  Test: schedule_registrations_match_the_frozen_catalog
   假设 合约要求的行为已实现
   当 读取工具 schedule_list 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 read
 
 Scenario: schedule_list 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_schedule_list
+  Test: schedule_registrations_match_the_frozen_catalog
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
-Scenario: schedule_list 说明 section 注册
-  Test: pending_req_fr_builtin_tools_schedule_list_section
+Scenario: schedule_list 说明 section 缺席
+  Test: prompt_sections_pin_the_nine_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 工具 schedule_list 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
+  那么 无工具 schedule_list 的说明 section（dsh 真源 tool-schedule 不注入 systemPrompt）；注册表恰九条 tool:* section 且 order 位于 1000-3000
 
 Scenario: schedule_list 行为 1
-  Test: pending_req_fr_builtin_tools_schedule_list_1
+  Test: the_management_flows_drive_the_storage_rows
   假设 工具 schedule_list 执行时
   当 达到触发条件时
   那么 列当前 session 活动提醒
 
 Scenario: schedule_update 调度与呈现
-  Test: pending_req_fr_builtin_tools_schedule_update
+  Test: schedule_registrations_match_the_frozen_catalog
   假设 合约要求的行为已实现
   当 读取工具 schedule_update 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: schedule_update 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_schedule_update
+  Test: schedule_registrations_match_the_frozen_catalog
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
-Scenario: schedule_update 说明 section 注册
-  Test: pending_req_fr_builtin_tools_schedule_update_section
+Scenario: schedule_update 说明 section 缺席
+  Test: prompt_sections_pin_the_nine_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 工具 schedule_update 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
+  那么 无工具 schedule_update 的说明 section（dsh 真源 tool-schedule 不注入 systemPrompt）；注册表恰九条 tool:* section 且 order 位于 1000-3000
 
 Scenario: schedule_update 参数 id 形状
-  Test: pending_req_fr_builtin_tools_schedule_update_id
+  Test: schedule_registrations_match_the_frozen_catalog
   假设 工具 schedule_update 已注册
   当 校验 schema 时
   那么 参数行 [id:string:req] 的名称与类型按目录行实现
 
 Scenario: schedule_update 参数 id 约束
-  Test: pending_req_fr_builtin_tools_schedule_update_id
+  Test: schedule_registrations_match_the_frozen_catalog
   假设 工具 schedule_update 已注册
   当 校验 schema 时
   那么 参数行 [id:string:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: schedule_update 行为 1
-  Test: pending_req_fr_builtin_tools_schedule_update_1
+  Test: the_management_flows_drive_the_storage_rows
   假设 工具 schedule_update 执行时
   当 达到触发条件时
   那么 原地改保留 id；改相对延迟须新建；every_seconds 改动按保存时刻重对齐

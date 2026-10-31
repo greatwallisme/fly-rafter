@@ -16,6 +16,7 @@ crate-type = ["cdylib", "rlib"]
 dougong-abi.workspace = true
 fr-sandbox.workspace = true
 fr-wire.workspace = true
+jiff = { version = "0.2", features = ["static"] }
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
