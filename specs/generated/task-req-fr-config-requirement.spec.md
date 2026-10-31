@@ -1162,13 +1162,13 @@ Scenario: config dsh-permission-presets defaultPreset 约束
   那么 配置行 [defaultPreset:Volatile] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-plan-mode section 默认
-  Test: pending_req_fr_config_config_dsh_plan_mode_section
+  Test: builtin_config_pins_ask_user_plan_mode_and_read_bounds
   假设 插件 dsh-plan-mode 已注册
   当 读取解析后配置时
   那么 配置行 [section:string（plan 活动期渲染 plan:policy 段）] 的默认值按目录行实现
 
 Scenario: config dsh-plan-mode section 约束
-  Test: pending_req_fr_config_config_dsh_plan_mode_section
+  Test: builtin_config_pins_ask_user_plan_mode_and_read_bounds
   假设 插件 dsh-plan-mode 已注册
   当 校验与生效时
   那么 配置行 [section:string（plan 活动期渲染 plan:policy 段）] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
@@ -1306,73 +1306,73 @@ Scenario: config dsh-session-persistence-jsonl listConcurrency 约束
   那么 配置行 [listConcurrency:3] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-session-query-sqlite journalMode 默认
-  Test: pending_req_fr_config_config_dsh_session_query_sqlite_journalmode
+  Test: builtin_config_pins_session_query_defaults
   假设 插件 dsh-session-query-sqlite 已注册
   当 读取解析后配置时
   那么 配置行 [journalMode:'wal'] 的默认值按目录行实现
 
 Scenario: config dsh-session-query-sqlite journalMode 约束
-  Test: pending_req_fr_config_config_dsh_session_query_sqlite_journalmode
+  Test: builtin_config_pins_session_query_probes
   假设 插件 dsh-session-query-sqlite 已注册
   当 校验与生效时
   那么 配置行 [journalMode:'wal'] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-session-query-sqlite defaultLimit 默认
-  Test: pending_req_fr_config_config_dsh_session_query_sqlite_defaultlimit
+  Test: builtin_config_pins_session_query_defaults
   假设 插件 dsh-session-query-sqlite 已注册
   当 读取解析后配置时
   那么 配置行 [defaultLimit:20] 的默认值按目录行实现
 
 Scenario: config dsh-session-query-sqlite defaultLimit 约束
-  Test: pending_req_fr_config_config_dsh_session_query_sqlite_defaultlimit
+  Test: builtin_config_pins_session_query_boundaries
   假设 插件 dsh-session-query-sqlite 已注册
   当 校验与生效时
   那么 配置行 [defaultLimit:20] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-session-query-sqlite maxLimit 默认
-  Test: pending_req_fr_config_config_dsh_session_query_sqlite_maxlimit
+  Test: builtin_config_pins_session_query_defaults
   假设 插件 dsh-session-query-sqlite 已注册
   当 读取解析后配置时
   那么 配置行 [maxLimit:100] 的默认值按目录行实现
 
 Scenario: config dsh-session-query-sqlite maxLimit 约束
-  Test: pending_req_fr_config_config_dsh_session_query_sqlite_maxlimit
+  Test: builtin_config_pins_session_query_boundaries
   假设 插件 dsh-session-query-sqlite 已注册
   当 校验与生效时
   那么 配置行 [maxLimit:100] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-session-query-sqlite snippetChars 默认
-  Test: pending_req_fr_config_config_dsh_session_query_sqlite_snippetchars
+  Test: builtin_config_pins_session_query_defaults
   假设 插件 dsh-session-query-sqlite 已注册
   当 读取解析后配置时
   那么 配置行 [snippetChars:240] 的默认值按目录行实现
 
 Scenario: config dsh-session-query-sqlite snippetChars 约束
-  Test: pending_req_fr_config_config_dsh_session_query_sqlite_snippetchars
+  Test: builtin_config_pins_ask_user_plan_mode_and_read_bounds
   假设 插件 dsh-session-query-sqlite 已注册
   当 校验与生效时
   那么 配置行 [snippetChars:240] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-session-query-sqlite persistedReadConcurrency 默认
-  Test: pending_req_fr_config_config_dsh_session_query_sqlite_persistedreadconcurrency
+  Test: builtin_config_pins_session_query_defaults
   假设 插件 dsh-session-query-sqlite 已注册
   当 读取解析后配置时
   那么 配置行 [persistedReadConcurrency:4] 的默认值按目录行实现
 
 Scenario: config dsh-session-query-sqlite persistedReadConcurrency 约束
-  Test: pending_req_fr_config_config_dsh_session_query_sqlite_persistedreadconcurrency
+  Test: builtin_config_pins_ask_user_plan_mode_and_read_bounds
   假设 插件 dsh-session-query-sqlite 已注册
   当 校验与生效时
   那么 配置行 [persistedReadConcurrency:4] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-session-query-sqlite preparedSessionCacheSize 默认
-  Test: pending_req_fr_config_config_dsh_session_query_sqlite_preparedsessioncachesize
+  Test: builtin_config_pins_session_query_defaults
   假设 插件 dsh-session-query-sqlite 已注册
   当 读取解析后配置时
   那么 配置行 [preparedSessionCacheSize:5] 的默认值按目录行实现
 
 Scenario: config dsh-session-query-sqlite preparedSessionCacheSize 约束
-  Test: pending_req_fr_config_config_dsh_session_query_sqlite_preparedsessioncachesize
+  Test: builtin_config_pins_session_query_boundaries
   假设 插件 dsh-session-query-sqlite 已注册
   当 校验与生效时
   那么 配置行 [preparedSessionCacheSize:5] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
@@ -1510,25 +1510,25 @@ Scenario: config dsh-time-context refreshIntervalMs 约束
   那么 配置行 [refreshIntervalMs:600000（0=每合格 step 注入）] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-ask-user mode 默认
-  Test: pending_req_fr_config_config_dsh_tool_ask_user_mode
+  Test: builtin_config_pins_ask_user_plan_mode_and_read_bounds
   假设 插件 dsh-tool-ask-user 已注册
   当 读取解析后配置时
   那么 配置行 [mode:'legacy'|'timed'（默认阻塞 legacy）] 的默认值按目录行实现
 
 Scenario: config dsh-tool-ask-user mode 约束
-  Test: pending_req_fr_config_config_dsh_tool_ask_user_mode
+  Test: builtin_config_pins_ask_user_plan_mode_and_read_bounds
   假设 插件 dsh-tool-ask-user 已注册
   当 校验与生效时
   那么 配置行 [mode:'legacy'|'timed'（默认阻塞 legacy）] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-ask-user timeout 默认
-  Test: pending_req_fr_config_config_dsh_tool_ask_user_timeout
+  Test: builtin_config_pins_ask_user_plan_mode_and_read_bounds
   假设 插件 dsh-tool-ask-user 已注册
   当 读取解析后配置时
   那么 配置行 [timeout:120s] 的默认值按目录行实现
 
 Scenario: config dsh-tool-ask-user timeout 约束
-  Test: pending_req_fr_config_config_dsh_tool_ask_user_timeout
+  Test: builtin_config_pins_ask_user_plan_mode_and_read_bounds
   假设 插件 dsh-tool-ask-user 已注册
   当 校验与生效时
   那么 配置行 [timeout:120s] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
@@ -1678,25 +1678,25 @@ Scenario: config dsh-tool-lsp timeoutMs 约束
   那么 配置行 [timeoutMs:60000] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-session-query maxSearchResults 默认
-  Test: pending_req_fr_config_config_dsh_tool_session_query_maxsearchresults
+  Test: builtin_config_pins_session_query_defaults
   假设 插件 dsh-tool-session-query 已注册
   当 读取解析后配置时
   那么 配置行 [maxSearchResults:100] 的默认值按目录行实现
 
 Scenario: config dsh-tool-session-query maxSearchResults 约束
-  Test: pending_req_fr_config_config_dsh_tool_session_query_maxsearchresults
+  Test: builtin_config_pins_session_query_probes
   假设 插件 dsh-tool-session-query 已注册
   当 校验与生效时
   那么 配置行 [maxSearchResults:100] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-session-query searchTimeoutMs 默认
-  Test: pending_req_fr_config_config_dsh_tool_session_query_searchtimeoutms
+  Test: builtin_config_pins_session_query_defaults
   假设 插件 dsh-tool-session-query 已注册
   当 读取解析后配置时
   那么 配置行 [searchTimeoutMs:30000] 的默认值按目录行实现
 
 Scenario: config dsh-tool-session-query searchTimeoutMs 约束
-  Test: pending_req_fr_config_config_dsh_tool_session_query_searchtimeoutms
+  Test: builtin_config_pins_session_query_probes
   假设 插件 dsh-tool-session-query 已注册
   当 校验与生效时
   那么 配置行 [searchTimeoutMs:30000] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写

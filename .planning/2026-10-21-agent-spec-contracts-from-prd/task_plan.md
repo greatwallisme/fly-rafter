@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-Phase 16 16d 批 2 已落（会话查询组全件：fr-session 持久 wire 面 1002/1003、fr-wire session-query observe=1400、引擎核心 ~2000 行+五工具 ~1700 行+时间模块、fr-schema 8 键、catalog 五工具+section、五门绿 workspace 1431+0）。**下一动作=16d 批 3 收口：TOOLS 47 场景绑定（含两 section 改否定执行）+CONFIG 22 场景绑定+七步流 4-7（lifecycle/guard/explain/stamp）+五门复跑+提交由用户 /commit 裁决。**
+Phase 16 16d 批 3（收口）已落（2026-10-31，待提交）：TOOLS 47+CONFIG 22 场景绑定全真（lifecycle 227/0/181+102/0/217 零 fail）、Q16d-4A 两 section 改否定、13 处 nine→ten 漂移勘误、Q97-A 两族注册钉测+fr-schema 新钉测、五门绿 workspace 1434+0。**下一动作=提交由用户 /commit 裁决；随后 16e PTY+persistent（terminal 六件+persistent bash/pwsh+fr-shell PTY 执行体）。**
 
 ## Phases
 
@@ -153,11 +153,11 @@ Phase 16 16d 批 2 已落（会话查询组全件：fr-session 持久 wire 面 1
 - [ ] 16d 批 0：交互+会话查询组真源终勘（~5350 行全读）+Q16d 四裁决（2026-10-31 全 A）——**已闭**
 - [x] 16d 批 1：交互组（user-questions 服务+tool-ask-user+plan-mode 全件+fr-schema 三键+fr-wire 两服务词汇+plan/mode 词表+plan:policy 动态 section）——**已落 2026-10-31（四门绿：workspace 1401+0；方法号 125-131+903-905；describe 91；事故档载=python 笔误自毁 user_questions.rs 后全量重建零丢失）**
 - [x] 16d 批 2：会话查询组（session-query 服务核心全量+搜索禁用终态+五工具+fr-schema 两组键）——**已落 2026-10-31（五门绿：workspace 1431+0、1401→1431=+30；fr-session 持久 wire 面 1002/1003+backend.cold_read+interrupted closers、Corruption 文本前缀分类；fr-wire session_query observe=1400+1002/1003；fr-tools-builtin 三新模块 session_query/session_query_time/session_query_tools；fr-schema 8 键平铺+3 钉测；catalog 五工具+SESSION_QUERY_SECTION_TEXT regen --check 绿；Q97-A 五件全 schema 钉测；sections 钉测 9→10；describe 91→107；descriptor provide 增 session-query；方法号 132-146+observe 1400；批次内退化 ~25 起全部小步+行号手术+括号深度探针自纠，测试期望错 6 起由测试暴露=代码对 dsh 正确）**
-- [ ] 16d 批 3（收口）：TOOLS 47 场景绑定（含两 section 场景改否定）+CONFIG 22 场景绑定+catalog regen+七步流 4-7+五门
+- [ ] 16d 批 3（收口）：TOOLS 47 场景绑定（含两 section 场景改否定）+CONFIG 22 场景绑定+catalog regen+七步流 4-7+五门——**已落 2026-10-31（待提交）**（lifecycle TOOLS 227/0/181=180+47、CONFIG 102/0/217=80+22；Q97-A 两族钉测 interaction_registrations+session_query_registrations 新落；Q16d-4A 两 section 场景改否定执行并扩 ten 钉测缺席断言；13 处 nine→ten 选择器勘误+4 处九条→十条文本同步=批 2 段表增长漂移；fr-schema 新钉测 ask_user_plan_mode_and_read_bounds 含 snippet/persisted 两读界探针；五门绿 workspace 1434+0=1431+3）
 - [ ] 16e PTY+persistent / 16f web+skill+lsp+目录全量+内省
 - [ ] 每工具参数 schema 对照 dsh tool-catalog.md 逐字冻结（16a bash/pwsh 已逐字落 schema.rs，catalog 脚本随批 3）
 - [ ] 对照 REQ-FR-BUILTIN-TOOLS 场景逐条落测试（随各子批 spec 绑定）
-- **Status:** in_progress（16c 批 4 已落待提交；下一片=批 5 schedule 域六规则+jiff+fr-storage 接线+四工具）
+- **Status:** in_progress（16d 批 3 已落待提交；下一片=16e PTY+persistent）
 
 ### Phase 17: fr-compaction + fr-mcp + fr-ptc
 - [ ] fr-compaction：剪枝 8192/4096/1024、压缩契约与自动触发、图片卸载、spill max-inline-tokens 12500、replace-op 落地

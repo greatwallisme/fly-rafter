@@ -1344,3 +1344,12 @@
 - clippy 全清单修尽（~45 起：doc 段落长/int implicit_hasher 泛化 S/float_cmp→i64 域/cast 族=诚实 expect 带 dsh 语义理由（to_f64/signed_to_f64/validated_seq/dsh_epoch_millisecond 四助手）/const fn 族/collapsible if（edition 2024 let-chains）/items-after-test-module 两个文件搬家/redundant closure+clone/map_or_else/RangeInclusive::contains）。
 - **五门终态：fmt ✓ / clippy workspace -D warnings 0 / tests 1431+0（FR_DSH_SOURCE，1401→1431=+30）/ doc ✓ / catalog --check ✓。**
 - **提交由用户 /commit 决定**。下一片=16d 批 3 收口（TOOLS 47 场景绑定含两 section 改否定+CONFIG 22 场景绑定+七步流 4-7+五门复跑）。
+
+## 2026-10-31 — 16d 批 3 收口落地（待提交）
+
+- 三层真源复核先行：dsh tool-session-query index.ts:58-63 实锤单族段 `tool:session-query` 服务五工具（"Register all five tools and their shared model guidance"）→ 五 section 场景正向绑定成立；tool-ask-user inject 仅 tools+userQuestions（无 systemPrompt）、plan-mode index.ts:216-218 段=PLAN_POLICY 注册 → Q16d-4A 两否定事实复核；dsh config-catalog ask-user 行 `timeout?: number` default 120 → registry 平铺行如实，union 约束由 validate_timed_timeout 工具层钉测承载，无缺口。
+- 码面三件（全测试，零生产码改动）：verify.rs 新增 interaction_registrations_match_the_frozen_catalog（ask/exit 描述逐字+表冻结+questions/plan required+输出契约+exclusive 面+exit presentCall/presentResult+other/generic 卡）与 session_query_registrations_match_the_frozen_catalog（五描述逐字+五表冻结+required 行+search 双件 timeoutMs=30000 独占/三读 isConcurrencySafe=parallel+五件 string 输出无 presentResult）；plugin_shell.rs ten 钉测缺席断言扩 ask-user/exit-plan（Q16d-4A 执法面）；fr-schema registry.rs 新增 builtin_config_pins_ask_user_plan_mode_and_read_bounds（mode 默认 legacy+枚举拒/timeout 默认 120+类型拒/section required 缺席拒/snippet-chars 0 下界/persisted-read-concurrency 0 下界+2^53 上界）。
+- spec 编辑（行号寻址 python+备份）：TOOLS 68 行=13 处 nine→ten 选择器勘误（16a/16b/16c 各批 section 场景，批 2 段表 9→10 改名的全量漂移，不止 schedule 4 处）+4 处九条→十条文本同步+47 场景绑定（interaction 8/session 26/ten 7/行为 6）+两 section 场景改否定（标题+文本+选择器，Q16d-4A）；CONFIG 22 行绑定（新钉测 6/defaults 7/probes 4/boundaries 5）。
+- 事故 2 起（备份纪律生效零损失）：①registry.rs Edit 退化——新钉测头部错接坏 fixture 顶掉 boundaries 钉测 default-limit 断言，复取；修复编辑自身再退化（old_string 幻觉）→ 立停，cp 备份恢复后小锚点干净重放；②hook TODO 报 verify.rs:225/registry.rs:11=既有 todo_write 文档注释与模块头（与 HEAD 逐字一致，已裁决误报类，透明接受）+fmt 一处多行断言折叠（cargo fmt 应用后 exit 0）。
+- 七步流 4-7：lifecycle TOOLS 227/0/181（180+47 算术吻合）/CONFIG 102/0/217（80+22）；guard 16 份 pending 态全 0 failed=基线一致（skip 计 not passing 随各 Phase 转绿，本批 skip 只减未增）；explain 新鲜读取带 FR_DSH_SOURCE 双绿（无环境时 catalog --check 钉测按设计 fail=1 failed 已勘误非回归）；stamp dry-run 如实（Spec-Passing false=skip 态，0 failed）。
+- **五门终态：fmt ✓ / clippy -D warnings 0 / tests 1434+0（1431→1434=+3）/ doc 0 / catalog --check ✓。提交由用户 /commit 裁决；下一片=16e PTY+persistent。**

@@ -115,7 +115,7 @@ Scenario: bash 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: bash 说明 section 注册
-  Test: prompt_sections_pin_the_nine_tools
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 bash 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -199,7 +199,7 @@ Scenario: pwsh 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: pwsh 说明 section 注册
-  Test: prompt_sections_pin_the_nine_tools
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 pwsh 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -277,7 +277,7 @@ Scenario: read 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: read 说明 section 注册
-  Test: prompt_sections_pin_the_nine_tools
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 read 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -337,7 +337,7 @@ Scenario: read_image 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: read_image 说明 section 注册缺席
-  Test: prompt_sections_pin_the_nine_tools
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 read_image 无说明 section（dsh 真源 read-image.ts 不注入 systemPrompt）；注册表恰七条 tool:* section 且 order 位于 1000-3000
@@ -373,7 +373,7 @@ Scenario: write 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: write 说明 section 注册
-  Test: prompt_sections_pin_the_nine_tools
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 write 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -421,7 +421,7 @@ Scenario: edit 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: edit 说明 section 注册
-  Test: prompt_sections_pin_the_nine_tools
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 edit 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -493,7 +493,7 @@ Scenario: glob 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: glob 说明 section 注册
-  Test: prompt_sections_pin_the_nine_tools
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 glob 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -541,7 +541,7 @@ Scenario: grep 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: grep 说明 section 注册
-  Test: prompt_sections_pin_the_nine_tools
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 grep 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -781,7 +781,7 @@ Scenario: todo_write 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: todo_write 说明 section 注册缺席
-  Test: prompt_sections_pin_the_nine_tools
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 todo_write 无说明 section（dsh 真源 tool-todo 不注入 systemPrompt）；注册表恰七条 tool:* section 且 order 位于 1000-3000
@@ -1135,10 +1135,10 @@ Scenario: schedule_create 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: schedule_create 说明 section 缺席
-  Test: prompt_sections_pin_the_nine_tools
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 无工具 schedule_create 的说明 section（dsh 真源 tool-schedule 不注入 systemPrompt）；注册表恰九条 tool:* section 且 order 位于 1000-3000
+  那么 无工具 schedule_create 的说明 section（dsh 真源 tool-schedule 不注入 systemPrompt）；注册表恰十条 tool:* section 且 order 位于 1000-3000
 
 Scenario: schedule_create 参数 prompt 形状
   Test: schedule_registrations_match_the_frozen_catalog
@@ -1183,10 +1183,10 @@ Scenario: schedule_delete 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: schedule_delete 说明 section 缺席
-  Test: prompt_sections_pin_the_nine_tools
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 无工具 schedule_delete 的说明 section（dsh 真源 tool-schedule 不注入 systemPrompt）；注册表恰九条 tool:* section 且 order 位于 1000-3000
+  那么 无工具 schedule_delete 的说明 section（dsh 真源 tool-schedule 不注入 systemPrompt）；注册表恰十条 tool:* section 且 order 位于 1000-3000
 
 Scenario: schedule_delete 参数 id 形状
   Test: schedule_registrations_match_the_frozen_catalog
@@ -1219,10 +1219,10 @@ Scenario: schedule_list 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: schedule_list 说明 section 缺席
-  Test: prompt_sections_pin_the_nine_tools
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 无工具 schedule_list 的说明 section（dsh 真源 tool-schedule 不注入 systemPrompt）；注册表恰九条 tool:* section 且 order 位于 1000-3000
+  那么 无工具 schedule_list 的说明 section（dsh 真源 tool-schedule 不注入 systemPrompt）；注册表恰十条 tool:* section 且 order 位于 1000-3000
 
 Scenario: schedule_list 行为 1
   Test: the_management_flows_drive_the_storage_rows
@@ -1243,10 +1243,10 @@ Scenario: schedule_update 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: schedule_update 说明 section 缺席
-  Test: prompt_sections_pin_the_nine_tools
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 无工具 schedule_update 的说明 section（dsh 真源 tool-schedule 不注入 systemPrompt）；注册表恰九条 tool:* section 且 order 位于 1000-3000
+  那么 无工具 schedule_update 的说明 section（dsh 真源 tool-schedule 不注入 systemPrompt）；注册表恰十条 tool:* section 且 order 位于 1000-3000
 
 Scenario: schedule_update 参数 id 形状
   Test: schedule_registrations_match_the_frozen_catalog
@@ -1267,73 +1267,73 @@ Scenario: schedule_update 行为 1
   那么 原地改保留 id；改相对延迟须新建；every_seconds 改动按保存时刻重对齐
 
 Scenario: ask_user_question 调度与呈现
-  Test: pending_req_fr_builtin_tools_ask_user_question
+  Test: interaction_registrations_match_the_frozen_catalog
   假设 合约要求的行为已实现
   当 读取工具 ask_user_question 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: ask_user_question 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_ask_user_question
+  Test: interaction_registrations_match_the_frozen_catalog
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
-Scenario: ask_user_question 说明 section 注册
-  Test: pending_req_fr_builtin_tools_ask_user_question_section
+Scenario: ask_user_question 说明 section 缺席
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 工具 ask_user_question 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
+  那么 无工具 ask_user_question 的说明 section（dsh 真源 tool-ask-user 不注入 systemPrompt，inject 仅 tools 与 userQuestions；Q16d-4A）；注册表恰十条 tool:* section 且 order 位于 1000-3000
 
 Scenario: ask_user_question 参数 questions 形状
-  Test: pending_req_fr_builtin_tools_ask_user_question_questions
+  Test: interaction_registrations_match_the_frozen_catalog
   假设 工具 ask_user_question 已注册
   当 校验 schema 时
   那么 参数行 [questions:array<object>:req（[].id:req 稳定 id、[].question:req、[].header:opt、[].options:opt（label 必填+description；推荐首位加 (Recommended)）、[].multi_select:opt:false）] 的名称与类型按目录行实现
 
 Scenario: ask_user_question 参数 questions 约束
-  Test: pending_req_fr_builtin_tools_ask_user_question_questions
+  Test: interaction_registrations_match_the_frozen_catalog
   假设 工具 ask_user_question 已注册
   当 校验 schema 时
   那么 参数行 [questions:array<object>:req（[].id:req 稳定 id、[].question:req、[].header:opt、[].options:opt（label 必填+description；推荐首位加 (Recommended)）、[].multi_select:opt:false）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: ask_user_question 行为 1
-  Test: pending_req_fr_builtin_tools_ask_user_question_1
+  Test: timed_variant_pins_the_validation_arms
   假设 工具 ask_user_question 执行时
   当 达到触发条件时
   那么 默认阻塞等回答；config mode:timed 启用超时+pending result（timeout 默认 120s，-1 无限阻塞）
 
 Scenario: exit_plan_mode 调度与呈现
-  Test: pending_req_fr_builtin_tools_exit_plan_mode
+  Test: interaction_registrations_match_the_frozen_catalog
   假设 合约要求的行为已实现
   当 读取工具 exit_plan_mode 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: exit_plan_mode 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_exit_plan_mode
+  Test: interaction_registrations_match_the_frozen_catalog
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
-Scenario: exit_plan_mode 说明 section 注册
-  Test: pending_req_fr_builtin_tools_exit_plan_mode_section
+Scenario: exit_plan_mode 说明 section 缺席
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 工具 exit_plan_mode 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
+  那么 无工具 exit_plan_mode 的说明 section（dsh 真源：plan:policy@500 段由 dsh-plan-mode 包注册而非工具注入；Q16d-4A）；注册表恰十条 tool:* section 且 order 位于 1000-3000
 
 Scenario: exit_plan_mode 参数 plan 形状
-  Test: pending_req_fr_builtin_tools_exit_plan_mode_plan
+  Test: interaction_registrations_match_the_frozen_catalog
   假设 工具 exit_plan_mode 已注册
   当 校验 schema 时
   那么 参数行 [plan:string:req（完整 markdown，# 标题开头）] 的名称与类型按目录行实现
 
 Scenario: exit_plan_mode 参数 plan 约束
-  Test: pending_req_fr_builtin_tools_exit_plan_mode_plan
+  Test: interaction_registrations_match_the_frozen_catalog
   假设 工具 exit_plan_mode 已注册
   当 校验 schema 时
   那么 参数行 [plan:string:req（完整 markdown，# 标题开头）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: exit_plan_mode 行为 1
-  Test: pending_req_fr_builtin_tools_exit_plan_mode_1
+  Test: exit_body_pins_the_refusal_order
   假设 工具 exit_plan_mode 执行时
   当 达到触发条件时
   那么 schema 常驻防 churn；plan 外 execute 拒绝；plan 内经 user-questions 呈批 approve/继续规划；批准在 step 边界记录 inactive
@@ -1423,211 +1423,211 @@ Scenario: run_code 行为 1
   那么 mode:ptc 保留传输不可过滤；子调用经完整 guarded pipeline；并发安全子调用重叠至 maxParallelSubCalls（默认 10，1=串行）；图片型子工具结果 run 后附加
 
 Scenario: session_search 调度与呈现
-  Test: pending_req_fr_builtin_tools_session_search
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 合约要求的行为已实现
   当 读取工具 session_search 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 search
 
 Scenario: session_search 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_session_search
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: session_search 说明 section 注册
-  Test: pending_req_fr_builtin_tools_session_search_section
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 session_search 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: session_search 参数 query 形状
-  Test: pending_req_fr_builtin_tools_session_search_query
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 工具 session_search 已注册
   当 校验 schema 时
   那么 参数行 [query:string:req] 的名称与类型按目录行实现
 
 Scenario: session_search 参数 query 约束
-  Test: pending_req_fr_builtin_tools_session_search_query
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 工具 session_search 已注册
   当 校验 schema 时
   那么 参数行 [query:string:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: session_search 参数 availability 形状
-  Test: pending_req_fr_builtin_tools_session_search_availability
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 工具 session_search 已注册
   当 校验 schema 时
   那么 参数行 [availability:enum[live|persisted]:opt（至少一选）] 的名称与类型按目录行实现
 
 Scenario: session_search 参数 availability 约束
-  Test: pending_req_fr_builtin_tools_session_search_availability
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 工具 session_search 已注册
   当 校验 schema 时
   那么 参数行 [availability:enum[live|persisted]:opt（至少一选）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: session_search 行为 1
-  Test: pending_req_fr_builtin_tools_session_search_1
+  Test: session_search_walks_the_filters_then_hits_the_disabled_state
   假设 工具 session_search 执行时
   当 达到触发条件时
   那么 跨 workspace 搜先前会话每会话回最强匹配；config maxSearchResults 100、searchTimeoutMs 30000
 
 Scenario: session_trace 调度与呈现
-  Test: pending_req_fr_builtin_tools_session_trace
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 合约要求的行为已实现
   当 读取工具 session_trace 的声明时
   那么 executionMode 为 parallel（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: session_trace 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_session_trace
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: session_trace 说明 section 注册
-  Test: pending_req_fr_builtin_tools_session_trace_section
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 session_trace 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: session_trace 参数 session_id 形状
-  Test: pending_req_fr_builtin_tools_session_trace_session_id
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 工具 session_trace 已注册
   当 校验 schema 时
   那么 参数行 [session_id:opt（省略当前）] 的名称与类型按目录行实现
 
 Scenario: session_trace 参数 session_id 约束
-  Test: pending_req_fr_builtin_tools_session_trace_session_id
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 工具 session_trace 已注册
   当 校验 schema 时
   那么 参数行 [session_id:opt（省略当前）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: session_trace 行为 1
-  Test: pending_req_fr_builtin_tools_session_trace_1
+  Test: trace_session_walks_ancestors_and_refuses_cycles
   假设 工具 session_trace 执行时
   当 达到触发条件时
   那么 读授权谱系
 
 Scenario: session_event_read 调度与呈现
-  Test: pending_req_fr_builtin_tools_session_event_read
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 合约要求的行为已实现
   当 读取工具 session_event_read 的声明时
   那么 executionMode 为 parallel（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: session_event_read 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_session_event_read
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: session_event_read 说明 section 注册
-  Test: pending_req_fr_builtin_tools_session_event_read_section
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 session_event_read 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: session_event_read 参数 seq 形状
-  Test: pending_req_fr_builtin_tools_session_event_read_seq
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 工具 session_event_read 已注册
   当 校验 schema 时
   那么 参数行 [seq:integer:req] 的名称与类型按目录行实现
 
 Scenario: session_event_read 参数 seq 约束
-  Test: pending_req_fr_builtin_tools_session_event_read_seq
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 工具 session_event_read 已注册
   当 校验 schema 时
   那么 参数行 [seq:integer:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: session_event_read 参数 session_id 形状
-  Test: pending_req_fr_builtin_tools_session_event_read_session_id
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 工具 session_event_read 已注册
   当 校验 schema 时
   那么 参数行 [session_id:opt] 的名称与类型按目录行实现
 
 Scenario: session_event_read 参数 session_id 约束
-  Test: pending_req_fr_builtin_tools_session_event_read_session_id
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 工具 session_event_read 已注册
   当 校验 schema 时
   那么 参数行 [session_id:opt] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: session_event_search 调度与呈现
-  Test: pending_req_fr_builtin_tools_session_event_search
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 合约要求的行为已实现
   当 读取工具 session_event_search 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 search
 
 Scenario: session_event_search 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_session_event_search
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: session_event_search 说明 section 注册
-  Test: pending_req_fr_builtin_tools_session_event_search_section
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 session_event_search 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: session_event_search 参数 query 形状
-  Test: pending_req_fr_builtin_tools_session_event_search_query
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 工具 session_event_search 已注册
   当 校验 schema 时
   那么 参数行 [query:string:req] 的名称与类型按目录行实现
 
 Scenario: session_event_search 参数 query 约束
-  Test: pending_req_fr_builtin_tools_session_event_search_query
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 工具 session_event_search 已注册
   当 校验 schema 时
   那么 参数行 [query:string:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: session_event_search 行为 1
-  Test: pending_req_fr_builtin_tools_session_event_search_1
+  Test: event_search_caps_the_current_session_step
   假设 工具 session_event_search 执行时
   当 达到触发条件时
   那么 排除执行本调用的 step
 
 Scenario: session_event_trace 调度与呈现
-  Test: pending_req_fr_builtin_tools_session_event_trace
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 合约要求的行为已实现
   当 读取工具 session_event_trace 的声明时
   那么 executionMode 为 parallel（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: session_event_trace 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_session_event_trace
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: session_event_trace 说明 section 注册
-  Test: pending_req_fr_builtin_tools_session_event_trace_section
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 session_event_trace 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: session_event_trace 参数 seq 形状
-  Test: pending_req_fr_builtin_tools_session_event_trace_seq
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 工具 session_event_trace 已注册
   当 校验 schema 时
   那么 参数行 [seq:integer:req] 的名称与类型按目录行实现
 
 Scenario: session_event_trace 参数 seq 约束
-  Test: pending_req_fr_builtin_tools_session_event_trace_seq
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 工具 session_event_trace 已注册
   当 校验 schema 时
   那么 参数行 [seq:integer:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: session_event_trace 参数 session_id 形状
-  Test: pending_req_fr_builtin_tools_session_event_trace_session_id
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 工具 session_event_trace 已注册
   当 校验 schema 时
   那么 参数行 [session_id:opt] 的名称与类型按目录行实现
 
 Scenario: session_event_trace 参数 session_id 约束
-  Test: pending_req_fr_builtin_tools_session_event_trace_session_id
+  Test: session_query_registrations_match_the_frozen_catalog
   假设 工具 session_event_trace 已注册
   当 校验 schema 时
   那么 参数行 [session_id:opt] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: session_event_trace 行为 1
-  Test: pending_req_fr_builtin_tools_session_event_trace_1
+  Test: trace_event_walks_the_replacement_and_source_chains
   假设 工具 session_event_trace 执行时
   当 达到触发条件时
   那么 读直接替换与关系

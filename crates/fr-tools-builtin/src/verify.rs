@@ -850,3 +850,199 @@ Deletion does not retract a reminder message that is already queued."
         json!("other")
     );
 }
+
+/// The interaction registrations equal the frozen catalog extraction
+/// (Q97-A): the ask/exit descriptions ride the catalog-verbatim
+/// constants, the parameter tables equal the frozen JSON, and the
+/// scheduling faces pin the dsh shapes — both stay exclusive, ask
+/// renders without call cards, and exit carries the
+/// presentCall/presentResult pair with the `other`/generic card.
+#[test]
+fn interaction_registrations_match_the_frozen_catalog() {
+    assert_eq!(
+        crate::catalog_gen::ASK_USER_QUESTION_DESCRIPTION,
+        "Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding."
+    );
+    assert_eq!(
+        crate::catalog_gen::EXIT_PLAN_MODE_DESCRIPTION,
+        "Use only in plan mode. Present your plan for the user's review and, on approval, leave plan mode. The user may approve (carry out the plan from your next step) or keep planning — their feedback comes back in the tool result; revise and present again."
+    );
+    for (composed, frozen) in [
+        (
+            crate::schema::ask_user_question_parameters(),
+            crate::catalog_gen::ASK_USER_QUESTION_PARAMETERS_JSON,
+        ),
+        (
+            crate::schema::exit_plan_mode_parameters(),
+            crate::catalog_gen::EXIT_PLAN_MODE_PARAMETERS_JSON,
+        ),
+    ] {
+        let frozen: Value = serde_json::from_str(frozen).expect("the frozen table parses");
+        assert_eq!(composed, frozen);
+    }
+    // The questions row pins the per-item required pair, the optional
+    // header/options/multi_select rows, and the label-required option
+    // items; the exit row pins the required plan string.
+    let ask = crate::schema::ask_user_question_parameters();
+    assert_eq!(ask["required"], json!(["questions"]));
+    let item = &ask["properties"]["questions"]["items"];
+    assert_eq!(item["required"], json!(["id", "question"]));
+    for optional in ["header", "options", "multi_select"] {
+        assert!(
+            item["properties"].get(optional).is_some(),
+            "{optional} rides the item table"
+        );
+    }
+    assert_eq!(item["properties"]["multi_select"]["type"], json!("boolean"));
+    assert_eq!(
+        item["properties"]["options"]["items"]["required"],
+        json!(["label"])
+    );
+    let exit = crate::schema::exit_plan_mode_parameters();
+    assert_eq!(exit["required"], json!(["plan"]));
+    assert_eq!(exit["properties"]["plan"]["type"], json!("string"));
+    // The output contracts: the answers array and the approved boolean
+    // (the fr dialect marks requiredness per property, not per array).
+    let ask_out = crate::schema::ask_user_question_output_schema();
+    let answers_item = &ask_out["properties"]["answers"]["items"]["properties"];
+    assert_eq!(
+        answers_item["id"],
+        json!({ "type": "string", "required": true })
+    );
+    assert_eq!(answers_item["selected"]["type"], json!("array"));
+    assert_eq!(answers_item["selected"]["required"], json!(true));
+    let exit_out = crate::schema::exit_plan_mode_output_schema();
+    assert_eq!(
+        exit_out["properties"]["approved"],
+        json!({ "type": "boolean", "required": true })
+    );
+    // The scheduling faces: both stay exclusive (no isConcurrencySafe),
+    // and only exit mounts the call/result card endpoints (the dsh
+    // plan-mode presentation; ask renders the raw JSON text).
+    let ask_registration = crate::plugin_shell::ask_user_question_registration();
+    let exit_registration = crate::plugin_shell::exit_plan_mode_registration();
+    for registration in [&ask_registration, &exit_registration] {
+        assert!(
+            registration.get("isConcurrencySafe").is_none(),
+            "the interaction tools stay exclusive"
+        );
+        assert_eq!(
+            registration["execute"]["service"],
+            crate::service::SERVICE_NAME
+        );
+    }
+    assert!(ask_registration.get("presentCall").is_none());
+    assert!(ask_registration.get("presentResult").is_none());
+    assert!(exit_registration.get("presentCall").is_some());
+    assert!(exit_registration.get("presentResult").is_some());
+    let card = crate::interaction_tools::present_call_exit(&json!({ "plan": "# Ship\nx" }));
+    assert_eq!(card["kind"], json!("other"));
+    assert_eq!(card["card"], json!("generic"));
+}
+
+/// The session-query registrations equal the frozen catalog extraction
+/// (Q97-A): the five descriptions ride the catalog-verbatim constants,
+/// the parameter tables equal the frozen JSON, and the scheduling
+/// faces pin the dsh shapes — the two search faces ride `timeoutMs`
+/// and stay exclusive while the three reads advertise
+/// `isConcurrencySafe`, and every face renders the string output.
+#[test]
+fn session_query_registrations_match_the_frozen_catalog() {
+    assert_eq!(
+        crate::catalog_gen::SESSION_SEARCH_DESCRIPTION,
+        "Search prior sessions in the caller workspace and return the strongest matching event from each session."
+    );
+    assert_eq!(
+        crate::catalog_gen::SESSION_EVENT_SEARCH_DESCRIPTION,
+        "Search prior events in one authorized session; the current session excludes the step performing this call."
+    );
+    assert_eq!(
+        crate::catalog_gen::SESSION_TRACE_DESCRIPTION,
+        "Read the authorized session lineage around one session, including complete visible ancestor and descendant relationships."
+    );
+    assert_eq!(
+        crate::catalog_gen::SESSION_EVENT_READ_DESCRIPTION,
+        "Read one full unabridged event and optional neighboring raw-event summaries from an authorized session."
+    );
+    assert_eq!(
+        crate::catalog_gen::SESSION_EVENT_TRACE_DESCRIPTION,
+        "Read every direct replacement and relationship to a cited source event for one event in an authorized session."
+    );
+    for (composed, frozen) in [
+        (
+            crate::schema::session_search_parameters(),
+            crate::catalog_gen::SESSION_SEARCH_PARAMETERS_JSON,
+        ),
+        (
+            crate::schema::session_event_search_parameters(),
+            crate::catalog_gen::SESSION_EVENT_SEARCH_PARAMETERS_JSON,
+        ),
+        (
+            crate::schema::session_trace_parameters(),
+            crate::catalog_gen::SESSION_TRACE_PARAMETERS_JSON,
+        ),
+        (
+            crate::schema::session_event_read_parameters(),
+            crate::catalog_gen::SESSION_EVENT_READ_PARAMETERS_JSON,
+        ),
+        (
+            crate::schema::session_event_trace_parameters(),
+            crate::catalog_gen::SESSION_EVENT_TRACE_PARAMETERS_JSON,
+        ),
+    ] {
+        let frozen: Value = serde_json::from_str(frozen).expect("the frozen table parses");
+        assert_eq!(composed, frozen);
+    }
+    // The required rows: query on both search faces, seq on both event
+    // targets; the trace face keeps session_id optional.
+    let search = crate::schema::session_search_parameters();
+    assert_eq!(search["required"], json!(["query"]));
+    assert!(search["properties"].get("availability").is_some());
+    let event_search = crate::schema::session_event_search_parameters();
+    assert_eq!(event_search["required"], json!(["query"]));
+    let event_read = crate::schema::session_event_read_parameters();
+    assert_eq!(event_read["required"], json!(["seq"]));
+    let event_trace = crate::schema::session_event_trace_parameters();
+    assert_eq!(event_trace["required"], json!(["seq"]));
+    let trace = crate::schema::session_trace_parameters();
+    assert!(trace.get("required").is_none());
+    // The scheduling faces: the two search faces ride the baked search
+    // timeout and stay exclusive; the three reads advertise
+    // isConcurrencySafe; every face mounts execute/render/presentCall
+    // and no presentResult.
+    let searches = [
+        crate::plugin_shell::session_search_registration(),
+        crate::plugin_shell::session_event_search_registration(),
+    ];
+    let reads = [
+        crate::plugin_shell::session_trace_registration(),
+        crate::plugin_shell::session_event_read_registration(),
+        crate::plugin_shell::session_event_trace_registration(),
+    ];
+    for registration in searches.iter().chain(reads.iter()) {
+        assert_eq!(
+            registration["execute"]["service"],
+            crate::service::SERVICE_NAME
+        );
+        assert_eq!(
+            registration["output"]["schema"],
+            json!({ "type": "string" })
+        );
+        assert!(registration.get("presentCall").is_some());
+        assert!(registration.get("presentResult").is_none());
+    }
+    for registration in &searches {
+        assert!(
+            registration.get("isConcurrencySafe").is_none(),
+            "the search faces stay exclusive"
+        );
+        assert_eq!(
+            registration.get("timeoutMs"),
+            Some(&json!(crate::session_query_tools::BAKED_SEARCH_TIMEOUT_MS))
+        );
+    }
+    for registration in &reads {
+        assert_eq!(registration.get("isConcurrencySafe"), Some(&json!(true)));
+        assert!(registration.get("timeoutMs").is_none());
+    }
+}

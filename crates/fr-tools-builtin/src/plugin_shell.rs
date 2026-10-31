@@ -2519,8 +2519,10 @@ mod tests {
         assert!(
             sections.iter().all(|(name, _, _)| !name.contains("todo")
                 && !name.contains("image")
-                && !name.contains("schedule")),
-            "the section-free tools stay absent (the dsh truth; the Q16b-4A, Q16b-5A, Q16c batch-2, and Q16c batch-0 schedule rulings)"
+                && !name.contains("schedule")
+                && !name.contains("ask-user")
+                && !name.contains("exit-plan")),
+            "the section-free tools stay absent (the dsh truth; the Q16b-4A, Q16b-5A, Q16c batch-2, Q16c batch-0 schedule, and Q16d-4A ask/exit rulings)"
         );
         let jobs = sections
             .iter()

@@ -702,4 +702,97 @@ mod tests {
             "expected integer"
         );
     }
+
+    /// The dsh-tool-ask-user and dsh-plan-mode rows plus the two
+    /// session-read bound probes the earlier session-query tests leave
+    /// uncovered (the 16d batch-3 binding surface).
+    #[test]
+    fn builtin_config_pins_ask_user_plan_mode_and_read_bounds() {
+        let schema = lookup("fr-tools-builtin").expect("the builtin-tools declaration");
+        let projected = to_json_schema(schema);
+        let rows = projected
+            .pointer("/anyOf/0/properties")
+            .expect("projection properties");
+        assert_eq!(
+            rows.get("mode").expect("row").get("default"),
+            Some(&serde_json::json!("legacy"))
+        );
+        assert_eq!(
+            rows.get("timeout").expect("row").get("default"),
+            Some(&serde_json::json!(120.0))
+        );
+        assert!(
+            rows.get("section").is_some(),
+            "the plan-mode section row exists"
+        );
+        // The mode enum refuses unknown selections; the timeout row is
+        // a plain number (the dsh config-catalog row; the timed
+        // -1|1..2147483 union rides the tool body validation).
+        assert_eq!(
+            first_message(
+                schema,
+                &serde_json::json!({
+                    "allow-parallel-in-progress": true,
+                    "section": "You are in plan mode.",
+                    "mode": "fast",
+                })
+            ),
+            "value not in candidates"
+        );
+        assert_eq!(
+            first_message(
+                schema,
+                &serde_json::json!({
+                    "allow-parallel-in-progress": true,
+                    "section": "You are in plan mode.",
+                    "timeout": "120s",
+                })
+            ),
+            "expected number"
+        );
+        assert_eq!(
+            first_message(
+                schema,
+                &serde_json::json!({
+                    "allow-parallel-in-progress": true,
+                })
+            ),
+            "missing required key `section`"
+        );
+        // The two session-read bound probes: snippet chars floor and
+        // the persisted read concurrency band.
+        assert_eq!(
+            first_message(
+                schema,
+                &serde_json::json!({
+                    "allow-parallel-in-progress": true,
+                    "section": "You are in plan mode.",
+                    "snippet-chars": 0,
+                })
+            ),
+            "below minimum"
+        );
+        assert_eq!(
+            first_message(
+                schema,
+                &serde_json::json!({
+                    "allow-parallel-in-progress": true,
+                    "section": "You are in plan mode.",
+                    "persisted-read-concurrency": 0,
+                })
+            ),
+            "below minimum"
+        );
+        assert_eq!(
+            first_message(
+                schema,
+                &serde_json::json!({
+                    "allow-parallel-in-progress": true,
+                    "section": "You are in plan mode.",
+                    "persisted-read-concurrency": 9_007_199_254_740_992i64,
+                })
+            ),
+            "above maximum"
+        );
+    }
 }
