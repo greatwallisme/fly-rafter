@@ -527,6 +527,20 @@ impl JsonlBackend {
     }
 
     /// Lists every stored session visible to this process (dsh `list`):
+    /// Reads one stored log balanced for read-only viewing: the stored
+    /// events plus deterministic in-memory interrupted-turn closers
+    /// (the dsh `readColdSessionLog` shape; nothing is written back).
+    ///
+    /// # Errors
+    ///
+    /// The persistence-layer refusal family.
+    pub fn cold_read(
+        &self,
+        id: &SessionId,
+    ) -> Result<Option<super::read::ReadOutcome>, PersistError> {
+        cold_read_stored_log(&self.root, self.compression, self.known.clone(), id)
+    }
+
     /// materialized artifacts plus this process's created-but-unmaterialized
     /// sessions, in no promised order.
     ///

@@ -1155,8 +1155,311 @@ pub fn schedule_update_output_schema() -> Value {
     json!({ "oneOf": one_of })
 }
 
+/// The `ask_user_question` parameter table (the catalog-frozen base).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON stops parsing — the generation
+/// contract, pinned by the verify suite.
+#[must_use]
+pub fn ask_user_question_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::ASK_USER_QUESTION_PARAMETERS_JSON)
+        .expect("the frozen ask_user_question table parses")
+}
+
+/// The `exit_plan_mode` parameter table (the catalog-frozen base).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON stops parsing — the generation
+/// contract, pinned by the verify suite.
+#[must_use]
+pub fn exit_plan_mode_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::EXIT_PLAN_MODE_PARAMETERS_JSON)
+        .expect("the frozen exit_plan_mode table parses")
+}
+
+/// The legacy `ask_user_question` output contract (the dsh
+/// `defineTool` `output.schema`, verbatim shape).
+#[must_use]
+pub fn ask_user_question_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "answers": {
+                "type": "array",
+                "required": true,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "id": { "type": "string", "required": true },
+                        "selected": {
+                            "type": "array",
+                            "required": true,
+                            "items": { "type": "string" },
+                        },
+                        "custom": { "type": "string" },
+                    },
+                },
+            },
+        },
+    })
+}
+
+/// The timed variant's `timeout` parameter (dsh
+/// `TIMED_WAIT_PARAMETER`; the default rides the baked wait).
+#[must_use]
+pub fn timed_timeout_parameter(default_seconds: i64) -> Value {
+    json!({
+        "type": "integer",
+        "description": format!(
+            "Wait seconds for the entire batch (default {default_seconds}); omit unless the user specifies a duration. Use -1 only when an answer is required before proceeding."
+        ),
+    })
+}
+
+/// The timed variant's output contract (dsh `registerTimedAskUser`
+/// `output.schema`: the oneOf pending/answers pair).
+#[must_use]
+pub fn timed_ask_user_question_output_schema() -> Value {
+    json!({
+        "oneOf": [
+            {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "pending": {
+                        "type": "boolean",
+                        "enum": [true],
+                        "required": true,
+                        "description": "True when the foreground wait expired before the user submitted an answer batch. The questions remain answerable; this is not a skipped answer.",
+                    },
+                    "callId": {
+                        "type": "string",
+                        "required": true,
+                        "description": "Tool call whose unanswered questions remain pending.",
+                    },
+                    "message": {
+                        "type": "string",
+                        "required": true,
+                        "description": "How to continue while the questions stay answerable.",
+                    },
+                },
+            },
+            {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "answers": {
+                        "type": "array",
+                        "required": true,
+                        "description": "Submitted answer batch with one item per question. A skipped question has empty selected and no custom; unlike pending, the user has completed the batch.",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "required": true,
+                                    "description": "Stable question id echoed from the request.",
+                                },
+                                "selected": {
+                                    "type": "array",
+                                    "required": true,
+                                    "items": { "type": "string" },
+                                    "description": "Selected option labels. Empty with no custom means the user explicitly skipped this question.",
+                                },
+                                "custom": {
+                                    "type": "string",
+                                    "description": "Optional free-form answer; omitted for a skipped question.",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        ],
+    })
+}
+
+/// The `exit_plan_mode` output contract (dsh plan-mode `output.schema`).
+#[must_use]
+pub fn exit_plan_mode_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "approved": { "type": "boolean", "required": true },
+        },
+    })
+}
+
+/// The `session_search` parameter table (the catalog-frozen base).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON drifts (the generation gate
+/// keeps the constant in sync).
+#[must_use]
+pub fn session_search_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::SESSION_SEARCH_PARAMETERS_JSON)
+        .expect("the frozen session_search table parses")
+}
+
+/// The `session_event_search` parameter table (the catalog-frozen
+/// base).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON drifts.
+#[must_use]
+pub fn session_event_search_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::SESSION_EVENT_SEARCH_PARAMETERS_JSON)
+        .expect("the frozen session_event_search table parses")
+}
+
+/// The `session_trace` parameter table (the catalog-frozen base).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON drifts.
+#[must_use]
+pub fn session_trace_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::SESSION_TRACE_PARAMETERS_JSON)
+        .expect("the frozen session_trace table parses")
+}
+
+/// The `session_event_trace` parameter table (the catalog-frozen
+/// base).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON drifts.
+#[must_use]
+pub fn session_event_trace_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::SESSION_EVENT_TRACE_PARAMETERS_JSON)
+        .expect("the frozen session_event_trace table parses")
+}
+
+/// The `session_event_read` parameter table (the catalog-frozen base).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON drifts.
+#[must_use]
+pub fn session_event_read_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::SESSION_EVENT_READ_PARAMETERS_JSON)
+        .expect("the frozen session_event_read table parses")
+}
+
 #[cfg(test)]
 mod tests {
+    /// The five session-query tables pin their catalog rows (Q97-A:
+    /// one full-schema pin per tool, the key sets, the required rows,
+    /// and the enum item lists verbatim).
+    #[test]
+    fn session_query_pins_the_catalog_tables() {
+        // session_search: 13 keys, `query` required, the availability
+        // and surface enums verbatim.
+        let search = super::session_search_parameters();
+        let keys = search
+            .pointer("/properties")
+            .and_then(Value::as_object)
+            .expect("session_search properties");
+        assert_eq!(keys.len(), 13);
+        assert_eq!(
+            search["required"],
+            serde_json::json!(["query"]),
+            "query is the one required row"
+        );
+        assert_eq!(
+            keys.get("query").and_then(|row| row.get("type")),
+            Some(&serde_json::json!("string"))
+        );
+        assert_eq!(
+            keys.get("availability")
+                .and_then(|row| row.pointer("/items/enum"))
+                .and_then(Value::as_array)
+                .map(std::vec::Vec::as_slice),
+            Some(&[serde_json::json!("live"), serde_json::json!("persisted")][..]),
+        );
+        assert_eq!(
+            keys.get("event_surfaces")
+                .and_then(|row| row.pointer("/items/enum"))
+                .and_then(Value::as_array)
+                .map(std::vec::Vec::as_slice),
+            Some(
+                &[
+                    serde_json::json!("current"),
+                    serde_json::json!("shadowed"),
+                    serde_json::json!("log-only"),
+                ][..]
+            ),
+        );
+        assert_eq!(
+            keys.get("include_root_sessions")
+                .and_then(|row| row.get("type")),
+            Some(&serde_json::json!("boolean"))
+        );
+
+        // session_event_search: 8 keys, `query` required.
+        let event_search = super::session_event_search_parameters();
+        let event_keys = event_search
+            .pointer("/properties")
+            .and_then(Value::as_object)
+            .expect("session_event_search properties");
+        assert_eq!(event_keys.len(), 8);
+        assert_eq!(event_search["required"], serde_json::json!(["query"]));
+        assert_eq!(
+            event_keys
+                .get("surfaces")
+                .and_then(|row| row.pointer("/items/enum"))
+                .and_then(Value::as_array)
+                .map(std::vec::Vec::len),
+            Some(3)
+        );
+
+        // session_trace: the one optional session_id row, no required.
+        let trace = super::session_trace_parameters();
+        let trace_keys = trace
+            .pointer("/properties")
+            .and_then(Value::as_object)
+            .expect("session_trace properties");
+        assert_eq!(trace_keys.len(), 1);
+        assert!(trace.get("required").is_none());
+
+        // session_event_trace: session_id + required seq.
+        let event_trace = super::session_event_trace_parameters();
+        let event_trace_keys = event_trace
+            .pointer("/properties")
+            .and_then(Value::as_object)
+            .expect("session_event_trace properties");
+        assert_eq!(event_trace_keys.len(), 2);
+        assert_eq!(event_trace["required"], serde_json::json!(["seq"]));
+        assert_eq!(
+            event_trace_keys.get("seq").and_then(|row| row.get("type")),
+            Some(&serde_json::json!("integer"))
+        );
+
+        // session_event_read: session_id + required seq + before/after.
+        let event_read = super::session_event_read_parameters();
+        let event_read_keys = event_read
+            .pointer("/properties")
+            .and_then(Value::as_object)
+            .expect("session_event_read properties");
+        assert_eq!(event_read_keys.len(), 4);
+        assert_eq!(event_read["required"], serde_json::json!(["seq"]));
+        for key in ["before", "after"] {
+            assert_eq!(
+                event_read_keys.get(key).and_then(|row| row.get("type")),
+                Some(&serde_json::json!("integer")),
+                "{key} rides the integer row"
+            );
+        }
+    }
+
     use super::*;
 
     /// The bash table pins the nine-sentence description and the

@@ -922,12 +922,14 @@ version = "0.1.0"
 dependencies = [
  "dougong-abi",
  "fr-sandbox",
+ "fr-session",
  "fr-wire",
  "image",
  "jiff",
  "regex",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
  "uuid",
  "windows-sys 0.60.2",
 ]

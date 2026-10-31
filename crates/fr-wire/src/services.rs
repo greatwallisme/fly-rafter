@@ -61,6 +61,78 @@ pub mod session_persistence {
     /// `request/header` snapshot (the dsh `session.requestHeader()`; the
     /// Q16b-1A route-gate seam).
     pub const METHOD_REQUEST_HEADER: u32 = 10;
+    /// `{}` → `{"sessions": [{"header": ...}]}` — the stored-session
+    /// listing (the session-query corpus's persisted face).
+    ///
+    /// The selectors follow the projections band on the shared
+    /// artifact: the in-process service serves this face, while the
+    /// dylib shell stays declare/describe/projections only.
+    pub const METHOD_PERSISTED_LIST: u32 = 1002;
+    /// `{"id"}` → `{"log": {"header", "inheritedEventCount", "events"}}`
+    /// or `{}` — the balanced cold log (dsh `readColdSessionLog`).
+    ///
+    /// The log carries the stored events plus the interrupted-turn
+    /// closers; a corrupt artifact fails with the
+    /// `SessionPersistenceCorruptionError` text prefix (the dsh
+    /// error-name check's wire form).
+    pub const METHOD_PERSISTED_COLD_READ: u32 = 1003;
+}
+
+/// The `'session-query'` service face (owner crate `fr-tools-builtin`;
+/// the dsh `ctx.sessionQuery` seam).
+///
+/// Q16d-2A: the M1 engine is the core port with the search-disabled
+/// terminal state, and the cross-boundary face carries the one method a
+/// non-tool consumer needs: the headless `--session-id` cold observation
+/// (the Phase 18 arm is real — the corpus seams it needs land with this
+/// batch). The remaining engine methods serve the in-crate tool bodies.
+pub mod session_query {
+    /// The provided service name consumers inject.
+    pub const SERVICE_NAME: &str = "session-query";
+    /// `{"id"}` → `{"source": "live"|"prepared", "header",
+    /// "inheritedEventCount", "events"}` — one exact observation (dsh
+    /// `observeSession`; the headless adoptability read).
+    ///
+    /// The selector sits in the 1400+ band (the disjoint method-space
+    /// judgment).
+    pub const METHOD_OBSERVE: u32 = 1400;
+}
+
+/// The `'user-questions'` service face (owner crate `fr-tools-builtin`;
+/// the dsh `ctx.userQuestions` seam).
+pub mod user_questions {
+    /// The provided service name consumers inject.
+    pub const SERVICE_NAME: &str = "user-questions";
+    /// Ask the scoped answerer waterfall and wait for the human's
+    /// answer (dsh `UserQuestionService.ask`).
+    ///
+    /// The selectors sit in the 1200+ band: one artifact serves several
+    /// services over one export table, so the method space stays
+    /// disjoint (the fr-session judgment).
+    pub const METHOD_ASK: u32 = 1200;
+    /// Foreground wait whose first settlement the Client decides
+    /// (dsh `UserQuestionService.askTimed`; the pending result maps the
+    /// `ASK_TIMED_OUT` code).
+    pub const METHOD_ASK_TIMED: u32 = 1201;
+}
+
+/// The `'plan-mode'` service face (owner crate `fr-tools-builtin`; the
+/// dsh `ctx.planMode` seam).
+///
+/// The M1 face declares the seam for the Phase 18 consumers (the
+/// `/plan` command and the client carriers); the get/set arms need the
+/// agents registry and stay absent (the Q16d archival ruling — a
+/// require on this service fails closed).
+pub mod plan_mode {
+    /// The provided service name consumers inject.
+    pub const SERVICE_NAME: &str = "plan-mode";
+    /// Read one agent's logged plan state plus any pending selection
+    /// (dsh `PlanModeController.get`; the Phase 18 arm). The selectors
+    /// sit in the 1300+ band (the disjoint method-space judgment).
+    pub const METHOD_GET: u32 = 1300;
+    /// Select whether plan mode should be active (dsh
+    /// `PlanModeController.set`; the Phase 18 arm).
+    pub const METHOD_SET: u32 = 1301;
 }
 
 /// The `'system-prompt'` service face (owner crate `fr-system-prompt`).

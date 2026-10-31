@@ -38,7 +38,12 @@ fn table() -> &'static [(&'static str, Schema)] {
     TABLE.get_or_init(build_table)
 }
 /// The declarations for the 16c config groups (kebab-case keys, the dsh
-/// schemastery constraints ported from the six dsh packages).
+/// schemastery constraints ported from the six dsh packages; the 16d
+/// interaction keys join the flat builtin row).
+#[expect(
+    clippy::too_many_lines,
+    reason = "the tuple table mirrors the dsh plugin configs one arm per group; splitting it would hide the correspondence"
+)]
 fn build_table() -> Vec<(&'static str, Schema)> {
     vec![
         (
@@ -133,6 +138,78 @@ fn build_table() -> Vec<(&'static str, Schema)> {
                     "allow-parallel-in-progress",
                     "Whether several todos may be in_progress at once; false restores single-active discipline.",
                 ),
+                string_property(
+                    "mode",
+                    &["legacy", "timed"],
+                    "legacy",
+                    "Tool definition selected by this Cordis row. Defaults to the blocking legacy tool.",
+                ),
+                number_property(
+                    "timeout",
+                    None,
+                    None,
+                    120.0,
+                    "Foreground wait before automatic continuation. Defaults to 120 seconds.",
+                ),
+                required_string_property(
+                    "section",
+                    "Guidance rendered as the `plan:policy` prompt section while plan mode is active.",
+                ),
+                integer_property(
+                    "max-search-results",
+                    1,
+                    None,
+                    100,
+                    "Maximum authorized hits returned by one session search call.",
+                ),
+                integer_property(
+                    "search-timeout-ms",
+                    1,
+                    Some(2_147_483_647),
+                    30_000,
+                    "Cooperative full-text search deadline in milliseconds.",
+                ),
+                string_property(
+                    "journal-mode",
+                    &["wal", "delete", "truncate", "persist"],
+                    "wal",
+                    "SQLite journal mode for the derived search index.",
+                ),
+                integer_property(
+                    "default-limit",
+                    1,
+                    Some(MAX_SAFE_INTEGER - 1),
+                    20,
+                    "Page size when a session search request omits limit.",
+                ),
+                integer_property(
+                    "max-limit",
+                    1,
+                    Some(MAX_SAFE_INTEGER - 1),
+                    100,
+                    "Largest accepted session search page size.",
+                ),
+                integer_property(
+                    "snippet-chars",
+                    1,
+                    None,
+                    240,
+                    "Maximum snippet length in Unicode code points.",
+                ),
+                integer_property(
+                    "persisted-read-concurrency",
+                    1,
+                    Some(MAX_SAFE_INTEGER),
+                    4,
+                    "Maximum concurrent persisted-log reads in one inherited batch read.",
+                ),
+                integer_property(
+                    "prepared-session-cache-size",
+                    1,
+                    Some(MAX_SAFE_INTEGER),
+                    5,
+                    "Maximum cold prepared observations the inherited reader retains for reuse.",
+                ),
             ]),
         ),
     ]
@@ -222,6 +299,20 @@ fn string_property(name: &str, candidates: &[&str], default: &str, description: 
                 .map(|candidate| (*candidate).to_owned())
                 .collect(),
             default: Some(default.to_owned()),
+            description: Some(description.to_owned()),
+        },
+    }
+}
+
+/// One free-form string property without a default (the dsh required
+/// string rows; the requiredness rides the wrapping `Property.required`).
+fn required_string_property(name: &str, description: &str) -> Property {
+    Property {
+        name: name.to_owned(),
+        required: true,
+        schema: Schema::String {
+            candidates: Vec::new(),
+            default: None,
             description: Some(description.to_owned()),
         },
     }
@@ -332,14 +423,14 @@ mod tests {
         assert!(
             violations_empty(
                 schema,
-                &serde_json::json!({"allow-parallel-in-progress": true})
+                &serde_json::json!({"allow-parallel-in-progress": true, "section": "You are in plan mode."})
             ),
             "the true choice validates"
         );
         assert!(
             violations_empty(
                 schema,
-                &serde_json::json!({"allow-parallel-in-progress": false})
+                &serde_json::json!({"allow-parallel-in-progress": false, "section": "You are in plan mode."})
             ),
             "the false choice validates"
         );
@@ -389,7 +480,7 @@ mod tests {
         assert!(
             violations_empty(
                 schema,
-                &serde_json::json!({"allow-parallel-in-progress": true})
+                &serde_json::json!({"allow-parallel-in-progress": true, "section": "You are in plan mode."})
             ),
             "absence of the optional wake cap validates"
         );
@@ -455,12 +546,6 @@ mod tests {
             Some(&serde_json::json!(30))
         );
         assert_eq!(
-            rows.get("delivery-history-records")
-                .expect("row")
-                .get("default"),
-            Some(&serde_json::json!(200))
-        );
-        assert_eq!(
             first_message(schema, &serde_json::json!({"delivery-history-days": 3_651})),
             "above maximum"
         );
@@ -476,11 +561,145 @@ mod tests {
                 schema,
                 &serde_json::json!({
                     "allow-parallel-in-progress": true,
+                    "section": "You are in plan mode.",
                     "delivery-history-days": 3_650,
                     "delivery-history-records": 10_000,
                 })
             ),
             "the boundary values validate"
+        );
+    }
+
+    #[test]
+    fn builtin_config_pins_session_query_defaults() {
+        let schema = lookup("fr-tools-builtin").expect("the builtin-tools declaration");
+        let projected = to_json_schema(schema);
+        let rows = projected
+            .pointer("/anyOf/0/properties")
+            .expect("projection properties");
+        for (key, expected) in [
+            ("max-search-results", 100),
+            ("search-timeout-ms", 30_000),
+            ("default-limit", 20),
+            ("max-limit", 100),
+            ("snippet-chars", 240),
+            ("persisted-read-concurrency", 4),
+            ("prepared-session-cache-size", 5),
+        ] {
+            let row = rows
+                .get(key)
+                .unwrap_or_else(|| panic!("projection carries {key}"));
+            assert_eq!(row.get("default"), Some(&serde_json::json!(expected)));
+        }
+        assert_eq!(
+            rows.get("journal-mode").expect("row").get("default"),
+            Some(&serde_json::json!("wal"))
+        );
+    }
+
+    /// The search-bounds and enum probes over the flat row.
+    #[test]
+    fn builtin_config_pins_session_query_probes() {
+        let schema = lookup("fr-tools-builtin").expect("the builtin-tools declaration");
+        assert_eq!(
+            first_message(
+                schema,
+                &serde_json::json!({
+                    "allow-parallel-in-progress": true,
+                    "section": "You are in plan mode.",
+                    "max-search-results": 0,
+                })
+            ),
+            "below minimum"
+        );
+        assert_eq!(
+            first_message(
+                schema,
+                &serde_json::json!({
+                    "allow-parallel-in-progress": true,
+                    "section": "You are in plan mode.",
+                    "search-timeout-ms": 0,
+                })
+            ),
+            "below minimum"
+        );
+        assert_eq!(
+            first_message(
+                schema,
+                &serde_json::json!({
+                    "allow-parallel-in-progress": true,
+                    "section": "You are in plan mode.",
+                    "search-timeout-ms": 2_147_483_648i64,
+                })
+            ),
+            "above maximum"
+        );
+        assert_eq!(
+            first_message(
+                schema,
+                &serde_json::json!({
+                    "allow-parallel-in-progress": true,
+                    "section": "You are in plan mode.",
+                    "journal-mode": "memory",
+                })
+            ),
+            "value not in candidates"
+        );
+        assert!(
+            violations_empty(
+                schema,
+                &serde_json::json!({
+                    "allow-parallel-in-progress": true,
+                    "section": "You are in plan mode.",
+                    "max-search-results": 1,
+                    "search-timeout-ms": 30_000,
+                    "journal-mode": "wal",
+                    "default-limit": 1,
+                    "max-limit": 100,
+                    "snippet-chars": 240,
+                    "persisted-read-concurrency": 4,
+                    "prepared-session-cache-size": 5,
+                })
+            ),
+            "the boundary values validate"
+        );
+    }
+
+    #[test]
+    fn builtin_config_pins_session_query_boundaries() {
+        let schema = lookup("fr-tools-builtin").expect("the builtin-tools declaration");
+        assert_eq!(
+            first_message(
+                schema,
+                &serde_json::json!({
+                    "allow-parallel-in-progress": true,
+                    "section": "You are in plan mode.",
+                    "max-limit": 9_007_199_254_740_992i64,
+                })
+            ),
+            "above maximum"
+        );
+        assert_eq!(
+            first_message(
+                schema,
+                &serde_json::json!({
+                    "allow-parallel-in-progress": true,
+                    "section": "You are in plan mode.",
+                    "prepared-session-cache-size": 9_007_199_254_740_992i64,
+                })
+            ),
+            "above maximum"
+        );
+        assert_eq!(
+            first_message(
+                schema,
+                &serde_json::json!({
+                    "allow-parallel-in-progress": true,
+                    "section": "You are in plan mode.",
+                    "default-limit": 1.5,
+                })
+            ),
+            "expected integer"
         );
     }
 }

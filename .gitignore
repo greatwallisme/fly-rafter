@@ -7,3 +7,5 @@ target/
 .planning/
 .agent-spec/graph/
 .agent-spec/code-bindings.json
+
+__pycache__/

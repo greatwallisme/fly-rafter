@@ -935,7 +935,6 @@ mod tests {
                 ..Self::default()
             }
         }
-
     }
 
     impl ScheduleSeams for ScriptSeams {
@@ -991,10 +990,6 @@ mod tests {
         }
     }
 
-    fn service(seams: ScriptSeams) -> Schedules {
-        Schedules::new(Box::new(seams))
-    }
-
     /// The four management flows over the scripted storage: create
     /// stores the active row and answers the view, list filters by
     /// session, delete removes the bound row, and the CAS update keeps
@@ -1042,11 +1037,15 @@ mod tests {
         // The update path carries no after_seconds (a relative delay
         // requires a new reminder; the tool root refuses it).
         assert_eq!(
-            crate::schedule::execute_update(&schedules, &json!({
-                "id": id,
-                "after_seconds": 60,
-                "prompt": "p",
-            }), Some("s1"))["code"],
+            crate::schedule::execute_update(
+                &schedules,
+                &json!({
+                    "id": id,
+                    "after_seconds": 60,
+                    "prompt": "p",
+                }),
+                Some("s1")
+            )["code"],
             json!("invalid_selector")
         );
         // A fixed-rate change re-anchors from the same queue-time now.
@@ -1065,11 +1064,14 @@ mod tests {
         // A local at in a spring-forward gap refuses; an overlap takes
         // the earlier instant (the creation grammar riding the
         // service).
-        let gap = schedules.create("s1", &json!({
-            "title": "Gap",
-            "prompt": "p",
-            "at": { "date": "2031-03-09", "time": "02:30:00", "time_zone": "America/New_York" },
-        }));
+        let gap = schedules.create(
+            "s1",
+            &json!({
+                "title": "Gap",
+                "prompt": "p",
+                "at": { "date": "2031-03-09", "time": "02:30:00", "time_zone": "America/New_York" },
+            }),
+        );
         assert_eq!(
             gap.unwrap_err().to_error_value()["message"],
             json!("The local at time does not exist in the selected time zone.")
@@ -1081,15 +1083,11 @@ mod tests {
                 "at": { "date": "2030-11-03", "time": "01:30:00", "time_zone": "America/New_York" },
             }))
             .expect("the overlap resolves");
-        assert_eq!(
-            overlap.scheduled_at(),
-            "2030-11-03T05:30:00.000Z"
-        );
+        assert_eq!(overlap.scheduled_at(), "2030-11-03T05:30:00.000Z");
         // The recurring decision skips the missed backlog to the latest
         // occurrence (the downtime arm the drive commits).
         let anchor = "2030-01-01T00:00:00.000Z";
-        let decision = super::super::domain::decode_instant(anchor)
-            .expect("the anchor decodes");
+        let decision = super::super::domain::decode_instant(anchor).expect("the anchor decodes");
         let occurrence = super::super::occurrences::resolve_every_occurrence(
             3_600,
             anchor,

@@ -215,6 +215,78 @@ TOOLS = {
         [],
         "none",
     ),
+    "ask_user_question": (
+        "ASK_USER_QUESTION",
+        [
+            ("questions", "QUESTIONS_TEXT"),
+        ],
+        "none",
+    ),
+    "exit_plan_mode": (
+        "EXIT_PLAN_MODE",
+        [
+            ("plan", "PLAN_TEXT"),
+        ],
+        "none",
+    ),
+    "session_event_read": (
+        "SESSION_EVENT_READ",
+        [
+            ("session_id", "SESSION_ID_TEXT"),
+            ("seq", "SEQ_TEXT"),
+            ("before", "BEFORE_TEXT"),
+            ("after", "AFTER_TEXT"),
+        ],
+        "none",
+    ),
+    "session_event_search": (
+        "SESSION_EVENT_SEARCH",
+        [
+            ("session_id", "SESSION_ID_TEXT"),
+            ("query", "QUERY_TEXT"),
+            ("seq_from", "SEQ_FROM_TEXT"),
+            ("seq_to", "SEQ_TO_TEXT"),
+            ("time_from", "TIME_FROM_TEXT"),
+            ("time_to", "TIME_TO_TEXT"),
+            ("event_types", "EVENT_TYPES_TEXT"),
+            ("surfaces", "SURFACES_TEXT"),
+        ],
+        "none",
+    ),
+    "session_event_trace": (
+        "SESSION_EVENT_TRACE",
+        [
+            ("session_id", "SESSION_ID_TEXT"),
+            ("seq", "SEQ_TEXT"),
+        ],
+        "none",
+    ),
+    "session_search": (
+        "SESSION_SEARCH",
+        [
+            ("query", "QUERY_TEXT"),
+            ("session_ids", "SESSION_IDS_TEXT"),
+            ("created_at_from", "CREATED_AT_FROM_TEXT"),
+            ("created_at_to", "CREATED_AT_TO_TEXT"),
+            ("parent_session_ids", "PARENT_SESSION_IDS_TEXT"),
+            ("include_root_sessions", "INCLUDE_ROOT_SESSIONS_TEXT"),
+            ("availability", "AVAILABILITY_TEXT"),
+            ("event_seq_from", "EVENT_SEQ_FROM_TEXT"),
+            ("event_seq_to", "EVENT_SEQ_TO_TEXT"),
+            ("event_time_from", "EVENT_TIME_FROM_TEXT"),
+            ("event_time_to", "EVENT_TIME_TO_TEXT"),
+            ("event_types", "EVENT_TYPES_TEXT"),
+            ("event_surfaces", "EVENT_SURFACES_TEXT"),
+        ],
+        "none",
+    ),
+    "session_trace": (
+        "SESSION_TRACE",
+        [
+            ("session_id", "SESSION_ID_TEXT"),
+        ],
+        "none",
+    ),
 }
 
 HEADER = """\
@@ -295,6 +367,33 @@ def ts_unescape(segment):
         out.append(mapped)
         index += 1
     return "".join(out)
+
+
+def extract_plan_mode_section(source_root):
+    """Extracts the plan-mode deployment guidance (the dsh-base
+    `cordis.patch.yml` plan-mode row's `config.section` YAML block scalar,
+    dedented per YAML block-clip rules; brand mapping runs after)."""
+    with open(os.path.join(source_root, "packages", "bundle", "base", "cordis.patch.yml"), encoding="utf-8") as handle:
+        lines = handle.read().split("\n")
+    anchor = next(i for i, line in enumerate(lines) if line.strip() == "- id: plan-mode")
+    section_line = next(i for i in range(anchor, len(lines)) if lines[i].strip() == "section: |")
+    # The block scalar runs until the first non-blank line at or below the
+    # `section:` indent; blank lines inside stay content (YAML block-clip).
+    section_indent = len(lines[section_line]) - len(lines[section_line].lstrip(" "))
+    content = []
+    for line in lines[section_line + 1:]:
+        if line.strip() == "":
+            content.append("")
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent <= section_indent:
+            break
+        content.append(line)
+    nonempty = [line for line in content if line != ""]
+    if not nonempty:
+        raise ExtractError("the plan-mode patch row carries no section block")
+    dedent = min(len(line) - len(line.lstrip(" ")) for line in nonempty)
+    return "\n".join(line[dedent:] if line else "" for line in content[:-1])
 
 
 def extract_section_text(source, tool):
@@ -398,6 +497,22 @@ def extract_goal_section_segments(source):
     tail_literals = "".join(ts_unescape(s) for s in re.findall(r"'((?:[^'\\]|\\.)*)'", after))
     tail = template_tail.group(1) + tail_literals
     return head, tail
+
+
+def extract_session_query_section_text(source):
+    """Extracts the shared `tool:session-query` section text (the dsh
+    `PROMPT_TEXT` constant: a single-quoted-literal concatenation whose
+    statement body sits inside its blank-line-delimited statement block;
+    one section serves the five session-query tools)."""
+    anchor = source.find("const PROMPT_TEXT")
+    if anchor < 0:
+        raise ExtractError("tool-session-query source carries no PROMPT_TEXT")
+    end = source.find("\n\n", anchor)
+    statements = source[anchor:end if end > 0 else len(source)]
+    literals = re.findall(r"'((?:[^'\\]|\\.)*)'", statements)
+    if not literals:
+        raise ExtractError("PROMPT_TEXT parses no literals")
+    return "".join(ts_unescape(segment) for segment in literals)
 
 
 def extract_overcap_variants(source):
@@ -558,6 +673,32 @@ def emit():
             )
             blocks.append(
                 f"pub const JOBS_SECTION_TEXT: &str = {raw_literal(section_text)};\n"
+            )
+        if tool == "exit_plan_mode":
+            blocks.append(
+                "\n/// The `plan:policy` prompt-section text (the dsh-base deployment"
+                " config in packages/bundle/base/cordis.patch.yml, source-verbatim;"
+                " the plan-mode service renders it while plan mode is active or"
+                " pending).\n"
+            )
+            blocks.append(
+                f"pub const PLAN_MODE_SECTION_TEXT: &str = "
+                f"{raw_literal(brand_map(extract_plan_mode_section(source_root)))};\n"
+            )
+        if tool == "session_search":
+            with open(
+                os.path.join(source_root, "packages", "experimental", "tool-session-query", "src", "index.ts"),
+                encoding="utf-8",
+            ) as handle:
+                source = handle.read()
+            section_text = brand_map(extract_session_query_section_text(source))
+            blocks.append(
+                "\n/// The `tool:session-query` prompt-section text (the dsh `PROMPT_TEXT`"
+                " constant in the tool-session-query plugin's source, source-verbatim;"
+                " one section serves the five session-query tools).\n"
+            )
+            blocks.append(
+                f"pub const SESSION_QUERY_SECTION_TEXT: &str = {raw_literal(section_text)};\n"
             )
         for key, suffix in keys:
             text = brand_map(parameter_text(parsed, key))

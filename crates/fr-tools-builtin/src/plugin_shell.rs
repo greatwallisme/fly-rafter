@@ -47,7 +47,7 @@ pub const EVENT_INBOX_CLAIMED: &str = "agent/inbox/claimed";
 /// completion-notice events — the spill listeners register at activation
 /// instead (the descriptor `listen` map stays a dylib event face, not a
 /// tools-pipeline registration).
-const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\",\"fs\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\",\"subprocess\",\"attachments\",\"llm\",\"session-projections\",\"storage-domain\"],\"listen\":{\"job/settled\":1,\"agent/inbox/claimed\":2}}";
+const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\",\"fs\",\"user-questions\",\"plan-mode\",\"session-query\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\",\"subprocess\",\"attachments\",\"llm\",\"session-projections\",\"storage-domain\"],\"listen\":{\"job/settled\":1,\"agent/inbox/claimed\":2}}";
 
 /// The maximum host reply the require loop grows its buffer toward (the
 /// approval judgment).
@@ -581,6 +581,7 @@ fn declare_change_event(link: &HostLink) -> Option<()> {
                 crate::working_directory::CHANGE_EVENT,
                 crate::todo::CHANGE_EVENT,
                 crate::goal::CHANGE_EVENT,
+                crate::plan_mode::CHANGE_EVENT,
             ]
         }))
         .ok()?
@@ -659,7 +660,36 @@ pub(crate) fn prompt_sections() -> Vec<(String, f64, String)> {
             1600.0,
             crate::catalog_gen::JOBS_SECTION_TEXT.to_owned(),
         ),
+        (
+            "tool:session-query".to_owned(),
+            crate::session_query_tools::SECTION_ORDER,
+            crate::catalog_gen::SESSION_QUERY_SECTION_TEXT.to_owned(),
+        ),
     ]
+}
+
+/// Registers the dynamic `plan:policy` section (the dsh
+/// `ctx.systemPrompt.section` text fn over the wire textProvider
+/// endpoint; the deployment guidance renders only while plan mode is
+/// active or pending for the assembling session).
+fn register_plan_policy_section(link: &HostLink) -> Option<()> {
+    step(
+        link,
+        fr_wire::services::system_prompt::SERVICE_NAME,
+        fr_wire::services::system_prompt::METHOD_REGISTER_SECTION,
+        serde_json::to_vec(&json!({
+            "name": crate::plan_mode::POLICY_SECTION,
+            "order": 500.0,
+            "text": {
+                "textProvider": {
+                    "service": crate::service::SERVICE_NAME,
+                    "method": crate::service::METHOD_PLAN_POLICY_SECTION,
+                },
+            },
+        }))
+        .ok()?
+        .as_slice(),
+    )
 }
 
 /// Registers the two prompt sections (dsh `ctx.systemPrompt.section`).
@@ -702,6 +732,20 @@ fn register_projection(link: &HostLink) -> Option<()> {
             crate::goal::PROJECTION_KEY,
             crate::goal::STATE_VERSION,
             crate::service::METHOD_GOAL_FOLD,
+        ),
+        // The timed-question projection (the dsh `userQuestions` key,
+        // stateVersion 2; the fold endpoint is the 903 selector).
+        (
+            "userQuestions",
+            2,
+            crate::service::METHOD_USER_QUESTIONS_FOLD,
+        ),
+        // The plan projection (stateVersion 3; the fold endpoint is
+        // the 904 selector).
+        (
+            crate::plan_mode::PROJECTION_KEY,
+            crate::plan_mode::STATE_VERSION,
+            crate::service::METHOD_PLAN_FOLD,
         ),
     ] {
         step(
@@ -1020,6 +1064,27 @@ fn register_tools(
             serde_json::to_vec(&registration).ok()?.as_slice(),
         )?;
     }
+    // The two interaction tools (dsh `tool-ask-user` legacy default +
+    // the plan-mode exit tool; the Q16d-1A unconditional registration).
+    // The five session-query tools ride the same unconditional
+    // registration (Q16d-1A; the two search bodies carry the resolved
+    // deadline, the three read bodies the concurrency-safe fact).
+    for registration in [
+        ask_user_question_registration(),
+        exit_plan_mode_registration(),
+        session_search_registration(),
+        session_event_search_registration(),
+        session_trace_registration(),
+        session_event_trace_registration(),
+        session_event_read_registration(),
+    ] {
+        step(
+            link,
+            fr_wire::services::tools::SERVICE_NAME,
+            fr_wire::services::tools::METHOD_REGISTER,
+            serde_json::to_vec(&registration).ok()?.as_slice(),
+        )?;
+    }
     register_spill_listeners(link);
     register_finalize_listeners(link);
     Some(())
@@ -1177,6 +1242,60 @@ pub fn schedule_delete_registration() -> Value {
         "presentCall": {
             "service": crate::service::SERVICE_NAME,
             "method": crate::service::METHOD_SCHEDULE_DELETE_PRESENT_CALL,
+        },
+    })
+}
+
+/// The `ask_user_question` registration row (dsh `ctx.tools.register`,
+/// the blocking legacy default: no presentCall, no presentationMeta,
+/// and the timed schema variant stays the Q16d-3A pure arm).
+#[must_use]
+pub fn ask_user_question_registration() -> Value {
+    json!({
+        "name": "ask_user_question",
+        "description": crate::catalog_gen::ASK_USER_QUESTION_DESCRIPTION,
+        "parameters": crate::schema::ask_user_question_parameters(),
+        "output": {
+            "schema": crate::schema::ask_user_question_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_ASK_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_ASK_EXECUTE,
+        },
+    })
+}
+
+/// The `exit_plan_mode` registration row (dsh plan-mode
+/// `ctx.tools.register`: the catalog-stable schema that stays mounted
+/// while plan mode is inactive).
+#[must_use]
+pub fn exit_plan_mode_registration() -> Value {
+    json!({
+        "name": "exit_plan_mode",
+        "description": crate::catalog_gen::EXIT_PLAN_MODE_DESCRIPTION,
+        "parameters": crate::schema::exit_plan_mode_parameters(),
+        "output": {
+            "schema": crate::schema::exit_plan_mode_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_EXIT_PLAN_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_EXIT_PLAN_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_EXIT_PLAN_PRESENT_CALL,
+        },
+        "presentResult": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_EXIT_PLAN_PRESENT_RESULT,
         },
     })
 }
@@ -1568,6 +1687,7 @@ impl BuiltinState {
         ));
         let worker = crate::job_tools::spawn_notice_worker(Arc::clone(&notices), receiver, link);
         register_sections(&link)?;
+        register_plan_policy_section(&link)?;
         register_projection(&link)?;
         register_tools(&link, !escalation.is_empty(), attachments_mounted)?;
 
@@ -1611,6 +1731,20 @@ impl BuiltinState {
             directories: Arc::clone(&directories_arc),
             env: Arc::clone(&env_arc),
         };
+        let interactions = Arc::new(crate::interaction_tools::InteractionState {
+            questions: crate::user_questions::TimedWaits::default(),
+            plans: Box::new(WireGoalSeams { link }),
+            ask: crate::interaction_tools::InteractionState::production_ask(),
+            disposed: false,
+            user_questions_present: true,
+        });
+        let session_query = Arc::new(crate::session_query_tools::SessionQueryRuntime {
+            engine: Arc::new(crate::session_query::SessionQueryEngine::new(
+                Arc::new(WireSessionQuery { link }),
+                crate::session_query::EngineConfig::default(),
+            )),
+            max_search_results: crate::session_query_tools::BAKED_MAX_SEARCH_RESULTS,
+        });
         let tools = BuiltinTools::new(
             Box::new(seams),
             env_arc,
@@ -1619,6 +1753,8 @@ impl BuiltinState {
             Arc::new(goals),
             notices,
             Arc::clone(&schedules),
+            Arc::clone(&interactions),
+            Arc::clone(&session_query),
         )
         .ok()?;
 
@@ -1755,6 +1891,14 @@ impl crate::todo::SessionAppend for WireSessionAppend {
 /// The goal domain's wire seams: the session-persistence read/append
 /// faces and the session-projections relay (the dsh
 /// `snapshotEvents`/`session.append`/`stateOf` consumption).
+/// The interaction bodies ride the same wire seam (the delegated
+/// projection read; one seam type serves both faces).
+impl crate::interaction_tools::InteractionSeam for WireGoalSeams {
+    fn projection_state(&self, session: &str, key: &str) -> Result<Option<Value>, String> {
+        crate::goal_service::GoalSeams::projection_state(self, session, key)
+    }
+}
+
 struct WireGoalSeams {
     link: HostLink,
 }
@@ -1811,6 +1955,112 @@ impl crate::goal_service::GoalSeams for WireGoalSeams {
             .pointer("/event/seq")
             .and_then(Value::as_i64)
             .unwrap_or_default())
+    }
+
+    fn projection_state(&self, session: &str, key: &str) -> Result<Option<Value>, String> {
+        let bytes = serde_json::to_vec(&json!({ "id": session, "key": key }))
+            .map_err(|error| format!("projection encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::session_projections::SERVICE_NAME,
+            fr_wire::services::session_projections::METHOD_STATE_OF,
+            &bytes,
+        )?;
+        let parsed: Value = serde_json::from_slice(&reply)
+            .map_err(|error| format!("projection decode failed: {error}"))?;
+        Ok(parsed.get("state").cloned())
+    }
+}
+
+/// The session-query corpus's wire source (the live read, the
+/// persisted faces, and the projection relay over one copied vtable;
+/// the `WireGoalSeams` judgment shape).
+struct WireSessionQuery {
+    link: HostLink,
+}
+
+impl std::fmt::Debug for WireSessionQuery {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WireSessionQuery").finish_non_exhaustive()
+    }
+}
+
+impl crate::session_query::QueryWire for WireSessionQuery {
+    fn session_read(&self, id: &str) -> Result<Option<crate::session_query::QueryLog>, String> {
+        let bytes = serde_json::to_vec(&json!({ "id": id }))
+            .map_err(|error| format!("session read encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::session_persistence::SERVICE_NAME,
+            fr_wire::services::session_persistence::METHOD_SESSION_READ,
+            &bytes,
+        )?;
+        let parsed: Value = serde_json::from_slice(&reply)
+            .map_err(|error| format!("session read decode failed: {error}"))?;
+        if parsed.get("header").is_none() {
+            // The read face answers nothing for an absent session.
+            return Ok(None);
+        }
+        Ok(Some(crate::session_query::QueryLog {
+            header: parsed.get("header").cloned().unwrap_or(Value::Null),
+            inherited_event_count: parsed
+                .get("inheritedEventCount")
+                .and_then(Value::as_u64)
+                .unwrap_or_default(),
+            events: parsed
+                .get("events")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+        }))
+    }
+
+    fn persisted_list(&self) -> Result<Vec<Value>, String> {
+        let reply = self.link.require(
+            fr_wire::services::session_persistence::SERVICE_NAME,
+            fr_wire::services::session_persistence::METHOD_PERSISTED_LIST,
+            b"{}",
+        )?;
+        let parsed: Value = serde_json::from_slice(&reply)
+            .map_err(|error| format!("persisted list decode failed: {error}"))?;
+        Ok(parsed
+            .get("sessions")
+            .and_then(Value::as_array)
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|row| row.get("header").cloned())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default())
+    }
+
+    fn persisted_cold_read(
+        &self,
+        id: &str,
+    ) -> Result<Option<crate::session_query::QueryLog>, String> {
+        let bytes = serde_json::to_vec(&json!({ "id": id }))
+            .map_err(|error| format!("cold read encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::session_persistence::SERVICE_NAME,
+            fr_wire::services::session_persistence::METHOD_PERSISTED_COLD_READ,
+            &bytes,
+        )?;
+        let parsed: Value = serde_json::from_slice(&reply)
+            .map_err(|error| format!("cold read decode failed: {error}"))?;
+        let Some(log) = parsed.get("log") else {
+            // The absent-log reply.
+            return Ok(None);
+        };
+        Ok(Some(crate::session_query::QueryLog {
+            header: log.get("header").cloned().unwrap_or(Value::Null),
+            inherited_event_count: log
+                .get("inheritedEventCount")
+                .and_then(Value::as_u64)
+                .unwrap_or_default(),
+            events: log
+                .get("events")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+        }))
     }
 
     fn projection_state(&self, session: &str, key: &str) -> Result<Option<Value>, String> {
@@ -2108,29 +2358,164 @@ pub static DOUGONG_PLUGIN_EXPORTS: PluginExports = PluginExports {
     teardown,
 };
 
+/// The `session_search` registration row (dsh `ctx.tools.register`:
+/// the resolved deadline rides the row; the exclusive default holds).
+#[must_use]
+pub fn session_search_registration() -> Value {
+    json!({
+        "name": "session_search",
+        "description": crate::catalog_gen::SESSION_SEARCH_DESCRIPTION,
+        "parameters": crate::schema::session_search_parameters(),
+        "output": {
+            "schema": { "type": "string" },
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_SESSION_SEARCH_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SESSION_SEARCH_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SESSION_SEARCH_PRESENT_CALL,
+        },
+        "timeoutMs": json!(crate::session_query_tools::BAKED_SEARCH_TIMEOUT_MS),
+    })
+}
+
+/// The `session_event_search` registration row (the same shape; the
+/// current-session step exclusion rides the body).
+#[must_use]
+pub fn session_event_search_registration() -> Value {
+    json!({
+        "name": "session_event_search",
+        "description": crate::catalog_gen::SESSION_EVENT_SEARCH_DESCRIPTION,
+        "parameters": crate::schema::session_event_search_parameters(),
+        "output": {
+            "schema": { "type": "string" },
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_SESSION_EVENT_SEARCH_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SESSION_EVENT_SEARCH_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SESSION_EVENT_SEARCH_PRESENT_CALL,
+        },
+        "timeoutMs": json!(crate::session_query_tools::BAKED_SEARCH_TIMEOUT_MS),
+    })
+}
+
+/// The `session_trace` registration row (the concurrency-safe read).
+#[must_use]
+pub fn session_trace_registration() -> Value {
+    json!({
+        "name": "session_trace",
+        "description": crate::catalog_gen::SESSION_TRACE_DESCRIPTION,
+        "parameters": crate::schema::session_trace_parameters(),
+        "output": {
+            "schema": { "type": "string" },
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_SESSION_TRACE_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SESSION_TRACE_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SESSION_TRACE_PRESENT_CALL,
+        },
+        "isConcurrencySafe": true,
+    })
+}
+
+/// The `session_event_trace` registration row (the concurrency-safe
+/// read).
+#[must_use]
+pub fn session_event_trace_registration() -> Value {
+    json!({
+        "name": "session_event_trace",
+        "description": crate::catalog_gen::SESSION_EVENT_TRACE_DESCRIPTION,
+        "parameters": crate::schema::session_event_trace_parameters(),
+        "output": {
+            "schema": { "type": "string" },
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_SESSION_EVENT_TRACE_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SESSION_EVENT_TRACE_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SESSION_EVENT_TRACE_PRESENT_CALL,
+        },
+        "isConcurrencySafe": true,
+    })
+}
+
+/// The `session_event_read` registration row (the concurrency-safe
+/// read).
+#[must_use]
+pub fn session_event_read_registration() -> Value {
+    json!({
+        "name": "session_event_read",
+        "description": crate::catalog_gen::SESSION_EVENT_READ_DESCRIPTION,
+        "parameters": crate::schema::session_event_read_parameters(),
+        "output": {
+            "schema": { "type": "string" },
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_SESSION_EVENT_READ_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SESSION_EVENT_READ_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SESSION_EVENT_READ_PRESENT_CALL,
+        },
+        "isConcurrencySafe": true,
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    /// The nine tool sections ride the dsh orders and their verbatim
+    /// The ten tool sections ride the dsh orders and their verbatim
     /// texts: the bash order opens the 1000-3000 tool band, the pwsh
     /// twin sits ten above it, the fs trio rides the dsh
     /// read/write/edit orders, the discovery pair rides the glob/grep
     /// orders, the jobs guidance rides the `TOOL_JOBS` order (one
-    /// section serving the three controls), and the goal guidance rides
-    /// the `TOOL_GOAL` order with its threshold-composed text (the
-    /// builtin-tools contract's section clause; the write and grep texts
-    /// carry the composed conditional tails). The count pins the
-    /// absences too: the image tool, the opt-in editor, and the
-    /// whole-list snapshot tool register no section (the dsh sources
-    /// inject no systemPrompt; the Q16b-4A, Q16b-5A, and Q16c batch-2
-    /// rulings).
+    /// section serving the three controls), the goal guidance rides
+    /// the `TOOL_GOAL` order with its threshold-composed text, and the
+    /// session-query guidance rides the `TOOL_SESSION_QUERY` order (one
+    /// section serving the five tools; the builtin-tools contract's
+    /// section clause; the write and grep texts carry the composed
+    /// conditional tails). The count pins the absences too: the image
+    /// tool, the opt-in editor, and the whole-list snapshot tool
+    /// register no section (the dsh sources inject no systemPrompt; the
+    /// Q16b-4A, Q16b-5A, and Q16c batch-2 rulings).
     #[test]
     #[expect(
         clippy::too_many_lines,
-        reason = "the pin mirrors the nine dsh sections one anchor per section; splitting it would hide the band correspondence"
+        reason = "the pin mirrors the ten dsh sections one anchor per section; splitting it would hide the band correspondence"
     )]
-    fn prompt_sections_pin_the_nine_tools() {
+    fn prompt_sections_pin_the_ten_tools() {
         let sections = super::prompt_sections();
-        assert_eq!(sections.len(), 9);
+        assert_eq!(sections.len(), 10);
         assert!(
             sections.iter().all(|(name, _, _)| !name.contains("todo")
                 && !name.contains("image")
@@ -2187,6 +2572,32 @@ mod tests {
             tuned.contains("at least 7 consecutive goal rounds")
                 && !tuned.contains("at least 3 consecutive goal rounds"),
             "{tuned}"
+        );
+        let session_query = sections
+            .iter()
+            .find(|(name, _, _)| name == "tool:session-query")
+            .expect("the session-query section registers");
+        assert_eq!(session_query.1, 2300.0);
+        assert!(
+            session_query
+                .2
+                .starts_with("Use session_search to find relevant work from prior sessions,"),
+            "{}",
+            session_query.2
+        );
+        assert!(
+            session_query
+                .2
+                .contains("Search results are cursor-free and workspace-scoped."),
+            "{}",
+            session_query.2
+        );
+        assert!(
+            session_query
+                .2
+                .ends_with("when you need lineage, relationships, or exact data."),
+            "{}",
+            session_query.2
         );
         assert_eq!(sections[0].0, "tool:bash");
         assert_eq!(sections[0].1, 1000.0);

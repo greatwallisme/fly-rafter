@@ -151,6 +151,12 @@ pub const METHOD_UPDATE_GOAL_PRESENT_CALL: u32 = 101;
 /// Method selector: the `goal` projection fold (the non-tool band;
 /// the `todos` fold rides 901).
 pub const METHOD_GOAL_FOLD: u32 = 902;
+/// Method selector: the `userQuestions` projection fold.
+pub const METHOD_USER_QUESTIONS_FOLD: u32 = 903;
+/// Method selector: the `plan` projection fold.
+pub const METHOD_PLAN_FOLD: u32 = 904;
+/// Method selector: the dynamic `plan:policy` section text endpoint.
+pub const METHOD_PLAN_POLICY_SECTION: u32 = 905;
 /// Method selector: the `job_output` tool body.
 pub const METHOD_JOB_OUTPUT_EXECUTE: u32 = 102;
 /// Method selector: the `job_output` render projection.
@@ -200,6 +206,55 @@ pub const METHOD_SCHEDULE_UPDATE_RENDER: u32 = 123;
 /// Method selector: the `schedule_update` pending-call presentation.
 pub const METHOD_SCHEDULE_UPDATE_PRESENT_CALL: u32 = 124;
 
+/// Method selector: the `ask_user_question` tool body (dsh
+/// `tool-ask-user`; the blocking legacy default).
+pub const METHOD_ASK_EXECUTE: u32 = 125;
+/// Method selector: the `ask_user_question` render projection.
+pub const METHOD_ASK_RENDER: u32 = 126;
+/// Method selector: the `exit_plan_mode` tool body (the plan-mode
+/// controller's tool).
+pub const METHOD_EXIT_PLAN_EXECUTE: u32 = 128;
+/// Method selector: the `exit_plan_mode` render projection.
+pub const METHOD_EXIT_PLAN_RENDER: u32 = 129;
+/// Method selector: the `exit_plan_mode` pending-call presentation.
+pub const METHOD_EXIT_PLAN_PRESENT_CALL: u32 = 130;
+/// Method selector: the `exit_plan_mode` result presentation.
+pub const METHOD_EXIT_PLAN_PRESENT_RESULT: u32 = 131;
+
+/// The `session_search` execute endpoint.
+pub const METHOD_SESSION_SEARCH_EXECUTE: u32 = 132;
+/// The `session_search` render endpoint.
+pub const METHOD_SESSION_SEARCH_RENDER: u32 = 133;
+/// The `session_search` present-call endpoint.
+pub const METHOD_SESSION_SEARCH_PRESENT_CALL: u32 = 134;
+/// The `session_event_search` execute endpoint.
+pub const METHOD_SESSION_EVENT_SEARCH_EXECUTE: u32 = 135;
+/// The `session_event_search` render endpoint.
+pub const METHOD_SESSION_EVENT_SEARCH_RENDER: u32 = 136;
+/// The `session_event_search` present-call endpoint.
+pub const METHOD_SESSION_EVENT_SEARCH_PRESENT_CALL: u32 = 137;
+/// The `session_trace` execute endpoint.
+pub const METHOD_SESSION_TRACE_EXECUTE: u32 = 138;
+/// The `session_trace` render endpoint.
+pub const METHOD_SESSION_TRACE_RENDER: u32 = 139;
+/// The `session_trace` present-call endpoint.
+pub const METHOD_SESSION_TRACE_PRESENT_CALL: u32 = 140;
+/// The `session_event_trace` execute endpoint.
+pub const METHOD_SESSION_EVENT_TRACE_EXECUTE: u32 = 141;
+/// The `session_event_trace` render endpoint.
+pub const METHOD_SESSION_EVENT_TRACE_RENDER: u32 = 142;
+/// The `session_event_trace` present-call endpoint.
+pub const METHOD_SESSION_EVENT_TRACE_PRESENT_CALL: u32 = 143;
+/// The `session_event_read` execute endpoint.
+pub const METHOD_SESSION_EVENT_READ_EXECUTE: u32 = 144;
+/// The `session_event_read` render endpoint.
+pub const METHOD_SESSION_EVENT_READ_RENDER: u32 = 145;
+/// The `session_event_read` present-call endpoint.
+pub const METHOD_SESSION_EVENT_READ_PRESENT_CALL: u32 = 146;
+/// The `'session-query'` service face's observe selector (the fr-wire
+/// constant mirrors; the headless adoptability read).
+pub const METHOD_SESSION_QUERY_OBSERVE: u32 = fr_wire::services::session_query::METHOD_OBSERVE;
+
 /// The escalate-to modes this composition advertises (the dsh
 /// `ESCALATION_TARGETS` words in table order).
 pub const ESCALATION_MODES: [&str; 2] = ["workspace-write", "danger-full-access"];
@@ -230,6 +285,8 @@ pub struct BuiltinTools {
     goals: std::sync::Arc<crate::goal_service::Goals>,
     notices: std::sync::Arc<crate::job_tools::NoticeState>,
     schedules: std::sync::Arc<crate::schedule::Schedules>,
+    interactions: std::sync::Arc<crate::interaction_tools::InteractionState>,
+    session_query: std::sync::Arc<crate::session_query_tools::SessionQueryRuntime>,
 }
 
 impl std::fmt::Debug for BuiltinTools {
@@ -245,6 +302,10 @@ impl BuiltinTools {
     /// # Errors
     ///
     /// The home resolution failure.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the assembly mirrors the dsh plugin composition one arm per domain; a params struct would hide the correspondence"
+    )]
     pub fn new(
         seams: Box<dyn tools::Seams>,
         env: std::sync::Arc<ShellEnvRegistry>,
@@ -253,6 +314,8 @@ impl BuiltinTools {
         goals: std::sync::Arc<crate::goal_service::Goals>,
         notices: std::sync::Arc<crate::job_tools::NoticeState>,
         schedules: std::sync::Arc<crate::schedule::Schedules>,
+        interactions: std::sync::Arc<crate::interaction_tools::InteractionState>,
+        session_query: std::sync::Arc<crate::session_query_tools::SessionQueryRuntime>,
     ) -> Result<Self, String> {
         Ok(Self {
             seams,
@@ -262,13 +325,33 @@ impl BuiltinTools {
             goals,
             notices,
             schedules,
+            interactions,
+            session_query,
         })
+    }
+
+    /// The hosted session-query runtime (the five bodies' engine and
+    /// search bounds).
+    #[must_use]
+    pub const fn session_query(
+        &self,
+    ) -> &std::sync::Arc<crate::session_query_tools::SessionQueryRuntime> {
+        &self.session_query
     }
 
     /// The hosted schedule domain (the tool bodies' owning state).
     #[must_use]
     pub const fn schedules(&self) -> &std::sync::Arc<crate::schedule::Schedules> {
         &self.schedules
+    }
+
+    /// The hosted interaction runtime (the ask/exit bodies' owning
+    /// state).
+    #[must_use]
+    pub const fn interactions(
+        &self,
+    ) -> &std::sync::Arc<crate::interaction_tools::InteractionState> {
+        &self.interactions
     }
 
     /// The hosted notice state (the completion-notice machine's shared
@@ -594,6 +677,268 @@ impl BuiltinTools {
                 let args = request.get("args").cloned().unwrap_or(Value::Null);
                 json!(crate::schedule::present_call_update(&args))
             }
+            METHOD_ASK_EXECUTE => {
+                let call = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let agent = call.get("agent").and_then(Value::as_str);
+                let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
+                let value =
+                    crate::interaction_tools::execute_ask(&arguments, agent, &self.interactions);
+                return match value {
+                    Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                        .map_err(|error| format!("body reply encode failed: {error}")),
+                    Err(error) => serde_json::to_vec(&json!({
+                        "error": {
+                            "code": error.code,
+                            "message": error.message,
+                            "name": error.name,
+                        }
+                    }))
+                    .map_err(|error| format!("body error encode failed: {error}")),
+                };
+            }
+            METHOD_EXIT_PLAN_EXECUTE => {
+                let call = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let agent = call.get("agent").and_then(Value::as_str);
+                let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
+                let value =
+                    crate::interaction_tools::execute_exit(&arguments, agent, &self.interactions);
+                return match value {
+                    Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                        .map_err(|error| format!("body reply encode failed: {error}")),
+                    Err(error) => serde_json::to_vec(&json!({
+                        "error": {
+                            "code": error.code,
+                            "message": error.message,
+                            "name": error.name,
+                        }
+                    }))
+                    .map_err(|error| format!("body error encode failed: {error}")),
+                };
+            }
+            METHOD_ASK_RENDER | METHOD_EXIT_PLAN_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                if method == METHOD_ASK_RENDER {
+                    json!(crate::interaction_tools::render_ask(&args, &value))
+                } else {
+                    json!(crate::interaction_tools::render_exit(&args, &value))
+                }
+            }
+            METHOD_EXIT_PLAN_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::interaction_tools::present_call_exit(&args))
+            }
+            METHOD_EXIT_PLAN_PRESENT_RESULT => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let result = request.get("result").cloned().unwrap_or(Value::Null);
+                crate::interaction_tools::present_result_exit(&args, &result).unwrap_or(Value::Null)
+            }
+            METHOD_USER_QUESTIONS_FOLD => {
+                let state = crate::user_questions::fold(
+                    &request
+                        .get("events")
+                        .cloned()
+                        .unwrap_or(Value::Array(Vec::new())),
+                );
+                json!({ "state": state })
+            }
+            METHOD_PLAN_FOLD => {
+                let state = crate::plan_mode::fold(
+                    &request
+                        .get("events")
+                        .cloned()
+                        .unwrap_or(Value::Array(Vec::new())),
+                );
+                json!({ "state": state })
+            }
+            METHOD_SESSION_SEARCH_EXECUTE => {
+                let call_frame = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let agent = call_frame.get("agent").and_then(Value::as_str);
+                let arguments = call_frame.get("arguments").cloned().unwrap_or(Value::Null);
+                return match crate::session_query_tools::execute_session_search(
+                    &arguments,
+                    agent,
+                    &self.session_query,
+                ) {
+                    Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                        .map_err(|error| format!("body reply encode failed: {error}")),
+                    Err(error) => serde_json::to_vec(&json!({
+                        "error": { "message": error.message, "name": error.name, "code": error.code },
+                    }))
+                    .map_err(|error| format!("body error encode failed: {error}")),
+                };
+            }
+            METHOD_SESSION_EVENT_SEARCH_EXECUTE => {
+                let call_frame = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let agent = call_frame.get("agent").and_then(Value::as_str);
+                let arguments = call_frame.get("arguments").cloned().unwrap_or(Value::Null);
+                return match crate::session_query_tools::execute_event_search(
+                    &arguments,
+                    agent,
+                    &self.session_query,
+                ) {
+                    Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                        .map_err(|error| format!("body reply encode failed: {error}")),
+                    Err(error) => serde_json::to_vec(&json!({
+                        "error": { "message": error.message, "name": error.name, "code": error.code },
+                    }))
+                    .map_err(|error| format!("body error encode failed: {error}")),
+                };
+            }
+            METHOD_SESSION_TRACE_EXECUTE => {
+                let call_frame = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let agent = call_frame.get("agent").and_then(Value::as_str);
+                let arguments = call_frame.get("arguments").cloned().unwrap_or(Value::Null);
+                return match crate::session_query_tools::execute_session_trace(
+                    &arguments,
+                    agent,
+                    &self.session_query,
+                ) {
+                    Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                        .map_err(|error| format!("body reply encode failed: {error}")),
+                    Err(error) => serde_json::to_vec(&json!({
+                        "error": { "message": error.message, "name": error.name, "code": error.code },
+                    }))
+                    .map_err(|error| format!("body error encode failed: {error}")),
+                };
+            }
+            METHOD_SESSION_EVENT_TRACE_EXECUTE => {
+                let call_frame = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let agent = call_frame.get("agent").and_then(Value::as_str);
+                let arguments = call_frame.get("arguments").cloned().unwrap_or(Value::Null);
+                return match crate::session_query_tools::execute_event_trace(
+                    &arguments,
+                    agent,
+                    &self.session_query,
+                ) {
+                    Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                        .map_err(|error| format!("body reply encode failed: {error}")),
+                    Err(error) => serde_json::to_vec(&json!({
+                        "error": { "message": error.message, "name": error.name, "code": error.code },
+                    }))
+                    .map_err(|error| format!("body error encode failed: {error}")),
+                };
+            }
+            METHOD_SESSION_EVENT_READ_EXECUTE => {
+                let call_frame = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let agent = call_frame.get("agent").and_then(Value::as_str);
+                let arguments = call_frame.get("arguments").cloned().unwrap_or(Value::Null);
+                return match crate::session_query_tools::execute_event_read(
+                    &arguments,
+                    agent,
+                    &self.session_query,
+                ) {
+                    Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                        .map_err(|error| format!("body reply encode failed: {error}")),
+                    Err(error) => serde_json::to_vec(&json!({
+                        "error": { "message": error.message, "name": error.name, "code": error.code },
+                    }))
+                    .map_err(|error| format!("body error encode failed: {error}")),
+                };
+            }
+            METHOD_SESSION_SEARCH_RENDER
+            | METHOD_SESSION_EVENT_SEARCH_RENDER
+            | METHOD_SESSION_TRACE_RENDER
+            | METHOD_SESSION_EVENT_TRACE_RENDER
+            | METHOD_SESSION_EVENT_READ_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::session_query_tools::render_text(&args, &value))
+            }
+            METHOD_SESSION_SEARCH_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::session_query_tools::present_session_search_call(
+                    &args
+                ))
+            }
+            METHOD_SESSION_EVENT_SEARCH_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::session_query_tools::present_event_search_call(&args))
+            }
+            METHOD_SESSION_TRACE_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::session_query_tools::present_session_trace_call(
+                    &args
+                ))
+            }
+            METHOD_SESSION_EVENT_TRACE_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::session_query_tools::present_event_target_call(
+                    "Trace event",
+                    &args,
+                ))
+            }
+            METHOD_SESSION_EVENT_READ_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::session_query_tools::present_event_target_call(
+                    "Read event",
+                    &args,
+                ))
+            }
+            METHOD_SESSION_QUERY_OBSERVE => {
+                let id = request
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "observe payload requires id".to_string())?;
+                let observation = self
+                    .session_query
+                    .engine
+                    .observe(id)
+                    .map_err(|error| format!("{}: {}", error.code.as_str(), error.message))?;
+                return serde_json::to_vec(&json!({
+                    "source": observation.source,
+                    "header": observation.header,
+                    "inheritedEventCount": observation.inherited_event_count,
+                    "events": observation.events,
+                    "cursor": observation.cursor,
+                }))
+                .map_err(|error| format!("observe reply encode failed: {error}"));
+            }
+            METHOD_PLAN_POLICY_SECTION => {
+                // The dsh section text fn: the deployment guidance only
+                // renders while plan mode is active or pending for the
+                // assembling context's session; without a session the
+                // dsh arm returns empty.
+                let context = request;
+                let session = context.get("sessionId").and_then(Value::as_str);
+                let text = session.map_or_else(String::new, |session| {
+                    let plans = &self.interactions.plans;
+                    plans
+                        .projection_state(session, crate::plan_mode::PROJECTION_KEY)
+                        .ok()
+                        .flatten()
+                        .map(|state| {
+                            let logged = crate::plan_mode::logged_active(Some(&state));
+                            let pending =
+                                state.get("wanted").is_some_and(|wanted| !wanted.is_null())
+                                    || state
+                                        .pointer("/running/wanted")
+                                        .is_some_and(|wanted| !wanted.is_null());
+                            if logged || pending {
+                                crate::catalog_gen::PLAN_MODE_SECTION_TEXT.to_owned()
+                            } else {
+                                String::new()
+                            }
+                        })
+                        .unwrap_or_default()
+                });
+                return serde_json::to_vec(&text)
+                    .map_err(|error| format!("section text encode failed: {error}"));
+            }
             other => return Err(format!("unknown {PLUGIN_NAME} method {other}")),
         };
         serde_json::to_vec(&reply)
@@ -910,91 +1255,135 @@ pub fn fold_log(request: &Value) -> Value {
 /// three job bands with their finalize listeners, and the two
 /// projection folds plus the jobless fold; excluded surfaces never
 /// appear here).
-const fn describe_methods() -> [&'static str; 82] {
-    [
-        "describe",
-        "bash.execute",
-        "bash.render",
-        "bash.presentResult",
-        "bash.presentCall",
-        "presentationMeta",
-        "pwsh.execute",
-        "pwsh.render",
-        "pwsh.presentCall",
-        "pwsh.presentResult",
-        "read.execute",
-        "read.render",
-        "read.presentCall",
-        "read.presentResult",
-        "read.presentationMeta",
-        "read_image.execute",
-        "read_image.render",
-        "read_image.presentCall",
-        "read_image.presentationMeta",
-        "write.execute",
-        "write.render",
-        "write.presentCall",
-        "write.presentResult",
-        "write.presentationMeta",
-        "edit.execute",
-        "edit.render",
-        "edit.presentCall",
-        "edit.presentResult",
-        "edit.presentationMeta",
-        "glob.execute",
-        "glob.render",
-        "glob.presentCall",
-        "glob.presentResult",
-        "glob.presentationMeta",
-        "glob.spill",
-        "grep.execute",
-        "grep.render",
-        "grep.presentCall",
-        "grep.presentResult",
-        "grep.presentationMeta",
-        "grep.spill",
-        "str_replace_editor.execute",
-        "str_replace_editor.render",
-        "str_replace_editor.presentCall",
-        "todo.execute",
-        "todo.render",
-        "todo.presentCall",
-        "get_goal.execute",
-        "get_goal.render",
-        "get_goal.presentCall",
-        "create_goal.execute",
-        "create_goal.render",
-        "create_goal.presentCall",
-        "update_goal.execute",
-        "update_goal.render",
-        "update_goal.presentCall",
-        "job_output.execute",
-        "job_output.render",
-        "job_output.presentCall",
-        "job_list.execute",
-        "job_list.render",
-        "job_list.presentCall",
-        "job_kill.execute",
-        "job_kill.render",
-        "job_kill.presentCall",
-        "job_output.finalize",
-        "job_kill.finalize",
-        "schedule_create.execute",
-        "schedule_create.render",
-        "schedule_create.presentCall",
-        "schedule_list.execute",
-        "schedule_list.render",
-        "schedule_list.presentCall",
-        "schedule_delete.execute",
-        "schedule_delete.render",
-        "schedule_delete.presentCall",
-        "schedule_update.execute",
-        "schedule_update.render",
-        "schedule_update.presentCall",
-        "todos.fold",
-        "workingDirectory.fold",
-        "goal.fold",
-    ]
+/// The pre-16d band rows (the assembly's standing face).
+const DESCRIBE_BASE_METHODS: [&str; 91] = [
+    "describe",
+    "bash.execute",
+    "bash.render",
+    "bash.presentResult",
+    "bash.presentCall",
+    "presentationMeta",
+    "pwsh.execute",
+    "pwsh.render",
+    "pwsh.presentCall",
+    "pwsh.presentResult",
+    "read.execute",
+    "read.render",
+    "read.presentCall",
+    "read.presentResult",
+    "read.presentationMeta",
+    "read_image.execute",
+    "read_image.render",
+    "read_image.presentCall",
+    "read_image.presentationMeta",
+    "write.execute",
+    "write.render",
+    "write.presentCall",
+    "write.presentResult",
+    "write.presentationMeta",
+    "edit.execute",
+    "edit.render",
+    "edit.presentCall",
+    "edit.presentResult",
+    "edit.presentationMeta",
+    "glob.execute",
+    "glob.render",
+    "glob.presentCall",
+    "glob.presentResult",
+    "glob.presentationMeta",
+    "glob.spill",
+    "grep.execute",
+    "grep.render",
+    "grep.presentCall",
+    "grep.presentResult",
+    "grep.presentationMeta",
+    "grep.spill",
+    "str_replace_editor.execute",
+    "str_replace_editor.render",
+    "str_replace_editor.presentCall",
+    "todo.execute",
+    "todo.render",
+    "todo.presentCall",
+    "get_goal.execute",
+    "get_goal.render",
+    "get_goal.presentCall",
+    "create_goal.execute",
+    "create_goal.render",
+    "create_goal.presentCall",
+    "update_goal.execute",
+    "update_goal.render",
+    "update_goal.presentCall",
+    "job_output.execute",
+    "job_output.render",
+    "job_output.presentCall",
+    "job_list.execute",
+    "job_list.render",
+    "job_list.presentCall",
+    "job_kill.execute",
+    "job_kill.render",
+    "job_kill.presentCall",
+    "job_output.finalize",
+    "job_kill.finalize",
+    "schedule_create.execute",
+    "schedule_create.render",
+    "schedule_create.presentCall",
+    "schedule_list.execute",
+    "schedule_list.render",
+    "schedule_list.presentCall",
+    "schedule_delete.execute",
+    "schedule_delete.render",
+    "schedule_delete.presentCall",
+    "schedule_update.execute",
+    "schedule_update.render",
+    "schedule_update.presentCall",
+    "todos.fold",
+    "workingDirectory.fold",
+    "goal.fold",
+    "ask_user_question.execute",
+    "ask_user_question.render",
+    "exit_plan_mode.execute",
+    "exit_plan_mode.render",
+    "exit_plan_mode.presentCall",
+    "exit_plan_mode.presentResult",
+    "userQuestions.fold",
+    "plan.fold",
+    "plan-policy.text",
+];
+
+/// The 16d batch rows: the five session-query tools and the observe
+/// face.
+const DESCRIBE_SESSION_METHODS: [&str; 16] = [
+    "session_search.execute",
+    "session_search.render",
+    "session_search.presentCall",
+    "session_event_search.execute",
+    "session_event_search.render",
+    "session_event_search.presentCall",
+    "session_trace.execute",
+    "session_trace.render",
+    "session_trace.presentCall",
+    "session_event_trace.execute",
+    "session_event_trace.render",
+    "session_event_trace.presentCall",
+    "session_event_read.execute",
+    "session_event_read.render",
+    "session_event_read.presentCall",
+    "session-query.observe",
+];
+
+const fn describe_methods() -> [&'static str; 107] {
+    let mut index = 0;
+    let mut methods: [&'static str; 107] = [""; 107];
+    while index < 91 {
+        methods[index] = DESCRIBE_BASE_METHODS[index];
+        index += 1;
+    }
+    let mut session_index = 0;
+    while session_index < 16 {
+        methods[91 + session_index] = DESCRIBE_SESSION_METHODS[session_index];
+        session_index += 1;
+    }
+    methods
 }
 
 #[cfg(test)]

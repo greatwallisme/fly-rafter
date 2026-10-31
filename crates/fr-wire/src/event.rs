@@ -505,6 +505,9 @@ pub mod event_type {
     /// `schedule/change`, the reminder create/delete/dispatch record (the
     /// schedule group; dsh `known-event-types.ts:55`).
     pub const SCHEDULE_CHANGE: &str = "schedule/change";
+    /// `plan/mode`, the log-only plan-mode state record (the plan-mode
+    /// group; dsh `SessionEventMap` merge extension, plan-mode/src/index.ts:46-54).
+    pub const PLAN_MODE: &str = "plan/mode";
 }
 
 /// The append-only source of truth for one agent interaction: an immutable

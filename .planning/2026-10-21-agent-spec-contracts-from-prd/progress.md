@@ -1313,3 +1313,34 @@
 - 批内顺带修复：fr-shell jobs_local wait 的 stale expect（significant_drop_tightening 因依赖图变化不再触发；意图注记保留在文档注释=死注解移除非压制）；catalog 脚本+regen（四工具条目 +271 行，--check 绿）。
 - 过程注记：本批生成退化高发（mod.rs 三连废+domain.rs 常量乱码+括号失衡+标识符截断 sal/efusal 共 10+ 起）全部小步 heredoc+逐块校验自纠；测试期望错误 6 起（epoch 手算错×3/cron 最短拼写误判×2/retention floor 语义误读×1）由测试暴露修正——其中 cron 编码与 retention 两处为代码对 dsh 正确、期望错。
 - **提交由用户 /commit 决定**。下一片=16d 交互+会话查询（ask_user_question/exit_plan_mode+session_search/trace/event_read/event_search/event_trace）。
+
+## 2026-10-31 — 16d 批 0 开工：交互+会话查询组真源终勘
+
+- 真源全读完成：user-questions 四文件（925）+tool-ask-user 两文件（327）+plan-mode 三文件（534）+tool-session-query 六文件（1420）+session-query 核心 12 文件（~2140），合计 ~5350 行；findings 三节落盘（装配判定/服务与工具语义/session-query 核心+CONFIG 面）。
+- 装配实锤：base 组合 user-questions+session-query-sqlite（:memory:+openAt never=搜索禁用）+plan-mode（section 六段部署文案）；tool-ask-user 与 tool-session-query 不在 base（仅 web/experimental presets）→ dsh headless 无此六工具。headless --session-id 硬依赖 sessionQuery 服务+observeSession 冷读。
+- spec 矛盾两处呈批：ask/exit 的 section 正场景与 dsh 真源不符（ask 无 section；exit 的 section=plan:policy@500）。
+- Q16d 裁决问集四条已呈用户（注册面/session-query 形态/user-questions 面/section 勘误改合同）。
+
+## 2026-10-31 — 16d 批 1 落地：交互组全件 + 四裁决执行
+
+- 用户四裁决全 A（16d-1A 注册/2A 服务形态/3A 服务面/4A 改否定）+呈报执行项无异议，全部入 task_plan Decisions。
+- fr-wire 两服务词汇+PLAN_MODE 事件；fr-tools-builtin 三新模块（user_questions/plan_mode/interaction_tools）；service/plugin_shell/schema/catalog_gen/fr-schema 全接线；plan:policy 动态 section（textProvider 端点）。
+- 事故：python 批改笔误自毁 user_questions.rs→全量重建零丢失；新纪律=批改前 cp 备份。
+- 四门全绿：fmt/clippy 0/workspace 1401+0（1381→1401）/doc。方法号 125-131+903-905；describe 91。
+- 下一片=16d 批 2：session-query 服务核心全量+搜索禁用终态+五工具；批 3 收口=TOOLS 47 场景绑定（含两 section 改否定）+CONFIG 22 场景绑定+catalog 五工具 regen+七步流 4-7+五门。
+
+## 2026-10-31 — 16d 批 2 落地（进行中）
+
+- Step 1-2 完成：fr-wire 增 session_persistence METHOD_PERSISTED_LIST=1002/METHOD_PERSISTED_COLD_READ=1003 + 新 session_query 模块（SERVICE_NAME "session-query"，METHOD_OBSERVE=1400 Phase 18 headless 臂）；fr-session backend.cold_read 包装（root/compression/known 自持）+ service.rs 两 serve 臂（list=header 行表、cold-read=平衡日志含 interrupted closers；Corruption 错误文本加 SessionPersistenceCorruptionError 前缀=引擎分类判别）；fr-session 169+2 全绿（+3 钉测：空/有列表、平衡冷读+缺席、未知方法带）。编辑事故 1 起：Edit 错位破坏 cold_read_stored_log 签名，当场修复（备份纪律持续）。
+- 设计定稿落 findings.md（装配事实终勘/引擎移植映射/工具移植映射/测试面四节）。
+- Step 5 完成：session_query.rs 引擎核心落地（~1940 行：17 码错误闭集+EngineConfig 三校验文本+QueryWire 四法 seam+头五字段兼容断言+extraction 六分支（todo/write 走 Unknown retention、session/title 快照折叠）+tracing（analyze 表面分类/trace_event replacedBy 链/traceSession 谱系环检）+corpus（list live 覆盖+load 三重竞态+project_many 顺序解析每源隔离、persisted_read_concurrency=分块解码内存界）+observe wire 版（无 prepared LRU=dsh 进程内 Session 机械归 fr-session restore Phase 18，档载）+引擎十二具体方法+search 双臂 SEARCH_DISABLED 终态）。fr-session 依赖加入 fr-tools-builtin（fr-agent-loop 判例同形）。生成退化高发（heredoc 截断×2/Write 退化×1/括号失衡×6/标识符退化×4/`...` 字面量×1）全部小步+行号手术+括号深度 python 探针自纠；SessionSeq newtype .get() 系统转换 20+ 处；ordered_results 收敛 owned 单变体。剩 2 预期警告=validate_range/invalid_filter 待工具模块消费。
+
+## 2026-10-31 — 16d 批 2 收尾：五门全绿
+
+- Step 3-4：catalog 脚本五 TOOLS 条目+extract_session_query_section_text（PROMPT_TEXT 常量抽取）+regen（39 个 SESSION_* 常量，--check 绿）；fr-schema 8 键平铺（kebab）+3 钉测（defaults/probes/boundaries 拆三件避免 too_many_lines）。脚本退化 3 起（walrus 乱写/cordis.patch 误改/标题退化）当场 git diff 核验恢复；fr-schema 钉测 5 起生成退化（引号缺失/类型混装/i32 溢出）行级修复；探针需带 required 键（验证器按属性序返回首违例）。
+- Step 6：session_query_tools.rs ~1750 行（SAFE 表 16 码全翻译含吞码两行/Caller+authorize 族/titles rejected→untitled+code/descendants None 子树投影/normalize+filters+ISO 时间戳（ULP 位操作 sub-ms 上下界）/五操作体全 dsh 序（M1 可达面=空表文案+三读工具全呈现+五卡）/collect_pages 归后端切片=M1 首请求即 SEARCH_DISABLED 与 dsh-base 逐字节同形/NO_CURRENT_STEP+degenerate cap）。钉测 9 件。
+- Step 7：service.rs 15 方法号 132-146+五 execute/render/present 臂+observe 1400 臂+BuiltinTools.session_query 九参；plugin_shell.rs 五注册行（search 带 timeoutMs、三读带 isConcurrencySafe）+section 静态行+WireSessionQuery 四法+descriptor provide 增 session-query+describe 91→107（双 const 表拆分避 too_many_lines）；schema.rs 五参数 fn；sections 钉测 9→10（tool:session-query 2300 逐字三锚）。
+- 测试期望错 6 起（derivedEventSeqs 含 replace 事件=admission 规则/replace 需 sourceEventSeqs 引被遮蔽节点/tool-result 载体非 tool-call/surfaceOp wire 形 op/startSeq/projectMany 去重=dsh Set 语义/空数组拒绝+断言文本无前缀+ULP 算术）全部代码对 dsh 正确、期望修正确认。
+- clippy 全清单修尽（~45 起：doc 段落长/int implicit_hasher 泛化 S/float_cmp→i64 域/cast 族=诚实 expect 带 dsh 语义理由（to_f64/signed_to_f64/validated_seq/dsh_epoch_millisecond 四助手）/const fn 族/collapsible if（edition 2024 let-chains）/items-after-test-module 两个文件搬家/redundant closure+clone/map_or_else/RangeInclusive::contains）。
+- **五门终态：fmt ✓ / clippy workspace -D warnings 0 / tests 1431+0（FR_DSH_SOURCE，1401→1431=+30）/ doc ✓ / catalog --check ✓。**
+- **提交由用户 /commit 决定**。下一片=16d 批 3 收口（TOOLS 47 场景绑定含两 section 改否定+CONFIG 22 场景绑定+七步流 4-7+五门复跑）。

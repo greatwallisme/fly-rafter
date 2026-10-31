@@ -965,3 +965,414 @@ pub const SCHEDULE_UPDATE_PARAMETERS_JSON: &str = r#"{
     "id"
   ]
 }"#;
+
+/// The `ask_user_question` tool description (catalog-verbatim).
+pub const ASK_USER_QUESTION_DESCRIPTION: &str = r"Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding.";
+
+/// The `ask_user_question` parameter table (the json block, verbatim).
+pub const ASK_USER_QUESTION_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "questions": {
+      "type": "array",
+      "description": "Questions to ask the user before continuing.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable id for this question; echoed in the answer."
+          },
+          "question": {
+            "type": "string",
+            "description": "The specific question to ask the user."
+          },
+          "header": {
+            "type": "string",
+            "description": "Optional short heading for the question, such as \"Confirm\" or \"Choose Mode\"."
+          },
+          "options": {
+            "type": "array",
+            "description": "Optional choices to show the user. If you recommend one, put it first and append \"(Recommended)\" to that label.",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "Short user-facing option label."
+                },
+                "description": {
+                  "type": "string",
+                  "description": "One sentence explaining the tradeoff or impact."
+                }
+              },
+              "required": [
+                "label"
+              ]
+            }
+          },
+          "multi_select": {
+            "type": "boolean",
+            "description": "Whether the user may select more than one option. Defaults to false."
+          }
+        },
+        "required": [
+          "id",
+          "question"
+        ]
+      }
+    }
+  },
+  "required": [
+    "questions"
+  ]
+}"#;
+
+/// The `ask_user_question` `questions` parameter description (catalog-verbatim).
+pub const ASK_USER_QUESTION_QUESTIONS_TEXT: &str = r"Questions to ask the user before continuing.";
+
+/// The `exit_plan_mode` tool description (catalog-verbatim).
+pub const EXIT_PLAN_MODE_DESCRIPTION: &str = r"Use only in plan mode. Present your plan for the user's review and, on approval, leave plan mode. The user may approve (carry out the plan from your next step) or keep planning — their feedback comes back in the tool result; revise and present again.";
+
+/// The `exit_plan_mode` parameter table (the json block, verbatim).
+pub const EXIT_PLAN_MODE_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "plan": {
+      "type": "string",
+      "description": "The complete plan, as markdown, starting with a # heading that names it."
+    }
+  },
+  "required": [
+    "plan"
+  ]
+}"#;
+
+/// The `plan:policy` prompt-section text (the dsh-base deployment config in packages/bundle/base/cordis.patch.yml, source-verbatim; the plan-mode service renders it while plan mode is active or pending).
+pub const PLAN_MODE_SECTION_TEXT: &str = r#"You are in plan mode. Stay in plan mode until the user approves your plan through exit_plan_mode or switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user's conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.
+
+Explore first. Use non-mutating reads, searches, static analysis, and checks to ground the plan in the actual repository. Do not edit or write files, change configuration, run formatters or code generation that rewrites tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.
+
+The tool catalog stays the same across modes for request-cache stability. These plan-mode rules override any later tool description or guidance that suggests using mutation tools; those tools remain listed only to keep the request shape stable. Do not use todo_write to track this planning phase: it tracks implementation after an approved plan, while the plan itself belongs in exit_plan_mode.
+
+Resolve discoverable facts by inspection. Use ask_user_question only for user-owned choices or material ambiguity that inspection cannot answer. Do not ask the user where code lives or how current behavior works when you can find out.
+
+Make the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.
+
+When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins only in a later step after approval. Do not paste the final plan as a plain reply or ask "should I proceed?" through prose or ask_user_question. If review rejects it, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation."#;
+
+/// The `exit_plan_mode` `plan` parameter description (catalog-verbatim).
+pub const EXIT_PLAN_MODE_PLAN_TEXT: &str =
+    r"The complete plan, as markdown, starting with a # heading that names it.";
+
+/// The `session_event_read` tool description (catalog-verbatim).
+pub const SESSION_EVENT_READ_DESCRIPTION: &str = r"Read one full unabridged event and optional neighboring raw-event summaries from an authorized session.";
+
+/// The `session_event_read` parameter table (the json block, verbatim).
+pub const SESSION_EVENT_READ_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "description": "Target session id. Omit for the current session."
+    },
+    "seq": {
+      "type": "integer",
+      "description": "Target event sequence number."
+    },
+    "before": {
+      "type": "integer",
+      "description": "Number of preceding raw events to summarize. Omit for none."
+    },
+    "after": {
+      "type": "integer",
+      "description": "Number of following raw events to summarize. Omit for none."
+    }
+  },
+  "required": [
+    "seq"
+  ]
+}"#;
+
+/// The `session_event_read` `session_id` parameter description (catalog-verbatim).
+pub const SESSION_EVENT_READ_SESSION_ID_TEXT: &str =
+    r"Target session id. Omit for the current session.";
+
+/// The `session_event_read` `seq` parameter description (catalog-verbatim).
+pub const SESSION_EVENT_READ_SEQ_TEXT: &str = r"Target event sequence number.";
+
+/// The `session_event_read` `before` parameter description (catalog-verbatim).
+pub const SESSION_EVENT_READ_BEFORE_TEXT: &str =
+    r"Number of preceding raw events to summarize. Omit for none.";
+
+/// The `session_event_read` `after` parameter description (catalog-verbatim).
+pub const SESSION_EVENT_READ_AFTER_TEXT: &str =
+    r"Number of following raw events to summarize. Omit for none.";
+
+/// The `session_event_search` tool description (catalog-verbatim).
+pub const SESSION_EVENT_SEARCH_DESCRIPTION: &str = r"Search prior events in one authorized session; the current session excludes the step performing this call.";
+
+/// The `session_event_search` parameter table (the json block, verbatim).
+pub const SESSION_EVENT_SEARCH_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "description": "Target session id. Omit for the current session."
+    },
+    "query": {
+      "type": "string",
+      "description": "Literal full-text query over the target session."
+    },
+    "seq_from": {
+      "type": "integer",
+      "description": "Inclusive event sequence lower bound."
+    },
+    "seq_to": {
+      "type": "integer",
+      "description": "Inclusive event sequence upper bound."
+    },
+    "time_from": {
+      "type": "string",
+      "description": "Inclusive timezone-qualified ISO 8601 event-time lower bound."
+    },
+    "time_to": {
+      "type": "string",
+      "description": "Inclusive timezone-qualified ISO 8601 event-time upper bound."
+    },
+    "event_types": {
+      "type": "array",
+      "description": "Event types to include.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "surfaces": {
+      "type": "array",
+      "description": "Event surfaces to include.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "current",
+          "shadowed",
+          "log-only"
+        ]
+      }
+    }
+  },
+  "required": [
+    "query"
+  ]
+}"#;
+
+/// The `session_event_search` `session_id` parameter description (catalog-verbatim).
+pub const SESSION_EVENT_SEARCH_SESSION_ID_TEXT: &str =
+    r"Target session id. Omit for the current session.";
+
+/// The `session_event_search` `query` parameter description (catalog-verbatim).
+pub const SESSION_EVENT_SEARCH_QUERY_TEXT: &str =
+    r"Literal full-text query over the target session.";
+
+/// The `session_event_search` `seq_from` parameter description (catalog-verbatim).
+pub const SESSION_EVENT_SEARCH_SEQ_FROM_TEXT: &str = r"Inclusive event sequence lower bound.";
+
+/// The `session_event_search` `seq_to` parameter description (catalog-verbatim).
+pub const SESSION_EVENT_SEARCH_SEQ_TO_TEXT: &str = r"Inclusive event sequence upper bound.";
+
+/// The `session_event_search` `time_from` parameter description (catalog-verbatim).
+pub const SESSION_EVENT_SEARCH_TIME_FROM_TEXT: &str =
+    r"Inclusive timezone-qualified ISO 8601 event-time lower bound.";
+
+/// The `session_event_search` `time_to` parameter description (catalog-verbatim).
+pub const SESSION_EVENT_SEARCH_TIME_TO_TEXT: &str =
+    r"Inclusive timezone-qualified ISO 8601 event-time upper bound.";
+
+/// The `session_event_search` `event_types` parameter description (catalog-verbatim).
+pub const SESSION_EVENT_SEARCH_EVENT_TYPES_TEXT: &str = r"Event types to include.";
+
+/// The `session_event_search` `surfaces` parameter description (catalog-verbatim).
+pub const SESSION_EVENT_SEARCH_SURFACES_TEXT: &str = r"Event surfaces to include.";
+
+/// The `session_event_trace` tool description (catalog-verbatim).
+pub const SESSION_EVENT_TRACE_DESCRIPTION: &str = r"Read every direct replacement and relationship to a cited source event for one event in an authorized session.";
+
+/// The `session_event_trace` parameter table (the json block, verbatim).
+pub const SESSION_EVENT_TRACE_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "description": "Target session id. Omit for the current session."
+    },
+    "seq": {
+      "type": "integer",
+      "description": "Target event sequence number."
+    }
+  },
+  "required": [
+    "seq"
+  ]
+}"#;
+
+/// The `session_event_trace` `session_id` parameter description (catalog-verbatim).
+pub const SESSION_EVENT_TRACE_SESSION_ID_TEXT: &str =
+    r"Target session id. Omit for the current session.";
+
+/// The `session_event_trace` `seq` parameter description (catalog-verbatim).
+pub const SESSION_EVENT_TRACE_SEQ_TEXT: &str = r"Target event sequence number.";
+
+/// The `session_search` tool description (catalog-verbatim).
+pub const SESSION_SEARCH_DESCRIPTION: &str = r"Search prior sessions in the caller workspace and return the strongest matching event from each session.";
+
+/// The `session_search` parameter table (the json block, verbatim).
+pub const SESSION_SEARCH_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "Literal full-text query over prior session history."
+    },
+    "session_ids": {
+      "type": "array",
+      "description": "Optional session ids to include.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "created_at_from": {
+      "type": "string",
+      "description": "Inclusive timezone-qualified ISO 8601 creation-time lower bound."
+    },
+    "created_at_to": {
+      "type": "string",
+      "description": "Inclusive timezone-qualified ISO 8601 creation-time upper bound."
+    },
+    "parent_session_ids": {
+      "type": "array",
+      "description": "Optional direct parent session ids.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "include_root_sessions": {
+      "type": "boolean",
+      "description": "Include sessions with no parent in the parent filter."
+    },
+    "availability": {
+      "type": "array",
+      "description": "Require at least one selected source availability.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "live",
+          "persisted"
+        ]
+      }
+    },
+    "event_seq_from": {
+      "type": "integer",
+      "description": "Inclusive event sequence lower bound."
+    },
+    "event_seq_to": {
+      "type": "integer",
+      "description": "Inclusive event sequence upper bound."
+    },
+    "event_time_from": {
+      "type": "string",
+      "description": "Inclusive timezone-qualified ISO 8601 event-time lower bound."
+    },
+    "event_time_to": {
+      "type": "string",
+      "description": "Inclusive timezone-qualified ISO 8601 event-time upper bound."
+    },
+    "event_types": {
+      "type": "array",
+      "description": "Event types to include.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "event_surfaces": {
+      "type": "array",
+      "description": "Event surfaces to include.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "current",
+          "shadowed",
+          "log-only"
+        ]
+      }
+    }
+  },
+  "required": [
+    "query"
+  ]
+}"#;
+
+/// The `tool:session-query` prompt-section text (the dsh `PROMPT_TEXT` constant in the tool-session-query plugin's source, source-verbatim; one section serves the five session-query tools).
+pub const SESSION_QUERY_SECTION_TEXT: &str = r"Use session_search to find relevant work from prior sessions, or session_event_search to search earlier events in one session. Search results are cursor-free and workspace-scoped. Follow a useful hit with session_trace, session_event_trace, or session_event_read when you need lineage, relationships, or exact data.";
+
+/// The `session_search` `query` parameter description (catalog-verbatim).
+pub const SESSION_SEARCH_QUERY_TEXT: &str = r"Literal full-text query over prior session history.";
+
+/// The `session_search` `session_ids` parameter description (catalog-verbatim).
+pub const SESSION_SEARCH_SESSION_IDS_TEXT: &str = r"Optional session ids to include.";
+
+/// The `session_search` `created_at_from` parameter description (catalog-verbatim).
+pub const SESSION_SEARCH_CREATED_AT_FROM_TEXT: &str =
+    r"Inclusive timezone-qualified ISO 8601 creation-time lower bound.";
+
+/// The `session_search` `created_at_to` parameter description (catalog-verbatim).
+pub const SESSION_SEARCH_CREATED_AT_TO_TEXT: &str =
+    r"Inclusive timezone-qualified ISO 8601 creation-time upper bound.";
+
+/// The `session_search` `parent_session_ids` parameter description (catalog-verbatim).
+pub const SESSION_SEARCH_PARENT_SESSION_IDS_TEXT: &str = r"Optional direct parent session ids.";
+
+/// The `session_search` `include_root_sessions` parameter description (catalog-verbatim).
+pub const SESSION_SEARCH_INCLUDE_ROOT_SESSIONS_TEXT: &str =
+    r"Include sessions with no parent in the parent filter.";
+
+/// The `session_search` `availability` parameter description (catalog-verbatim).
+pub const SESSION_SEARCH_AVAILABILITY_TEXT: &str =
+    r"Require at least one selected source availability.";
+
+/// The `session_search` `event_seq_from` parameter description (catalog-verbatim).
+pub const SESSION_SEARCH_EVENT_SEQ_FROM_TEXT: &str = r"Inclusive event sequence lower bound.";
+
+/// The `session_search` `event_seq_to` parameter description (catalog-verbatim).
+pub const SESSION_SEARCH_EVENT_SEQ_TO_TEXT: &str = r"Inclusive event sequence upper bound.";
+
+/// The `session_search` `event_time_from` parameter description (catalog-verbatim).
+pub const SESSION_SEARCH_EVENT_TIME_FROM_TEXT: &str =
+    r"Inclusive timezone-qualified ISO 8601 event-time lower bound.";
+
+/// The `session_search` `event_time_to` parameter description (catalog-verbatim).
+pub const SESSION_SEARCH_EVENT_TIME_TO_TEXT: &str =
+    r"Inclusive timezone-qualified ISO 8601 event-time upper bound.";
+
+/// The `session_search` `event_types` parameter description (catalog-verbatim).
+pub const SESSION_SEARCH_EVENT_TYPES_TEXT: &str = r"Event types to include.";
+
+/// The `session_search` `event_surfaces` parameter description (catalog-verbatim).
+pub const SESSION_SEARCH_EVENT_SURFACES_TEXT: &str = r"Event surfaces to include.";
+
+/// The `session_trace` tool description (catalog-verbatim).
+pub const SESSION_TRACE_DESCRIPTION: &str = r"Read the authorized session lineage around one session, including complete visible ancestor and descendant relationships.";
+
+/// The `session_trace` parameter table (the json block, verbatim).
+pub const SESSION_TRACE_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "description": "Target session id. Omit for the current session."
+    }
+  }
+}"#;
+
+/// The `session_trace` `session_id` parameter description (catalog-verbatim).
+pub const SESSION_TRACE_SESSION_ID_TEXT: &str = r"Target session id. Omit for the current session.";

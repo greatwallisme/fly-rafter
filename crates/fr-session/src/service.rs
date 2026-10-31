@@ -96,6 +96,18 @@ pub const METHOD_SESSION_READ: u32 = 9;
 /// snapshot (`{id}` → `{"header": EpochHeader | null}`; the dsh
 /// `session.requestHeader()`; the Q16b-1A route-gate seam).
 pub const METHOD_REQUEST_HEADER: u32 = 10;
+/// Method selector: list the stored sessions (`{}` →
+/// `{"sessions": [{"header": ...}]}`; the corpus's persisted face).
+///
+/// The selector sits past the projections band on the shared artifact's
+/// method space (the fr-wire comment carries the judgment).
+pub const METHOD_PERSISTED_LIST: u32 =
+    fr_wire::services::session_persistence::METHOD_PERSISTED_LIST;
+/// Method selector: read one stored session's balanced cold log
+/// (`{"id"}` → `{"log": {header, inheritedEventCount, events}}` or
+/// `{}`; the dsh `readColdSessionLog` wire form).
+pub const METHOD_PERSISTED_COLD_READ: u32 =
+    fr_wire::services::session_persistence::METHOD_PERSISTED_COLD_READ;
 
 /// Which store edge one mirror record carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -791,6 +803,84 @@ fn service_request_header(
     .map_err(|error| format!("request-header reply encode failed: {error}"))
 }
 
+/// Serves the stored-session listing (the session-query corpus's
+/// persisted face): header rows in backend listing order, `formatStatus`
+/// omitted (the v4-only artifact has no migration state).
+///
+/// # Errors
+///
+/// Returns the listing failure text the host surfaces as `STATUS_FAILED`.
+fn service_persisted_list(service: &SessionService) -> Result<serde_json::Value, String> {
+    let snapshots = service
+        .backend
+        .list()
+        .map_err(|error| format!("session persistence listing failed: {error}"))?;
+    let rows: Vec<serde_json::Value> = snapshots
+        .iter()
+        .map(|snapshot| {
+            serde_json::to_value(serde_json::json!({
+                "header": snapshot.header,
+            }))
+            .map_err(|error| format!("persisted header encode failed: {error}"))
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(serde_json::json!({ "sessions": rows }))
+}
+
+/// Serves one stored session's balanced cold read (the dsh
+/// `readColdSessionLog` wire form): the stored events plus the
+/// interrupted-turn closers, nothing written back. Absence answers the
+/// omitted-log reply; corruption fails with the
+/// `SessionPersistenceCorruptionError` text prefix (the dsh error-name
+/// check's wire form — the session-query corpus classifies on it).
+///
+/// # Errors
+///
+/// Returns the persistence refusal or the encode failure text.
+fn service_persisted_cold_read(
+    service: &SessionService,
+    request: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let id = require_id(request, "id")?;
+    let loaded = service
+        .backend
+        .cold_read(&id)
+        .map_err(persisted_cold_read_text)?;
+    let Some(loaded) = loaded else {
+        return Ok(serde_json::json!({}));
+    };
+    let mut events = loaded.events;
+    let closers =
+        crate::repair::open_turn_closers(&events, crate::repair::OpenTurnCloseCause::Interrupted)
+            .map_err(|error| format!("cold read closer synthesis failed: {error}"))?;
+    events.extend(closers);
+    let rows = events
+        .iter()
+        .map(|event| {
+            serde_json::to_value(event)
+                .map_err(|error| format!("cold read event encode failed: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(serde_json::json!({
+        "log": {
+            "header": loaded.meta,
+            "inheritedEventCount": loaded.inherited_event_count,
+            "events": rows,
+        },
+    }))
+}
+
+/// Renders one cold-read failure the wire face carries (the
+/// corruption-classified prefix; the dsh error-name check's wire form).
+fn persisted_cold_read_text(error: PersistError) -> String {
+    match error {
+        PersistError::Corruption(message) => {
+            format!("SessionPersistenceCorruptionError: {message}")
+        }
+        other => other.to_string(),
+    }
+}
+
 /// Serves one dynamic-channel invocation against the assembled runtime: a
 /// pure (JSON-in, JSON-out) function so the face stays testable.
 ///
@@ -816,6 +906,8 @@ pub fn dispatch(
         METHOD_SESSION_DRAIN => service_drain(service, &request)?,
         METHOD_SESSION_READ => service_read(service, &request)?,
         METHOD_REQUEST_HEADER => service_request_header(service, &request)?,
+        METHOD_PERSISTED_LIST => service_persisted_list(service)?,
+        METHOD_PERSISTED_COLD_READ => service_persisted_cold_read(service, &request)?,
         _ => return Err(format!("unknown session-persistence method {method}")),
     };
     serde_json::to_vec(&reply)
@@ -1484,5 +1576,108 @@ mod tests {
         assert_eq!(METHOD_SESSION_RESTORE, wire::METHOD_SESSION_RESTORE);
         assert_eq!(METHOD_SESSION_DRAIN, wire::METHOD_SESSION_DRAIN);
         assert_eq!(METHOD_SESSION_READ, wire::METHOD_SESSION_READ);
+        assert_eq!(super::METHOD_PERSISTED_LIST, wire::METHOD_PERSISTED_LIST);
+        assert_eq!(
+            super::METHOD_PERSISTED_COLD_READ,
+            wire::METHOD_PERSISTED_COLD_READ
+        );
+    }
+
+    /// Stores one session whose log ends on an open turn (the
+    /// persisted-face fixtures' builder; the flush checkpoints the open
+    /// tail the same way a crashed writer would).
+    fn store_session(service: &mut SessionService, id: &str) {
+        call(
+            service,
+            METHOD_SESSION_CREATE,
+            &serde_json::json!({ "id": id, "meta": { "cwd": "/repo" } }),
+        )
+        .expect("create");
+        call(
+            service,
+            METHOD_SESSION_APPEND,
+            &serde_json::json!({
+                "id": id, "type": "user/message",
+                "data": user_message("stored text"), "surfaceOp": "append"
+            }),
+        )
+        .expect("append");
+        call(
+            service,
+            METHOD_SESSION_APPEND,
+            &serde_json::json!({ "id": id, "type": "turn/start", "data": { "turn": 1 } }),
+        )
+        .expect("open turn");
+        call(
+            service,
+            METHOD_SESSION_FLUSH,
+            &serde_json::json!({ "id": id }),
+        )
+        .expect("flush");
+    }
+
+    #[test]
+    fn persisted_list_answers_stored_headers_and_empty_deployments() {
+        let mut service = make_service_at(&temp_root("persisted-list"));
+        let empty = call(
+            &mut service,
+            super::METHOD_PERSISTED_LIST,
+            &serde_json::json!({}),
+        )
+        .expect("empty listing");
+        assert_eq!(empty["sessions"], serde_json::json!([]));
+
+        store_session(&mut service, "s1");
+        let listing = call(
+            &mut service,
+            super::METHOD_PERSISTED_LIST,
+            &serde_json::json!({}),
+        )
+        .expect("listing");
+        let rows = listing["sessions"].as_array().expect("rows");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["header"]["id"], "s1");
+        assert_eq!(rows[0]["header"]["cwd"], "/repo");
+    }
+
+    #[test]
+    fn persisted_cold_read_answers_balanced_log_and_absence() {
+        let mut service = make_service_at(&temp_root("persisted-cold"));
+        call(
+            &mut service,
+            super::METHOD_PERSISTED_COLD_READ,
+            &serde_json::json!({ "id": "gone" }),
+        )
+        .expect("absence");
+
+        store_session(&mut service, "s1");
+        let reply = call(
+            &mut service,
+            super::METHOD_PERSISTED_COLD_READ,
+            &serde_json::json!({ "id": "s1" }),
+        )
+        .expect("cold read");
+        let log = &reply["log"];
+        assert_eq!(log["header"]["id"], "s1");
+        assert_eq!(log["inheritedEventCount"], 0);
+        let events = log["events"].as_array().expect("events");
+        let types: Vec<&str> = events
+            .iter()
+            .map(|event| event["type"].as_str().expect("type"))
+            .collect();
+        assert_eq!(
+            types.last().copied(),
+            Some("turn/end"),
+            "the interrupted closer balances the open turn: {types:?}"
+        );
+        assert_eq!(types.first().copied(), Some("user/message"));
+    }
+
+    #[test]
+    fn persisted_cold_read_refuses_unknown_methods_only() {
+        let mut service = make_service_at(&temp_root("persisted-bands"));
+        let error = call(&mut service, 1004, &serde_json::json!({}))
+            .expect_err("unknown session-persistence method");
+        assert_eq!(error, "unknown session-persistence method 1004");
     }
 }
