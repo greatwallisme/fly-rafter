@@ -4,6 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
+16e 批 1（fr-shell PTY 底座 inspect.rs+terminal.rs）已落：clippy workspace 0/tests 46+0/doc ✓。下一动作=16e 批 2 续：terminal_session.rs（BoundedTextBuffer/Sanitizer/alacritty 接线/就绪三证据状态机）+terminals registry（3000+ band、六错误码、名/pending/close 三 fence、sandbox-mode fence 缝调研）。
 Phase 16 16d 批 3（收口）已落（2026-10-31，待提交）：TOOLS 47+CONFIG 22 场景绑定全真（lifecycle 227/0/181+102/0/217 零 fail）、Q16d-4A 两 section 改否定、13 处 nine→ten 漂移勘误、Q97-A 两族注册钉测+fr-schema 新钉测、五门绿 workspace 1434+0。**下一动作=提交由用户 /commit 裁决；随后 16e PTY+persistent（terminal 六件+persistent bash/pwsh+fr-shell PTY 执行体）。**
 
 ## Phases

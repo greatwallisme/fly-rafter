@@ -25,6 +25,7 @@
 //! [`shell_types`], [`executors`], [`service`], [`plugin_shell`]).
 
 pub mod executors;
+pub mod inspect;
 pub mod jobs_local;
 pub mod jobs_types;
 pub mod plugin_shell;
@@ -33,3 +34,7 @@ pub mod ring;
 pub mod service;
 pub mod shell_types;
 pub mod subprocess;
+pub mod terminal;
+pub mod terminal_buffer;
+pub mod terminal_sanitize;
+pub mod terminal_session;

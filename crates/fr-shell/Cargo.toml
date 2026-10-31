@@ -20,6 +20,9 @@ fr-wire.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
+# Q16e-1B/Q16e-2A: the terminal primitive and the protocol-reply emulator.
+portable-pty.workspace = true
+alacritty_terminal.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

@@ -59,6 +59,11 @@ uuid = { version = "1", features = ["v4"] }
 ureq = "3.5"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 libwebp-sys = "0.9"
+# Phase 16e PTY substrate (Q16e-1B/Q16e-2A): the portable-pty terminal
+# primitive (the node-pty parity) and the alacritty_terminal protocol-reply
+# emulator (the @xterm/headless parity).
+portable-pty = "0.9"
+alacritty_terminal = "0.26"
 
 # Internal crates
 fr-config = { path = "crates/fr-config" }
