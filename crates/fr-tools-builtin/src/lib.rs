@@ -63,6 +63,7 @@ pub mod session_query_time;
 pub mod session_query_tools;
 pub mod shell_env;
 pub mod sre_tools;
+pub mod terminal_render;
 pub mod todo;
 pub mod tools;
 pub mod user_questions;

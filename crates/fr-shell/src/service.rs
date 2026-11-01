@@ -28,9 +28,15 @@ use crate::executors::{
     ShellExecRequest, ShellExecSpec, ShellExecutorFace, ShellKind, ShellRunResult, process_sources,
 };
 use crate::jobs_local::{ControllerGuard, JobHooks, JobSpec, LocalJobRegistry};
-use crate::jobs_types::JobToolCall;
+use crate::jobs_types::{JobOutcome, JobSourceRead, JobToolCall};
 use crate::shell_types::AbortSignal;
 use crate::subprocess::{Outcome, SpawnSpec, StdinMode, Stdio, SubprocessHandle};
+use crate::terminal_registry::{SpawnRequest, TerminalRegistry, TerminalSessionSnapshot};
+use crate::terminal_session::{SendOperation, SendResult, SessionStatus, WaitReason};
+
+/// The owner-keyed live send table row (the wire face's operation
+/// handle between the start and settled slices).
+type SendSlot = Arc<Mutex<Option<Arc<SendOperation>>>>;
 
 /// Renders one finite number the way dsh `JSON.stringify` does for the
 /// error texts.
@@ -331,8 +337,9 @@ struct SubprocessEntry {
     tool_call: Option<WireToolCall>,
 }
 
-/// The three-band shell service: the registry, the subprocess handle
-/// table, the per-kind executors, and the absorbed-process table.
+/// The four-band shell service: the registry, the subprocess handle
+/// table, the per-kind executors, the absorbed-process table, and the
+/// PTY terminal registry.
 pub struct ShellService {
     registry: Arc<LocalJobRegistry>,
     /// The controller attachment keeping `start` open (the dsh
@@ -344,6 +351,10 @@ pub struct ShellService {
     executors: HashMap<ShellKind, Arc<dyn ShellExecutorFace>>,
     started: Mutex<HashMap<String, StartedJob>>,
     run_threads: Arc<Mutex<Vec<std::thread::JoinHandle<()>>>>,
+    /// The PTY session registry (the `'terminals'` 3000+ band).
+    terminals: Arc<TerminalRegistry>,
+    /// The live send operations keyed by `(owner, session id)`.
+    sends: Mutex<HashMap<(String, String), Arc<SendOperation>>>,
 }
 
 impl std::fmt::Debug for ShellService {
@@ -360,17 +371,33 @@ impl ShellService {
     /// dsh bundle's standing mount; the local variants are the batch-2
     /// bundle-row override). The per-kind configurations ride the dsh
     /// bundle rows: bash carries `timeoutMs: 60000`, pwsh the package
-    /// default.
+    /// default. The PTY registry mounts with the caller's owner-liveness
+    /// closure; the shell backend rides the baked opt-in.
     ///
     /// # Errors
     ///
-    /// The default-mode read failure.
+    /// The default-mode read failure, or the backend configuration
+    /// failure under the baked opt-in.
     pub fn new(
         registry: Arc<LocalJobRegistry>,
         confine: Arc<dyn SandboxConfine>,
         policy: Arc<dyn PolicyResolve>,
         configs: executors::ExecutorConfigs,
+        terminals: Arc<TerminalRegistry>,
     ) -> Result<Self, String> {
+        if crate::terminal_bash::BAKED_TERMINAL_BACKEND {
+            let raw = crate::terminal_bash::RawBackendConfig::default();
+            let resolved = crate::terminal_bash::resolve_config(&raw)?;
+            let backend = crate::terminal_bash::BashTerminalBackend::new(
+                resolved,
+                Arc::clone(&confine),
+                Arc::clone(&policy),
+                Arc::clone(&terminals),
+            );
+            terminals
+                .register_backend(Arc::new(backend))
+                .map_err(|failure| failure.message)?;
+        }
         let executors = [ShellKind::Bash, ShellKind::Pwsh]
             .into_iter()
             .map(move |kind| {
@@ -393,7 +420,16 @@ impl ShellService {
             executors,
             started: Mutex::new(HashMap::new()),
             run_threads: Arc::new(Mutex::new(Vec::new())),
+            sends: Mutex::new(HashMap::new()),
+            terminals,
         })
+    }
+
+    /// The hosted PTY registry (tests drive the terminals band
+    /// directly).
+    #[must_use]
+    pub const fn terminals(&self) -> &Arc<TerminalRegistry> {
+        &self.terminals
     }
 
     /// The hosted registry (tests drive the jobs face directly).
@@ -574,6 +610,7 @@ impl ShellService {
             let _ignored = handle.wait_for_exit(None);
         }
         self.registry.dispose_all();
+        let _ignored = self.terminals.dispose_all();
         let threads: Vec<std::thread::JoinHandle<()>> = {
             let mut run = recover(&self.run_threads);
             run.drain(..).collect()
@@ -640,8 +677,10 @@ impl ShellService {
             self.serve_subprocess(method, &request)?
         } else if method < fr_wire::services::shell::METHOD_DESCRIBE {
             self.serve_jobs(method, &request)?
-        } else {
+        } else if method < fr_wire::services::terminals::METHOD_DESCRIBE {
             self.serve_shell(method, &request)?
+        } else {
+            self.serve_terminals(method, &request)?
         };
         serde_json::to_vec(&reply)
             .map_err(|error| format!("shell service reply encode failed: {error}"))
@@ -927,6 +966,439 @@ impl ShellService {
             other => Err(format!("unknown shell method {other}")),
         }
     }
+
+    /// Serves the `'terminals'` 3000+ band (the PTY registry; the
+    /// registry's coded failure texts ride through verbatim). Sends
+    /// split into start/wait/cancel/read slices; the spawn and the
+    /// close stay bounded blocking calls (the band discipline).
+    fn serve_terminals(&self, method: u32, request: &Value) -> Result<Value, String> {
+        if (3002..=3005).contains(&method) {
+            return self.serve_terminal_send(method, request);
+        }
+        if method == 3010 {
+            return self.serve_terminal_background(request);
+        }
+        match method {
+            3000 => Ok(json!({
+                "plugin": crate::plugin_shell::PLUGIN_NAME,
+                "service": "terminals",
+                "methods": [
+                    "describe", "spawn", "startSend", "sendWait", "sendCancel", "sendRead",
+                    "read", "signal", "kill", "list", "sendBackground",
+                ],
+            })),
+            3001 => {
+                let owner = require_str(request, "owner", "terminals spawn")?;
+                let spawn_request = SpawnRequest {
+                    backend_type: require_str(request, "type", "terminals spawn")?,
+                    name: opt_str(request, "name"),
+                    cwd: opt_str(request, "cwd"),
+                };
+                let result = self
+                    .terminals
+                    .spawn(&owner, &spawn_request)
+                    .map_err(|failure| failure.message)?;
+                Ok(terminal_spawn_json(&result))
+            }
+            3006 => {
+                let owner = require_str(request, "owner", "terminals read")?;
+                let session_id = require_str(request, "sessionId", "terminals read")?;
+                let offset = optional_index(request, "offset")?;
+                let count = optional_index(request, "count")?;
+                let page = self
+                    .terminals
+                    .read(&owner, &session_id, offset, count)
+                    .map_err(|failure| failure.message)?;
+                Ok(json!({
+                    "text": page.text,
+                    "totalLines": page.total_lines,
+                    "lineBegin": page.line_begin,
+                    "lineEnd": page.line_end,
+                    "truncated": page.truncated,
+                }))
+            }
+            3007 => {
+                let owner = require_str(request, "owner", "terminals signal")?;
+                let session_id = require_str(request, "sessionId", "terminals signal")?;
+                let signal = require_str(request, "signal", "terminals signal")?;
+                let target_pgid = self
+                    .terminals
+                    .signal(&owner, &session_id, &signal)
+                    .map_err(|failure| failure.message)?;
+                Ok(json!({ "delivered": true, "targetPgid": target_pgid }))
+            }
+            3008 => {
+                let owner = require_str(request, "owner", "terminals kill")?;
+                let session_id = require_str(request, "sessionId", "terminals kill")?;
+                let reason =
+                    opt_str(request, "reason").unwrap_or_else(|| "model request".to_owned());
+                let closed = self
+                    .terminals
+                    .kill(&owner, &session_id, &reason)
+                    .map_err(|failure| failure.message)?;
+                recover(&self.sends).remove(&(owner, session_id));
+                Ok(json!({ "closed": closed }))
+            }
+            3009 => {
+                let owner = require_str(request, "owner", "terminals list")?;
+                let sessions: Vec<Value> = self
+                    .terminals
+                    .list(&owner)
+                    .iter()
+                    .map(terminal_snapshot_json)
+                    .collect();
+                Ok(json!({ "sessions": sessions }))
+            }
+            other => Err(format!("unknown terminals method {other}")),
+        }
+    }
+
+    /// Serves the send-slice quartet: start/wait/cancel/read (the
+    /// exclusive send's wire face; the wait is the bounded poll slice).
+    fn serve_terminal_send(&self, method: u32, request: &Value) -> Result<Value, String> {
+        match method {
+            3002 => {
+                let (owner, session_id) = terminal_send_request(request)?;
+                let text = require_str(request, "text", "terminals startSend")?;
+                let submit = request
+                    .get("submit")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true);
+                let operation = self
+                    .terminals
+                    .start_send(&owner, &session_id, &text, submit)
+                    .map_err(|failure| failure.message)?;
+                self.sweep_sends();
+                recover(&self.sends).insert((owner, session_id), Arc::clone(&operation));
+                Ok(json!({}))
+            }
+            3003 => {
+                let (owner, session_id) = terminal_send_request(request)?;
+                let timeout_ms = request
+                    .get("timeout_ms")
+                    .and_then(Value::as_f64)
+                    .ok_or_else(|| "terminals sendWait payload requires timeout_ms".to_owned())?;
+                if !timeout_ms.is_finite() || timeout_ms <= 0.0 {
+                    return Err(format!(
+                        "invalid wait timeout: expected a positive number of milliseconds, got {}",
+                        js_number(timeout_ms)
+                    ));
+                }
+                let operation = self.active_send(&owner, &session_id)?;
+                let deadline = Instant::now() + Duration::from_millis(ms(timeout_ms));
+                while !operation.is_settled() {
+                    if Instant::now() >= deadline {
+                        return Ok(json!({ "settled": false }));
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                recover(&self.sends).remove(&(owner, session_id));
+                let result = operation
+                    .done()
+                    .map_err(|error| format!("PTY send failed: {error}"))?;
+                Ok(send_result_json(&result))
+            }
+            3004 => {
+                let (owner, session_id) = terminal_send_request(request)?;
+                let operation = self.active_send(&owner, &session_id)?;
+                let cancelled = operation.cancel();
+                Ok(json!({ "cancelled": cancelled }))
+            }
+            _ => {
+                let (owner, session_id) = terminal_send_request(request)?;
+                let operation = self.active_send(&owner, &session_id)?;
+                let (delta, truncated) = operation.read_output();
+                Ok(json!({ "delta": delta, "truncated": truncated }))
+            }
+        }
+    }
+
+    /// Serves the absorbed background send: the dsh tool's `jobs.start`
+    /// lowers onto the jobs band with the send pull source.
+    fn serve_terminal_background(&self, request: &Value) -> Result<Value, String> {
+        let owner = require_str(request, "owner", "terminals sendBackground")?;
+        let session_id = require_str(request, "sessionId", "terminals sendBackground")?;
+        let text = require_str(request, "text", "terminals sendBackground")?;
+        let submit = request
+            .get("submit")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let label = require_str(request, "label", "terminals sendBackground")?;
+        let call_id = require_str(request, "callId", "terminals sendBackground")?;
+        let tool_call = Some(JobToolCall {
+            call_id,
+            root_call_id: opt_str(request, "rootCallId").unwrap_or_default(),
+        });
+        let output_limit_bytes = request.get("outputLimitBytes").and_then(Value::as_f64);
+        let job_id = self.start_send_background(
+            &owner,
+            &session_id,
+            &text,
+            submit,
+            label,
+            tool_call,
+            output_limit_bytes,
+        )?;
+        Ok(json!({ "jobId": job_id }))
+    }
+
+    /// Reads the live send for one owner pair, failing closed on an
+    /// absent operation (the wire face's handle discipline).
+    fn active_send(&self, owner: &str, session_id: &str) -> Result<Arc<SendOperation>, String> {
+        self.sweep_sends();
+        recover(&self.sends)
+            .get(&(owner.to_owned(), session_id.to_owned()))
+            .cloned()
+            .ok_or_else(|| format!("PTY session {session_id} has no active send"))
+    }
+
+    /// Drops the send rows whose operations settled (the started-table
+    /// sweep judgment).
+    fn sweep_sends(&self) {
+        recover(&self.sends).retain(|_, operation| !operation.is_settled());
+    }
+
+    /// The absorbed background send (the dsh tool's `jobs.start` with
+    /// the send pull source; the closure cannot cross the wire, so the
+    /// job registration lives here — the `shell.start` judgment).
+    ///
+    /// # Errors
+    ///
+    /// The jobs admission refusal, or a failed send registration inside
+    /// the starter (the dsh run-starter throw).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the wire payload lowers field-for-field; grouping would hide the dsh argument order"
+    )]
+    pub fn start_send_background(
+        &self,
+        owner: &str,
+        session_id: &str,
+        text: &str,
+        submit: bool,
+        label: String,
+        tool_call: Option<JobToolCall>,
+        output_limit_bytes: Option<f64>,
+    ) -> Result<String, String> {
+        let slot: SendSlot = Arc::new(Mutex::new(None));
+        let jobs_registry = Arc::clone(&self.registry);
+        let terminals = Arc::clone(&self.terminals);
+        let run_threads = Arc::clone(&self.run_threads);
+        let run_owner = owner.to_owned();
+        let run_session = session_id.to_owned();
+        let run_text = text.to_owned();
+        let job_spec = JobSpec {
+            kind: "pty-send".to_owned(),
+            label,
+            owner: Some(owner.to_owned()),
+            tool_call,
+            output_limit_bytes,
+            output: vec![(None, send_source(Arc::clone(&slot)))],
+            run: Box::new(move |handle| {
+                let job_id = handle.id().to_owned();
+                let started = terminals
+                    .start_send(&run_owner, &run_session, &run_text, submit)
+                    .map_err(|failure| failure.message)?;
+                *recover(&slot) = Some(Arc::clone(&started));
+                let outcome_slot = Arc::new(JobOutcomeSlot::default());
+                let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let watcher_cancelled = Arc::clone(&cancelled);
+                let watcher_outcome = Arc::clone(&outcome_slot);
+                let watcher_started = Arc::clone(&started);
+                let watcher_registry = Arc::clone(&jobs_registry);
+                let join = std::thread::Builder::new()
+                    .name("fr-shell-pty-send".to_owned())
+                    .spawn(move || {
+                        let outcome = match watcher_started.done() {
+                            Ok(result) => JobOutcome {
+                                status: if watcher_cancelled
+                                    .load(std::sync::atomic::Ordering::SeqCst)
+                                {
+                                    crate::jobs_types::JobStatus::Killed
+                                } else {
+                                    crate::jobs_types::JobStatus::Completed
+                                },
+                                detail: Some(send_detail(&result)),
+                                result: None,
+                            },
+                            Err(error) => JobOutcome {
+                                status: crate::jobs_types::JobStatus::Failed,
+                                detail: Some(error),
+                                result: None,
+                            },
+                        };
+                        watcher_outcome.store(outcome.clone());
+                        watcher_registry.producer_settled(&job_id, outcome, true);
+                    })
+                    .map_err(|error| format!("pty-send watcher spawn failed: {error}"))?;
+                {
+                    let mut threads = recover(&run_threads);
+                    threads.retain(|thread| !thread.is_finished());
+                    threads.push(join);
+                }
+                let cancel_started = Arc::clone(&started);
+                let cancel_flag = Arc::clone(&cancelled);
+                Ok(JobHooks {
+                    cancel: Box::new(move |_reason: Option<&str>| {
+                        cancel_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                        // The dsh cancel leg ignores the already-delivered
+                        // word (the fence keeps its one-interrupt rule).
+                        let _ignored = cancel_started.cancel();
+                        Ok(())
+                    }),
+                    done: Box::new(move || outcome_slot.load()),
+                })
+            }),
+        };
+        self.registry.start(job_spec)
+    }
+}
+
+/// The owner/session pair on the send wire.
+fn terminal_send_request(request: &Value) -> Result<(String, String), String> {
+    let owner = require_str(request, "owner", "terminals send")?;
+    let session_id = require_str(request, "sessionId", "terminals send")?;
+    Ok((owner, session_id))
+}
+
+/// Reads one optional non-negative index argument.
+fn optional_index(request: &Value, key: &str) -> Result<Option<usize>, String> {
+    match request.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => {
+            let raw = value
+                .as_u64()
+                .ok_or_else(|| format!("terminals {key} must be a non-negative integer"))?;
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "the u64 index rides the usize scrollback domain; truncation above usize::MAX is unreachable for retained pages"
+            )]
+            Ok(Some(raw as usize))
+        }
+    }
+}
+
+/// Lowers one session status onto the wire (the dsh sessionStatus
+/// schema; camelCase is the dsh tool-output vocabulary).
+fn terminal_status_json(status: &SessionStatus) -> Value {
+    match status {
+        SessionStatus::Running => json!({ "kind": "running" }),
+        SessionStatus::Exited { exit_code, signal } => json!({
+            "kind": "exited",
+            "exitCode": exit_code,
+            "signal": signal,
+        }),
+    }
+}
+
+/// Lowers one snapshot onto the wire (absent optional keys stay
+/// absent — the dsh JSON vocabulary).
+fn terminal_snapshot_json(snapshot: &TerminalSessionSnapshot) -> Value {
+    let mut object = serde_json::Map::new();
+    object.insert("sessionId".to_owned(), json!(snapshot.session_id));
+    if let Some(name) = &snapshot.name {
+        object.insert("name".to_owned(), json!(name));
+    }
+    object.insert("type".to_owned(), json!(snapshot.backend_type));
+    if let Some(pid) = snapshot.pid {
+        object.insert("pid".to_owned(), json!(pid));
+    }
+    object.insert("status".to_owned(), terminal_status_json(&snapshot.status));
+    Value::Object(object)
+}
+
+/// Lowers one spawn result onto the wire.
+fn terminal_spawn_json(result: &crate::terminal_registry::TerminalSpawnResult) -> Value {
+    let mut object = serde_json::Map::new();
+    object.insert("sessionId".to_owned(), json!(result.session_id));
+    if let Some(name) = &result.name {
+        object.insert("name".to_owned(), json!(name));
+    }
+    object.insert("type".to_owned(), json!(result.backend_type));
+    if let Some(pid) = result.pid {
+        object.insert("pid".to_owned(), json!(pid));
+    }
+    object.insert("status".to_owned(), terminal_status_json(&result.status));
+    object.insert("motd".to_owned(), json!(result.motd));
+    Value::Object(object)
+}
+
+/// Lowers one settled send onto the wire.
+fn send_result_json(result: &SendResult) -> Value {
+    json!({
+        "viewport": result.viewport,
+        "waitReason": wait_reason_word(result.wait_reason),
+        "sessionStatus": terminal_status_json(&result.session_status),
+        "truncated": result.truncated,
+    })
+}
+
+/// The dsh wait-reason vocabulary word.
+const fn wait_reason_word(reason: WaitReason) -> &'static str {
+    match reason {
+        WaitReason::StdinRead => "stdin_read",
+        WaitReason::InferredIdle => "inferred_idle",
+        WaitReason::Timeout => "timeout",
+        WaitReason::SessionExit => "session_exit",
+    }
+}
+
+/// The dsh `sendDetail`: the running arm renders the wait reason, the
+/// exited arm renders the exit code, signal, or the unknown fallback.
+fn send_detail(result: &SendResult) -> String {
+    match &result.session_status {
+        SessionStatus::Running => format!("wait: {}", wait_reason_word(result.wait_reason)),
+        SessionStatus::Exited { exit_code, signal } => format!(
+            "session exited: {}",
+            exit_code
+                .map(|code| code.to_string())
+                .or_else(|| signal.clone())
+                .unwrap_or_else(|| "unknown".to_owned())
+        ),
+    }
+}
+
+/// The dsh `renderSendRead`: the delta plus its upstream truncation
+/// marker, newline-separated only when the delta lacks the trailing
+/// newline.
+fn render_send_read(delta: &str, truncated: bool) -> String {
+    let separator = if delta.ends_with('\n') || delta.is_empty() {
+        ""
+    } else {
+        "\n"
+    };
+    if truncated {
+        format!("{delta}{separator}[output truncated]")
+    } else {
+        delta.to_owned()
+    }
+}
+
+/// Adapts the backend's consuming send reader to a registry pull source
+/// (the dsh `sendSource`): each call hands over what arrived since the
+/// previous one, so the source counts the bytes it delivered to keep
+/// the registry's cursor monotonic; a read before the starter binds the
+/// operation delivers nothing.
+fn send_source(slot: SendSlot) -> Box<dyn Fn(u64) -> JobSourceRead + Send + Sync> {
+    Box::new(move |from| {
+        let live = recover(&slot).as_ref().map(Arc::clone);
+        let Some(operation) = live else {
+            return JobSourceRead {
+                text: String::new(),
+                next_offset: from,
+                lossy: false,
+                spill_path: None,
+            };
+        };
+        let (delta, truncated) = operation.read_output();
+        let text = render_send_read(&delta, truncated);
+        JobSourceRead {
+            next_offset: from + text.len() as u64,
+            text,
+            lossy: false,
+            spill_path: None,
+        }
+    })
 }
 
 /// Reads the shell-kind selector (the dsh single `ctx.shell` slot's
@@ -1010,6 +1482,12 @@ mod tests {
     use fr_sandbox::seam::{
         ConfinedArgv, SandboxEnforcement, SandboxExecutionPolicy, SandboxPolicy,
     };
+
+    /// One always-live registry for the shell-band tests (the terminals
+    /// band drives its own assembly).
+    fn test_terminals() -> Arc<TerminalRegistry> {
+        Arc::new(TerminalRegistry::new(Box::new(|_owner: &str| true)))
+    }
 
     /// One fake session log recording the durable lifecycle records.
     #[derive(Debug, Default)]
@@ -1103,6 +1581,7 @@ mod tests {
             }),
             Arc::new(DangerPolicy),
             executors::ExecutorConfigs::default_configs(),
+            test_terminals(),
         )
         .expect("service")
     }
@@ -1313,6 +1792,7 @@ mod tests {
                 signatures: Vec::new(),
             }),
             executors::ExecutorConfigs::default_configs(),
+            test_terminals(),
         )
         .expect("service");
         let resolve: Value = serde_json::from_slice(
@@ -1681,6 +2161,7 @@ mod tests {
             }),
             Arc::new(DangerPolicy),
             executors::ExecutorConfigs::bundle(),
+            test_terminals(),
         )
         .expect("service");
         let base =
@@ -1713,6 +2194,224 @@ mod tests {
         )
         .expect("decode");
         assert_eq!(pwsh["spec"]["timeout_ms"], 120_000.0);
+        service.dispose();
+    }
+
+    /// Assembles one terminals-band service over a real fast bash
+    /// backend (the backend test's configuration, mounted directly).
+    fn terminal_service() -> ShellService {
+        let registry = LocalJobRegistry::new(Arc::new(FakeLog::default()), Arc::new(QuietAnnounce));
+        let terminals = Arc::new(TerminalRegistry::new(Box::new(|_owner: &str| true)));
+        let raw = crate::terminal_bash::RawBackendConfig {
+            rows: Some(24),
+            cols: Some(80),
+            scrollback_lines: Some(500),
+            poll_interval_ms: Some(10),
+            exact_probe_after_ms: Some(60),
+            idle_silence_ms: Some(250),
+            handoff_grace_ms: Some(40),
+            timeout_ms: Some(4_000),
+            dispose_grace_ms: Some(250),
+            ..crate::terminal_bash::RawBackendConfig::default()
+        };
+        let resolved = crate::terminal_bash::resolve_config(&raw).expect("resolve");
+        let backend = crate::terminal_bash::BashTerminalBackend::new(
+            resolved,
+            Arc::new(ConfinedPolicy {
+                argv: Vec::new(),
+                signatures: Vec::new(),
+            }),
+            Arc::new(DangerPolicy),
+            Arc::clone(&terminals),
+        );
+        terminals
+            .register_backend(Arc::new(backend))
+            .expect("the first registration never duplicates");
+        ShellService::new(
+            registry,
+            Arc::new(ConfinedPolicy {
+                argv: Vec::new(),
+                signatures: Vec::new(),
+            }),
+            Arc::new(DangerPolicy),
+            executors::ExecutorConfigs::default_configs(),
+            terminals,
+        )
+        .expect("service")
+    }
+
+    fn terminals_call(service: &ShellService, method: u32, payload: &Value) -> Value {
+        serde_json::from_slice(
+            &service
+                .serve(method, &serde_json::to_vec(payload).expect("encode"))
+                .expect("terminals call"),
+        )
+        .expect("decode")
+    }
+
+    #[test]
+    fn terminals_band_describes_and_refuses_verbatim() {
+        let service = danger_service();
+        let reply = terminals_call(&service, 3000, &json!({}));
+        assert_eq!(reply["service"], "terminals");
+        let error = service
+            .serve(
+                3001,
+                &serde_json::to_vec(&json!({ "owner": "a", "type": "shell" })).expect("e"),
+            )
+            .expect_err("no backend under the baked-off composition");
+        assert_eq!(error, "no PTY backend registered for \"shell\"");
+        let error = service
+            .serve(3999, &serde_json::to_vec(&json!({})).expect("e"))
+            .expect_err("unknown method");
+        assert_eq!(error, "unknown terminals method 3999");
+        service.dispose();
+    }
+
+    #[test]
+    fn terminals_band_roundtrips_one_real_session() {
+        let service = terminal_service();
+        let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+        let spawn = terminals_call(
+            &service,
+            3001,
+            &json!({ "owner": "agent-1", "type": "shell", "cwd": cwd }),
+        );
+        let session_id = spawn["sessionId"].as_str().expect("session id").to_owned();
+        assert_eq!(spawn["type"], "shell");
+        assert_eq!(spawn["status"]["kind"], "running");
+        assert!(spawn["motd"].is_string());
+        let list = terminals_call(&service, 3009, &json!({ "owner": "agent-1" }));
+        assert_eq!(list["sessions"].as_array().map(Vec::len), Some(1));
+        // The send slice face: start, wait, incremental read.
+        terminals_call(
+            &service,
+            3002,
+            &json!({ "owner": "agent-1", "sessionId": session_id, "text": "echo fr-band-ok\n" }),
+        );
+        let wait = terminals_call(
+            &service,
+            3003,
+            &json!({ "owner": "agent-1", "sessionId": session_id, "timeout_ms": 4000.0 }),
+        );
+        assert_eq!(wait["settled"], json!(null));
+        assert_eq!(wait["waitReason"], "stdin_read");
+        assert_eq!(wait["sessionStatus"]["kind"], "running");
+        let read = terminals_call(
+            &service,
+            3006,
+            &json!({ "owner": "agent-1", "sessionId": session_id }),
+        );
+        assert!(read["totalLines"].as_u64().expect("lines") >= 1);
+        let signal = terminals_call(
+            &service,
+            3007,
+            &json!({ "owner": "agent-1", "sessionId": session_id, "signal": "SIGINT" }),
+        );
+        assert_eq!(signal["delivered"], true);
+        assert!(signal["targetPgid"].as_i64().is_some());
+        let kill = terminals_call(
+            &service,
+            3008,
+            &json!({ "owner": "agent-1", "sessionId": session_id, "reason": "test done" }),
+        );
+        assert_eq!(kill["closed"], true);
+        let list = terminals_call(&service, 3009, &json!({ "owner": "agent-1" }));
+        assert_eq!(list["sessions"].as_array().map(Vec::len), Some(0));
+        service.dispose();
+    }
+
+    #[test]
+    fn terminals_band_wait_requires_an_active_send() {
+        let service = terminal_service();
+        let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+        let spawn = terminals_call(
+            &service,
+            3001,
+            &json!({ "owner": "agent-1", "type": "shell", "cwd": cwd }),
+        );
+        let session_id = spawn["sessionId"].as_str().expect("session id").to_owned();
+        let error = service
+            .serve(
+                3003,
+                &serde_json::to_vec(&json!({
+                    "owner": "agent-1",
+                    "sessionId": session_id,
+                    "timeout_ms": 50.0,
+                }))
+                .expect("encode"),
+            )
+            .expect_err("no active send");
+        assert_eq!(
+            error,
+            format!("PTY session {session_id} has no active send")
+        );
+        let kill = terminals_call(
+            &service,
+            3008,
+            &json!({ "owner": "agent-1", "sessionId": session_id, "reason": "test done" }),
+        );
+        assert_eq!(kill["closed"], true);
+        service.dispose();
+    }
+
+    #[test]
+    fn terminals_band_background_send_registers_a_pty_send_job() {
+        let service = terminal_service();
+        let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+        let spawn = terminals_call(
+            &service,
+            3001,
+            &json!({ "owner": "agent-1", "type": "shell", "cwd": cwd }),
+        );
+        let session_id = spawn["sessionId"].as_str().expect("session id").to_owned();
+        let started = terminals_call(
+            &service,
+            3010,
+            &json!({
+                "owner": "agent-1",
+                "sessionId": session_id,
+                "text": "echo fr-bg",
+                "label": format!("{session_id}: echo fr-bg"),
+                "callId": "call-1",
+                "outputLimitBytes": 262_144.0,
+            }),
+        );
+        let job_id = started["jobId"].as_str().expect("job id").to_owned();
+        let mut view: Value = serde_json::from_slice(
+            &service
+                .serve(
+                    1002,
+                    &serde_json::to_vec(&json!({ "id": job_id, "caller": "agent-1" }))
+                        .expect("encode"),
+                )
+                .expect("jobs call"),
+        )
+        .expect("decode");
+        let mut waited = 0;
+        while view["status"] == "running" && waited < 100 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            waited += 1;
+            view = serde_json::from_slice(
+                &service
+                    .serve(
+                        1002,
+                        &serde_json::to_vec(&json!({ "id": job_id, "caller": "agent-1" }))
+                            .expect("encode"),
+                    )
+                    .expect("jobs call"),
+            )
+            .expect("decode");
+        }
+        assert_eq!(view["kind"], "pty-send");
+        assert_eq!(view["status"], "completed");
+        assert_eq!(view["detail"], "wait: stdin_read");
+        let kill = terminals_call(
+            &service,
+            3008,
+            &json!({ "owner": "agent-1", "sessionId": session_id, "reason": "test done" }),
+        );
+        assert_eq!(kill["closed"], true);
         service.dispose();
     }
 }

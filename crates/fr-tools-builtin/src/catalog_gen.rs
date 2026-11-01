@@ -1376,3 +1376,179 @@ pub const SESSION_TRACE_PARAMETERS_JSON: &str = r#"{
 
 /// The `session_trace` `session_id` parameter description (catalog-verbatim).
 pub const SESSION_TRACE_SESSION_ID_TEXT: &str = r"Target session id. Omit for the current session.";
+
+/// The `terminal_open` tool description (catalog-verbatim).
+pub const TERMINAL_OPEN_DESCRIPTION: &str = r"Create a persistent, owner-isolated terminal session from a registered backend type. Use this for shell or REPL state that must survive across tool calls.";
+
+/// The `terminal_open` parameter table (the json block, verbatim).
+pub const TERMINAL_OPEN_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "type": {
+      "type": "string",
+      "description": "Registered terminal backend type, usually \"shell\"."
+    },
+    "name": {
+      "type": "string",
+      "description": "Optional owner-local display name such as \"main\" or \"gdb\"."
+    },
+    "cwd": {
+      "type": "string",
+      "description": "Initial working directory, relative to the Session current directory when not absolute."
+    }
+  },
+  "required": [
+    "type"
+  ]
+}"#;
+
+/// The `terminal_send` tool description (catalog-verbatim).
+pub const TERMINAL_SEND_DESCRIPTION: &str = r"Send text to a persistent terminal. By default Enter is submitted and the call waits for a prompt, stdin wait, output silence, timeout, or session exit. Background mode returns a job id for job_output/job_kill.";
+
+/// The `terminal_send` parameter table (the json block, verbatim).
+pub const TERMINAL_SEND_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "description": "Terminal session id returned by terminal_open or terminal_list."
+    },
+    "text": {
+      "type": "string",
+      "description": "UTF-8 text to write to the terminal."
+    },
+    "submit": {
+      "type": "boolean",
+      "description": "Submit Enter after text (default true). Set false for control characters or incomplete REPL input."
+    },
+    "run_in_background": {
+      "type": "boolean",
+      "description": "Return a job id immediately; collect with job_output or stop with job_kill."
+    }
+  },
+  "required": [
+    "sessionId",
+    "text"
+  ]
+}"#;
+
+/// The `terminal_read` tool description (catalog-verbatim).
+pub const TERMINAL_READ_DESCRIPTION: &str =
+    r"Read a bounded page of retained output from a persistent terminal without sending input.";
+
+/// The `terminal_read` parameter table (the json block, verbatim).
+pub const TERMINAL_READ_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "description": "Terminal session id."
+    },
+    "offset": {
+      "type": "number",
+      "description": "Newest-relative line offset (default 0)."
+    },
+    "count": {
+      "type": "number",
+      "description": "Requested line count (default 500; backend caps apply)."
+    }
+  },
+  "required": [
+    "sessionId"
+  ]
+}"#;
+
+/// The `terminal_signal` tool description (catalog-verbatim).
+pub const TERMINAL_SIGNAL_DESCRIPTION: &str =
+    r"Send an allowed signal to the current foreground process group of a persistent terminal.";
+
+/// The `terminal_signal` parameter table (the json block, verbatim).
+pub const TERMINAL_SIGNAL_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "description": "Terminal session id."
+    },
+    "signal": {
+      "type": "string",
+      "description": "Signal to deliver. Shell-targeted SIGKILL is rejected; use terminal_close.",
+      "enum": [
+        "SIGINT",
+        "SIGTERM",
+        "SIGKILL",
+        "SIGTSTP",
+        "SIGHUP"
+      ]
+    }
+  },
+  "required": [
+    "sessionId",
+    "signal"
+  ]
+}"#;
+
+/// The `terminal_close` tool description (catalog-verbatim).
+pub const TERMINAL_CLOSE_DESCRIPTION: &str =
+    r"Close one persistent terminal and wait until its captured owned process tree is gone.";
+
+/// The `terminal_close` parameter table (the json block, verbatim).
+pub const TERMINAL_CLOSE_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "description": "Terminal session id."
+    }
+  },
+  "required": [
+    "sessionId"
+  ]
+}"#;
+
+/// The `terminal_list` tool description (catalog-verbatim).
+pub const TERMINAL_LIST_DESCRIPTION: &str =
+    r"List persistent terminal sessions owned by the current agent.";
+
+/// The `terminal_list` parameter table (the json block, verbatim).
+pub const TERMINAL_LIST_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {}
+}"#;
+
+/// The `tool:pty` prompt-section text (the dsh `ctx.systemPrompt.section` call in the tool-terminal plugin's apply, source-verbatim; one section serves the six terminal tools).
+pub const PTY_SECTION_TEXT: &str = r"Use a terminal session only when work needs persistent terminal state or interactive stdin; prefer shell/read/write/edit for bounded one-shot operations. Track every terminal session id and close sessions that no longer matter. An inferred_idle or timeout result does not prove the foreground command exited.";
+
+/// The persistent `bash` tool description (catalog-verbatim; the dsh `@deepseek-ai/dsh-tool-bash-persistent` package section).
+pub const BASH_PERSISTENT_DESCRIPTION: &str = r"Run commands in a persistent bash shell. State, including the current directory and exported environment variables, persists across calls for this agent.";
+
+/// The persistent `bash` parameter table (the json block, verbatim).
+pub const BASH_PERSISTENT_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "description": "The bash command to run. Relative path is preferred in the command."
+    }
+  },
+  "required": [
+    "command"
+  ]
+}"#;
+
+/// The persistent `pwsh` tool description (catalog-verbatim; the dsh `@deepseek-ai/dsh-tool-pwsh-persistent` package section).
+pub const PWSH_PERSISTENT_DESCRIPTION: &str = r"Run commands in a persistent PowerShell shell. State, including the current directory and exported environment variables, persists across calls for this agent.";
+
+/// The persistent `pwsh` parameter table (the json block, verbatim).
+pub const PWSH_PERSISTENT_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "description": "The PowerShell command to run. Relative path is preferred in the command."
+    }
+  },
+  "required": [
+    "command"
+  ]
+}"#;

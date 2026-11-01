@@ -28,15 +28,17 @@ use crate::jobs_local::SettlementAnnounce;
 use crate::jobs_types::JOB_REGISTERED_EVENT;
 use crate::jobs_types::JOB_SETTLED_EVENT;
 use crate::service::ShellService;
+use crate::terminal_registry::TerminalRegistry;
 use fr_sandbox::seam::{ConfinedArgv, SandboxExecutionPolicy, SandboxMode, SandboxPolicy};
 
 /// The plugin name the host registers the artifact under.
 pub const PLUGIN_NAME: &str = "fr-shell";
 
-/// The static descriptor: three provided services over one export
-/// table, three injected seams, no listeners.
+/// The static descriptor: four provided services over one export
+/// table, four injected seams, no listeners.
 const DESCRIPTOR: &str = "{\"name\":\"fr-shell\",\"provide\":[\"shell\",\"subprocess\",\"jobs\
-\"],\"inject\":[\"session-persistence\",\"sandbox\",\"sandbox-policy\"],\"listen\":{}}";
+\",\"terminals\"],\"inject\":[\"session-persistence\",\"sandbox\",\"sandbox-policy\",\"agent\
+\"],\"listen\":{}}";
 
 /// The maximum host reply the require loop grows its buffer toward (the
 /// approval judgment).
@@ -295,8 +297,22 @@ impl ShellState {
         let registry = LocalJobRegistry::new(sessions, announce);
         let confine = Arc::new(WireConfine { link });
         let policy = Arc::new(WirePolicy { link });
-        let service =
-            ShellService::new(registry, confine, policy, ExecutorConfigs::bundle()).ok()?;
+        // The owner-liveness closure (the dsh ctx.agents.get(id)===owner
+        // probe). The fr M1 agent face materializes any session id and
+        // answers its status, so it cannot distinguish a disposed owner;
+        // the single-host agent stays live for the process lifetime and
+        // disposal collapses into the whole-service dispose (the sync-
+        // port record; the coded OWNER_NOT_LIVE texts stay pinned by
+        // the registry tests through injected closures).
+        let terminals = Arc::new(TerminalRegistry::new(Box::new(|_owner: &str| true)));
+        let service = ShellService::new(
+            registry,
+            confine,
+            policy,
+            ExecutorConfigs::bundle(),
+            Arc::clone(&terminals),
+        )
+        .ok()?;
         Some(Self { service })
     }
 

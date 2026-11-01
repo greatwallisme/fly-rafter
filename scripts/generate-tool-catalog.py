@@ -287,6 +287,44 @@ TOOLS = {
         ],
         "none",
     ),
+    "terminal_open": (
+        "TERMINAL_OPEN",
+        [],
+        "none",
+    ),
+    "terminal_send": (
+        "TERMINAL_SEND",
+        [],
+        "none",
+    ),
+    "terminal_read": (
+        "TERMINAL_READ",
+        [],
+        "none",
+    ),
+    "terminal_signal": (
+        "TERMINAL_SIGNAL",
+        [],
+        "none",
+    ),
+    "terminal_close": (
+        "TERMINAL_CLOSE",
+        [],
+        "none",
+    ),
+    "terminal_list": (
+        "TERMINAL_LIST",
+        [],
+        "none",
+    ),
+}
+
+# The persistent-shell pair reuses the `bash`/`pwsh` tool names inside
+# their own package sections, so their anchors are scoped under the
+# package header (the plain `### bash` anchor finds tool-bash first).
+SCOPED_TOOLS = {
+    ("@deepseek-ai/dsh-tool-bash-persistent", "bash"): "BASH_PERSISTENT",
+    ("@deepseek-ai/dsh-tool-pwsh-persistent", "pwsh"): "PWSH_PERSISTENT",
 }
 
 HEADER = """\
@@ -345,6 +383,19 @@ def extract_tool(text, tool):
     except json.JSONDecodeError as error:
         raise ExtractError(f"catalog section `{tool}` json fence: {error}") from error
     return description, json_text, parsed
+
+
+def extract_tool_scoped(text, package, tool):
+    """Extracts one tool's description and parameters inside one package
+    section (the persistent pair reuses the `bash`/`pwsh` names)."""
+    package_anchor = re.search(rf"^## `{package}`$", text, re.M)
+    if package_anchor is None:
+        raise ExtractError(f"catalog has no `## `{package}`` section")
+    body = text[package_anchor.end():]
+    next_package = re.search(r"^## `", body[1:], re.M)
+    if next_package is not None:
+        body = body[: 1 + next_package.start()]
+    return extract_tool(body, tool)
 
 
 def ts_unescape(segment):
@@ -662,6 +713,21 @@ def emit():
             blocks.append(
                 f"pub const GOAL_SECTION_TEXT_TAIL: &str = {raw_literal(brand_map(tail))};\n"
             )
+        if tool == "terminal_list":
+            with open(
+                os.path.join(source_root, "packages", "experimental", "tool-terminal", "src", "index.ts"),
+                encoding="utf-8",
+            ) as handle:
+                source = handle.read()
+            section_text = brand_map(extract_section_text(source, "pty"))
+            blocks.append(
+                "\n/// The `tool:pty` prompt-section text (the dsh `ctx.systemPrompt.section`"
+                " call in the tool-terminal plugin's apply, source-verbatim; one section"
+                " serves the six terminal tools).\n"
+            )
+            blocks.append(
+                f"pub const PTY_SECTION_TEXT: &str = {raw_literal(section_text)};\n"
+            )
         if tool == "job_output":
             with open(os.path.join(source_root, "packages", "jobs", "tool-jobs", "src", "index.ts"), encoding="utf-8") as handle:
                 source = handle.read()
@@ -708,6 +774,23 @@ def emit():
             blocks.append(
                 f"pub const {stem}_{suffix}: &str = {raw_literal(text)};\n"
             )
+    for (package, tool), stem in SCOPED_TOOLS.items():
+        description, _, parsed = extract_tool_scoped(catalog, package, tool)
+        description = brand_map(description)
+        parameters = brand_map(json.dumps(parsed, indent=2, ensure_ascii=False))
+        blocks.append(
+            f"\n/// The persistent `{tool}` tool description (catalog-verbatim; the"
+            f" dsh `{package}` package section).\n"
+        )
+        blocks.append(
+            f"pub const {stem}_DESCRIPTION: &str = {raw_literal(description)};\n"
+        )
+        blocks.append(
+            f"\n/// The persistent `{tool}` parameter table (the json block, verbatim).\n"
+        )
+        blocks.append(
+            f"pub const {stem}_PARAMETERS_JSON: &str = {raw_literal(parameters)};\n"
+        )
     generated = "".join(blocks)
     return write_or_check(rustfmt(generated, ".rs"))
 

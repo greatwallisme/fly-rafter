@@ -556,6 +556,13 @@ impl LocalPtySession {
         self.core.lock().expect("session core lock").motd.clone()
     }
 
+    /// Overwrites the captured startup output (the dsh `session.motd =`
+    /// assignment; the pwsh startup bootstrap publishes its settled
+    /// viewport through it).
+    pub(crate) fn set_motd(&self, motd: String) {
+        self.core.lock().expect("session core lock").motd = motd;
+    }
+
     /// Whether no output has been retained yet (the dsh
     /// `scrollback.isEmpty` startup gate).
     fn scrollback_is_empty(&self) -> bool {

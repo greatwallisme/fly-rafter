@@ -521,4 +521,46 @@ pub mod llm {
     pub const METHOD_RESOLVE_MODEL_INFO: u32 = 6;
 }
 
-// Rust guideline compliant 2026-10-29
+/// The `'terminals'` service face (the fr-shell PTY registry band; PRD
+/// :127 verbatim seam list).
+///
+/// The method band is this artifact's 3000+ range (the jobs 1000+ and
+/// shell 2000+ precedents: one export table, artifact-unique method
+/// space). The lock discipline matches the bands: spawns ride the
+/// backend's own startup bound, sends split into start/wait/cancel/read
+/// slices the consumer drives, and closes block through the bounded
+/// teardown ladder.
+pub mod terminals {
+    /// The provided service name consumers inject.
+    pub const SERVICE_NAME: &str = "terminals";
+    /// Face metadata echo.
+    pub const METHOD_DESCRIBE: u32 = 3000;
+    /// `{owner, type, name?, cwd?}` → the published spawn snapshot plus
+    /// motd (bounded by the backend startup).
+    pub const METHOD_SPAWN: u32 = 3001;
+    /// `{owner, sessionId, text, submit}` → `{}` (starts the exclusive
+    /// send; returns at once).
+    pub const METHOD_START_SEND: u32 = 3002;
+    /// `{owner, sessionId, timeoutMs}` → the settled send result or
+    /// `{settled: false}` (the slice wait).
+    pub const METHOD_SEND_WAIT: u32 = 3003;
+    /// `{owner, sessionId}` → `{cancelled: bool}` (the dsh cancel leg).
+    pub const METHOD_SEND_CANCEL: u32 = 3004;
+    /// `{owner, sessionId}` → `{delta, truncated}` (consuming read).
+    pub const METHOD_SEND_READ: u32 = 3005;
+    /// `{owner, sessionId, offset?, count?}` → the scrollback page.
+    pub const METHOD_READ: u32 = 3006;
+    /// `{owner, sessionId, signal}` → `{delivered, targetPgid}`.
+    pub const METHOD_SIGNAL: u32 = 3007;
+    /// `{owner, sessionId, reason?}` → `{closed: bool}` (blocks through
+    /// the bounded teardown; `false` = already closing).
+    pub const METHOD_KILL: u32 = 3008;
+    /// `{owner}` → `{sessions: [snapshot]}` (publication order).
+    pub const METHOD_LIST: u32 = 3009;
+    /// The absorbed background send (the dsh tool's `jobs.start` with
+    /// the send pull source; the closure cannot cross the wire, so the
+    /// job registration lives here — the `shell.start` judgment).
+    pub const METHOD_SEND_BACKGROUND: u32 = 3010;
+}
+
+// Rust guideline compliant 2026-11-01
