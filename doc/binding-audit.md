@@ -312,3 +312,16 @@ TOOLS spec 6 条 lsp 场景（4 个选择器）+ CONFIG spec 6 条 dsh-tool-lsp 
 - **测试基线**：fr-tools-builtin 331→337（lsp 域 4+pin 2）；fr-schema 47→48；workspace 1622 rc=0；clippy 全绿（LspToolInput 死字段删=诚实面无消费方/SectionGates 结构体化/test struct 前置三修）。
 - **lifecycle 基线（FR_DSH_SOURCE 下）**：TOOLS **324/0/84**（+6）；CONFIG **137/0/182**（+6）；PROMPT 47/0/0。零 fail。
 - **M1 结构性缺席档载**：①dsh-lsp-stdio servers 两 CONFIG 场景 pending（fr 无 stdio provider，M1 不做 language-server 子进程管理=Q94-A 16 范围既裁）；②renderUri win32 驱动器臂缺席（无 Windows lane，Q99-B 判例族）。
+
+## 二十、16f 批 2 步④ 绑定审计（load_workspace_dependencies，2026-11-02）
+
+TOOLS spec 4 条 wsd 场景（4 个选择器）全绑真实测试；CONFIG 无新增场景（Q16f-E：baked 不挂不部署，config source 必填面随 opt-in 部署走，无 scenario 即无 fr-schema 组）。
+
+- **Q16f-E 判例落地**：BAKED_WORKSPACE_DEPENDENCIES const false+注册臂 gated+const assert（inspect/lsp 判例同形）；BuiltinTools.wsd=Option（仅 opt-in 部署装配）；baked 装配 None（dsh 无 payload 部署同构=非偏差既裁）。
+- **工具脸（tool-workspace-dependencies 322 行全录）**：manifest 校验族全移植（parse_primary_runtime：semver/平台枚举/架构枚举/pnpm 需 node/digest hex64/分布名版形/legacy components 归一化+numpy/pandas 冲突文案逐字）；read/alias（POSIX python3/python 符号链接族+invalid Python alias 文案）/copy（dereference+alias 排除）/resolve/install 全机（staging mkdtemp 同构+previous 回滚舞+link 探测拒绝文案+same-manifest 短路）；platform/arch 兼容门（process.arch→x64|arm64 映射）；路径解析双平台臂（win32 python.exe/Lib 臂文本保留）。
+- **工具执行**：memoized preparation（失败清 memo=dsh `preparation = undefined` 臂）；`workspace dependencies: source and root must be absolute paths` 装配门逐字；参数形状门=cordis list 判例（`arguments must be an object`）；presentCall generic/read `Load workspace dependencies` 逐字；render pretty JSON。
+- **方法号 195-197**；describe 156→159（workspace_dependencies 三行）。
+- **TOOLS 4 条 → 4 钉测**：①「调度与呈现」→ `load_workspace_dependencies_registration_pins_the_row`（行 pin+gate off+card 值+装配门文案+四缺席键）；②「越界拒绝」→ `tool_gate_and_memo_faces`（形状门+失败 memo 清除双臂）；③「section 缺席」→ `prompt_sections_pin_the_twelve_tools`；④「行为 1」→ `resolve_and_install_round_trip`（真临时目录 payload：resolve 路径/别名校验+install 拷贝树+same-manifest 二次短路；staging 目录未创建缺陷当场修=dsh mkdtemp 建目录语义）。
+- **测试基线**：fr-tools-builtin 337→342（wsd 域 3+schema pin 1+plugin pin 1）；workspace 1627 rc=0 ×2 连跑（首轮单发 1 失败=已知 loopback flake 族）；clippy 全绿（Eq derive/unwrap_or_else/map_or_else/作用域化 MutexGuard/字段文档/panics doc 七起修）。
+- **lifecycle 基线（FR_DSH_SOURCE 下）**：TOOLS **328/0/80**（+4）；CONFIG 137/0/182；PROMPT 47/0/0。零 fail。
+- **M1 结构性缺席档载**：①config source/root 面无 fr-schema 组（无 scenario=无绑定义务；opt-in 部署面随 M2+ 装配落地）②windows 载荷路径臂为文本解析面（fr 实跑 posix；无 Windows lane，Q99-B 判例族）。

@@ -366,6 +366,11 @@ TOOLS = {
         ],
         "lsp",
     ),
+    "load_workspace_dependencies": (
+        "LOAD_WORKSPACE_DEPENDENCIES",
+        [],
+        "none",
+    ),
 }
 
 # The persistent-shell pair reuses the `bash`/`pwsh` tool names inside

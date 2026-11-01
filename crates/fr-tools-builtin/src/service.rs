@@ -356,6 +356,14 @@ pub const METHOD_LSP_EXECUTE: u32 = 192;
 pub const METHOD_LSP_RENDER: u32 = 193;
 /// Method selector: the `lsp` pending-call presentation.
 pub const METHOD_LSP_PRESENT_CALL: u32 = 194;
+/// Method selector: the `load_workspace_dependencies` tool body.
+pub const METHOD_WSD_EXECUTE: u32 = 195;
+/// Method selector: the `load_workspace_dependencies` render
+/// projection.
+pub const METHOD_WSD_RENDER: u32 = 196;
+/// Method selector: the `load_workspace_dependencies` present-call
+/// presentation.
+pub const METHOD_WSD_PRESENT_CALL: u32 = 197;
 
 /// The escalate-to modes this composition advertises (the dsh
 /// `ESCALATION_TARGETS` words in table order).
@@ -393,6 +401,7 @@ pub struct BuiltinTools {
     persistent_shells: std::sync::Arc<crate::persistent::PersistentShells>,
     inspect: std::sync::Arc<crate::inspect_tools::InspectRegistry>,
     lsp: std::sync::Arc<crate::lsp_tools::LspRegistry>,
+    wsd: Option<std::sync::Arc<crate::wsd_tools::WorkspaceDependenciesTool>>,
     web: std::sync::Arc<crate::web_seam::WebRuntime>,
     web_search_provider: Option<String>,
     web_fetch_provider: Option<String>,
@@ -429,6 +438,7 @@ impl BuiltinTools {
         persistent_shells: std::sync::Arc<crate::persistent::PersistentShells>,
         inspect: std::sync::Arc<crate::inspect_tools::InspectRegistry>,
         lsp: std::sync::Arc<crate::lsp_tools::LspRegistry>,
+        wsd: Option<std::sync::Arc<crate::wsd_tools::WorkspaceDependenciesTool>>,
         web: std::sync::Arc<crate::web_seam::WebRuntime>,
         web_search_provider: Option<String>,
         web_fetch_provider: Option<String>,
@@ -447,6 +457,7 @@ impl BuiltinTools {
             persistent_shells,
             inspect,
             lsp,
+            wsd,
             web,
             web_search_provider,
             web_fetch_provider,
@@ -689,6 +700,33 @@ impl BuiltinTools {
             METHOD_LSP_PRESENT_CALL => {
                 let args = request.get("args").cloned().unwrap_or(Value::Null);
                 json!(crate::lsp_tools::present_call(&args))
+            }
+            METHOD_WSD_EXECUTE => {
+                let call = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
+                let Some(wsd) = self.wsd.as_ref() else {
+                    return Err(
+                        "builtin-tools: the workspace-dependencies tool is not mounted".to_string(),
+                    );
+                };
+                return match wsd.execute(&arguments) {
+                    Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                        .map_err(|error| format!("body reply encode failed: {error}")),
+                    Err(error) => serde_json::to_vec(&json!({
+                        "error": { "message": error.message, "name": error.name },
+                    }))
+                    .map_err(|error| format!("body error encode failed: {error}")),
+                };
+            }
+            METHOD_WSD_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::wsd_tools::render(&args, &value))
+            }
+            METHOD_WSD_PRESENT_CALL => {
+                json!(crate::wsd_tools::WorkspaceDependenciesTool::present_call())
             }
             METHOD_TODOS_FOLD => {
                 let state = crate::todo::fold(
@@ -1992,9 +2030,18 @@ const DESCRIBE_INSPECT_METHODS: [&str; 6] = [
 /// rows describe the service methods, not a mounted tool).
 const DESCRIBE_LSP_METHODS: [&str; 3] = ["lsp.execute", "lsp.render", "lsp.presentCall"];
 
-const fn describe_methods() -> [&'static str; 156] {
+/// The 16f batch-2 workspace-dependencies rows: the one tool's three
+/// faces (the dsh `tool-workspace-dependencies` registration
+/// reality; the tool stays baked off).
+const DESCRIBE_WSD_METHODS: [&str; 3] = [
+    "workspace_dependencies.execute",
+    "workspace_dependencies.render",
+    "workspace_dependencies.presentCall",
+];
+
+const fn describe_methods() -> [&'static str; 159] {
     let mut index = 0;
-    let mut methods: [&'static str; 156] = [""; 156];
+    let mut methods: [&'static str; 159] = [""; 159];
     while index < 91 {
         methods[index] = DESCRIBE_BASE_METHODS[index];
         index += 1;
@@ -2030,6 +2077,11 @@ const fn describe_methods() -> [&'static str; 156] {
         methods[153 + lsp_index] = DESCRIBE_LSP_METHODS[lsp_index];
         lsp_index += 1;
     }
+    let mut wsd_index = 0;
+    while wsd_index < 3 {
+        methods[156 + wsd_index] = DESCRIBE_WSD_METHODS[wsd_index];
+        wsd_index += 1;
+    }
     methods
 }
 
@@ -2054,7 +2106,7 @@ mod tests {
     #[test]
     fn describe_surface_carries_the_web_pair() {
         let methods = super::describe_methods();
-        assert_eq!(methods.len(), 156);
+        assert_eq!(methods.len(), 159);
         for name in [
             "web_search.execute",
             "web_search.presentResult",
@@ -2073,7 +2125,7 @@ mod tests {
     #[test]
     fn describe_surface_carries_the_working_directory_band() {
         let methods = super::describe_methods();
-        assert_eq!(methods.len(), 156);
+        assert_eq!(methods.len(), 159);
         for name in [
             "workingDirectory.execute",
             "workingDirectory.render",
@@ -2091,7 +2143,7 @@ mod tests {
     #[test]
     fn describe_surface_carries_the_terminal_family() {
         let methods = super::describe_methods();
-        assert_eq!(methods.len(), 156);
+        assert_eq!(methods.len(), 159);
         for name in [
             "terminal_send.execute",
             "terminal_send.presentResult",

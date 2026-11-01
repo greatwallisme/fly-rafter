@@ -1706,6 +1706,15 @@ pub const LSP_LINE_TEXT: &str = r"One-based line of the cursor.";
 /// The `lsp` `character` parameter description (catalog-verbatim).
 pub const LSP_CHARACTER_TEXT: &str = r"One-based UTF-16 column of the cursor.";
 
+/// The `load_workspace_dependencies` tool description (catalog-verbatim).
+pub const LOAD_WORKSPACE_DEPENDENCIES_DESCRIPTION: &str = r"Get absolute paths to bundled Python and library directories, plus bundled Python distribution versions. Node.js and pnpm paths are included when the payload provides them. Python includes numpy, pandas, python-docx, python-pptx, openpyxl, Pillow, lxml, and XlsxWriter. Use these libraries for Office files unless the user or workspace instructions select another environment. When Node.js and pnpm paths are returned, run pnpm with that Node executable and pnpm script path. This does not change PATH or package-manager settings.";
+
+/// The `load_workspace_dependencies` parameter table (the json block, verbatim).
+pub const LOAD_WORKSPACE_DEPENDENCIES_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {}
+}"#;
+
 /// The persistent `bash` tool description (catalog-verbatim; the dsh `@deepseek-ai/dsh-tool-bash-persistent` package section).
 pub const BASH_PERSISTENT_DESCRIPTION: &str = r"Run commands in a persistent bash shell. State, including the current directory and exported environment variables, persists across calls for this agent.";
 

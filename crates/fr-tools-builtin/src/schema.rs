@@ -625,6 +625,39 @@ pub fn inspect_output_schema() -> Value {
     json!({ "type": "json" })
 }
 
+/// The `load_workspace_dependencies` parameter table (the
+/// catalog-frozen base: the empty object).
+#[must_use]
+pub fn load_workspace_dependencies_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {},
+    })
+}
+
+/// The `load_workspace_dependencies` output contract (the dsh
+/// `defineTool` `output.schema` verbatim shape).
+#[must_use]
+pub fn load_workspace_dependencies_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "python": { "type": "string", "required": true },
+            "node": { "type": "string", "description": "Absent when the payload ships no Node.js." },
+            "pnpm": { "type": "string", "description": "Absent when the payload ships no pnpm." },
+            "pythonPackages": { "type": "string", "required": true },
+            "nodePackages": { "type": "string", "description": "Absent when the payload ships no Node.js." },
+            "pythonDistributions": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": true,
+                "description": "Bundled distribution names and versions recorded in runtime.json; excludes user-installed additions.",
+            },
+        },
+    })
+}
+
 /// The `lsp` parameter table (the catalog-frozen base: the four rows).
 #[must_use]
 pub fn lsp_parameters() -> Value {
@@ -2187,6 +2220,48 @@ mod tests {
         assert_eq!(
             fetch_fields["truncated"],
             serde_json::json!({ "type": "boolean", "required": true })
+        );
+    }
+
+    /// The workspace-dependencies tables pin their catalog rows
+    /// (Q97-A: the empty parameter object and the six-field output
+    /// union with its absent-arm descriptions).
+    #[test]
+    fn load_workspace_dependencies_pins_the_catalog_tables() {
+        let parameters = super::load_workspace_dependencies_parameters();
+        assert_eq!(
+            parameters,
+            serde_json::json!({ "type": "object", "properties": {} })
+        );
+        let output = super::load_workspace_dependencies_output_schema();
+        let fields = output["properties"].as_object().expect("output fields");
+        assert_eq!(
+            fields.keys().collect::<Vec<_>>(),
+            vec![
+                "python",
+                "node",
+                "pnpm",
+                "pythonPackages",
+                "nodePackages",
+                "pythonDistributions"
+            ]
+        );
+        for required in ["python", "pythonPackages", "pythonDistributions"] {
+            assert_eq!(
+                fields[required]["required"],
+                serde_json::json!(true),
+                "{required}"
+            );
+        }
+        for optional in ["node", "pnpm", "nodePackages"] {
+            assert!(
+                fields[optional].get("required").is_none(),
+                "{optional} stays optional"
+            );
+        }
+        assert_eq!(
+            fields["pythonDistributions"]["additionalProperties"],
+            serde_json::json!(true)
         );
     }
 

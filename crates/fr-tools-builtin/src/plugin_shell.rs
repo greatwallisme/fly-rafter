@@ -1478,6 +1478,20 @@ fn register_tools(
             serde_json::to_vec(&lsp_registration()).ok()?.as_slice(),
         )?;
     }
+    // The workspace-dependencies tool (dsh `tool-workspace-
+    // dependencies`; the Q16f-E ruling — the baked composition mounts
+    // no row and ships no payload; the tool mounts only over a
+    // deployment config with a required payload source).
+    if crate::wsd_tools::BAKED_WORKSPACE_DEPENDENCIES {
+        step(
+            link,
+            fr_wire::services::tools::SERVICE_NAME,
+            fr_wire::services::tools::METHOD_REGISTER,
+            serde_json::to_vec(&load_workspace_dependencies_registration())
+                .ok()?
+                .as_slice(),
+        )?;
+    }
     // The terminal family (dsh `tool-terminal` + the two persistent
     // twins; one bake gate — the dsh base bundle mounts none, the
     // `BAKED_STR_REPLACE_EDITOR` judgment). The registered tool names
@@ -1684,6 +1698,33 @@ pub fn lsp_registration() -> Value {
             "method": crate::service::METHOD_LSP_PRESENT_CALL,
         },
         "timeoutMs": crate::lsp_tools::BAKED_LSP_TIMEOUT_MS,
+    })
+}
+
+/// The `load_workspace_dependencies` registration row (dsh
+/// `ctx.tools.register`; the baked gate stays off per the Q16f-E
+/// ruling — the row serves opt-in deployments carrying a payload).
+#[must_use]
+pub fn load_workspace_dependencies_registration() -> Value {
+    json!({
+        "name": "load_workspace_dependencies",
+        "description": crate::catalog_gen::LOAD_WORKSPACE_DEPENDENCIES_DESCRIPTION,
+        "parameters": crate::schema::load_workspace_dependencies_parameters(),
+        "output": {
+            "schema": crate::schema::load_workspace_dependencies_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_WSD_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_WSD_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_WSD_PRESENT_CALL,
+        },
     })
 }
 
@@ -2612,6 +2653,7 @@ impl BuiltinState {
             std::sync::Arc::new(crate::persistent::PersistentShells::default()),
             std::sync::Arc::new(crate::inspect_tools::InspectRegistry::new()),
             std::sync::Arc::new(crate::lsp_tools::LspRegistry::new()),
+            None,
             std::sync::Arc::new(web),
             Some(crate::web_tools::BAKED_SEARCH_PROVIDER.to_owned()),
             Some(crate::web_tools::BAKED_FETCH_PROVIDER.to_owned()),
@@ -3537,6 +3579,52 @@ mod tests {
             lsp: false,
         });
         assert!(without.iter().all(|(name, _, _)| name != "tool:lsp"));
+    }
+
+    /// The workspace-dependencies row keeps its registration
+    /// reachable with the baked gate off (the Q16f-E ruling): the
+    /// row carries the catalog identity and the generic read card,
+    /// and the tool config gate refuses relative paths.
+    #[test]
+    fn load_workspace_dependencies_registration_pins_the_row() {
+        const _: () = assert!(!crate::wsd_tools::BAKED_WORKSPACE_DEPENDENCIES);
+        let row = super::load_workspace_dependencies_registration();
+        assert_eq!(
+            row["name"],
+            serde_json::json!("load_workspace_dependencies")
+        );
+        assert_eq!(
+            row["description"],
+            serde_json::json!(crate::catalog_gen::LOAD_WORKSPACE_DEPENDENCIES_DESCRIPTION)
+        );
+        assert_eq!(
+            row["parameters"],
+            crate::schema::load_workspace_dependencies_parameters()
+        );
+        assert_eq!(
+            row["presentCall"]["method"],
+            serde_json::json!(crate::service::METHOD_WSD_PRESENT_CALL)
+        );
+        assert_eq!(
+            crate::wsd_tools::WorkspaceDependenciesTool::present_call(),
+            serde_json::json!({
+                "card": "generic",
+                "title": "Load workspace dependencies",
+                "kind": "read",
+            })
+        );
+        assert_eq!(
+            crate::wsd_tools::WorkspaceDependenciesTool::new("relative", None).unwrap_err(),
+            "workspace dependencies: source and root must be absolute paths"
+        );
+        for absent in [
+            "isConcurrencySafe",
+            "presentResult",
+            "presentationMeta",
+            "timeoutMs",
+        ] {
+            assert!(row.get(absent).is_none(), "{absent} stays absent");
+        }
     }
 
     /// The two web registration rows carry the full faces (the dsh

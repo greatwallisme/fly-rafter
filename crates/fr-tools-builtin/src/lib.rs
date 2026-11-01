@@ -83,3 +83,4 @@ pub mod web_search_perplexity;
 pub mod web_tools;
 pub mod working_directory;
 pub mod working_directory_tools;
+pub mod wsd_tools;

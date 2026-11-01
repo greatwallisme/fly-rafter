@@ -1575,3 +1575,9 @@
 - lsp_tools.rs（LspRegistry 空 route 表+parse/execute+render 族全移植+present+4 测试）；service.rs 192-194+三臂+describe 156；schema.rs 四行+双臂 output+Q97-A 钉测；plugin_shell 注册行+gated 臂+SectionGates 重构（4 布尔→3 场枚举）；fr-schema tool-lsp 嵌套组+钉测；generator lsp 表项+kind 分支+regen 幂等；bind-config +6 对；TOOLS 6 场景绑定。
 - 门：fmt/clippy/workspace 1622/doc 全绿；lifecycle TOOLS 324/0/84+CONFIG 137/0/182；测试名冲突改名判例（lsp_parse_args）。
 - **下一动作=步④（load_workspace_dependencies，Q16f-E opt-in source 必填）→ 步⑤（plugin_manager，Q16f-A）→ 步⑥（skill 全家，Q16f-C 全量）→ 步⑦ 收口（catalog SECTION_TEXTS 扩源+最终门）。**
+
+## 2026-11-02 — 16f 批 2 步④：load_workspace_dependencies（Q16f-E）
+
+- wsd_tools.rs（manifest 校验族/alias/copy/resolve/install 全机+memoized 工具+3 测试）；service.rs 195-197+三臂+describe 159+wsd Option 字段；plugin_shell 注册行+gated 臂+None 装配+pin；schema.rs 空参数+六字段输出+Q97-A 钉测；generator 表项+regen 幂等；TOOLS 4 场景绑定。
+- 门：fmt/clippy/workspace 1627×2/doc 全绿；lifecycle TOOLS 328/0/80 零 fail；staging 未创建缺陷当场修。
+- **下一动作=步⑤（plugin_manager，Q16f-A）→ 步⑥（skill 全家）→ 步⑦ 收口。**

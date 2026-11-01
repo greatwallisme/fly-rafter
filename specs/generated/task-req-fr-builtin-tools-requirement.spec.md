@@ -1945,25 +1945,25 @@ Scenario: skill 参数 name 约束
   那么 参数行 [name:string:req（精确技能名）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: load_workspace_dependencies 调度与呈现
-  Test: pending_req_fr_builtin_tools_load_workspace_dependencies
+  Test: load_workspace_dependencies_registration_pins_the_row
   假设 合约要求的行为已实现
   当 读取工具 load_workspace_dependencies 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 read
 
 Scenario: load_workspace_dependencies 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_load_workspace_dependencies
+  Test: tool_gate_and_memo_faces
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: load_workspace_dependencies 说明 section 注册缺席
-  Test: pending_req_fr_builtin_tools_load_workspace_dependencies_section
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 load_workspace_dependencies 无说明 section（dsh 真源 tool-workspace-dependencies 不注入 systemPrompt）
 
 Scenario: load_workspace_dependencies 行为 1
-  Test: pending_req_fr_builtin_tools_load_workspace_dependencies_1
+  Test: resolve_and_install_round_trip
   假设 工具 load_workspace_dependencies 执行时
   当 达到触发条件时
   那么 返回捆绑 Python+库路径与版本（numpy/pandas 等）；Node/pnpm 在 payload 提供时附上
