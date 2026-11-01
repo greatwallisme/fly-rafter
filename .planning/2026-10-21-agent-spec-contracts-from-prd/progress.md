@@ -1530,3 +1530,24 @@
 - 测试：web_tools 15 钉测（parse 拒绝表/format 三臂/present+meta 收窄表/execute 单查询直通+merge 轮转去重+cap/完成序首败/fetch parse+present+meta 表/execute 往返/render 三臂帽+源截/html 路由字节锚/深度预检臂/raw-text 截断臂/span+collapse 整改钉）；期望值全部探针手算先行。clippy --all-targets 下 web_tools 清零（含 7 处 doc 首段拆分）；web_search_deepseek 测试绑定 bare→numeric 改名。
 - **门状态**：fmt 全绿、clippy -p fr-tools-builtin -- -D warnings 绿、FR_DSH_SOURCE 下 crate 308/308、workspace 1588/0（+15）、workspace doc 零警告、8 连跑稳定。备注：步③ 4 个 provider 文件的测试侧 assert 风格 clippy 提示（--all-targets 形态才现形）不在官方门（cargo clippy -- -D warnings）射程，记录待后续清理轮。
 - **下一动作=步⑤集成收口：service.rs 174-183（web_search execute/render/presentCall/presentResult/presentationMeta 174-178、web_fetch 179-183）+describe 带/plugin_shell 注册行+system-prompt sections 2000/2100（TOOL_WEB_SEARCH/TOOL_WEB_FETCH 双变体文案）/schema.rs 参数+输出表（Q97-A 全 schema 钉测）/fr-schema config 七组（web/tool-web/web-search-deepseek/web-deepseek-api/web-fetch-http/web-search-exa/web-search-perplexity）/catalog 抽取扩源/十门全绿+TOOLS spec 绑定。**
+
+
+## 2026-11-01 — 16f 批 1 步⑤：web 双工具集成收口
+
+- 接线全落：service.rs 选择器 174-183+双 body server+describe 134→144+钉测；plugin_shell build_web_runtime 六 provider 注册（baked 选择 deepseek-official/http）+双注册行全脸+段表 12 节；schema.rs 双工具参数/输出表+Q97-A 钉测；web_tools baked 组合常量（60000/30000/开关/provider 钉）+段文案选择器。
+- fr-schema 配置七组落位（用户 A 裁决=新组嵌套/旧组平铺）：registry.rs 嵌套子对象+三钉测（键集/默认/封闭面/probe/投影）。
+- catalog 生成器扩源+再生成（WEB_SEARCH_DESCRIPTION/SECTION_TEXTS[2]/WEB_FETCH_SECTION_TEXT 等常量落地）；generate-tool-catalog --check 幂等。
+- 绑定收口：TOOLS spec 15 场景（8 选择器）、CONFIG spec 17 场景（10 选择器，bind-config-tests.py +17 对幂等复放）；binding-audit 十六节。
+- 测试基线：fr-tools-builtin 311→318、fr-schema 45→48、workspace 全测 rc=0。
+- **下一动作=lifecycle 双 spec+guard+全门复核+提交。**
+
+
+## 2026-11-01 — 步⑤ 收口段二：绑定+lifecycle+门禁
+
+- 绑定落地：TOOLS spec web 15 场景（8 选择器）+CONFIG spec web 17 场景（bind-config-tests.py +17 对幂等复放）+binding-audit 十六节。
+- **lifecycle 首跑暴露属性错位真因**：274/134（预期 299/109）——两次以「fn 行」为锚的插入（baked pin/registrations pin）在 insert 尾又复制了锚行，原测试的 doc+#[test] 被顶到新测试头上（--list 中 web_registrations 出现两次=双 #[test]，parse_args/prompt_sections 裸化为非测试→skip）。修复=doc/attr 归位原 fn；十二钉测 #[expect] reason ten→twelve 同步。**教训：锚=fn 行且 insert 尾含锚时必吞上方属性——insert 锚应含 #[test] 行或锚前置。**
+- 段钉测改名（ten→twelve）曾致 22 处既有绑定选择器失配→skip+10：lifecycle 计数对账（408=274+134 vs 16e 408=284+124）是发现此类的唯一信号。
+- --all-targets clippy 债务清零：步③记录的 10 处测试侧 assert 风格（assert_is_empty×5/bool_assert_comparison×3/assertions_on_constants×2）全修——is_empty→len()==0、bool 字面量→assert!、baked 双 gate 常量钉升编译期 const assert。
+- fr-schema 三 web 钉测调试三连修：Number 默认投影 float 序（30000.0/10 整数序按 Schema 变体）、违规断言改 violations[].path、嵌套投影指针 /anyOf/0/properties/<组>/anyOf/0/properties（wrap_value_positions 把 core 移入 anyOf[0]）。
+- 门：fr-tools-builtin 313/0 ×3 连跑稳（首轮 1 失败=已知 loopback flake 类单发，3/3 佐证）；clippy -p fr-tools-builtin --all-targets -D warnings 绿+workspace clippy 绿；fmt/三合约门/两抽取 --check 绿。
+- **下一动作=workspace test/doc 终门→lifecycle 双 spec 复跑（预期 TOOLS 299/0/109、CONFIG 131/0/188）→guard→stamp→提交。**

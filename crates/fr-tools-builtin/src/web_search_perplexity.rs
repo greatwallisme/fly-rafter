@@ -588,7 +588,7 @@ mod tests {
     fn map_perplexity_response_pins_the_narrowing_table() {
         let bare = map_perplexity_response(&json!({})).expect("bare envelope");
         assert_eq!(bare.content, None);
-        assert!(bare.sources.is_empty());
+        assert_eq!(bare.sources.len(), 0);
         let mapped = map_perplexity_response(&json!({
             "choices": "not an array",
             "citations": ["https://a/", 42, "https://b/"]

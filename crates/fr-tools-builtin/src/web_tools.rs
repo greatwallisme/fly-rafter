@@ -60,6 +60,32 @@ pub const DEFAULT_WEB_TOOL_TIMEOUT_MS: f64 = 30_000.0;
 /// converted synchronously (the dsh `DEFAULT_FETCH_MAX_OUTPUT_CHARS`).
 pub const DEFAULT_FETCH_MAX_OUTPUT_CHARS: usize = 200_000;
 
+/// The baked `tool-web` registration gate for `web_search` (the dsh
+/// base patch row composes both tools; the `search` default true).
+pub const BAKED_WEB_SEARCH_ENABLED: bool = true;
+/// The baked `tool-web` registration gate for `web_fetch` (the dsh
+/// base patch row's `fetch: true`).
+pub const BAKED_WEB_FETCH_ENABLED: bool = true;
+/// The baked deployment search budget (the dsh base patch
+/// `searchTimeoutMs: 60000` override; the schema default stays 30000).
+pub const BAKED_SEARCH_TIMEOUT_MS: f64 = 60_000.0;
+/// The baked deployment fetch budget (the base patch carries no
+/// override; the schema default rides).
+pub const BAKED_FETCH_TIMEOUT_MS: f64 = DEFAULT_WEB_TOOL_TIMEOUT_MS;
+/// The baked search-provider selection (the dsh base patch `web` row).
+pub const BAKED_SEARCH_PROVIDER: &str = "deepseek-official";
+/// The baked fetch-provider selection (see [`BAKED_SEARCH_PROVIDER`]).
+pub const BAKED_FETCH_PROVIDER: &str = "http";
+
+/// The `tool:web_search` section text (the dsh `fetchEnabled` ternary:
+/// the fetch-recommending variant while `web_fetch` shares the
+/// composition, the snippets variant otherwise).
+#[must_use]
+pub fn web_search_section_text(fetch_enabled: bool) -> String {
+    let index = usize::from(!fetch_enabled);
+    crate::catalog_gen::WEB_SEARCH_SECTION_TEXTS[index].to_owned()
+}
+
 /// The truncation notice appended when the provider or the output cap
 /// cut content (dsh `TRUNCATION_FOOTER`).
 const TRUNCATION_FOOTER: &str =
@@ -1198,6 +1224,8 @@ fn rewrite_open_tag(
 
 #[cfg(test)]
 mod tests {
+    const _: () = assert!(BAKED_WEB_SEARCH_ENABLED && BAKED_WEB_FETCH_ENABLED);
+
     use super::*;
     use crate::web_seam::WebSearchProvider;
     use std::sync::Arc;
@@ -1209,6 +1237,23 @@ mod tests {
             snippet: None,
             published_at: None,
         }
+    }
+
+    /// The baked tool-web composition (the dsh base patch judgment:
+    /// both gates true, the 60000 search-budget override, the untouched
+    /// fetch schema defaults, and the deepseek-official/http provider
+    /// pins; the CONFIG spec's deployed-default rows).
+    #[test]
+    fn baked_composition_pins_the_base_patch() {
+        // The two gates pin at compile time (a flipped constant is a
+        // build error, not a test failure).
+        assert!((BAKED_SEARCH_TIMEOUT_MS - 60_000.0).abs() < f64::EPSILON);
+        assert!((BAKED_FETCH_TIMEOUT_MS - DEFAULT_WEB_TOOL_TIMEOUT_MS).abs() < f64::EPSILON);
+        assert_eq!(BAKED_SEARCH_PROVIDER, "deepseek-official");
+        assert_eq!(BAKED_FETCH_PROVIDER, "http");
+        assert_eq!(WEB_SEARCH_MAX_RESULTS, 8);
+        assert_eq!(WEB_SEARCH_MAX_QUERIES, 4);
+        assert_eq!(DEFAULT_FETCH_MAX_OUTPUT_CHARS, 200_000);
     }
 
     /// The value-level refusals ride the dsh texts verbatim, including

@@ -531,17 +531,15 @@ mod tests {
             map_exa_result(&json!({"url": "https://a/", "highlights": 7})).unwrap_err(),
             "Exa returned an unprocessable response body: highlights is not an array"
         );
-        assert_eq!(
+        assert!(
             map_exa_result(&json!({"highlights": ["x"]}))
                 .expect("no url drops")
-                .is_none(),
-            true
+                .is_none()
         );
-        assert_eq!(
+        assert!(
             map_exa_result(&json!({"url": "https://b/"}))
                 .expect("no highlights drops")
-                .is_none(),
-            true
+                .is_none()
         );
         let mapped = map_exa_result(&json!({
             "url": "https://c/",
@@ -554,7 +552,7 @@ mod tests {
         assert_eq!(mapped.title, None);
         assert_eq!(mapped.published_at, None);
         let empty_results = map_exa_response(&json!({})).expect("absent results are empty");
-        assert!(empty_results.sources.is_empty());
+        assert_eq!(empty_results.sources.len(), 0);
     }
 
     /// The option resolution: config values over the `$EXA_API_KEY`

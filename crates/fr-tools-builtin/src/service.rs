@@ -4,8 +4,8 @@
 //! the fr-tools register face, the Q101A-prime seam-host judgment).
 //!
 //! Method selectors: 0 describe; bash 1 execute / 2 render /
-//! 3 presentCall / 4 presentResult; pwsh 11-14; 900 the
-//! `workingDirectory` projection fold. The execute frames follow the
+//! 3 presentCall / 4 presentResult; pwsh 11-14; the web pair
+//! 174-183; 900 the `workingDirectory` projection fold. The execute frames follow the
 //! fr-tools body protocol (`{call}` in, `{value}|{error}` out); the
 //! projection frames follow the register-wire projector protocol
 //! (`{args, value}` / `{args, result}` in, the view out).
@@ -310,6 +310,26 @@ pub const METHOD_PERSISTENT_PWSH_PRESENT_CALL: u32 = 172;
 /// The terminal finalize listener (the shared dsh `finalizeContent`
 /// carrier; the six tools' post-execute CPS arm).
 pub const METHOD_TERMINAL_FINALIZE: u32 = 173;
+/// Method selector: the `web_search` tool body.
+pub const METHOD_WEB_SEARCH_EXECUTE: u32 = 174;
+/// Method selector: the `web_search` render projection.
+pub const METHOD_WEB_SEARCH_RENDER: u32 = 175;
+/// Method selector: the `web_search` pending-call presentation.
+pub const METHOD_WEB_SEARCH_PRESENT_CALL: u32 = 176;
+/// Method selector: the `web_search` completed-result presentation.
+pub const METHOD_WEB_SEARCH_PRESENT_RESULT: u32 = 177;
+/// Method selector: the `web_search` presentation metadata.
+pub const METHOD_WEB_SEARCH_PRESENTATION_META: u32 = 178;
+/// Method selector: the `web_fetch` tool body.
+pub const METHOD_WEB_FETCH_EXECUTE: u32 = 179;
+/// Method selector: the `web_fetch` render projection.
+pub const METHOD_WEB_FETCH_RENDER: u32 = 180;
+/// Method selector: the `web_fetch` pending-call presentation.
+pub const METHOD_WEB_FETCH_PRESENT_CALL: u32 = 181;
+/// Method selector: the `web_fetch` completed-result presentation.
+pub const METHOD_WEB_FETCH_PRESENT_RESULT: u32 = 182;
+/// Method selector: the `web_fetch` presentation metadata.
+pub const METHOD_WEB_FETCH_PRESENTATION_META: u32 = 183;
 
 /// The escalate-to modes this composition advertises (the dsh
 /// `ESCALATION_TARGETS` words in table order).
@@ -345,6 +365,9 @@ pub struct BuiltinTools {
     session_query: std::sync::Arc<crate::session_query_tools::SessionQueryRuntime>,
     terminal_finalizes: std::sync::Arc<crate::terminal_tools::FinalizeParks>,
     persistent_shells: std::sync::Arc<crate::persistent::PersistentShells>,
+    web: std::sync::Arc<crate::web_seam::WebRuntime>,
+    web_search_provider: Option<String>,
+    web_fetch_provider: Option<String>,
 }
 
 impl std::fmt::Debug for BuiltinTools {
@@ -376,6 +399,9 @@ impl BuiltinTools {
         session_query: std::sync::Arc<crate::session_query_tools::SessionQueryRuntime>,
         terminal_finalizes: std::sync::Arc<crate::terminal_tools::FinalizeParks>,
         persistent_shells: std::sync::Arc<crate::persistent::PersistentShells>,
+        web: std::sync::Arc<crate::web_seam::WebRuntime>,
+        web_search_provider: Option<String>,
+        web_fetch_provider: Option<String>,
     ) -> Result<Self, String> {
         Ok(Self {
             seams,
@@ -389,6 +415,9 @@ impl BuiltinTools {
             session_query,
             terminal_finalizes,
             persistent_shells,
+            web,
+            web_search_provider,
+            web_fetch_provider,
         })
     }
 
@@ -1082,6 +1111,52 @@ impl BuiltinTools {
             METHOD_TERMINAL_FINALIZE => {
                 return serve_terminal_finalize(self, &request);
             }
+            METHOD_WEB_SEARCH_EXECUTE => {
+                return self.serve_web_search_body(&request);
+            }
+            METHOD_WEB_FETCH_EXECUTE => {
+                return self.serve_web_fetch_body(&request);
+            }
+            METHOD_WEB_SEARCH_RENDER => {
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::web_tools::format_search_output(&value))
+            }
+            METHOD_WEB_FETCH_RENDER => {
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::web_tools::format_fetch_output(
+                    &value,
+                    crate::web_tools::DEFAULT_FETCH_MAX_OUTPUT_CHARS
+                ))
+            }
+            METHOD_WEB_SEARCH_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::web_tools::present_search_call(&args))
+            }
+            METHOD_WEB_FETCH_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::web_tools::present_fetch_call(&args))
+            }
+            METHOD_WEB_SEARCH_PRESENT_RESULT => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let result = request.get("result").cloned().unwrap_or(Value::Null);
+                crate::web_tools::present_search_result(&args, &result).unwrap_or(Value::Null)
+            }
+            METHOD_WEB_FETCH_PRESENT_RESULT => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let result = request.get("result").cloned().unwrap_or(Value::Null);
+                crate::web_tools::present_fetch_result(&args, &result).unwrap_or(Value::Null)
+            }
+            METHOD_WEB_SEARCH_PRESENTATION_META => {
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::web_tools::search_meta_from_value(&value))
+            }
+            METHOD_WEB_FETCH_PRESENTATION_META => {
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::web_tools::fetch_meta_from_value(
+                    &value,
+                    crate::web_tools::DEFAULT_FETCH_MAX_OUTPUT_CHARS
+                ))
+            }
             METHOD_PLAN_POLICY_SECTION => {
                 // The dsh section text fn: the deployment guidance only
                 // renders while plan mode is active or pending for the
@@ -1226,6 +1301,59 @@ impl BuiltinTools {
 }
 
 impl BuiltinTools {
+    /// Serves one `web_search` body (the fr-tools body protocol:
+    /// `{call}` in, `{value}|{error}` out; the bounds ride the baked
+    /// tool-web composition).
+    fn serve_web_search_body(&self, request: &Value) -> Result<Vec<u8>, String> {
+        let call = request
+            .get("call")
+            .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+        let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
+        match crate::web_tools::execute_search(
+            &self.web,
+            self.web_search_provider.as_deref(),
+            &arguments,
+            crate::web_tools::WEB_SEARCH_MAX_RESULTS,
+            crate::web_tools::WEB_SEARCH_MAX_QUERIES,
+        ) {
+            Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                .map_err(|error| format!("body reply encode failed: {error}")),
+            Err(error) => serde_json::to_vec(&json!({
+                "error": {
+                    "code": error.code,
+                    "message": error.message,
+                    "name": error.name,
+                },
+            }))
+            .map_err(|error| format!("body error encode failed: {error}")),
+        }
+    }
+
+    /// Serves one `web_fetch` body (the same protocol; the output cap
+    /// rides the baked `fetchMaxOutputChars` default).
+    fn serve_web_fetch_body(&self, request: &Value) -> Result<Vec<u8>, String> {
+        let call = request
+            .get("call")
+            .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+        let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
+        match crate::web_tools::execute_fetch(
+            &self.web,
+            self.web_fetch_provider.as_deref(),
+            &arguments,
+        ) {
+            Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                .map_err(|error| format!("body reply encode failed: {error}")),
+            Err(error) => serde_json::to_vec(&json!({
+                "error": {
+                    "code": error.code,
+                    "message": error.message,
+                    "name": error.name,
+                },
+            }))
+            .map_err(|error| format!("body error encode failed: {error}")),
+        }
+    }
+
     /// Serves one terminal body (the ask-arm shape: the frame rides
     /// whole; the `BodyError` family encodes the code field).
     fn serve_terminal_body(
@@ -1681,9 +1809,25 @@ const DESCRIBE_TERMINAL_METHODS: [&str; 27] = [
     "terminal.finalize",
 ];
 
-const fn describe_methods() -> [&'static str; 134] {
+/// The 16f batch rows: the two web tools' five faces each (the dsh
+/// `tool-web` registration; the provider seam stays an in-crate domain
+/// service and takes no selectors — the Q93-A judgment).
+const DESCRIBE_WEB_METHODS: [&str; 10] = [
+    "web_search.execute",
+    "web_search.render",
+    "web_search.presentCall",
+    "web_search.presentResult",
+    "web_search.presentationMeta",
+    "web_fetch.execute",
+    "web_fetch.render",
+    "web_fetch.presentCall",
+    "web_fetch.presentResult",
+    "web_fetch.presentationMeta",
+];
+
+const fn describe_methods() -> [&'static str; 144] {
     let mut index = 0;
-    let mut methods: [&'static str; 134] = [""; 134];
+    let mut methods: [&'static str; 144] = [""; 144];
     while index < 91 {
         methods[index] = DESCRIBE_BASE_METHODS[index];
         index += 1;
@@ -1697,6 +1841,11 @@ const fn describe_methods() -> [&'static str; 134] {
     while terminal_index < 27 {
         methods[107 + terminal_index] = DESCRIBE_TERMINAL_METHODS[terminal_index];
         terminal_index += 1;
+    }
+    let mut web_index = 0;
+    while web_index < 10 {
+        methods[134 + web_index] = DESCRIBE_WEB_METHODS[web_index];
+        web_index += 1;
     }
     methods
 }
@@ -1717,13 +1866,31 @@ mod tests {
         assert!(methods.contains(&"pwsh.execute"));
     }
 
+    /// The 16f rows complete the web face: the two tools' five faces
+    /// each (144 selectors total).
+    #[test]
+    fn describe_surface_carries_the_web_pair() {
+        let methods = super::describe_methods();
+        assert_eq!(methods.len(), 144);
+        for name in [
+            "web_search.execute",
+            "web_search.presentResult",
+            "web_search.presentationMeta",
+            "web_fetch.execute",
+            "web_fetch.presentCall",
+            "web_fetch.presentationMeta",
+        ] {
+            assert!(methods.contains(&name), "missing {name}");
+        }
+    }
+
     /// The 16e rows complete the surface: the six terminal bands, the
     /// persistent twins' artifact-side rows, and the shared finalize
-    /// listener (134 selectors total).
+    /// listener.
     #[test]
     fn describe_surface_carries_the_terminal_family() {
         let methods = super::describe_methods();
-        assert_eq!(methods.len(), 134);
+        assert_eq!(methods.len(), 144);
         for name in [
             "terminal_send.execute",
             "terminal_send.presentResult",

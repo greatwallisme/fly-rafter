@@ -48,6 +48,8 @@ TOOL_SOURCES = {
     "edit": os.path.join("packages", "fs", "tool-fs", "src", "edit.ts"),
     "glob": os.path.join("packages", "fs", "tool-fs-search", "src", "glob.ts"),
     "grep": os.path.join("packages", "fs", "tool-fs-search", "src", "grep.ts"),
+    "web_search": os.path.join("packages", "web", "tool-web", "src", "search.ts"),
+    "web_fetch": os.path.join("packages", "web", "tool-web", "src", "fetch.ts"),
 }
 
 # The extracted tools: the Rust constant stem, the parameter-text keys
@@ -316,6 +318,20 @@ TOOLS = {
         "TERMINAL_LIST",
         [],
         "none",
+    ),
+    "web_search": (
+        "WEB_SEARCH",
+        [
+            ("queries", "QUERIES_TEXT"),
+        ],
+        "segments",
+    ),
+    "web_fetch": (
+        "WEB_FETCH",
+        [
+            ("url", "URL_TEXT"),
+        ],
+        "segments",
     ),
 }
 

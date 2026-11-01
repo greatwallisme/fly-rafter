@@ -544,19 +544,19 @@ Scenario: 默认值 projection-cache
   那么 值为 200 事件 5000ms
 
 Scenario: 默认值 web searchProvider
-  Test: pending_req_fr_config_web_searchprovider
+  Test: baked_composition_pins_the_base_patch
   假设 全默认配置启动
   当 读取 web searchProvider 时
   那么 值为 deepseek-official
 
 Scenario: 默认值 web fetchProvider
-  Test: pending_req_fr_config_web_fetchprovider
+  Test: baked_composition_pins_the_base_patch
   假设 全默认配置启动
   当 读取 web fetchProvider 时
   那么 值为 http
 
 Scenario: 默认值 tool-web searchTimeoutMs
-  Test: pending_req_fr_config_tool_web_searchtimeoutms
+  Test: baked_composition_pins_the_base_patch
   假设 全默认配置启动
   当 读取 tool-web searchTimeoutMs 时
   那么 值为 60000
@@ -1762,85 +1762,85 @@ Scenario: config dsh-tool-todo allowParallelInProgress 约束
   那么 配置行 [allowParallelInProgress:必填部署选择（true=多 in_progress；false=恰一且多标拒绝）] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-web search 默认
-  Test: pending_req_fr_config_config_dsh_tool_web_search
+  Test: builtin_config_pins_web_groups
   假设 插件 dsh-tool-web 已注册
   当 读取解析后配置时
   那么 配置行 [search:true] 的默认值按目录行实现
 
 Scenario: config dsh-tool-web search 约束
-  Test: pending_req_fr_config_config_dsh_tool_web_search
+  Test: builtin_config_pins_web_groups
   假设 插件 dsh-tool-web 已注册
   当 校验与生效时
   那么 配置行 [search:true] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-web fetch 默认
-  Test: pending_req_fr_config_config_dsh_tool_web_fetch
+  Test: builtin_config_pins_web_groups
   假设 插件 dsh-tool-web 已注册
   当 读取解析后配置时
   那么 配置行 [fetch:true] 的默认值按目录行实现
 
 Scenario: config dsh-tool-web fetch 约束
-  Test: pending_req_fr_config_config_dsh_tool_web_fetch
+  Test: builtin_config_pins_web_groups
   假设 插件 dsh-tool-web 已注册
   当 校验与生效时
   那么 配置行 [fetch:true] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-web fetchTimeoutMs 默认
-  Test: pending_req_fr_config_config_dsh_tool_web_fetchtimeoutms
+  Test: builtin_config_pins_web_groups
   假设 插件 dsh-tool-web 已注册
   当 读取解析后配置时
   那么 配置行 [fetchTimeoutMs:30000] 的默认值按目录行实现
 
 Scenario: config dsh-tool-web fetchTimeoutMs 约束
-  Test: pending_req_fr_config_config_dsh_tool_web_fetchtimeoutms
+  Test: builtin_config_pins_web_groups
   假设 插件 dsh-tool-web 已注册
   当 校验与生效时
   那么 配置行 [fetchTimeoutMs:30000] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-web searchTimeoutMs 默认
-  Test: pending_req_fr_config_config_dsh_tool_web_searchtimeoutms
+  Test: builtin_config_pins_web_groups
   假设 插件 dsh-tool-web 已注册
   当 读取解析后配置时
   那么 配置行 [searchTimeoutMs:30000] 的默认值按目录行实现
 
 Scenario: config dsh-tool-web searchTimeoutMs 约束
-  Test: pending_req_fr_config_config_dsh_tool_web_searchtimeoutms
+  Test: builtin_config_pins_web_groups
   假设 插件 dsh-tool-web 已注册
   当 校验与生效时
   那么 配置行 [searchTimeoutMs:30000] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-web fetchMaxOutputChars 默认
-  Test: pending_req_fr_config_config_dsh_tool_web_fetchmaxoutputchars
+  Test: builtin_config_pins_web_groups
   假设 插件 dsh-tool-web 已注册
   当 读取解析后配置时
   那么 配置行 [fetchMaxOutputChars:200000] 的默认值按目录行实现
 
 Scenario: config dsh-tool-web fetchMaxOutputChars 约束
-  Test: pending_req_fr_config_config_dsh_tool_web_fetchmaxoutputchars
+  Test: builtin_config_pins_web_groups
   假设 插件 dsh-tool-web 已注册
   当 校验与生效时
   那么 配置行 [fetchMaxOutputChars:200000] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-web-deepseek-api / dsh-web-fetch-http count 默认
-  Test: pending_req_fr_config_config_dsh_web_deepseek_api_dsh_web_fetch_http_count
+  Test: builtin_config_pins_web_groups
   假设 插件 dsh-web-deepseek-api / dsh-web-fetch-http 已注册
   当 读取解析后配置时
   那么 配置行 [count:10（1..50）] 的默认值按目录行实现
 
 Scenario: config dsh-web-deepseek-api / dsh-web-fetch-http count 约束
-  Test: pending_req_fr_config_config_dsh_web_deepseek_api_dsh_web_fetch_http_count
+  Test: builtin_config_pins_web_groups
   假设 插件 dsh-web-deepseek-api / dsh-web-fetch-http 已注册
   当 校验与生效时
   那么 配置行 [count:10（1..50）] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-web-deepseek-api / dsh-web-fetch-http sendOriginalQuestion 默认
-  Test: pending_req_fr_config_config_dsh_web_deepseek_api_dsh_web_fetch_http_sendoriginalquestion
+  Test: builtin_config_pins_web_groups
   假设 插件 dsh-web-deepseek-api / dsh-web-fetch-http 已注册
   当 读取解析后配置时
   那么 配置行 [sendOriginalQuestion:true] 的默认值按目录行实现
 
 Scenario: config dsh-web-deepseek-api / dsh-web-fetch-http sendOriginalQuestion 约束
-  Test: pending_req_fr_config_config_dsh_web_deepseek_api_dsh_web_fetch_http_sendoriginalquestion
+  Test: builtin_config_pins_web_groups
   假设 插件 dsh-web-deepseek-api / dsh-web-fetch-http 已注册
   当 校验与生效时
   那么 配置行 [sendOriginalQuestion:true] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写

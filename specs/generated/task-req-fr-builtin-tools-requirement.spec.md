@@ -79,7 +79,7 @@ Scenario: 注册表不含 plugin_market
   那么 不存在 plugin_market
 
 Scenario: web_search provider 可切换
-  Test: pending_req_fr_builtin_tools_web_search_provider
+  Test: selection_pins_the_configured_arms
   假设 web 搜索 provider 配置为 exa
   当 调用 web_search 时
   那么 请求经 exa 适配位发出
@@ -115,7 +115,7 @@ Scenario: bash 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: bash 说明 section 注册
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 bash 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -199,7 +199,7 @@ Scenario: pwsh 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: pwsh 说明 section 注册
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 pwsh 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -223,7 +223,7 @@ Scenario: persistent-bash 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: persistent-bash 说明 section 注册缺席
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 persistent bash 无说明 section（dsh 真源 tool-bash-persistent 不注入 systemPrompt）；注册表恰十条 tool:* section 且 order 位于 1000-3000
@@ -259,7 +259,7 @@ Scenario: persistent-pwsh 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: persistent-pwsh 说明 section 注册缺席
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 persistent pwsh 无说明 section（dsh 真源 tool-pwsh-persistent 不注入 systemPrompt）；注册表恰十条 tool:* section 且 order 位于 1000-3000
@@ -277,7 +277,7 @@ Scenario: read 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: read 说明 section 注册
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 read 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -337,7 +337,7 @@ Scenario: read_image 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: read_image 说明 section 注册缺席
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 read_image 无说明 section（dsh 真源 read-image.ts 不注入 systemPrompt）；注册表恰七条 tool:* section 且 order 位于 1000-3000
@@ -373,7 +373,7 @@ Scenario: write 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: write 说明 section 注册
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 write 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -421,7 +421,7 @@ Scenario: edit 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: edit 说明 section 注册
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 edit 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -493,7 +493,7 @@ Scenario: glob 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: glob 说明 section 注册
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 glob 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -541,7 +541,7 @@ Scenario: grep 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: grep 说明 section 注册
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 grep 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -697,73 +697,73 @@ Scenario: str_replace_editor 行为 1
   那么 view=cat -n；目录 view 列非隐藏两层；长输出截断标 <response clipped>；未用命令的 null 占位视为省略
 
 Scenario: web_search 调度与呈现
-  Test: pending_req_fr_builtin_tools_web_search
+  Test: web_registrations_pin_the_full_faces
   假设 合约要求的行为已实现
   当 读取工具 web_search 的声明时
   那么 executionMode 为 parallel（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 search+web
 
 Scenario: web_search 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_web_search
+  Test: parse_args_pins_the_refusals
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: web_search 说明 section 注册
-  Test: pending_req_fr_builtin_tools_web_search_section
+  Test: web_sections_carry_the_variant_texts
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 web_search 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: web_search 参数 queries 形状
-  Test: pending_req_fr_builtin_tools_web_search_queries
+  Test: web_tools_pin_the_catalog_tables
   假设 工具 web_search 已注册
   当 校验 schema 时
   那么 参数行 [queries:array<string>:req（1-4 条，结果合并）] 的名称与类型按目录行实现
 
 Scenario: web_search 参数 queries 约束
-  Test: pending_req_fr_builtin_tools_web_search_queries
+  Test: web_tools_pin_the_catalog_tables
   假设 工具 web_search 已注册
   当 校验 schema 时
   那么 参数行 [queries:array<string>:req（1-4 条，结果合并）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: web_search 行为 1
-  Test: pending_req_fr_builtin_tools_web_search_1
+  Test: execute_pins_single_and_merged_batches
   假设 工具 web_search 执行时
   当 达到触发条件时
   那么 可选摘要答案+源 URL 列表；config searchTimeoutMs 30000、searchMaxQueries/searchMaxResults 上限；后端 deepseek/exa/perplexity
 
 Scenario: web_fetch 调度与呈现
-  Test: pending_req_fr_builtin_tools_web_fetch
+  Test: web_registrations_pin_the_full_faces
   假设 合约要求的行为已实现
   当 读取工具 web_fetch 的声明时
   那么 executionMode 为 parallel（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 fetch+web
 
 Scenario: web_fetch 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_web_fetch
+  Test: fetch_presentation_pins_the_shapes
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: web_fetch 说明 section 注册
-  Test: pending_req_fr_builtin_tools_web_fetch_section
+  Test: web_sections_carry_the_variant_texts
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 web_fetch 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: web_fetch 参数 url 形状
-  Test: pending_req_fr_builtin_tools_web_fetch_url
+  Test: web_tools_pin_the_catalog_tables
   假设 工具 web_fetch 已注册
   当 校验 schema 时
   那么 参数行 [url:string:req（HTTP(S)）] 的名称与类型按目录行实现
 
 Scenario: web_fetch 参数 url 约束
-  Test: pending_req_fr_builtin_tools_web_fetch_url
+  Test: web_tools_pin_the_catalog_tables
   假设 工具 web_fetch 已注册
   当 校验 schema 时
   那么 参数行 [url:string:req（HTTP(S)）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: web_fetch 行为 1
-  Test: pending_req_fr_builtin_tools_web_fetch_1
+  Test: fetch_execute_round_trips_the_value
   假设 工具 web_fetch 执行时
   当 达到触发条件时
   那么 解码为文本；config fetchTimeoutMs 30000、fetchMaxOutputChars 200000、search/fetch 注册开关默认 true
@@ -781,7 +781,7 @@ Scenario: todo_write 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: todo_write 说明 section 注册缺席
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 todo_write 无说明 section（dsh 真源 tool-todo 不注入 systemPrompt）；注册表恰七条 tool:* section 且 order 位于 1000-3000
@@ -1135,7 +1135,7 @@ Scenario: schedule_create 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: schedule_create 说明 section 缺席
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 无工具 schedule_create 的说明 section（dsh 真源 tool-schedule 不注入 systemPrompt）；注册表恰十条 tool:* section 且 order 位于 1000-3000
@@ -1183,7 +1183,7 @@ Scenario: schedule_delete 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: schedule_delete 说明 section 缺席
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 无工具 schedule_delete 的说明 section（dsh 真源 tool-schedule 不注入 systemPrompt）；注册表恰十条 tool:* section 且 order 位于 1000-3000
@@ -1219,7 +1219,7 @@ Scenario: schedule_list 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: schedule_list 说明 section 缺席
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 无工具 schedule_list 的说明 section（dsh 真源 tool-schedule 不注入 systemPrompt）；注册表恰十条 tool:* section 且 order 位于 1000-3000
@@ -1243,7 +1243,7 @@ Scenario: schedule_update 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: schedule_update 说明 section 缺席
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 无工具 schedule_update 的说明 section（dsh 真源 tool-schedule 不注入 systemPrompt）；注册表恰十条 tool:* section 且 order 位于 1000-3000
@@ -1279,7 +1279,7 @@ Scenario: ask_user_question 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: ask_user_question 说明 section 缺席
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 无工具 ask_user_question 的说明 section（dsh 真源 tool-ask-user 不注入 systemPrompt，inject 仅 tools 与 userQuestions；Q16d-4A）；注册表恰十条 tool:* section 且 order 位于 1000-3000
@@ -1315,7 +1315,7 @@ Scenario: exit_plan_mode 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: exit_plan_mode 说明 section 缺席
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 无工具 exit_plan_mode 的说明 section（dsh 真源：plan:policy@500 段由 dsh-plan-mode 包注册而非工具注入；Q16d-4A）；注册表恰十条 tool:* section 且 order 位于 1000-3000
@@ -1435,7 +1435,7 @@ Scenario: session_search 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: session_search 说明 section 注册
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 session_search 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -1483,7 +1483,7 @@ Scenario: session_trace 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: session_trace 说明 section 注册
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 session_trace 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -1519,7 +1519,7 @@ Scenario: session_event_read 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: session_event_read 说明 section 注册
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 session_event_read 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -1561,7 +1561,7 @@ Scenario: session_event_search 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: session_event_search 说明 section 注册
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 session_event_search 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
@@ -1597,7 +1597,7 @@ Scenario: session_event_trace 参数越界拒绝
   那么 校验失败返回结构化错误且不执行
 
 Scenario: session_event_trace 说明 section 注册
-  Test: prompt_sections_pin_the_ten_tools
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 session_event_trace 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取

@@ -449,6 +449,102 @@ pub fn edit_output_schema() -> Value {
     })
 }
 
+/// The `web_search` parameter table (the catalog-frozen base; the query
+/// cap inside the description text is the baked dsh default).
+#[must_use]
+pub fn web_search_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "queries": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": catalog_gen::WEB_SEARCH_QUERIES_TEXT,
+            },
+        },
+        "required": ["queries"],
+    })
+}
+
+/// The `web_fetch` parameter table (the catalog-frozen base).
+#[must_use]
+pub fn web_fetch_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "url": {
+                "type": "string",
+                "description": catalog_gen::WEB_FETCH_URL_TEXT,
+            },
+        },
+        "required": ["url"],
+    })
+}
+
+/// The `web_search` output contract (the dsh `defineTool` `output.schema`
+/// verbatim shapes).
+#[must_use]
+pub fn web_search_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "content": { "type": "string" },
+            "sources": {
+                "type": "array",
+                "required": true,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "url": { "type": "string", "required": true },
+                        "title": { "type": "string" },
+                        "snippet": { "type": "string" },
+                        "publishedAt": { "type": "string" },
+                    },
+                },
+            },
+            "truncated": { "type": "boolean", "required": true },
+        },
+    })
+}
+
+/// The `web_fetch` output contract (the dsh `defineTool` `output.schema`
+/// verbatim shapes; the body union carries the html/text kind arms).
+#[must_use]
+pub fn web_fetch_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "url": { "type": "string", "required": true },
+            "statusCode": { "type": "integer", "required": true },
+            "body": {
+                "required": true,
+                "oneOf": [
+                    {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "kind": { "type": "string", "required": true, "const": "html" },
+                            "content": { "type": "string", "required": true },
+                        },
+                    },
+                    {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "kind": { "type": "string", "required": true, "const": "text" },
+                            "content": { "type": "string", "required": true },
+                        },
+                    },
+                ],
+            },
+            "truncated": { "type": "boolean", "required": true },
+        },
+    })
+}
+
 /// The glob tool description (the composed registration fact).
 ///
 /// The catalog-frozen base carries the sampled over-cap phrase; the
@@ -1802,6 +1898,107 @@ mod tests {
         let full = pwsh_description(true);
         assert!(full.contains("ConstrainedLanguage"));
         assert!(full.ends_with("avoid capturing output."));
+    }
+
+    /// The two web tables pin their catalog rows (Q97-A: one full-schema
+    /// pin per tool, the key sets, the required rows, and the optional
+    /// fields verbatim).
+    #[test]
+    fn web_tools_pin_the_catalog_tables() {
+        // web_search: the one `queries` array row, required, string
+        // items, the baked cap inside the catalog description.
+        let search = super::web_search_parameters();
+        let search_keys = search
+            .pointer("/properties")
+            .and_then(Value::as_object)
+            .expect("web_search properties");
+        assert_eq!(search_keys.len(), 1);
+        assert_eq!(search["required"], serde_json::json!(["queries"]));
+        assert_eq!(search_keys["queries"]["type"], serde_json::json!("array"));
+        assert_eq!(
+            search_keys["queries"]["items"],
+            serde_json::json!({ "type": "string" })
+        );
+        assert_eq!(
+            search_keys["queries"]["description"],
+            serde_json::json!(catalog_gen::WEB_SEARCH_QUERIES_TEXT)
+        );
+        let search_out = super::web_search_output_schema();
+        assert_eq!(search_out["additionalProperties"], serde_json::json!(false));
+        let sources = &search_out["properties"]["sources"];
+        assert_eq!(sources["required"], serde_json::json!(true));
+        assert_eq!(sources["type"], serde_json::json!("array"));
+        let source_keys = sources
+            .pointer("/items/properties")
+            .and_then(Value::as_object)
+            .expect("source item properties");
+        assert_eq!(
+            source_keys.keys().collect::<Vec<_>>(),
+            vec!["url", "title", "snippet", "publishedAt"]
+        );
+        assert_eq!(source_keys["url"]["required"], serde_json::json!(true));
+        for optional in ["publishedAt", "snippet", "title"] {
+            assert!(
+                source_keys[optional].get("required").is_none(),
+                "{optional} stays optional"
+            );
+        }
+        assert_eq!(
+            search_out["properties"]["truncated"],
+            serde_json::json!({ "type": "boolean", "required": true })
+        );
+        assert_eq!(
+            search_out["properties"]["content"],
+            serde_json::json!({ "type": "string" })
+        );
+
+        // web_fetch: the one `url` row, required; the body union's two
+        // kind arms; the status integer; the truncation flag.
+        let fetch = super::web_fetch_parameters();
+        let fetch_keys = fetch
+            .pointer("/properties")
+            .and_then(Value::as_object)
+            .expect("web_fetch properties");
+        assert_eq!(fetch_keys.len(), 1);
+        assert_eq!(fetch["required"], serde_json::json!(["url"]));
+        assert_eq!(fetch_keys["url"]["type"], serde_json::json!("string"));
+        assert_eq!(
+            fetch_keys["url"]["description"],
+            serde_json::json!(catalog_gen::WEB_FETCH_URL_TEXT)
+        );
+        let fetch_out = super::web_fetch_output_schema();
+        assert_eq!(fetch_out["additionalProperties"], serde_json::json!(false));
+        let fetch_fields = fetch_out["properties"].as_object().expect("fetch fields");
+        assert_eq!(
+            fetch_fields.keys().collect::<Vec<_>>(),
+            vec!["url", "statusCode", "body", "truncated"]
+        );
+        assert_eq!(fetch_fields["url"]["required"], serde_json::json!(true));
+        assert_eq!(
+            fetch_fields["statusCode"]["type"],
+            serde_json::json!("integer")
+        );
+        assert_eq!(
+            fetch_fields["statusCode"]["required"],
+            serde_json::json!(true)
+        );
+        let arms = fetch_fields["body"]["oneOf"]
+            .as_array()
+            .expect("body oneOf");
+        assert_eq!(arms.len(), 2);
+        for (arm, kind) in arms.iter().zip(["html", "text"]) {
+            assert_eq!(arm["additionalProperties"], serde_json::json!(false));
+            let arm_keys = arm["properties"].as_object().expect("arm properties");
+            assert_eq!(arm_keys.keys().collect::<Vec<_>>(), vec!["kind", "content"]);
+            assert_eq!(arm_keys["kind"]["const"], serde_json::json!(kind));
+            assert_eq!(arm_keys["kind"]["required"], serde_json::json!(true));
+            assert_eq!(arm_keys["content"]["required"], serde_json::json!(true));
+        }
+        assert_eq!(fetch_fields["body"]["required"], serde_json::json!(true));
+        assert_eq!(
+            fetch_fields["truncated"],
+            serde_json::json!({ "type": "boolean", "required": true })
+        );
     }
 
     /// The output contract's three union arms carry the exact key sets.

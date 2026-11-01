@@ -739,7 +739,7 @@ mod tests {
             .available()
         );
         // The fetch provider carries no count contract.
-        assert!(DeepSeekFetchApiProvider::new(fetch_options("not a url")).available() == false);
+        assert!(!DeepSeekFetchApiProvider::new(fetch_options("not a url")).available());
         assert!(
             DeepSeekFetchApiProvider::new(fetch_options("https://api.example/v1/tools"))
                 .available()
@@ -841,7 +841,7 @@ mod tests {
                 max_results: Some(3),
             })
             .expect("search runs");
-        assert!(outcome.sources.is_empty());
+        assert_eq!(outcome.sources.len(), 0);
 
         // The gate off (the dsh config default is on) sends nothing —
         // pinned by the first loopback, the gate on with no source
@@ -851,7 +851,7 @@ mod tests {
             original_question: None,
             ..search_options("https://api.example/v1/tools")
         });
-        assert_eq!(gateless.options.send_original_question, true);
+        assert!(gateless.options.send_original_question);
     }
 
     /// Read one full HTTP request off the socket: complete when the
@@ -1000,7 +1000,7 @@ mod tests {
             "DeepSeek returned an invalid response body"
         );
         let empty = map_search_response(&json!({"results": []})).expect("empty results pass");
-        assert!(empty.sources.is_empty());
+        assert_eq!(empty.sources.len(), 0);
     }
 
     /// The option resolution: config values, the credential-ref-named

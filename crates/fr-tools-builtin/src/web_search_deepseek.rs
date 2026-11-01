@@ -911,7 +911,7 @@ mod tests {
             {"type": "web_search_tool_result"}
         ]}))
         .expect("a result block with no items is empty sources");
-        assert!(bare_block.sources.is_empty());
+        assert_eq!(bare_block.sources.len(), 0);
     }
 
     /// First occurrence wins per URL; blank urls and cited texts skip.

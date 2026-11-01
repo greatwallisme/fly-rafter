@@ -771,6 +771,59 @@ fn read_default_mode(link: &HostLink) -> Option<Vec<&'static str>> {
     Some(escalation_modes_from(mode_word))
 }
 
+/// The environment lookup for the provider option resolution (the dsh
+/// `process.env` read; the credential layer resolves once at activation
+/// because the fr provider options are construction-time data — the
+/// per-operation env re-read is the one seam-route deviation, recorded
+/// in the module notes).
+fn web_env(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
+/// The baked web runtime over the dsh base composition's provider set:
+/// the four base rows' providers register over the baked group
+/// defaults, and the exa/perplexity implementations register too (the
+/// `available` gate absorbs the missing credentials; the baked
+/// selection pins deepseek-official/http, so the ambiguity arm stays
+/// unreachable).
+fn build_web_runtime() -> Option<crate::web_seam::WebRuntime> {
+    let deepseek_group = json!({ "api-key-env": "DEEPSEEK_API_KEY" });
+    let env = |name: &str| web_env(name);
+    let mut runtime = crate::web_seam::WebRuntime::new();
+    let official: std::sync::Arc<dyn crate::web_seam::WebSearchProvider> =
+        std::sync::Arc::new(crate::web_search_deepseek::DeepSeekSearchProvider::new(
+            crate::web_search_deepseek::resolve_options(&deepseek_group, &env),
+        ));
+    runtime.register_search_provider(official).ok()?;
+    let api_search: std::sync::Arc<dyn crate::web_seam::WebSearchProvider> =
+        std::sync::Arc::new(crate::web_deepseek_api::DeepSeekSearchApiProvider::new(
+            crate::web_deepseek_api::resolve_search_options(&deepseek_group, &env),
+        ));
+    runtime.register_search_provider(api_search).ok()?;
+    let api_fetch: std::sync::Arc<dyn crate::web_seam::WebFetchProvider> =
+        std::sync::Arc::new(crate::web_deepseek_api::DeepSeekFetchApiProvider::new(
+            crate::web_deepseek_api::resolve_fetch_options(&deepseek_group, &env),
+        ));
+    runtime.register_fetch_provider(api_fetch).ok()?;
+    let http = crate::web_fetch_http::HttpFetchProvider::new(
+        crate::web_fetch_http::resolve_limits(&json!({})).ok()?,
+    );
+    runtime
+        .register_fetch_provider(std::sync::Arc::new(http))
+        .ok()?;
+    let exa: std::sync::Arc<dyn crate::web_seam::WebSearchProvider> =
+        std::sync::Arc::new(crate::web_search_exa::ExaSearchProvider::new(
+            crate::web_search_exa::resolve_options(&json!({}), &env),
+        ));
+    runtime.register_search_provider(exa).ok()?;
+    let perplexity: std::sync::Arc<dyn crate::web_seam::WebSearchProvider> =
+        std::sync::Arc::new(crate::web_search_perplexity::PerplexitySearchProvider::new(
+            crate::web_search_perplexity::resolve_options(&json!({}), &env),
+        ));
+    runtime.register_search_provider(perplexity).ok()?;
+    Some(runtime)
+}
+
 /// The eight prompt sections (dsh `ctx.systemPrompt.section`): the names,
 /// the dsh orders, and the script-extracted verbatim texts (the catalog
 /// generator; the PRD 22 rule — the texts live in the dsh tool sources,
@@ -781,13 +834,21 @@ fn read_default_mode(link: &HostLink) -> Option<Vec<&'static str>> {
 /// template. The `str_replace_editor` registers no section (the dsh
 /// source injects no systemPrompt; the Q16b-4A ruling).
 pub(crate) fn prompt_sections() -> Vec<(String, f64, String)> {
-    prompt_sections_with(crate::terminal_tools::terminal_tools_registered())
+    prompt_sections_with(
+        crate::terminal_tools::terminal_tools_registered(),
+        crate::web_tools::BAKED_WEB_SEARCH_ENABLED,
+        crate::web_tools::BAKED_WEB_FETCH_ENABLED,
+    )
 }
 
 /// The parameterized section table (the gate drives the `tool:pty`
 /// row: the dsh section call lives inside the tool-terminal apply, so
 /// the unmounted composition registers nothing).
-pub(crate) fn prompt_sections_with(terminals: bool) -> Vec<(String, f64, String)> {
+pub(crate) fn prompt_sections_with(
+    terminals: bool,
+    web_search: bool,
+    web_fetch: bool,
+) -> Vec<(String, f64, String)> {
     let mut sections = vec![
         (
             "tool:bash".to_owned(),
@@ -840,6 +901,20 @@ pub(crate) fn prompt_sections_with(terminals: bool) -> Vec<(String, f64, String)
             crate::catalog_gen::SESSION_QUERY_SECTION_TEXT.to_owned(),
         ),
     ];
+    if web_search {
+        sections.push((
+            "tool:web_search".to_owned(),
+            2000.0,
+            crate::web_tools::web_search_section_text(web_fetch),
+        ));
+    }
+    if web_fetch {
+        sections.push((
+            "tool:web_fetch".to_owned(),
+            2100.0,
+            crate::catalog_gen::WEB_FETCH_SECTION_TEXT.to_owned(),
+        ));
+    }
     if terminals {
         sections.push((
             "tool:pty".to_owned(),
@@ -1267,6 +1342,30 @@ fn register_tools(
             serde_json::to_vec(&registration).ok()?.as_slice(),
         )?;
     }
+    // The two web tools (dsh `tool-web`; the baked gates mirror the
+    // base patch row's `fetch: true` and the `search` default. An
+    // enabled tool stays visible while its provider is unavailable —
+    // the execution-time structured error is the dsh judgment).
+    if crate::web_tools::BAKED_WEB_SEARCH_ENABLED {
+        step(
+            link,
+            fr_wire::services::tools::SERVICE_NAME,
+            fr_wire::services::tools::METHOD_REGISTER,
+            serde_json::to_vec(&web_search_registration())
+                .ok()?
+                .as_slice(),
+        )?;
+    }
+    if crate::web_tools::BAKED_WEB_FETCH_ENABLED {
+        step(
+            link,
+            fr_wire::services::tools::SERVICE_NAME,
+            fr_wire::services::tools::METHOD_REGISTER,
+            serde_json::to_vec(&web_fetch_registration())
+                .ok()?
+                .as_slice(),
+        )?;
+    }
     // The terminal family (dsh `tool-terminal` + the two persistent
     // twins; one bake gate — the dsh base bundle mounts none, the
     // `BAKED_STR_REPLACE_EDITOR` judgment). The registered tool names
@@ -1294,6 +1393,80 @@ fn register_tools(
     register_spill_listeners(link);
     register_finalize_listeners(link);
     Some(())
+}
+
+/// The `web_search` registration row (dsh `ctx.tools.register`,
+/// call-for-call; the full face with the baked search budget and the
+/// concurrency-safe provider read).
+#[must_use]
+pub fn web_search_registration() -> Value {
+    json!({
+        "name": "web_search",
+        "description": crate::catalog_gen::WEB_SEARCH_DESCRIPTION,
+        "parameters": crate::schema::web_search_parameters(),
+        "output": {
+            "schema": crate::schema::web_search_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_WEB_SEARCH_RENDER,
+            },
+            "presentationMeta": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_WEB_SEARCH_PRESENTATION_META,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_WEB_SEARCH_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_WEB_SEARCH_PRESENT_CALL,
+        },
+        "presentResult": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_WEB_SEARCH_PRESENT_RESULT,
+        },
+        "isConcurrencySafe": true,
+        "timeoutMs": crate::web_tools::BAKED_SEARCH_TIMEOUT_MS,
+    })
+}
+
+/// The `web_fetch` registration row (dsh `ctx.tools.register`,
+/// call-for-call; the full face with the baked fetch budget and the
+/// concurrency-safe provider read).
+#[must_use]
+pub fn web_fetch_registration() -> Value {
+    json!({
+        "name": "web_fetch",
+        "description": crate::catalog_gen::WEB_FETCH_DESCRIPTION,
+        "parameters": crate::schema::web_fetch_parameters(),
+        "output": {
+            "schema": crate::schema::web_fetch_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_WEB_FETCH_RENDER,
+            },
+            "presentationMeta": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_WEB_FETCH_PRESENTATION_META,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_WEB_FETCH_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_WEB_FETCH_PRESENT_CALL,
+        },
+        "presentResult": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_WEB_FETCH_PRESENT_RESULT,
+        },
+        "isConcurrencySafe": true,
+        "timeoutMs": crate::web_tools::BAKED_FETCH_TIMEOUT_MS,
+    })
 }
 
 /// The `terminal_open` registration row (dsh `ctx.tools.register`,
@@ -2190,6 +2363,12 @@ impl BuiltinState {
             )),
             max_search_results: crate::session_query_tools::BAKED_MAX_SEARCH_RESULTS,
         });
+        // The baked web runtime (the dsh base composition: the four
+        // base rows' providers register over the baked group defaults;
+        // the exa/perplexity implementations ride in with their
+        // availability gates absorbing the missing credentials, and the
+        // baked selection keeps the ambiguity arm unreachable).
+        let web = build_web_runtime()?;
         let tools = BuiltinTools::new(
             Box::new(seams),
             env_arc,
@@ -2202,6 +2381,9 @@ impl BuiltinState {
             Arc::clone(&session_query),
             std::sync::Arc::new(crate::terminal_tools::FinalizeParks::default()),
             std::sync::Arc::new(crate::persistent::PersistentShells::default()),
+            std::sync::Arc::new(web),
+            Some(crate::web_tools::BAKED_SEARCH_PROVIDER.to_owned()),
+            Some(crate::web_tools::BAKED_FETCH_PROVIDER.to_owned()),
         )
         .ok()?;
 
@@ -2947,7 +3129,124 @@ pub fn session_event_read_registration() -> Value {
 
 #[cfg(test)]
 mod tests {
-    /// The ten tool sections ride the dsh orders and their verbatim
+    /// The two web registration rows carry the full faces (the dsh
+    /// `tool-web` registration: parallel scheduling, the catalog
+    /// descriptions, the service-route faces, and the baked budgets).
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the pin mirrors the two registrations face by face; splitting it would hide the face correspondence"
+    )]
+    fn web_registrations_pin_the_full_faces() {
+        let search = super::web_search_registration();
+        assert_eq!(search["name"], serde_json::json!("web_search"));
+        assert_eq!(
+            search["description"],
+            serde_json::json!(crate::catalog_gen::WEB_SEARCH_DESCRIPTION)
+        );
+        assert_eq!(search["parameters"], crate::schema::web_search_parameters());
+        assert_eq!(
+            search["output"]["schema"],
+            crate::schema::web_search_output_schema()
+        );
+        assert_eq!(
+            search["output"]["render"]["method"],
+            serde_json::json!(crate::service::METHOD_WEB_SEARCH_RENDER)
+        );
+        assert_eq!(
+            search["output"]["presentationMeta"]["method"],
+            serde_json::json!(crate::service::METHOD_WEB_SEARCH_PRESENTATION_META)
+        );
+        assert_eq!(
+            search["execute"]["method"],
+            serde_json::json!(crate::service::METHOD_WEB_SEARCH_EXECUTE)
+        );
+        assert_eq!(
+            search["presentCall"]["method"],
+            serde_json::json!(crate::service::METHOD_WEB_SEARCH_PRESENT_CALL)
+        );
+        assert_eq!(
+            search["presentResult"]["method"],
+            serde_json::json!(crate::service::METHOD_WEB_SEARCH_PRESENT_RESULT)
+        );
+        assert_eq!(search["isConcurrencySafe"], serde_json::json!(true));
+        assert_eq!(
+            search["timeoutMs"],
+            serde_json::json!(crate::web_tools::BAKED_SEARCH_TIMEOUT_MS)
+        );
+        // The presentation family (the pending call's search card and
+        // the completed call's web card).
+        assert_eq!(
+            crate::web_tools::present_search_call(&serde_json::json!({
+                "queries": ["a"],
+            }))["kind"],
+            serde_json::json!("search")
+        );
+        assert_eq!(
+            crate::web_tools::present_search_result(
+                &serde_json::json!({ "queries": ["a"] }),
+                &serde_json::json!({
+                    "isError": false,
+                    "meta": { "sources": [], "truncated": false },
+                }),
+            )
+            .expect("the search card")["card"],
+            serde_json::json!("web")
+        );
+        let fetch = super::web_fetch_registration();
+        assert_eq!(fetch["name"], serde_json::json!("web_fetch"));
+        assert_eq!(
+            fetch["description"],
+            serde_json::json!(crate::catalog_gen::WEB_FETCH_DESCRIPTION)
+        );
+        assert_eq!(fetch["parameters"], crate::schema::web_fetch_parameters());
+        assert_eq!(
+            fetch["output"]["schema"],
+            crate::schema::web_fetch_output_schema()
+        );
+        assert_eq!(
+            fetch["output"]["render"]["method"],
+            serde_json::json!(crate::service::METHOD_WEB_FETCH_RENDER)
+        );
+        assert_eq!(
+            fetch["output"]["presentationMeta"]["method"],
+            serde_json::json!(crate::service::METHOD_WEB_FETCH_PRESENTATION_META)
+        );
+        assert_eq!(
+            fetch["execute"]["method"],
+            serde_json::json!(crate::service::METHOD_WEB_FETCH_EXECUTE)
+        );
+        assert_eq!(
+            fetch["presentCall"]["method"],
+            serde_json::json!(crate::service::METHOD_WEB_FETCH_PRESENT_CALL)
+        );
+        assert_eq!(
+            fetch["presentResult"]["method"],
+            serde_json::json!(crate::service::METHOD_WEB_FETCH_PRESENT_RESULT)
+        );
+        assert_eq!(fetch["isConcurrencySafe"], serde_json::json!(true));
+        assert_eq!(
+            fetch["timeoutMs"],
+            serde_json::json!(crate::web_tools::BAKED_FETCH_TIMEOUT_MS)
+        );
+        assert_eq!(
+            crate::web_tools::present_fetch_call(&serde_json::json!({ "url": "https://a.test" }))["kind"],
+            serde_json::json!("fetch")
+        );
+        assert_eq!(
+            crate::web_tools::present_fetch_result(
+                &serde_json::json!({ "url": "https://a.test" }),
+                &serde_json::json!({
+                    "isError": false,
+                    "meta": { "url": "https://a.test", "statusCode": 200, "truncated": false },
+                }),
+            )
+            .expect("the fetch card")["card"],
+            serde_json::json!("web")
+        );
+    }
+
+    /// The twelve tool sections ride the dsh orders and their verbatim
     /// texts: the bash order opens the 1000-3000 tool band, the pwsh
     /// twin sits ten above it, the fs trio rides the dsh
     /// read/write/edit orders, the discovery pair rides the glob/grep
@@ -2957,18 +3256,20 @@ mod tests {
     /// session-query guidance rides the `TOOL_SESSION_QUERY` order (one
     /// section serving the five tools; the builtin-tools contract's
     /// section clause; the write and grep texts carry the composed
-    /// conditional tails). The count pins the absences too: the image
+    /// conditional tails), and the web pair rides the `TOOL_WEB_SEARCH`/
+    /// `TOOL_WEB_FETCH` orders with the fetch-variant search text. The
+    /// count pins the absences too: the image
     /// tool, the opt-in editor, and the whole-list snapshot tool
     /// register no section (the dsh sources inject no systemPrompt; the
     /// Q16b-4A, Q16b-5A, and Q16c batch-2 rulings).
     #[test]
     #[expect(
         clippy::too_many_lines,
-        reason = "the pin mirrors the ten dsh sections one anchor per section; splitting it would hide the band correspondence"
+        reason = "the pin mirrors the twelve dsh sections one anchor per section; splitting it would hide the band correspondence"
     )]
-    fn prompt_sections_pin_the_ten_tools() {
+    fn prompt_sections_pin_the_twelve_tools() {
         let sections = super::prompt_sections();
-        assert_eq!(sections.len(), 10);
+        assert_eq!(sections.len(), 12);
         assert!(
             sections.iter().all(|(name, _, _)| !name.contains("todo")
                 && !name.contains("image")
@@ -3119,10 +3420,43 @@ mod tests {
         }
     }
 
+    /// The two web sections ride their dsh orders with the variant
+    /// texts: the search text recommends `web_fetch` while the fetch
+    /// tool shares the composition and falls back to the snippets
+    /// variant otherwise; the fetch text is the one verbatim guidance.
+    #[test]
+    fn web_sections_carry_the_variant_texts() {
+        let both = super::prompt_sections_with(true, true, true);
+        let search = both
+            .iter()
+            .find(|(name, _, _)| name == "tool:web_search")
+            .expect("the search section registers");
+        assert_eq!(search.1, 2000.0);
+        assert_eq!(search.2, crate::catalog_gen::WEB_SEARCH_SECTION_TEXTS[0]);
+        let fetch = both
+            .iter()
+            .find(|(name, _, _)| name == "tool:web_fetch")
+            .expect("the fetch section registers");
+        assert_eq!(fetch.1, 2100.0);
+        assert_eq!(fetch.2, crate::catalog_gen::WEB_FETCH_SECTION_TEXT);
+        let search_only = super::prompt_sections_with(true, true, false);
+        let fallback = search_only
+            .iter()
+            .find(|(name, _, _)| name == "tool:web_search")
+            .expect("the search section registers without fetch");
+        assert_eq!(fallback.2, crate::catalog_gen::WEB_SEARCH_SECTION_TEXTS[1]);
+        assert!(
+            search_only
+                .iter()
+                .all(|(name, _, _)| name != "tool:web_fetch"),
+            "the fetch section stays absent while disabled"
+        );
+    }
+
     /// The `tool:pty` section joins only when the terminal family is
-    /// enabled: the baked default stays at the ten rows (the opt-in
-    /// judgment) while the enabled face pins the dsh `TOOL_PTY` order
-    /// 1700 and the extracted text anchors.
+    /// enabled: the baked default stays at the web-pair rows (the
+    /// opt-in judgment) while the enabled face pins the dsh `TOOL_PTY`
+    /// order 1700 and the extracted text anchors.
     #[test]
     fn pty_section_registers_only_when_enabled() {
         assert!(
@@ -3131,8 +3465,8 @@ mod tests {
                 .all(|(name, _, _)| name != "tool:pty"),
             "the baked default carries no pty section"
         );
-        let enabled = super::prompt_sections_with(true);
-        assert_eq!(enabled.len(), 11);
+        let enabled = super::prompt_sections_with(true, true, true);
+        assert_eq!(enabled.len(), 13);
         let pty = enabled
             .iter()
             .find(|(name, _, _)| name == "tool:pty")

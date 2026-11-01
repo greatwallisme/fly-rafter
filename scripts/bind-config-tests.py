@@ -32,6 +32,23 @@ SPEC = Path("specs/generated/task-req-fr-config-requirement.spec.md")
 
 # (scenario title, expected current selector prefix, new selector)
 PAIRS = [
+    ("默认值 web searchProvider", "pending_req_fr_config", "baked_composition_pins_the_base_patch"),
+    ("默认值 web fetchProvider", "pending_req_fr_config", "baked_composition_pins_the_base_patch"),
+    ("默认值 tool-web searchTimeoutMs", "pending_req_fr_config", "baked_composition_pins_the_base_patch"),
+    ("config dsh-tool-web search 默认", "pending_req_fr_config", "builtin_config_pins_web_groups"),
+    ("config dsh-tool-web search 约束", "pending_req_fr_config", "builtin_config_pins_web_groups"),
+    ("config dsh-tool-web fetch 默认", "pending_req_fr_config", "builtin_config_pins_web_groups"),
+    ("config dsh-tool-web fetch 约束", "pending_req_fr_config", "builtin_config_pins_web_groups"),
+    ("config dsh-tool-web fetchTimeoutMs 默认", "pending_req_fr_config", "builtin_config_pins_web_groups"),
+    ("config dsh-tool-web fetchTimeoutMs 约束", "pending_req_fr_config", "builtin_config_pins_web_groups"),
+    ("config dsh-tool-web searchTimeoutMs 默认", "pending_req_fr_config", "builtin_config_pins_web_groups"),
+    ("config dsh-tool-web searchTimeoutMs 约束", "pending_req_fr_config", "builtin_config_pins_web_groups"),
+    ("config dsh-tool-web fetchMaxOutputChars 默认", "pending_req_fr_config", "builtin_config_pins_web_groups"),
+    ("config dsh-tool-web fetchMaxOutputChars 约束", "pending_req_fr_config", "builtin_config_pins_web_groups"),
+    ("config dsh-web-deepseek-api / dsh-web-fetch-http count 默认", "pending_req_fr_config", "builtin_config_pins_web_groups"),
+    ("config dsh-web-deepseek-api / dsh-web-fetch-http count 约束", "pending_req_fr_config", "builtin_config_pins_web_groups"),
+    ("config dsh-web-deepseek-api / dsh-web-fetch-http sendOriginalQuestion 默认", "pending_req_fr_config", "builtin_config_pins_web_groups"),
+    ("config dsh-web-deepseek-api / dsh-web-fetch-http sendOriginalQuestion 约束", "pending_req_fr_config", "builtin_config_pins_web_groups"),
     ("覆盖行仅翻转 disabled", "pending_req_fr_config", "toggle_only_override_keeps_other_keys"),
     ("覆盖行整键替换 config", "pending_req_fr_config", "config_override_replaces_wholesale"),
     ("覆盖行未命中 id 警告跳过", "pending_req_fr_config", "unmatched_and_mismatched_overrides_warn_and_skip"),
