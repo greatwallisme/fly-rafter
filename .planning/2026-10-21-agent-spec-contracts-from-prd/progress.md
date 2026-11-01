@@ -1581,3 +1581,12 @@
 - wsd_tools.rs（manifest 校验族/alias/copy/resolve/install 全机+memoized 工具+3 测试）；service.rs 195-197+三臂+describe 159+wsd Option 字段；plugin_shell 注册行+gated 臂+None 装配+pin；schema.rs 空参数+六字段输出+Q97-A 钉测；generator 表项+regen 幂等；TOOLS 4 场景绑定。
 - 门：fmt/clippy/workspace 1627×2/doc 全绿；lifecycle TOOLS 328/0/80 零 fail；staging 未创建缺陷当场修。
 - **下一动作=步⑤（plugin_manager，Q16f-A）→ 步⑥（skill 全家）→ 步⑦ 收口。**
+
+## 2026-11-02 — 16f 批 2 步⑤：plugin_manager 全机（Q16f-A+步⑤四问裁决）
+
+- plugin_manager_tools.rs（码表/三文案表 13+8+5 逐字品牌映射+with_next_step 五臂+五参数门+list_page 分页+磁盘面：patch 视图组合/胜者行/set_plugin 写面 patch.ts 同构减锚点/set_bundle profile.yml 选择编辑/remove 恒 not-removable/install+exemption 写 failed operation-error fr 自创诊断/exemption 读工具错误+execute 审批前置+present/render，14 测试）；service.rs 198-200+describe 159→162；plugin_shell 注册行+BAKED_PLUGIN_MANAGER gate+pin 测试；schema.rs 10 参+string output+Q97-A 钉测；catalog_gen 逐字抽取（generator 表项+regen 幂等）；SeamApprover pub(crate) 复用+shell_env resolve_home pub(crate)。
+- 裁决四问（用户 2026-11-02）：①行载体=patch 磁盘面（非推荐项；FR_PROFILE 工具侧直读+rows 1:1 破缺备案 19.2 条 29）②set_bundle=dsh 真源 profile.yml 同构③拒绝族=按动作形状分流④serde_yaml_ng 重写+19.2 条 30；19.2 条 31=拒绝族文案+写载体。
+- 绑定：TOOLS 22 场景→5 钉测（审计二十一节）；PRD 19.2 条 29/30/31。
+- 门：fmt/clippy 零警告；workspace 1643×2（+16）；doc 零警告；lifecycle TOOLS 350/0/58+CONFIG 137/0/182+PROMPT 47/0/0 零 fail。
+- 过程：退化 8 起（表达式位置属性 E0658/python 区间误删三函数/.pipe 幻 method/YAML 续行吃缩进/断言中断保盘）——一次一函数最小分片+写后即验复归判例；判定序勘误（2.5 落默认 25→可选整数 present-else-refuse）；insert 子行根提升勘误。
+- **下一动作=步⑥（skill 全家，Q16f-C 全量：registry+filesystem+catalog+gesture，最大件）→ 步⑦ 收口（catalog SECTION_TEXTS 扩源+终门）。**

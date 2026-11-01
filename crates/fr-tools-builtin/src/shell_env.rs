@@ -301,7 +301,7 @@ impl FrozenEnv {
 /// # Errors
 ///
 /// No override, no environment variable, and no resolvable user home.
-fn resolve_home(override_home: Option<&str>) -> Result<String, String> {
+pub(crate) fn resolve_home(override_home: Option<&str>) -> Result<String, String> {
     if let Some(home) = override_home {
         return Ok(home.to_owned());
     }

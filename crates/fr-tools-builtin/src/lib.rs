@@ -54,6 +54,7 @@ pub mod lsp_tools;
 pub mod observation;
 pub mod persistent;
 pub mod plan_mode;
+pub mod plugin_manager_tools;
 pub mod plugin_shell;
 pub mod render;
 pub mod schedule;

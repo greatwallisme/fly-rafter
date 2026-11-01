@@ -325,3 +325,14 @@ TOOLS spec 4 条 wsd 场景（4 个选择器）全绑真实测试；CONFIG 无�
 - **测试基线**：fr-tools-builtin 337→342（wsd 域 3+schema pin 1+plugin pin 1）；workspace 1627 rc=0 ×2 连跑（首轮单发 1 失败=已知 loopback flake 族）；clippy 全绿（Eq derive/unwrap_or_else/map_or_else/作用域化 MutexGuard/字段文档/panics doc 七起修）。
 - **lifecycle 基线（FR_DSH_SOURCE 下）**：TOOLS **328/0/80**（+4）；CONFIG 137/0/182；PROMPT 47/0/0。零 fail。
 - **M1 结构性缺席档载**：①config source/root 面无 fr-schema 组（无 scenario=无绑定义务；opt-in 部署面随 M2+ 装配落地）②windows 载荷路径臂为文本解析面（fr 实跑 posix；无 Windows lane，Q99-B 判例族）。
+
+## 二十一、16f 批 2 步⑤ 绑定审计（plugin_manager，2026-11-02）
+
+TOOLS spec 22 条 plugin_manager 场景（12 个选择器）全绑真实测试；CONFIG 无新增场景（Q16f-A：dsh plugin-manager Config=pnpm 族在 fr 无载体不转键，无 config 即无 fr-schema 组）。
+
+- **Q16f-A 判例落地**：BAKED_PLUGIN_MANAGER const false+注册臂 gated+const assert（inspect/lsp/wsd 判例同形）；PRD 19.2 条 29/30/31 三备案（磁盘面 rows 破缺+FR_PROFILE 事实/写面注释丢失/拒绝族 fr 自创文案+set_bundle 写载体）。
+- **工具脸（tools.ts 159 行全录+types.ts/failure.ts/index.ts/patch.ts）**：10 参 schema 1:1（action req enum 8+九 opt 行）；output={type:'string'}+render 单 text 块（value=JSON.stringify 串）；presentCall generic `Manage profile plugins` list_/read 分叉+rawInput；审批前置=approve_escalation danger-full-access（justification 逐字，SeamApprover pub(crate) 化复用）；参数校验五文案逐字；ChangeResult/withNextStep 五臂+kind-over-code 优先级全结构；ERROR_STEPS 13 码/FAILURE_STEPS 8 kind/RESTART_STEPS 5 理由逐字（三处品牌词映射 fr）。
+- **磁盘面（步⑤四问裁决①②）**：行源=profile patch+home patch 组合视图（insert 子行根提升+group 深先展平+按 id 末位胜者+有 name 成列）；set_plugin=patch.ts 同构写面减锚点（findLast 匹配/only-switch implied 删行/implied no-op/追加，serde_yaml_ng 重写）；set_bundle=profile.yml bundles 选择编辑（metadata 门=fr 无 bundle manifest 恒 not-bundle）；remove_bundle 恒 not-removable（空表流原样）；install/exemption 写=failed operation-error+fr 自创诊断；exemption 读=工具错误。方法号 198-200；describe 159→162。
+- **TOOLS 22 条 → 5 钉测**：「调度与呈现」→`plugin_manager_registration_pins_the_row`（行 pin+gate off+string output+四缺席键+card 值）；「越界拒绝」→`argument_gates_carry_the_dsh_texts`（五门文案）；「section 缺席」→`prompt_sections_pin_the_twelve_tools`；18 条参数形状/约束→`plugin_manager_pins_the_catalog_table`（十行全形状+enum+description 非空+string output）；「行为 1」→`approval_gate_runs_before_any_file_touch`（审批先行+拒批零文件触）。
+- **测试基线**：fr-tools-builtin 342→358（plugin_manager_tools 域 14+schema pin 1+plugin pin 1）；clippy 全绿（E0658 表达式位置属性/分页可选整数判定序/insert 根提升/name-less 胜者四起勘误当场修）。
+- **M1 结构性缺席档载**：①FR_PROFILE 由 Phase 18 装配器设置（M1 无 boot=工具启用面恒 PROFILE_REQUIRED 拒绝，备案条 29）；②dsh composeEntries 的 telemetry 注入行与 overlay 层不可见（bundle 载体同属条 27/29 破缺档）。

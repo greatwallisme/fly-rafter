@@ -371,6 +371,11 @@ TOOLS = {
         [],
         "none",
     ),
+    "plugin_manager": (
+        "PLUGIN_MANAGER",
+        [],
+        "none",
+    ),
 }
 
 # The persistent-shell pair reuses the `bash`/`pwsh` tool names inside

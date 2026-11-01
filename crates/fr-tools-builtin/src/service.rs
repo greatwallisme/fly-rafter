@@ -364,6 +364,12 @@ pub const METHOD_WSD_RENDER: u32 = 196;
 /// Method selector: the `load_workspace_dependencies` present-call
 /// presentation.
 pub const METHOD_WSD_PRESENT_CALL: u32 = 197;
+/// Method selector: the `plugin_manager` tool body.
+pub const METHOD_PLUGIN_MANAGER_EXECUTE: u32 = 198;
+/// Method selector: the `plugin_manager` render projection.
+pub const METHOD_PLUGIN_MANAGER_RENDER: u32 = 199;
+/// Method selector: the `plugin_manager` present-call presentation.
+pub const METHOD_PLUGIN_MANAGER_PRESENT_CALL: u32 = 200;
 
 /// The escalate-to modes this composition advertises (the dsh
 /// `ESCALATION_TARGETS` words in table order).
@@ -727,6 +733,40 @@ impl BuiltinTools {
             }
             METHOD_WSD_PRESENT_CALL => {
                 json!(crate::wsd_tools::WorkspaceDependenciesTool::present_call())
+            }
+            METHOD_PLUGIN_MANAGER_EXECUTE => {
+                let call = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let call_id = call
+                    .get("call_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let agent = call.get("agent").and_then(Value::as_str);
+                let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
+                return match crate::plugin_manager_tools::execute(
+                    self.seams.policy(),
+                    self.seams.approval(),
+                    &arguments,
+                    agent,
+                    call_id,
+                ) {
+                    Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                        .map_err(|error| format!("body reply encode failed: {error}")),
+                    Err(error) => serde_json::to_vec(&json!({
+                        "error": { "message": error.message, "name": error.name },
+                    }))
+                    .map_err(|error| format!("body error encode failed: {error}")),
+                };
+            }
+            METHOD_PLUGIN_MANAGER_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::plugin_manager_tools::render(&args, &value))
+            }
+            METHOD_PLUGIN_MANAGER_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::plugin_manager_tools::present_call(&args))
             }
             METHOD_TODOS_FOLD => {
                 let state = crate::todo::fold(
@@ -2038,10 +2078,15 @@ const DESCRIBE_WSD_METHODS: [&str; 3] = [
     "workspace_dependencies.render",
     "workspace_dependencies.presentCall",
 ];
+const DESCRIBE_PLUGIN_MANAGER_METHODS: [&str; 3] = [
+    "plugin_manager.execute",
+    "plugin_manager.render",
+    "plugin_manager.presentCall",
+];
 
-const fn describe_methods() -> [&'static str; 159] {
+const fn describe_methods() -> [&'static str; 162] {
     let mut index = 0;
-    let mut methods: [&'static str; 159] = [""; 159];
+    let mut methods: [&'static str; 162] = [""; 162];
     while index < 91 {
         methods[index] = DESCRIBE_BASE_METHODS[index];
         index += 1;
@@ -2082,6 +2127,11 @@ const fn describe_methods() -> [&'static str; 159] {
         methods[156 + wsd_index] = DESCRIBE_WSD_METHODS[wsd_index];
         wsd_index += 1;
     }
+    let mut plugin_manager_index = 0;
+    while plugin_manager_index < 3 {
+        methods[159 + plugin_manager_index] = DESCRIBE_PLUGIN_MANAGER_METHODS[plugin_manager_index];
+        plugin_manager_index += 1;
+    }
     methods
 }
 
@@ -2106,7 +2156,7 @@ mod tests {
     #[test]
     fn describe_surface_carries_the_web_pair() {
         let methods = super::describe_methods();
-        assert_eq!(methods.len(), 159);
+        assert_eq!(methods.len(), 162);
         for name in [
             "web_search.execute",
             "web_search.presentResult",
@@ -2125,7 +2175,7 @@ mod tests {
     #[test]
     fn describe_surface_carries_the_working_directory_band() {
         let methods = super::describe_methods();
-        assert_eq!(methods.len(), 159);
+        assert_eq!(methods.len(), 162);
         for name in [
             "workingDirectory.execute",
             "workingDirectory.render",
@@ -2143,7 +2193,7 @@ mod tests {
     #[test]
     fn describe_surface_carries_the_terminal_family() {
         let methods = super::describe_methods();
-        assert_eq!(methods.len(), 159);
+        assert_eq!(methods.len(), 162);
         for name in [
             "terminal_send.execute",
             "terminal_send.presentResult",

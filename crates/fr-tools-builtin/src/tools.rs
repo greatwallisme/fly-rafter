@@ -604,7 +604,7 @@ pub fn build_request(
 /// The approver bridge: the approval seam folded into the escalation
 /// facet [`fr_sandbox::escalation::EscalationApprover`] consumes (every
 /// transport failure resolves `unavailable` — the ask never throws).
-struct SeamApprover<'a>(&'a dyn ApprovalSeam);
+pub(crate) struct SeamApprover<'a>(pub(crate) &'a dyn ApprovalSeam);
 
 impl fr_sandbox::escalation::EscalationApprover for SeamApprover<'_> {
     fn request(

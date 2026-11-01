@@ -2131,133 +2131,133 @@ Scenario: cordis_inspect_query 参数 input 约束
   那么 参数行 [input:any:opt（满足 input schema）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: plugin_manager 调度与呈现
-  Test: pending_req_fr_builtin_tools_plugin_manager
+  Test: plugin_manager_registration_pins_the_row
   假设 合约要求的行为已实现
   当 读取工具 plugin_manager 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: plugin_manager 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_plugin_manager
+  Test: argument_gates_carry_the_dsh_texts
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: plugin_manager 说明 section 注册缺席
-  Test: pending_req_fr_builtin_tools_plugin_manager_section
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 plugin_manager 无说明 section（dsh 真源 dsh-plugin-manager tools.ts 不注入 systemPrompt）
 
 Scenario: plugin_manager 参数 action 形状
-  Test: pending_req_fr_builtin_tools_plugin_manager_action
+  Test: plugin_manager_pins_the_catalog_table
   假设 工具 plugin_manager 已注册
   当 校验 schema 时
   那么 参数行 [action:string:req:enum[list_plugins|list_bundles|set_plugin|set_bundle|install_bundle|remove_bundle|list_version_exemptions|set_version_exemption]] 的名称与类型按目录行实现
 
 Scenario: plugin_manager 参数 action 约束
-  Test: pending_req_fr_builtin_tools_plugin_manager_action
+  Test: plugin_manager_pins_the_catalog_table
   假设 工具 plugin_manager 已注册
   当 校验 schema 时
   那么 参数行 [action:string:req:enum[list_plugins|list_bundles|set_plugin|set_bundle|install_bundle|remove_bundle|list_version_exemptions|set_version_exemption]] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: plugin_manager 参数 target 形状
-  Test: pending_req_fr_builtin_tools_plugin_manager_target
+  Test: plugin_manager_pins_the_catalog_table
   假设 工具 plugin_manager 已注册
   当 校验 schema 时
   那么 参数行 [target:opt] 的名称与类型按目录行实现
 
 Scenario: plugin_manager 参数 target 约束
-  Test: pending_req_fr_builtin_tools_plugin_manager_target
+  Test: plugin_manager_pins_the_catalog_table
   假设 工具 plugin_manager 已注册
   当 校验 schema 时
   那么 参数行 [target:opt] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: plugin_manager 参数 enabled 形状
-  Test: pending_req_fr_builtin_tools_plugin_manager_enabled
+  Test: plugin_manager_pins_the_catalog_table
   假设 工具 plugin_manager 已注册
   当 校验 schema 时
   那么 参数行 [enabled:opt（set 必填）] 的名称与类型按目录行实现
 
 Scenario: plugin_manager 参数 enabled 约束
-  Test: pending_req_fr_builtin_tools_plugin_manager_enabled
+  Test: plugin_manager_pins_the_catalog_table
   假设 工具 plugin_manager 已注册
   当 校验 schema 时
   那么 参数行 [enabled:opt（set 必填）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: plugin_manager 参数 runtimeVersion 形状
-  Test: pending_req_fr_builtin_tools_plugin_manager_runtimeversion
+  Test: plugin_manager_pins_the_catalog_table
   假设 工具 plugin_manager 已注册
   当 校验 schema 时
   那么 参数行 [runtimeVersion:opt（精确版本）] 的名称与类型按目录行实现
 
 Scenario: plugin_manager 参数 runtimeVersion 约束
-  Test: pending_req_fr_builtin_tools_plugin_manager_runtimeversion
+  Test: plugin_manager_pins_the_catalog_table
   假设 工具 plugin_manager 已注册
   当 校验 schema 时
   那么 参数行 [runtimeVersion:opt（精确版本）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: plugin_manager 参数 acceptRisk 形状
-  Test: pending_req_fr_builtin_tools_plugin_manager_acceptrisk
+  Test: plugin_manager_pins_the_catalog_table
   假设 工具 plugin_manager 已注册
   当 校验 schema 时
   那么 参数行 [acceptRisk:opt] 的名称与类型按目录行实现
 
 Scenario: plugin_manager 参数 acceptRisk 约束
-  Test: pending_req_fr_builtin_tools_plugin_manager_acceptrisk
+  Test: plugin_manager_pins_the_catalog_table
   假设 工具 plugin_manager 已注册
   当 校验 schema 时
   那么 参数行 [acceptRisk:opt] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: plugin_manager 参数 approvedBuilds 形状
-  Test: pending_req_fr_builtin_tools_plugin_manager_approvedbuilds
+  Test: plugin_manager_pins_the_catalog_table
   假设 工具 plugin_manager 已注册
   当 校验 schema 时
   那么 参数行 [approvedBuilds:opt] 的名称与类型按目录行实现
 
 Scenario: plugin_manager 参数 approvedBuilds 约束
-  Test: pending_req_fr_builtin_tools_plugin_manager_approvedbuilds
+  Test: plugin_manager_pins_the_catalog_table
   假设 工具 plugin_manager 已注册
   当 校验 schema 时
   那么 参数行 [approvedBuilds:opt] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: plugin_manager 参数 registry 形状
-  Test: pending_req_fr_builtin_tools_plugin_manager_registry
+  Test: plugin_manager_pins_the_catalog_table
   假设 工具 plugin_manager 已注册
   当 校验 schema 时
   那么 参数行 [registry:opt] 的名称与类型按目录行实现
 
 Scenario: plugin_manager 参数 registry 约束
-  Test: pending_req_fr_builtin_tools_plugin_manager_registry
+  Test: plugin_manager_pins_the_catalog_table
   假设 工具 plugin_manager 已注册
   当 校验 schema 时
   那么 参数行 [registry:opt] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: plugin_manager 参数 offset 形状
-  Test: pending_req_fr_builtin_tools_plugin_manager_offset
+  Test: plugin_manager_pins_the_catalog_table
   假设 工具 plugin_manager 已注册
   当 校验 schema 时
   那么 参数行 [offset:opt:0] 的名称与类型按目录行实现
 
 Scenario: plugin_manager 参数 offset 约束
-  Test: pending_req_fr_builtin_tools_plugin_manager_offset
+  Test: plugin_manager_pins_the_catalog_table
   假设 工具 plugin_manager 已注册
   当 校验 schema 时
   那么 参数行 [offset:opt:0] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: plugin_manager 参数 limit 形状
-  Test: pending_req_fr_builtin_tools_plugin_manager_limit
+  Test: plugin_manager_pins_the_catalog_table
   假设 工具 plugin_manager 已注册
   当 校验 schema 时
   那么 参数行 [limit:opt:25（1..100）] 的名称与类型按目录行实现
 
 Scenario: plugin_manager 参数 limit 约束
-  Test: pending_req_fr_builtin_tools_plugin_manager_limit
+  Test: plugin_manager_pins_the_catalog_table
   假设 工具 plugin_manager 已注册
   当 校验 schema 时
   那么 参数行 [limit:opt:25（1..100）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: plugin_manager 行为 1
-  Test: pending_req_fr_builtin_tools_plugin_manager_1
+  Test: approval_gate_runs_before_any_file_touch
   假设 工具 plugin_manager 执行时
   当 达到触发条件时
   那么 每动作需 danger-full-access 或本次批准；安装可执行允许的 build 脚本

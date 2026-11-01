@@ -658,6 +658,72 @@ pub fn load_workspace_dependencies_output_schema() -> Value {
     })
 }
 
+/// The `plugin_manager` parameter table (the catalog-frozen base:
+/// the required action enum over the nine optional rows).
+#[must_use]
+pub fn plugin_manager_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "required": true,
+                "enum": [
+                    "list_plugins",
+                    "list_bundles",
+                    "set_plugin",
+                    "set_bundle",
+                    "install_bundle",
+                    "remove_bundle",
+                    "list_version_exemptions",
+                    "set_version_exemption",
+                ],
+                "description": "Management operation.",
+            },
+            "target": {
+                "type": "string",
+                "description": "Plugin entry id, bundle package name, or installation spec, according to action. For an Official catalog entry, pass list_bundles installTarget.spec to install_bundle.",
+            },
+            "enabled": {
+                "type": "boolean",
+                "description": "Required for set operations; defaults to true for installation. For set_version_exemption, true grants and false revokes.",
+            },
+            "runtimeVersion": {
+                "type": "string",
+                "description": "For set_version_exemption: exact DSH version from list_version_exemptions. Target must be the manifest package-name@version, not an alias or version range.",
+            },
+            "acceptRisk": {
+                "type": "boolean",
+                "description": "For granting an exemption: true only after warning the user about possible crashes and data loss and receiving explicit permission for this exact plugin/runtime pair. General installation permission is not enough.",
+            },
+            "approvedBuilds": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "For install_bundle: pass names from pendingBuilds only after the user explicitly approves running their install scripts in the conversation. This grants persistent permission for this profile.",
+            },
+            "registry": {
+                "type": "string",
+                "description": "For install_bundle: the npm registry URL asked first, when the user names one; otherwise the configured registry is asked, and its configured fallbacks while a registry is unreachable.",
+            },
+            "offset": {
+                "type": "number",
+                "description": "Zero-based list offset; defaults to 0.",
+            },
+            "limit": {
+                "type": "number",
+                "description": "List page size, from 1 to 100; defaults to 25.",
+            },
+        },
+    })
+}
+
+/// The `plugin_manager` output contract (the dsh `defineTool`
+/// `output.schema`: the JSON string the execute tail serializes).
+#[must_use]
+pub fn plugin_manager_output_schema() -> Value {
+    json!({ "type": "string" })
+}
+
 /// The `lsp` parameter table (the catalog-frozen base: the four rows).
 #[must_use]
 pub fn lsp_parameters() -> Value {
@@ -2262,6 +2328,76 @@ mod tests {
         assert_eq!(
             fields["pythonDistributions"]["additionalProperties"],
             serde_json::json!(true)
+        );
+    }
+
+    /// The `plugin_manager` tables pin their catalog rows (Q97-A:
+    /// the ten rows, the required action enum, and the string output).
+    #[test]
+    fn plugin_manager_pins_the_catalog_table() {
+        let parameters = super::plugin_manager_parameters();
+        let keys = parameters
+            .pointer("/properties")
+            .and_then(Value::as_object)
+            .expect("plugin_manager properties");
+        assert_eq!(
+            keys.keys().collect::<Vec<_>>(),
+            vec![
+                "action",
+                "target",
+                "enabled",
+                "runtimeVersion",
+                "acceptRisk",
+                "approvedBuilds",
+                "registry",
+                "offset",
+                "limit",
+            ]
+        );
+        assert_eq!(
+            keys["action"]["enum"],
+            serde_json::json!([
+                "list_plugins",
+                "list_bundles",
+                "set_plugin",
+                "set_bundle",
+                "install_bundle",
+                "remove_bundle",
+                "list_version_exemptions",
+                "set_version_exemption",
+            ])
+        );
+        assert_eq!(keys["action"]["required"], serde_json::json!(true));
+        assert_eq!(keys["action"]["type"], serde_json::json!("string"));
+        assert_eq!(keys["target"]["type"], serde_json::json!("string"));
+        assert!(keys["target"].get("required").is_none());
+        assert_eq!(keys["enabled"]["type"], serde_json::json!("boolean"));
+        assert_eq!(keys["runtimeVersion"]["type"], serde_json::json!("string"));
+        assert_eq!(keys["acceptRisk"]["type"], serde_json::json!("boolean"));
+        assert_eq!(keys["approvedBuilds"]["type"], serde_json::json!("array"));
+        assert_eq!(
+            keys["approvedBuilds"]["items"],
+            serde_json::json!({ "type": "string" })
+        );
+        assert_eq!(keys["registry"]["type"], serde_json::json!("string"));
+        assert_eq!(keys["offset"]["type"], serde_json::json!("number"));
+        assert_eq!(keys["limit"]["type"], serde_json::json!("number"));
+        for row in [
+            "target",
+            "enabled",
+            "runtimeVersion",
+            "acceptRisk",
+            "approvedBuilds",
+            "registry",
+            "offset",
+            "limit",
+        ] {
+            assert!(keys[row].get("required").is_none(), "optional: {row}");
+            assert_ne!(keys[row]["description"].as_str().expect("text"), "");
+        }
+        assert_eq!(
+            super::plugin_manager_output_schema(),
+            serde_json::json!({ "type": "string" })
         );
     }
 

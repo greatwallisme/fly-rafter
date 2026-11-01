@@ -1492,6 +1492,20 @@ fn register_tools(
                 .as_slice(),
         )?;
     }
+    // The plugin-management tool (dsh `tool-plugin-manager`; the dsh
+    // base bundle mounts the row `disabled: true` — the Q16f-A opt-in
+    // gate — so the baked gate stays off and the profile patch face
+    // stays opt-in).
+    if crate::plugin_manager_tools::BAKED_PLUGIN_MANAGER {
+        step(
+            link,
+            fr_wire::services::tools::SERVICE_NAME,
+            fr_wire::services::tools::METHOD_REGISTER,
+            serde_json::to_vec(&plugin_manager_registration())
+                .ok()?
+                .as_slice(),
+        )?;
+    }
     // The terminal family (dsh `tool-terminal` + the two persistent
     // twins; one bake gate — the dsh base bundle mounts none, the
     // `BAKED_STR_REPLACE_EDITOR` judgment). The registered tool names
@@ -1724,6 +1738,36 @@ pub fn load_workspace_dependencies_registration() -> Value {
         "presentCall": {
             "service": crate::service::SERVICE_NAME,
             "method": crate::service::METHOD_WSD_PRESENT_CALL,
+        },
+    })
+}
+
+/// The `plugin_manager` registration row (dsh `ctx.tools.register`,
+/// call-for-call; the partial face kept out of the baked composition
+/// by the Q16f-A opt-in gate).
+///
+/// The face omits the presentResult and presentationMeta keys, rides
+/// exclusive scheduling, and carries no timeout.
+#[must_use]
+pub fn plugin_manager_registration() -> Value {
+    json!({
+        "name": "plugin_manager",
+        "description": crate::catalog_gen::PLUGIN_MANAGER_DESCRIPTION.to_owned(),
+        "parameters": crate::schema::plugin_manager_parameters(),
+        "output": {
+            "schema": crate::schema::plugin_manager_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_PLUGIN_MANAGER_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_PLUGIN_MANAGER_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_PLUGIN_MANAGER_PRESENT_CALL,
         },
     })
 }
@@ -3579,6 +3623,48 @@ mod tests {
             lsp: false,
         });
         assert!(without.iter().all(|(name, _, _)| name != "tool:lsp"));
+    }
+
+    /// The plugin-management row keeps its registration reachable
+    /// with the baked gate off (the Q16f-A ruling): the partial face
+    /// carries the catalog identity, the string output schema, and
+    /// the generic management card.
+    #[test]
+    fn plugin_manager_registration_pins_the_row() {
+        const _: () = assert!(!crate::plugin_manager_tools::BAKED_PLUGIN_MANAGER);
+        let row = super::plugin_manager_registration();
+        assert_eq!(row["name"], serde_json::json!("plugin_manager"));
+        assert_eq!(
+            row["description"],
+            serde_json::json!(crate::catalog_gen::PLUGIN_MANAGER_DESCRIPTION)
+        );
+        assert_eq!(
+            row["parameters"],
+            crate::schema::plugin_manager_parameters()
+        );
+        assert_eq!(
+            row["output"]["schema"],
+            serde_json::json!({ "type": "string" })
+        );
+        assert!(row.get("presentResult").is_none());
+        assert!(row.get("presentationMeta").is_none());
+        assert!(row.get("isConcurrencySafe").is_none());
+        assert!(row.get("timeoutMs").is_none());
+        assert_eq!(
+            row["presentCall"]["method"],
+            serde_json::json!(crate::service::METHOD_PLUGIN_MANAGER_PRESENT_CALL)
+        );
+        assert_eq!(
+            crate::plugin_manager_tools::present_call(&serde_json::json!({
+                "action": "list_plugins",
+            })),
+            serde_json::json!({
+                "card": "generic",
+                "title": "Manage profile plugins",
+                "kind": "read",
+                "rawInput": { "action": "list_plugins" },
+            })
+        );
     }
 
     /// The workspace-dependencies row keeps its registration
