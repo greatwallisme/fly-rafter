@@ -688,7 +688,7 @@ mod tests {
             );
             let payload = sample_response();
             let wire = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
+                "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
                 payload.len()
             );
             std::io::Write::write_all(&mut socket, wire.as_bytes()).unwrap();
@@ -725,7 +725,7 @@ mod tests {
             let _ = read_request(&mut socket);
             let body = r#"{"content":[{"type":"text","text":"no search happened"}]}"#;
             let wire = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
                 body.len()
             );
             std::io::Write::write_all(&mut socket, wire.as_bytes()).unwrap();
@@ -791,7 +791,7 @@ mod tests {
                     "gateway 502 html"
                 };
                 let wire = format!(
-                    "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                    "HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
                     body.len(),
                     body
                 );
@@ -827,9 +827,9 @@ mod tests {
             )
         );
         // A non-string detail (a numeric message) never appends.
-        let bare = at("/bare").search(&request("q")).unwrap_err();
+        let numeric = at("/bare").search(&request("q")).unwrap_err();
         assert_eq!(
-            bare.message,
+            numeric.message,
             format!("DeepSeek API error (HTTP 401){}", suffix("/bare"))
         );
         // A non-JSON error body only costs the detail, never the status.

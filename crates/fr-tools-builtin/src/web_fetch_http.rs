@@ -602,7 +602,7 @@ fn pin_error(error: PinError) -> WebError {
 /// `.length`). A boundary that would split a surrogate pair (the JS
 /// slice can leave a lone high surrogate) stops before the character:
 /// a Rust `String` cannot represent the lone surrogate.
-fn slice_to_utf16_len(text: &str, max_len: usize) -> String {
+pub(crate) fn slice_to_utf16_len(text: &str, max_len: usize) -> String {
     let mut utf16_units = 0usize;
     for (index, character) in text.char_indices() {
         if utf16_units + character.len_utf16() > max_len {
@@ -792,30 +792,30 @@ mod tests {
                 let read = std::io::Read::read(&mut socket, &mut buffer).unwrap_or(0);
                 let text = String::from_utf8_lossy(&buffer[..read]);
                 let response = if text.contains("GET /moved") {
-                    "HTTP/1.1 301 Moved Permanently\r\nLocation: /final\r\nContent-Length: 0\r\n\r\n"
+                    "HTTP/1.1 301 Moved Permanently\r\nConnection: close\r\nLocation: /final\r\nContent-Length: 0\r\n\r\n"
                 } else if text.contains("GET /away") {
-                    "HTTP/1.1 302 Found\r\nLocation: http://other.invalid/x\r\nContent-Length: 0\r\n\r\n"
+                    "HTTP/1.1 302 Found\r\nConnection: close\r\nLocation: http://other.invalid/x\r\nContent-Length: 0\r\n\r\n"
                 } else if text.contains("GET /loop") {
-                    "HTTP/1.1 302 Found\r\nLocation: /loop\r\nContent-Length: 0\r\n\r\n"
+                    "HTTP/1.1 302 Found\r\nConnection: close\r\nLocation: /loop\r\nContent-Length: 0\r\n\r\n"
                 } else if text.contains("GET /bin") {
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: 2\r\n\r\n\x00\x01"
+                    "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/octet-stream\r\nContent-Length: 2\r\n\r\n\x00\x01"
                 } else if text.contains("GET /big") {
                     // Close-delimited (no Content-Length): eight bytes
                     // arrive, the cap keeps four.
                     let _ = socket
-                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nabcdefgh");
+                        .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\nabcdefgh");
                     continue;
                 } else if text.contains("GET /latin") {
                     // The declared charset carries a raw latin-1 byte
                     // (not its UTF-8 spelling), so the response writes
                     // as bytes.
                     let mut latin = Vec::new();
-                    latin.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=iso-8859-1\r\nContent-Length: 4\r\n\r\ncaf");
+                    latin.extend_from_slice(b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain; charset=iso-8859-1\r\nContent-Length: 4\r\n\r\ncaf");
                     latin.push(0xE9);
                     socket.write_all(&latin).unwrap();
                     continue;
                 } else {
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nok"
+                    "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nok"
                 };
                 socket.write_all(response.as_bytes()).unwrap();
             }
@@ -916,8 +916,7 @@ mod tests {
             let (mut socket, _) = server.accept().unwrap();
             let mut buffer = [0u8; 4096];
             let _ = std::io::Read::read(&mut socket, &mut buffer);
-            let response =
-                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 100\r\n\r\nshort";
+            let response = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain\r\nContent-Length: 100\r\n\r\nshort";
             socket.write_all(response.as_bytes()).unwrap();
         });
         let provider = HttpFetchProvider::with_resolver(

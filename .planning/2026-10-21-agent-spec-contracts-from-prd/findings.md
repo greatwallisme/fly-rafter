@@ -2755,3 +2755,13 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - **JS `??` 端口判例**：`a?.b ?? c` 端口=「a.b 字段 present 且非 null 才取（任意 JSON 类型），否则 c」+「detail 仅串非空才附加」（`42 ?? msg` 保持 42，`42.length`=undefined 不附加）——serde Value 端口须以「字段存在性+null 判」建模，禁 and_then(as_str).or_else 链（会把非串值错落回退臂）。
 - **mapAnthropicResponse 顺序判例**：resultBlocks 空臂先于 citations TypeError（dsh throw 序）；空体 `{}` 亦=no-blocks 错误（非空 sources 成功）；孤 result block 无 items=空 sources 成功。
 - **loopback POST 钉测判例**：服务器必须读全请求（头+Content-Length 体，分节到达）再应答——读头即答会在客户端写体中途落 RST（表现为 ureq 传输错误），web_fetch_http GET 钉测无体故未暴露；助手=read_request（找 \r\n\r\n+按声明长度补读）。
+
+## 16f 批 1 步④ 判例补录（2026-11-01，web_tools.rs）
+
+- **crate-route 行为级缺口五判例（Q16f-D 扩充，探针实测）**：`html-to-markdown-rs` 3.19.1 相对 dsh turndown 面不止字节差异，有三处行为级缺口，fr 以 scan_html 重建扫描+exclude_selectors 补齐：①`strip_tags` 语义=剥壳留文本（子内容照出）——非可见元素剔除必须用 `exclude_selectors`（tag 列表+`[hidden]`+`[aria-hidden=true]` 属性选择器均实证有效），且必须强制 `TierStrategy::Tier2`（字节扫描器层不跑剔除通道）；②`colspan`/`rowspan` 按数值展开（colspan=1000000→百万格爆炸）——dsh tableCellWithoutSpanExpansion 的"输出与源成比例"是硬需求，fr 在重建扫描中剥 span 属性（quote 感知属性 token 化，误切面=逐字直通自愈）；③未闭合/截断闭合 raw-text（`<script>unclosed`、`</script` 无 `>`）crate 会把体文本当正文——fr 截断臂在 raw-text 开标签处截尾（对 dsh domino 吞 EOF 语义）；④`visibility:collapse` 不在 crate 隐藏面（hidden/display:none/visibility:hidden 在）——style 声明重写 collapse→hidden（归一化对 dsh：trim+lowercase+`!important` 剥离）；⑤未终结注释（`<!-- unfinished`）crate 把尾文本当正文——fr 截尾臂直接停 emission（dsh 会在注释尾继续 over-count 伪标签深度，fr 不复制该保守伪影=19.2 微偏差，方向是 fr 更宽：病态尾部不再触发 marker）。
+- **turndown→crate 风格差异清单（字节级，已备案）**：em= `*` 非 `_`、表格紧凑无对齐 padding、align 属性不映射 GFM 冒号、列表缩进两空格非 turndown 三空格、输出尾多 `\n`、`_` 转义形态不同。
+- **多查询并发载体判例**：dsh 首败语义=**完成序**首败（Promise.allSettled 后 rethrow firstFailure），非索引序——fr scoped threads+mpsc 按完成序收包取首败，钉测 execute_reports_the_first_completion_failure（慢查询先发+快查询先败→报快败）。阻塞模型下首败后兄弟跑完不被中止=Q69-B 载体偏差（报告的错误相同，墙钟时间不同）。
+- **ureq 3 池化 keep-alive 竞态判例（步③ 潜伏 flake 根因）**：测试 loopback 服务器每响应后关 socket，但 HTTP/1.1 默认 keep-alive→ureq 进程级连接池回收已死连接→下一次请求写入 RST→传输层失败（"HTTP request failed"），负载相关偶发（实测 1/4~1/6）。修复=响应头加 `Connection: close`（全仓 19 处已补）。**新 loopback 测试服务器的响应头必须带 Connection: close。**
+- **观测手段判例**：cargo test 输出经 `rg|cut|head` 管道时 rg 块缓冲吞全部中间输出（编译期无行匹配过滤）→0 字节文件≠卡死也≠正常；判据=直跑测试二进制（`target/debug/deps/<crate>-<hash> <filter> --nocapture`）+timeout 硬顶。Rust stdout 恒 LineWriter，println 逐行出，直跑可见首行即知挂在哪个样本。
+- **转换函数验收纪律**：写完任何"扫描/重建"函数必问两问——①产物从哪出去（scan_html 事故：重建 HTML 滞留局部变量，返回值只带诊断）；②循环每臂是否至少前进一字节（rewrite_open_tag 事故：无属性标签的属性区含结尾 `>`，attribute_end 原地踏步死循环）。钉测期望值先探针后落笔继续有效（本次 render 三臂帽两处手算错均被探针纠正）。
+- **方法号规划确认（步⑤ 用）**：web_search 174-178（execute/render/presentCall/presentResult/presentationMeta）、web_fetch 179-183；web seam 不占方法号（Q93-A 域服务判例）；BuiltinTools 需新增 Arc<WebRuntime>+两 provider id+fetchMaxOutputChars 等注册常量的装配位；config 七组键见 2732 行钉。

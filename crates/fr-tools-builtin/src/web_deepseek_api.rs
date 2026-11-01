@@ -779,7 +779,7 @@ mod tests {
                 {"url":"https://b.example/","title":"","snippet":"keep","date":null}
             ]}"#;
             let wire = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
                 body.len()
             );
             std::io::Write::write_all(&mut socket, wire.as_bytes()).unwrap();
@@ -824,7 +824,7 @@ mod tests {
             );
             let body = r#"{"results":[]}"#;
             let wire = format!(
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+                "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
                 body.len()
             );
             std::io::Write::write_all(&mut socket, wire.as_bytes()).unwrap();
@@ -939,7 +939,7 @@ mod tests {
                     r#"{"content":42}"#
                 };
                 let wire = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                    "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
                     body.len()
                 );
                 std::io::Write::write_all(&mut socket, wire.as_bytes()).unwrap();

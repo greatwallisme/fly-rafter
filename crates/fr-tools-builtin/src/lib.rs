@@ -78,4 +78,5 @@ pub mod web_seam;
 pub mod web_search_deepseek;
 pub mod web_search_exa;
 pub mod web_search_perplexity;
+pub mod web_tools;
 pub mod working_directory;

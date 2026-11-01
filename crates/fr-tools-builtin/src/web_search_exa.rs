@@ -425,7 +425,7 @@ mod tests {
                 {"url":"https://c.example/","title":"C"}
             ]}"#;
             let wire = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
                 body.len()
             );
             std::io::Write::write_all(&mut socket, wire.as_bytes()).unwrap();
@@ -486,14 +486,14 @@ mod tests {
                     // mapping (not the status) refuses.
                     let body = r#"{"results":"not an array"}"#;
                     let wire = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                        "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
                         body.len()
                     );
                     std::io::Write::write_all(&mut socket, wire.as_bytes()).unwrap();
                     continue;
                 };
                 let wire = format!(
-                    "HTTP/1.1 402 Payment Required\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                    "HTTP/1.1 402 Payment Required\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
                     body.len()
                 );
                 std::io::Write::write_all(&mut socket, wire.as_bytes()).unwrap();

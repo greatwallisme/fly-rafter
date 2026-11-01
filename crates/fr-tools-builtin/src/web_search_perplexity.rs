@@ -470,7 +470,7 @@ mod tests {
                     r#"{"choices":[{"message":{"content":""}}],"citations":["https://c.example/","https://d.example/"]}"#
                 };
                 let wire = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
+                    "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
                     payload.len()
                 );
                 std::io::Write::write_all(&mut socket, wire.as_bytes()).unwrap();
@@ -547,7 +547,7 @@ mod tests {
                     ("200 OK", r#"{"citations":"not an array"}"#)
                 };
                 let wire = format!(
-                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                    "HTTP/1.1 {status}\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
                     body.len()
                 );
                 std::io::Write::write_all(&mut socket, wire.as_bytes()).unwrap();
