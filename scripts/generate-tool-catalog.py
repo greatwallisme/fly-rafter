@@ -333,6 +333,13 @@ TOOLS = {
         ],
         "segments",
     ),
+    "working_directory": (
+        "WORKING_DIRECTORY",
+        [
+            ("cd", "CD_TEXT"),
+        ],
+        "none",
+    ),
 }
 
 # The persistent-shell pair reuses the `bash`/`pwsh` tool names inside
@@ -510,6 +517,24 @@ def extract_section_text_segments(source, tool):
     if not kept:
         raise ExtractError(f"the `tool:{tool}` section text parses no literals")
     return kept
+
+
+def extract_working_directory_output_texts(source):
+    """Extracts the `working_directory` output schema's cwd row text (the
+    dsh tool source's output.schema.properties.cwd.description; the
+    catalog carries the parameters block only)."""
+    anchor = source.find("cwd: {")
+    if anchor < 0:
+        raise ExtractError("tool-working-directory source carries no cwd output row")
+    end = source.find("}", anchor)
+    row = source[anchor:end]
+    marker = row.find("description:")
+    if marker < 0:
+        raise ExtractError("the cwd output row carries no description")
+    literals = re.findall(r"'((?:[^'\\]|\\.)*)'", row[marker + len("description:"):])
+    if len(literals) != 1:
+        raise ExtractError(f"the cwd description parses {len(literals)} literals, expected 1")
+    return ts_unescape(literals[0])
 
 
 def extract_todo_description_segments(source):
@@ -755,6 +780,18 @@ def emit():
             )
             blocks.append(
                 f"pub const JOBS_SECTION_TEXT: &str = {raw_literal(section_text)};\n"
+            )
+        if tool == "working_directory":
+            with open(os.path.join(source_root, "packages", "session", "tool-working-directory", "src", "index.ts"), encoding="utf-8") as handle:
+                source = handle.read()
+            cwd_text = extract_working_directory_output_texts(source)
+            blocks.append(
+                "\n/// The `working_directory` output schema's cwd row text (the dsh tool"
+                " source's output.schema.properties.cwd.description, source-verbatim; the"
+                " catalog carries the parameters block only).\n"
+            )
+            blocks.append(
+                f"pub const WORKING_DIRECTORY_CWD_TEXT: &str = {raw_literal(cwd_text)};\n"
             )
         if tool == "exit_plan_mode":
             blocks.append(

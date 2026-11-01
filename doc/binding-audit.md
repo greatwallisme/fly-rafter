@@ -273,3 +273,16 @@ TOOLS spec 15 条 web 场景（8 个选择器）+ CONFIG spec 17 条 web 场景�
 - **测试基线**：fr-tools-builtin 311→318（+baked pin+registration pin+web_sections），fr-schema 45→48（+web 组三钉测）；describe_methods 134→144。workspace 全测 rc=0。
 - **lifecycle 基线（FR_DSH_SOURCE 下）**：TOOLS 297/0/111（111 skip 全=未落相位 pending：skill/lsp/working_directory/内省/subagent 族/run_code）；CONFIG 131/0/188（188 skip=未落 CLI 面 pending 态）——随后续里程碑转绿。web 15 场景零 skip 零 fail。
 - **M1 结构性缺席档载**：①provider 凭证解析=激活时冻结（fr provider options 为构造期数据；dsh 为每操作 env 重读闭包——单点偏差，模块文档载）②build_web_runtime 的 dsh「config 挂载即注册」判例=fr 单 crate 的 baked gate+availability 判据合并。
+
+## 十七、16f 批 2 步① 绑定审计（working_directory 全量 + PROMPT 唯一 pending 收口，2026-11-01）
+
+TOOLS spec 6 条 wd 场景（5 个选择器）+ PROMPT spec 1 条 working-directory context 场景全绑真实测试；CONFIG 本步无新增场景（wd 无 config 组，dsh defaultDirectory 键无部署面）。
+
+- **装配事实**：tool-working-directory 注册行=partial face（execute 184/render 185 双端点+无 present* 键+无 timeoutMs+无 isConcurrencySafe=exclusive/generic 默认）；baked 恒挂（base 同构 Q16f-F）。working-directory 服务全量腿（Q16a-5A 最小臂 A 的 16f 兑现）：set/commit/notice 两变体/context text 四腿全落；WorkingDirectories 增 FsDomain（fs_domain.resolve/process_path/stat=dsh ctx.fs 同构件，16a fsio::probe 腿换缝收编）+AgentInject seam（agent service 2 inject，job_tools send_agent_message 判例同构）；notice 消息=role user+uuid v4+单 text 块+source.kind working-directory（job_tools notice_message 判例同形）；inject 失败吞并=dsh warn-not-rollback（fr 无 logger 面档载）。
+- **context 载体判例**：dsh assemble prepend listener+context text fn 二件→fr 单 textProvider 端点（METHOD_WORKING_DIRECTORY_CONTEXT_TEXT=906，ensure+取文本合一，组装期解析=等价可观察面）；spec=working-directory:current/order 100（WORKING_DIRECTORY 槽）/required true/interpolate false；register_working_directory_context_spec() 构造器+钉测分离（无 HostLink 可验）。
+- **TOOLS 6 条 → 5 钉测**：①「调度与呈现」→ `working_directory_registration_pins_the_partial_face`（partial face 五缺席键断言）；②「参数越界拒绝」→ `parse_args_pins_the_shapes`（web 越界→parse 判例同形：non-string cd 拒绝）；③「说明 section 注册缺席」→ `prompt_sections_pin_the_twelve_tools`（12 节全表钉=缺席执法点）；④「cd 形状/约束」×2 → `working_directory_tools_pin_the_catalog_tables`（Q97-A 全 schema 钉：cd 行+cwd 输出行+两逐字文案）；⑤「行为 1」→ `set_leaves_the_process_and_origin_untouched`（进程 cwd 不动+header 不变=shell/进程隔离+origin 恒定条款执法点）。
+- **PROMPT 1 条 → `context_tracks_the_working_directory`**（working_directory.rs：context_text(None)=空+set 后 context 反映新 cwd；bind-prompt-tests.py 增 1 对幂等复放，脚本头注「Deliberately left pending」判例同步勘误）；domain 腿 8 新测试（set/commit/notice 两变体/恢复腿 notice/同目录短路/notice 拒绝容纳/context 双臂/fold 保持）。
+- **catalog 抽取扩源**：generate-tool-catalog.py 增 working_directory TOOLS 表项（kind none）+extract_working_directory_output_texts（cwd description 锚 description: 后单字面量——首版锚全行误捕 type 字面量，探针实证后修）；catalog_gen.rs 增 DESCRIPTION/PARAMETERS_JSON/CD_TEXT/CWD_TEXT 四常量，--check 幂等。
+- **describe 面 144→147**（workingDirectory.execute/render/contextText 三行）；方法号 184/185/906 按批 2 设计钉分配；BuiltinTools 装配位零变更（directories 已在场；FsDomain 构造前移复用）。
+- **测试基线**：fr-tools-builtin 318→325（+registration/context 两钉测+schema 钉测+domain 8 测试-tool 内 2）；workspace 全测 1609 rc=0；clippy -D warnings 全绿（本轮 12 起修尽：message move/redundant clone/doc backticks/too-long-paragraph）。
+- **lifecycle 基线（FR_DSH_SOURCE 下）**：TOOLS **303/0/105**（+6 wd 场景转 pass）；PROMPT **47/0/0**（唯一 pending 收口，基线 46/0/1→47/0/0）；CONFIG 131/0/188 不变。零 fail。

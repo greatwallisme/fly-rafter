@@ -1551,3 +1551,13 @@
 - fr-schema 三 web 钉测调试三连修：Number 默认投影 float 序（30000.0/10 整数序按 Schema 变体）、违规断言改 violations[].path、嵌套投影指针 /anyOf/0/properties/<组>/anyOf/0/properties（wrap_value_positions 把 core 移入 anyOf[0]）。
 - 门：fr-tools-builtin 313/0 ×3 连跑稳（首轮 1 失败=已知 loopback flake 类单发，3/3 佐证）；clippy -p fr-tools-builtin --all-targets -D warnings 绿+workspace clippy 绿；fmt/三合约门/两抽取 --check 绿。
 - **下一动作=workspace test/doc 终门→lifecycle 双 spec 复跑（预期 TOOLS 299/0/109、CONFIG 131/0/188）→guard→stamp→提交。**
+
+## 2026-11-01 — 16f 批 2 步①：working_directory 全量（set/notice/context 三腿+tool+PROMPT 收口）
+
+- working_directory.rs 全量面：set（空拒/目录腿/changed commit）+commit（prev 同短路/append+notice 两变体/inject 失败容纳）+context_text（ensure+文本合一端点）+ensure 恢复腿补 notice；FsDomain 注入（fsio probe 腿退役）；AgentInject seam；8 新 domain 测试。
+- 接线：service.rs 184/185/906+三臂+describe 144→147；working_directory_tools.rs 新件（parse/execute/render+2 测试）；plugin_shell 注册行 partial face+register_working_directory_context_spec+setup 序列+6 位；WireAgentInject；FsDomain 构造前移复用。
+- schema.rs wd 参数/输出行+Q97-A 钉测；catalog_gen 四常量（脚本扩源：TOOLS 表项+extract_working_directory_output_texts——首版锚误捕 type 字面量，探针实证后修）；--check 幂等。
+- 绑定：TOOLS 6 场景→5 钉测（审计十七节）；PROMPT 唯一 pending→context_tracks_the_working_directory（bind-prompt-tests.py +1 对，头注判例勘误）。
+- 门：fmt/clippy workspace -D warnings 全绿（12 起修尽）；fr-tools-builtin 318→325；workspace 1609 rc=0；lifecycle TOOLS 303/0/105+PROMPT 47/0/0（唯一 pending 收口）+CONFIG 131/0/188。
+- 过程记录：Write 长内容退化 4 起（占位符/乱码标识符/掉括号/双次整文件损坏）——分片写+python 确定性 splice+写后即验纪律执行；rg -rn 误用 1 起（-r=--replace 陷阱再现）。
+- **下一动作=提交步① → 开步②（cordis_inspect 双工具，Q16f-B 空注册表诚实面+baked OFF）。**

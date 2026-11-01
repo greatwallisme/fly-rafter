@@ -545,6 +545,38 @@ pub fn web_fetch_output_schema() -> Value {
     })
 }
 
+/// The `working_directory` parameter table (the catalog-frozen base;
+/// the single optional `cd` row).
+#[must_use]
+pub fn working_directory_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "cd": {
+                "type": "string",
+                "description": catalog_gen::WORKING_DIRECTORY_CD_TEXT,
+            },
+        },
+    })
+}
+
+/// The `working_directory` output contract (the dsh `defineTool`
+/// `output.schema` verbatim shape).
+#[must_use]
+pub fn working_directory_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "cwd": {
+                "type": "string",
+                "required": true,
+                "description": catalog_gen::WORKING_DIRECTORY_CWD_TEXT,
+            },
+        },
+    })
+}
+
 /// The glob tool description (the composed registration fact).
 ///
 /// The catalog-frozen base carries the sampled over-cap phrase; the
@@ -1998,6 +2030,36 @@ mod tests {
         assert_eq!(
             fetch_fields["truncated"],
             serde_json::json!({ "type": "boolean", "required": true })
+        );
+    }
+
+    /// The working-directory tables pin their catalog rows (Q97-A: the
+    /// full-schema pin — the one optional `cd` row and the one
+    /// required `cwd` output row, verbatim texts included).
+    #[test]
+    fn working_directory_tools_pin_the_catalog_tables() {
+        let parameters = super::working_directory_parameters();
+        assert_eq!(parameters["type"], serde_json::json!("object"));
+        assert!(parameters.get("required").is_none());
+        let keys = parameters
+            .pointer("/properties")
+            .and_then(Value::as_object)
+            .expect("working_directory properties");
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys["cd"]["type"], serde_json::json!("string"));
+        assert_eq!(
+            keys["cd"]["description"],
+            serde_json::json!(catalog_gen::WORKING_DIRECTORY_CD_TEXT)
+        );
+        let output = super::working_directory_output_schema();
+        assert_eq!(output["additionalProperties"], serde_json::json!(false));
+        let fields = output["properties"].as_object().expect("cwd fields");
+        assert_eq!(fields.keys().collect::<Vec<_>>(), vec!["cwd"]);
+        assert_eq!(fields["cwd"]["type"], serde_json::json!("string"));
+        assert_eq!(fields["cwd"]["required"], serde_json::json!(true));
+        assert_eq!(
+            fields["cwd"]["description"],
+            serde_json::json!(catalog_gen::WORKING_DIRECTORY_CWD_TEXT)
         );
     }
 

@@ -80,7 +80,7 @@ Scenario: 无 AGENTS.md 不产生空 section
   那么 不存在空的 agent-instructions section
 
 Scenario: working-directory context 跟随 cwd
-  Test: pending_req_fr_prompt_working_directory_context_cwd
+  Test: context_tracks_the_working_directory
   假设 会话工作目录变更
   当 组装 runtime-context 时
   那么 WORKING_DIRECTORY context 反映新 cwd

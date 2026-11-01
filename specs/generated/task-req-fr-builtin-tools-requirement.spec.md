@@ -2005,37 +2005,37 @@ Scenario: lsp 行为 1
   那么 无 provider 返回结构化 LSP_UNAVAILABLE 不改 schema；config maxLocations 100、maxResultChars 16000、timeoutMs 60000（即 60000 归属 lsp）
 
 Scenario: working_directory 调度与呈现
-  Test: pending_req_fr_builtin_tools_working_directory
+  Test: working_directory_registration_pins_the_partial_face
   假设 合约要求的行为已实现
   当 读取工具 working_directory 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: working_directory 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_working_directory
+  Test: parse_args_pins_the_shapes
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: working_directory 说明 section 注册缺席
-  Test: pending_req_fr_builtin_tools_working_directory_section
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 working_directory 无说明 section（dsh 真源 tool-working-directory（目录变更走 user context，非 section） 不注入 systemPrompt）
 
 Scenario: working_directory 参数 cd 形状
-  Test: pending_req_fr_builtin_tools_working_directory_cd
+  Test: working_directory_tools_pin_the_catalog_tables
   假设 工具 working_directory 已注册
   当 校验 schema 时
   那么 参数行 [cd:string:opt（省略读当前）] 的名称与类型按目录行实现
 
 Scenario: working_directory 参数 cd 约束
-  Test: pending_req_fr_builtin_tools_working_directory_cd
+  Test: working_directory_tools_pin_the_catalog_tables
   假设 工具 working_directory 已注册
   当 校验 schema 时
   那么 参数行 [cd:string:opt（省略读当前）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: working_directory 行为 1
-  Test: pending_req_fr_builtin_tools_working_directory_1
+  Test: set_leaves_the_process_and_origin_untouched
   假设 工具 working_directory 执行时
   当 达到触发条件时
   那么 shell 与运行进程保留自身目录；origin 元数据与权限根固定

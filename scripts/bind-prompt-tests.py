@@ -24,9 +24,9 @@ through this script means accepting all eight rules):
 
 Idempotent: each pair asserts the current selector before replacing, so
 re-running after `draft-specs` regeneration re-applies the binding map.
-Deliberately left pending: working-directory context follows cwd (the
-working-directory context provider registers from its own plugin, a
-Phase 18 assembly — no proving test exists in this slice).
+The working-directory context scenario joined at 16f batch 2 step 1
+(the endpoint test `context_tracks_the_working_directory` proves the
+set-then-assemble reflect clause).
 
 Multi-clause composites added with this batch (each asserts every clause of
 its scenario's Then in one test): interpolation_and_tool_order_recompose_
@@ -58,6 +58,7 @@ PAIRS = [
     ("尺寸门控与去重", "loader_enforces_size_budget_dedup_and_root_markers"),
     ("complete section 唯一", "complete_conflict_and_refresh_context_only"),
     ("interpolate false 保留字面", "interpolate_false_keeps_literal_text"),
+    ("working-directory context 跟随 cwd", "context_tracks_the_working_directory"),
 ]
 
 # The 32 per-entry SECTION_ORDERS table scenarios all bind the one

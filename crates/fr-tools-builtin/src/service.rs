@@ -157,6 +157,10 @@ pub const METHOD_USER_QUESTIONS_FOLD: u32 = 903;
 pub const METHOD_PLAN_FOLD: u32 = 904;
 /// Method selector: the dynamic `plan:policy` section text endpoint.
 pub const METHOD_PLAN_POLICY_SECTION: u32 = 905;
+/// Method selector: the working-directory runtime-context text
+/// provider (the single resolve endpoint behind the PROMPT contract's
+/// working-directory context).
+pub const METHOD_WORKING_DIRECTORY_CONTEXT_TEXT: u32 = 906;
 /// Method selector: the `job_output` tool body.
 pub const METHOD_JOB_OUTPUT_EXECUTE: u32 = 102;
 /// Method selector: the `job_output` render projection.
@@ -330,6 +334,10 @@ pub const METHOD_WEB_FETCH_PRESENT_CALL: u32 = 181;
 pub const METHOD_WEB_FETCH_PRESENT_RESULT: u32 = 182;
 /// Method selector: the `web_fetch` presentation metadata.
 pub const METHOD_WEB_FETCH_PRESENTATION_META: u32 = 183;
+/// Method selector: the `working_directory` tool body.
+pub const METHOD_WORKING_DIRECTORY_EXECUTE: u32 = 184;
+/// Method selector: the `working_directory` render projection.
+pub const METHOD_WORKING_DIRECTORY_RENDER: u32 = 185;
 
 /// The escalate-to modes this composition advertises (the dsh
 /// `ESCALATION_TARGETS` words in table order).
@@ -550,6 +558,38 @@ impl BuiltinTools {
             METHOD_WORKING_DIRECTORY_FOLD => {
                 let state = fold_log(&request);
                 json!({ "state": state })
+            }
+            METHOD_WORKING_DIRECTORY_EXECUTE => {
+                let call = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let agent = call.get("agent").and_then(Value::as_str);
+                let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
+                return match crate::working_directory_tools::execute(
+                    self.directories.as_ref(),
+                    &arguments,
+                    agent,
+                ) {
+                    Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                        .map_err(|error| format!("body reply encode failed: {error}")),
+                    Err(error) => serde_json::to_vec(&json!({
+                        "error": { "message": error.message, "name": error.name },
+                    }))
+                    .map_err(|error| format!("body error encode failed: {error}")),
+                };
+            }
+            METHOD_WORKING_DIRECTORY_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::working_directory_tools::render(&args, &value))
+            }
+            METHOD_WORKING_DIRECTORY_CONTEXT_TEXT => {
+                let agent = request.get("agent").and_then(Value::as_str);
+                let text = self
+                    .directories
+                    .context_text(agent)
+                    .map_err(|error| format!("context-text failure: {error}"))?;
+                json!({ "text": text })
             }
             METHOD_TODOS_FOLD => {
                 let state = crate::todo::fold(
@@ -1825,9 +1865,20 @@ const DESCRIBE_WEB_METHODS: [&str; 10] = [
     "web_fetch.presentationMeta",
 ];
 
-const fn describe_methods() -> [&'static str; 144] {
+/// The 16f batch-2 rows: the working-directory tool's three faces
+/// (the dsh `tool-working-directory` registration; the context-text
+/// provider is the fr carrier for the dsh assemble prepend listener
+/// plus context-text pair — the tool carries no prompt section, so the
+/// registration reality is exactly these three selectors).
+const DESCRIBE_WORKING_DIRECTORY_METHODS: [&str; 3] = [
+    "workingDirectory.execute",
+    "workingDirectory.render",
+    "workingDirectory.contextText",
+];
+
+const fn describe_methods() -> [&'static str; 147] {
     let mut index = 0;
-    let mut methods: [&'static str; 144] = [""; 144];
+    let mut methods: [&'static str; 147] = [""; 147];
     while index < 91 {
         methods[index] = DESCRIBE_BASE_METHODS[index];
         index += 1;
@@ -1846,6 +1897,12 @@ const fn describe_methods() -> [&'static str; 144] {
     while web_index < 10 {
         methods[134 + web_index] = DESCRIBE_WEB_METHODS[web_index];
         web_index += 1;
+    }
+    let mut working_directory_index = 0;
+    while working_directory_index < 3 {
+        methods[144 + working_directory_index] =
+            DESCRIBE_WORKING_DIRECTORY_METHODS[working_directory_index];
+        working_directory_index += 1;
     }
     methods
 }
@@ -1867,11 +1924,11 @@ mod tests {
     }
 
     /// The 16f rows complete the web face: the two tools' five faces
-    /// each (144 selectors total).
+    /// each (147 selectors total with the working-directory band).
     #[test]
     fn describe_surface_carries_the_web_pair() {
         let methods = super::describe_methods();
-        assert_eq!(methods.len(), 144);
+        assert_eq!(methods.len(), 147);
         for name in [
             "web_search.execute",
             "web_search.presentResult",
@@ -1884,13 +1941,28 @@ mod tests {
         }
     }
 
+    /// The 16f batch-2 rows complete the surface: the working-directory
+    /// band rides its three faces (execute/render/contextText).
+    #[test]
+    fn describe_surface_carries_the_working_directory_band() {
+        let methods = super::describe_methods();
+        assert_eq!(methods.len(), 147);
+        for name in [
+            "workingDirectory.execute",
+            "workingDirectory.render",
+            "workingDirectory.contextText",
+        ] {
+            assert!(methods.contains(&name), "missing {name}");
+        }
+    }
+
     /// The 16e rows complete the surface: the six terminal bands, the
     /// persistent twins' artifact-side rows, and the shared finalize
     /// listener.
     #[test]
     fn describe_surface_carries_the_terminal_family() {
         let methods = super::describe_methods();
-        assert_eq!(methods.len(), 144);
+        assert_eq!(methods.len(), 147);
         for name in [
             "terminal_send.execute",
             "terminal_send.presentResult",

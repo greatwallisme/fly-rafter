@@ -949,6 +949,36 @@ fn register_plan_policy_section(link: &HostLink) -> Option<()> {
     )
 }
 
+/// Registers the working-directory runtime context (dsh
+/// `ctx.systemPrompt.context` with the assemble prepend listener's
+/// ensure-and-text resolve; order 100 `WORKING_DIRECTORY`, required,
+/// non-interpolated).
+fn register_working_directory_context_spec() -> Value {
+    json!({
+        "name": "working-directory:current",
+        "order": 100.0,
+        "text": {
+            "textProvider": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_WORKING_DIRECTORY_CONTEXT_TEXT,
+            },
+        },
+        "interpolate": false,
+        "required": true,
+    })
+}
+
+fn register_working_directory_context(link: &HostLink) -> Option<()> {
+    step(
+        link,
+        fr_wire::services::system_prompt::SERVICE_NAME,
+        fr_wire::services::system_prompt::METHOD_REGISTER_CONTEXT,
+        serde_json::to_vec(&register_working_directory_context_spec())
+            .ok()?
+            .as_slice(),
+    )
+}
+
 /// Registers the two prompt sections (dsh `ctx.systemPrompt.section`).
 fn register_sections(link: &HostLink) -> Option<()> {
     for (name, order, text) in prompt_sections() {
@@ -1366,6 +1396,17 @@ fn register_tools(
                 .as_slice(),
         )?;
     }
+    // The working-directory tool (dsh `tool-working-directory`; the
+    // dsh base bundle mounts it, so the registration is unconditional
+    // — the Q16f-F baked mirror judgment).
+    step(
+        link,
+        fr_wire::services::tools::SERVICE_NAME,
+        fr_wire::services::tools::METHOD_REGISTER,
+        serde_json::to_vec(&working_directory_registration())
+            .ok()?
+            .as_slice(),
+    )?;
     // The terminal family (dsh `tool-terminal` + the two persistent
     // twins; one bake gate — the dsh base bundle mounts none, the
     // `BAKED_STR_REPLACE_EDITOR` judgment). The registered tool names
@@ -1466,6 +1507,32 @@ pub fn web_fetch_registration() -> Value {
         },
         "isConcurrencySafe": true,
         "timeoutMs": crate::web_tools::BAKED_FETCH_TIMEOUT_MS,
+    })
+}
+
+/// The `working_directory` registration row (dsh `ctx.tools.register`).
+///
+/// Call-for-call: the dsh defineTool carries no custom present faces
+/// and no concurrency flag, so the partial face keeps exactly the
+/// execute/render output pair — the exclusive, generic-presentation
+/// default.
+#[must_use]
+pub fn working_directory_registration() -> Value {
+    json!({
+        "name": "working_directory",
+        "description": crate::catalog_gen::WORKING_DIRECTORY_DESCRIPTION,
+        "parameters": crate::schema::working_directory_parameters(),
+        "output": {
+            "schema": crate::schema::working_directory_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_WORKING_DIRECTORY_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_WORKING_DIRECTORY_EXECUTE,
+        },
     })
 }
 
@@ -2306,16 +2373,27 @@ impl BuiltinState {
         let worker = crate::job_tools::spawn_notice_worker(Arc::clone(&notices), receiver, link);
         register_sections(&link)?;
         register_plan_policy_section(&link)?;
+        register_working_directory_context(&link)?;
         register_projection(&link)?;
         register_tools(&link, !escalation.is_empty(), attachments_mounted)?;
 
         // The managed-environment registry over the resolved home.
         let env = ShellEnvRegistry::new(None).ok()?;
 
-        // The working-directory domain over the wire log seam and the
-        // in-crate fsio probe.
+        // The working-directory domain over the wire log/inject seams
+        // and the in-crate fs domain (the dsh ctx.fs isomorph; built
+        // first so the directory legs resolve through it).
+        let config = crate::fs_domain::FsDomainConfig::new().ok()?;
+        let policy = WireStandingPolicy { link };
+        let fs = Arc::new(crate::fs_domain::FsDomain::new(
+            config,
+            Box::new(policy),
+            escalation.first().map(|mode| (*mode).to_owned()),
+        ));
         let directories = WorkingDirectories::new(
             Arc::new(WireSessionLog { link }),
+            Arc::clone(&fs),
+            Arc::new(WireAgentInject { link }),
             std::env::current_dir().ok()?.to_string_lossy().to_string(),
         );
 
@@ -2387,15 +2465,6 @@ impl BuiltinState {
         )
         .ok()?;
 
-        // The fs domain over the standing-policy wire seam (the
-        // composed single-arm backend; the Q16b-3B seam).
-        let config = crate::fs_domain::FsDomainConfig::new().ok()?;
-        let policy = WireStandingPolicy { link };
-        let fs = Arc::new(crate::fs_domain::FsDomain::new(
-            config,
-            Box::new(policy),
-            escalation.first().map(|mode| (*mode).to_owned()),
-        ));
         Some(Self {
             tools,
             fs,
@@ -2451,6 +2520,29 @@ impl crate::fs_domain::StandingPolicy for WireStandingPolicy {
 /// pair).
 struct WireSessionLog {
     link: HostLink,
+}
+
+/// The model notices over the `'agent'` inject face (the dsh
+/// `agent.inject(notice)` pair).
+struct WireAgentInject {
+    link: HostLink,
+}
+
+impl crate::working_directory::AgentInject for WireAgentInject {
+    fn inject(&self, agent: &str, message: &Value) -> Result<(), String> {
+        let bytes = serde_json::to_vec(&json!({
+            "sessionId": agent,
+            "message": message,
+        }))
+        .map_err(|error| format!("notice encode failed: {error}"))?;
+        self.link
+            .require(
+                fr_wire::services::agent::SERVICE_NAME,
+                fr_wire::services::agent::METHOD_INJECT,
+                &bytes,
+            )
+            .map(|_| ())
+    }
 }
 
 impl crate::working_directory::SessionLog for WireSessionLog {
@@ -3129,6 +3221,67 @@ pub fn session_event_read_registration() -> Value {
 
 #[cfg(test)]
 mod tests {
+    /// The working-directory registration row keeps the partial face
+    /// (the dsh `tool-working-directory` defineTool: no concurrency
+    /// flag — the exclusive default, no custom present faces — the
+    /// generic presentation family, no timeout): exactly the
+    /// execute/render output pair plus the catalog identity.
+    #[test]
+    fn working_directory_registration_pins_the_partial_face() {
+        let row = super::working_directory_registration();
+        assert_eq!(row["name"], serde_json::json!("working_directory"));
+        assert_eq!(
+            row["description"],
+            serde_json::json!(crate::catalog_gen::WORKING_DIRECTORY_DESCRIPTION)
+        );
+        assert_eq!(
+            row["parameters"],
+            crate::schema::working_directory_parameters()
+        );
+        assert_eq!(
+            row["output"]["schema"],
+            crate::schema::working_directory_output_schema()
+        );
+        assert_eq!(
+            row["output"]["render"]["method"],
+            serde_json::json!(crate::service::METHOD_WORKING_DIRECTORY_RENDER)
+        );
+        assert_eq!(
+            row["execute"]["method"],
+            serde_json::json!(crate::service::METHOD_WORKING_DIRECTORY_EXECUTE)
+        );
+        for absent in [
+            "isConcurrencySafe",
+            "presentCall",
+            "presentResult",
+            "presentationMeta",
+            "timeoutMs",
+        ] {
+            assert!(row.get(absent).is_none(), "{absent} stays absent");
+        }
+    }
+
+    /// The working-directory runtime context registers with the dsh
+    /// name, the order-100 `WORKING_DIRECTORY` slot, the required
+    /// flag, the non-interpolated flag, and the endpoint route (the
+    /// PROMPT contract's context registration face).
+    #[test]
+    fn working_directory_context_pins_the_registration() {
+        let spec = super::register_working_directory_context_spec();
+        assert_eq!(spec["name"], serde_json::json!("working-directory:current"));
+        assert_eq!(spec["order"], serde_json::json!(100.0));
+        assert_eq!(spec["interpolate"], serde_json::json!(false));
+        assert_eq!(spec["required"], serde_json::json!(true));
+        assert_eq!(
+            spec["text"]["textProvider"]["service"],
+            serde_json::json!(crate::service::SERVICE_NAME)
+        );
+        assert_eq!(
+            spec["text"]["textProvider"]["method"],
+            serde_json::json!(crate::service::METHOD_WORKING_DIRECTORY_CONTEXT_TEXT)
+        );
+    }
+
     /// The two web registration rows carry the full faces (the dsh
     /// `tool-web` registration: parallel scheduling, the catalog
     /// descriptions, the service-route faces, and the baked budgets).

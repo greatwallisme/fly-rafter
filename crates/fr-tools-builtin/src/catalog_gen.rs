@@ -1572,6 +1572,27 @@ pub const WEB_FETCH_SECTION_TEXT: &str = r"web_fetch returns external, untrusted
 /// The `web_fetch` `url` parameter description (catalog-verbatim).
 pub const WEB_FETCH_URL_TEXT: &str = r"The HTTP(S) URL to fetch.";
 
+/// The `working_directory` tool description (catalog-verbatim).
+pub const WORKING_DIRECTORY_DESCRIPTION: &str = r"Read the current working directory, or change it with cd. Relative paths use the current directory. Existing shells and running processes keep their own directories.";
+
+/// The `working_directory` parameter table (the json block, verbatim).
+pub const WORKING_DIRECTORY_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "cd": {
+      "type": "string",
+      "description": "Existing directory to enter. Omit to read the current directory."
+    }
+  }
+}"#;
+
+/// The `working_directory` output schema's cwd row text (the dsh tool source's output.schema.properties.cwd.description, source-verbatim; the catalog carries the parameters block only).
+pub const WORKING_DIRECTORY_CWD_TEXT: &str = r"Current absolute working directory.";
+
+/// The `working_directory` `cd` parameter description (catalog-verbatim).
+pub const WORKING_DIRECTORY_CD_TEXT: &str =
+    r"Existing directory to enter. Omit to read the current directory.";
+
 /// The persistent `bash` tool description (catalog-verbatim; the dsh `@deepseek-ai/dsh-tool-bash-persistent` package section).
 pub const BASH_PERSISTENT_DESCRIPTION: &str = r"Run commands in a persistent bash shell. State, including the current directory and exported environment variables, persists across calls for this agent.";
 
