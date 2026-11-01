@@ -33,6 +33,7 @@
 //! [`service`], [`plugin_shell`], [`catalog_gen`], and the test-only
 //! catalog-freeze verifier).
 
+pub mod attribution;
 pub mod catalog_gen;
 pub mod fence;
 pub mod fs_diff;
@@ -71,6 +72,10 @@ pub mod tools;
 pub mod user_questions;
 #[cfg(test)]
 mod verify;
+pub mod web_deepseek_api;
 pub mod web_fetch_http;
 pub mod web_seam;
+pub mod web_search_deepseek;
+pub mod web_search_exa;
+pub mod web_search_perplexity;
 pub mod working_directory;

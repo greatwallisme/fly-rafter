@@ -157,14 +157,24 @@ impl UreqFetch {
     /// stalled read surfaces at the deadline instead of the default).
     #[must_use]
     pub fn with_read_window(window: Option<Duration>) -> Self {
-        let config = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .timeout_connect(Some(Duration::from_secs(10)))
-            .timeout_per_read(window)
-            .build();
+        let config = Self::config(window);
         Self {
             agent: ureq::Agent::new_with_config(config),
         }
+    }
+
+    /// The shared agent configuration: statuses are data, never errors
+    /// (ureq's `http_status_as_error` defaults to `true`, which would
+    /// collapse every 4xx/5xx into a transport failure and strip the
+    /// status the callers classify on — dsh's `fetch` returns the
+    /// `Response` for any status).
+    fn config(window: Option<Duration>) -> ureq::config::Config {
+        ureq::Agent::config_builder()
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .timeout_connect(Some(Duration::from_secs(10)))
+            .timeout_per_read(window)
+            .build()
     }
 
     /// The default backend behind every [`Fetch`] injection point.
@@ -191,11 +201,7 @@ impl UreqFetch {
         addresses: Vec<std::net::IpAddr>,
         window: Option<Duration>,
     ) -> Self {
-        let config = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .timeout_connect(Some(Duration::from_secs(10)))
-            .timeout_per_read(window)
-            .build();
+        let config = Self::config(window);
         Self {
             agent: ureq::Agent::with_parts(
                 config,
@@ -337,6 +343,8 @@ mod tests {
                 let text = String::from_utf8_lossy(&buf[..read]);
                 let response = if text.contains("GET /moved") {
                     "HTTP/1.1 302 Found\r\nLocation: /there\r\nContent-Length: 0\r\n\r\n"
+                } else if text.contains("GET /missing") {
+                    "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: 11\r\n\r\nnot found!!"
                 } else {
                     "HTTP/1.1 200 OK\r\nRetry-After: 3\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello"
                 };
@@ -358,6 +366,22 @@ mod tests {
         let mut body = String::new();
         ok.body.read_to_string(&mut body).unwrap();
         assert_eq!(body, "hello");
+
+        // A 4xx is a response, not a transport failure: callers
+        // classify statuses (dsh fetch returns the Response for any
+        // status; ureq's status-as-error default stays off).
+        let mut missing = fetch
+            .fetch(HttpRequest {
+                method: HttpMethod::Get,
+                url: format!("http://127.0.0.1:{port}/missing"),
+                headers: Vec::new(),
+                body: None,
+            })
+            .unwrap();
+        assert_eq!(missing.status, 404);
+        let mut body = String::new();
+        missing.body.read_to_string(&mut body).unwrap();
+        assert_eq!(body, "not found!!");
 
         let redirect = fetch
             .fetch(HttpRequest {

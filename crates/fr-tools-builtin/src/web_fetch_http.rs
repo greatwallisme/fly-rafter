@@ -29,11 +29,13 @@ use crate::web_seam::{WebError, WebFetchBody, WebFetchProvider, WebFetchRequest,
 /// provider (dsh `WEB_FETCH_MAX_URL_LENGTH`).
 pub const WEB_FETCH_MAX_URL_LENGTH: usize = 2048;
 
-/// Default `User-Agent`: an explicit product agent, never a browser
+/// The default `User-Agent`: an explicit product agent, never a browser
 /// disguise (the dsh default under the workspace brand mapping; the
-/// version rides the workspace crate version).
-pub const DEFAULT_USER_AGENT: &str =
-    "fly-rafter/0.1.0 (+https://github.com/greatwallisme/fly-rafter)";
+/// version rides [`crate::attribution::APP_IDENTITY`]).
+#[must_use]
+pub fn default_user_agent() -> String {
+    crate::attribution::user_agent()
+}
 
 /// Node coerces larger timer delays to 1 ms, so reject them at
 /// configuration time (dsh `MAX_NODE_TIMER_DELAY_MS`).
@@ -76,7 +78,7 @@ pub fn resolve_limits(config: &Value) -> Result<HttpFetchLimits, String> {
     let user_agent = config
         .get("user-agent")
         .and_then(Value::as_str)
-        .unwrap_or(DEFAULT_USER_AGENT)
+        .unwrap_or(&default_user_agent())
         .to_owned();
     assert_positive_finite("max-response-bytes", max_response_bytes)?;
     assert_positive_finite("max-body-chars", max_body_chars)?;
@@ -631,7 +633,7 @@ mod tests {
             max_body_chars: 100_000,
             timeout_ms: 30_000.0,
             max_redirects: 5,
-            user_agent: DEFAULT_USER_AGENT.to_owned(),
+            user_agent: default_user_agent(),
         }
     }
 
@@ -757,7 +759,7 @@ mod tests {
         assert_eq!(defaults.max_body_chars, 100_000);
         assert_eq!(defaults.timeout_ms, 30_000.0);
         assert_eq!(defaults.max_redirects, 5);
-        assert_eq!(defaults.user_agent, DEFAULT_USER_AGENT);
+        assert_eq!(defaults.user_agent, default_user_agent());
         assert_eq!(
             resolve_limits(&serde_json::json!({"max-response-bytes": 0})).unwrap_err(),
             "web-fetch-http: max-response-bytes must be a positive finite number"

@@ -1500,3 +1500,23 @@
 - 钉测 7 件 12 测全绿：URL 策略全臂/classify+charset 表/redirect 解析+同源+origin 序列化（含 IPv6 括号）/UTF-16 切片/limits 默认+三拒绝文案/loopback 全程（200+301 同源跟随+跨源拒+5 跳 budget+octet-stream 拒+latin-1 charset 解码+close 定界流截断）/声明超帽拒。
 - 过程修正：/big 用例首版撞 declared-length 拒臂（改 close 定界才到流截断臂——dsh 语义钉测反向实证）；utf16 切片改「加后判超」；测试内残留 stub 清除。
 - 状态：fr-tools-builtin clippy -D warnings 绿、web 域 12/12、全 crate check 零警告。**下一动作=16f 批 1 步③四 search provider（web_search_deepseek/web_deepseek_api/web_search_exa/web_search_perplexity，findings 钉二全录）→步④ web_tools.rs→步⑤集成收口。**
+## 2026-11-01 — 16f 批 1 前段提交（760cd78）
+
+- 入库：fr-net pinned 模块+fetch_raw/读窗扩件、web_seam、web_fetch_http、三依赖+fr-net path 依赖、findings/progress 设计钉与进度。四关手跑全绿（fmt/clippy -D warnings/FR_DSH_SOURCE 下 14+265 全测/doc）；pre-commit guard 按 precommit-guard-no-verify 判例 --no-verify。
+- **下一动作不变=步③四 search provider→步④ web_tools→步⑤集成收口。**
+## 2026-11-01 — 16f 批 1 步③前段：web_search_deepseek 全绿+两项整改（用户裁决与钉测反扒）
+
+- **用户指误整改（UA 硬编码）**：web_fetch_http.rs（760cd78 已入库，同缺陷）与 web_search_deepseek.rs 硬编码 "fly-rafter/0.1.0" 均改 `crates/fr-tools-builtin/src/attribution.rs`：APP_IDENTITY{product,version=env!(CARGO_PKG_VERSION),url}+user_agent()（长形 product/version (+url)，对 dsh 'deepseek-harness/0.0.1 (+https://github.com/deepseek-ai)'）+product_agent()（短形，对 dsh 'deepseek-harness/0.0.1'）；web_fetch_http::DEFAULT_USER_AGENT const→default_user_agent() fn（resolve_limits 默认+钉测同改，外部零引用已核）。
+- **fr-net 缝 bug（web_search_deepseek 401 钉测反扒）**：ureq 3.5 `http_status_as_error` 默认 true，UreqFetch::send 把 4xx/5xx 塌缩成通用传输错误=状态丢失，违反 fr-net 自身"Callers classify outcomes"契约与 undici 语义（4xx/5xx 恒 Response）。修复=两处 config（with_read_window/pinned_with_read_window 共用新 `config()` 构造器）加 `.http_status_as_error(false)`；fr-net 钉测加 404 直通臂（GET /missing→Ok+status 404+body）；fr-net 14/14 绿。此修同时护航 fr-llm-deepseek adapter.rs:601-609 的非 2xx 分类面（该面此前仅注入 stub 测过、真 ureq 下潜伏）。
+- web_search_deepseek.rs 落码（钉二 deepseek-official 全臂）：resolve_options(config,env 缝)+availability（凭证面结构性在场=缺 key 不挡 available，对 dsh resolveApiKey!==undefined 臂）/dispatch（POST /messages 六头逐字+体五键 json! 保序）/map_anthropic_response（no-blocks 逐字+citation join 首现胜+去重+unprocessable 四臂+空体=no-blocks 错误）/anthropic_error_detail（JS `??` 语义：error 串→error.message 非空非 null 才用→message 回退，非串 detail 永不附加）/endpoint_guidance 尾注逐字（19.2 条 21 判例）。死臂注释载明：account token（Q57-B）、recordRequest、abort 族（Q69-B）。
+- 钉测 9 件全绿：availability 表/loopback 全程（POST 体五键+六头断言+双块同 URL 去重+citation join）/no-blocks+尾注逐字/缺 key CREDENTIAL_MISSING 逐字（网络前拒）/HTTP 错误四路（error.message 串/error 串/非串 detail 不附加/非 JSON 体）/narrowing 表/unprocessable 形状表/citation 首现胜/resolve_options 默认+env 回退表。
+- 本窗生成降级事故三起（初写尾段乱码、平行 Edit 同文件竞态、回声环写入）已按 3-strike 处置：rm 重写+极短分段（≤80 行/次、rustfmt 逐段语法门、写后即 cargo check）；`+` 字面量拼接、format! 内拼接、read_request 单次 read 不足（POST 头体分节）等钉测暴露即修。
+- 状态：fr-net 14/14、fr-tools-builtin attribution 1+web_fetch_http 7+web_search_deepseek 9 全绿、check 零警告。**下一动作=步③续：web_deepseek_api（search+fetch 双 provider 共 transport）→exa→perplexity→步④ web_tools.rs→步⑤集成收口。**
+## 2026-11-01 — 16f 批 1 步③收窗：四 search provider 全落+clippy 门清零
+
+- 四 provider 落码全绿：web_search_deepseek 9 测、web_deepseek_api 8 测（search+fetch 共 transport：dispatch_deep_seek_web 泛型 decode+guidance 尾注、bounded_question=JS \s 集手写（含 ﻿ 排 \u{85}）+128 字符帽、ori_question 注入门=send_original_question+QuestionSource 注入缝）、web_search_exa 5 测（error 串覆写语义 `error ?? message`+is_none_or）、web_search_perplexity 5 测（choices[].message.content 空 content 省略+search_results 优先 citations 回退+非串 citation 丢弃）。
+- fr 净化判例（钉入 findings）：exa/perplexity url 缺失项丢弃（WebSearchSource 类型约束+dsh loose 直通不可表）、「decode 闭包串=最终消息+dsh 会包 guidance」双臂语义、HTTP 错误 detail 仅非空串附加。
+- clippy -D warnings 清零：52 处（pedantic+nursery）全修无压制——doc 首段缩短+identifiers 反引号（doc_markdown）、const fn 化（构造器+谓词）、option_if_let_else 改 map_or_else、format_push_string 改 push_str、is_none_or、# Errors 节补齐。
+- 门状态：fmt 绿、clippy -p fr-net -p fr-tools-builtin -D warnings 绿、fr-net 14/14、fr-tools-builtin 293/293（FR_DSH_SOURCE 下）。全仓 test+doc 后台跑中（后台任务 byhr9sixx）。
+- 本窗新增小事故三起均已即修：raw string 内 `"#` 提前闭合、loopback 服务器硬编码 Content-Length 少 2 字节（Peer disconnected）、路径判别与 provider 构造不一致。教训延续：钉测期望值先手算再落笔。
+- **下一动作=步④ web_tools.rs（web_search/web_fetch 双工具全脸：parse/execute/merge/render/present，钉一全录+turndown→html-to-markdown-rs 映射）→步⑤集成收口。**

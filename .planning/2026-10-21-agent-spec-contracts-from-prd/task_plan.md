@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-16e 批 3b 已收口（2026-11-01）：TOOL/CONFIG 双 spec 69 场景绑定+三钉测扩件+Q16e-3b-A 改否定裁决执行+双 lifecycle 0 fail（TOOLS 284/0/124、CONFIG 114/0/205），五门绿 workspace 1525。**下一动作=16f（web+skill+lsp+目录+内省，Q94-A 末子批）批 0 设计问答：六组工具（web_search/web_fetch/skill/load_workspace_dependencies/lsp/working_directory/cordis_inspect_list/cordis_inspect_query/plugin_manager）的 dsh 真源勘察+裁问题清单+Q97-A schema 钉测+config 组+catalog 抽取+spec 绑定+七步流收口。**
+16f 批 1 步③已收口（2026-11-01）：四 search provider（deepseek-official/deepseek-search-api+deepseek-fetch-api/exa/perplexity）全落 27 钉测绿；两项整改入库——UA 版本改 attribution::APP_IDENTITY（env!(CARGO_PKG_VERSION)，用户指误判例）+fr-net 缝 http_status_as_error(false) 修复（4xx/5xx 状态直通，ureq 默认塌缩 bug）；clippy -D warnings 清零（52 处 pedantic/nursery 全修无压制）；workspace 1573/0 + doc 零警告。**下一动作=16f 批 1 步④ web_tools.rs：web_search/web_fetch 双工具全脸（parse/execute/merge/render/present，findings 钉一全录+turndown→html-to-markdown-rs 映射+Q97-A 全 schema 钉测）→步⑤集成收口（service 174-183/plugin_shell 注册+sections 2000/2100/schema.rs/fr-schema config 七组/catalog 扩源/十门）。**
 
 ## Phases
 
