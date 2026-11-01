@@ -292,6 +292,24 @@ pub fn retain_tail(text: &str, max_bytes: usize) -> String {
     String::from_utf8_lossy(&bytes[start..]).into_owned()
 }
 
+/// The UTF-16-unit cap that never splits a surrogate pair (dsh
+/// `truncateWithoutSplittingSurrogatePair`; a Rust `char` is a whole
+/// code point, so the pair ride or fall together by construction).
+#[must_use]
+pub fn truncate_without_splitting_surrogate_pair(text: &str, max_chars: usize) -> String {
+    let mut units = 0_usize;
+    let mut capped = String::new();
+    for ch in text.chars() {
+        let len = ch.len_utf16();
+        if units + len > max_chars {
+            break;
+        }
+        units += len;
+        capped.push(ch);
+    }
+    capped
+}
+
 /// The head retain (dsh `TextRetainer` kind `'head'`): the first
 /// `max_bytes` bytes, cut back to a UTF-8 boundary.
 #[must_use]
@@ -962,6 +980,9 @@ mod tests {
     }
 
     impl Seams for JobSeams {
+        fn terminals(&self) -> Option<&dyn crate::tools::TerminalSeams> {
+            None
+        }
         fn policy(&self) -> &dyn crate::tools::PolicySeam {
             self
         }

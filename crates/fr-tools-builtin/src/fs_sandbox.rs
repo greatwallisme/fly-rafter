@@ -224,6 +224,9 @@ mod tests {
     }
 
     impl Seams for ScriptSeams {
+        fn terminals(&self) -> Option<&dyn crate::tools::TerminalSeams> {
+            None
+        }
         fn attachments(&self) -> Option<&dyn crate::tools::AttachmentSeam> {
             None
         }

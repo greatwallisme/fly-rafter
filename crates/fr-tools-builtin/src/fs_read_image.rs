@@ -735,6 +735,9 @@ mod tests {
     }
 
     impl Seams for ImageSeams {
+        fn terminals(&self) -> Option<&dyn crate::tools::TerminalSeams> {
+            None
+        }
         fn policy(&self) -> &dyn crate::tools::PolicySeam {
             unreachable!("the image body never reads the policy seam")
         }

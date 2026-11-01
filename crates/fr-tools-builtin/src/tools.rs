@@ -235,6 +235,10 @@ pub trait Seams: Send + Sync {
     ///
     /// The storage failure family (the dsh `saveText` rejection).
     fn spill_store_save_text(&self, save: &Value) -> Result<Option<Value>, String>;
+    /// The terminals seam face (the six terminal tools and the
+    /// persistent pair's band; absent when the composition mounts no
+    /// terminals provider — the attachment-store judgment).
+    fn terminals(&self) -> Option<&dyn TerminalSeams>;
 }
 
 /// The attachment-store seam (dsh `ctx.get('attachments')` reduced to
@@ -282,6 +286,89 @@ pub trait RouteHeaderSeam: Send + Sync {
     fn request_header(&self, session: &str) -> Result<Value, String>;
 }
 
+/// The terminals seam (dsh `ctx.terminals` reduced to the wire band the
+/// six tool bodies and the persistent pair consume; the fr-shell
+/// registry's 3000+ face).
+///
+/// Sends split into start/wait/cancel/read slices the bodies drive;
+/// spawn and close block through the backend's own bounds.
+pub trait TerminalSeams: Send + Sync {
+    /// Spawns one session (dsh `ctx.terminals.spawn`); the reply is the
+    /// published snapshot plus motd.
+    ///
+    /// # Errors
+    ///
+    /// The registry's coded refusal family (`NO_BACKEND`,
+    /// `OWNER_NOT_LIVE`, `SERVICE_DISPOSING`).
+    fn spawn(&self, owner: &str, spec: &Value) -> Result<Value, String>;
+    /// Starts the exclusive send (dsh `ctx.terminals.startSend`); the
+    /// reply is `{}` and the operation face rides the three slice arms.
+    ///
+    /// # Errors
+    ///
+    /// The registry's coded refusal family (`NO_SESSION`,
+    /// `SEND_ACTIVE`, closing).
+    fn start_send(
+        &self,
+        owner: &str,
+        session_id: &str,
+        text: &str,
+        submit: bool,
+    ) -> Result<Value, String>;
+    /// The bounded wait slice (dsh `operation.done` lowered); the reply
+    /// is the settled result or `{settled: false}`.
+    ///
+    /// # Errors
+    /// The transport family.
+    fn send_wait(&self, owner: &str, session_id: &str, timeout_ms: u64) -> Result<Value, String>;
+    /// Cancels one in-flight send (dsh `operation.cancel`).
+    ///
+    /// # Errors
+    /// The transport family.
+    fn send_cancel(&self, owner: &str, session_id: &str) -> Result<Value, String>;
+    /// One consuming read of the in-flight send's delta (dsh
+    /// `operation.readOutput`).
+    ///
+    /// # Errors
+    /// The transport family.
+    fn send_read(&self, owner: &str, session_id: &str) -> Result<Value, String>;
+    /// One scrollback page (dsh `ctx.terminals.read`).
+    ///
+    /// # Errors
+    /// The registry's coded refusal family (`NO_SESSION`).
+    fn read(
+        &self,
+        owner: &str,
+        session_id: &str,
+        offset: Option<u64>,
+        count: Option<u64>,
+    ) -> Result<Value, String>;
+    /// One signal delivery (dsh `ctx.terminals.signal`).
+    ///
+    /// # Errors
+    /// The registry's coded refusal family.
+    fn signal(&self, owner: &str, session_id: &str, signal: &str) -> Result<Value, String>;
+    /// Closes one session (dsh `ctx.terminals.kill`); the reply word
+    /// `{closed: bool}` rides through.
+    ///
+    /// # Errors
+    /// The registry's coded refusal family.
+    fn kill(&self, owner: &str, session_id: &str, reason: &str) -> Result<Value, String>;
+    /// Lists the owner's sessions in publication order (dsh
+    /// `ctx.terminals.list`).
+    ///
+    /// # Errors
+    /// The transport family.
+    fn list(&self, owner: &str) -> Result<Value, String>;
+    /// The absorbed background send (dsh `jobs.start` lowered onto the
+    /// terminals band); the reply carries the job id.
+    ///
+    /// # Errors
+    /// The jobs admission refusal family.
+    fn send_background(&self, payload: &Value) -> Result<Value, String>;
+}
+
+/// The attachment-store seam (dsh `ctx.get('attachments')` reduced to
 /// The shell variant the bodies parameterize over (dsh's two tool
 /// packages as one twin skeleton).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -464,7 +551,7 @@ pub fn resolve_workdir(
 /// Lexically joins and collapses `.`/`..` segments (the dsh pwsh twin's
 /// `path.resolve(session, model)` shape).
 #[must_use]
-fn normalize_join(session: &str, model: &str) -> String {
+pub(crate) fn normalize_join(session: &str, model: &str) -> String {
     let joined_path = format!("{session}/{model}");
     let mut segments: Vec<&str> = Vec::new();
     for part in joined_path.split('/') {
@@ -1299,6 +1386,9 @@ mod tests {
     }
 
     impl Seams for ScriptSeams {
+        fn terminals(&self) -> Option<&dyn crate::tools::TerminalSeams> {
+            None
+        }
         fn attachments(&self) -> Option<&dyn crate::tools::AttachmentSeam> {
             None
         }

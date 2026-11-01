@@ -255,6 +255,62 @@ pub const METHOD_SESSION_EVENT_READ_PRESENT_CALL: u32 = 146;
 /// constant mirrors; the headless adoptability read).
 pub const METHOD_SESSION_QUERY_OBSERVE: u32 = fr_wire::services::session_query::METHOD_OBSERVE;
 
+/// The `terminal_send` execute endpoint.
+pub const METHOD_TERMINAL_SEND_EXECUTE: u32 = 147;
+/// The `terminal_send` render endpoint.
+pub const METHOD_TERMINAL_SEND_RENDER: u32 = 148;
+/// The `terminal_send` present-call endpoint.
+pub const METHOD_TERMINAL_SEND_PRESENT_CALL: u32 = 149;
+/// The `terminal_send` result-presentation endpoint.
+pub const METHOD_TERMINAL_SEND_PRESENT_RESULT: u32 = 150;
+/// The `terminal_send` presentation-metadata endpoint.
+pub const METHOD_TERMINAL_SEND_PRESENTATION_META: u32 = 151;
+/// The `terminal_open` execute endpoint.
+pub const METHOD_TERMINAL_OPEN_EXECUTE: u32 = 152;
+/// The `terminal_open` render endpoint.
+pub const METHOD_TERMINAL_OPEN_RENDER: u32 = 153;
+/// The `terminal_open` present-call endpoint.
+pub const METHOD_TERMINAL_OPEN_PRESENT_CALL: u32 = 154;
+/// The `terminal_read` execute endpoint.
+pub const METHOD_TERMINAL_READ_EXECUTE: u32 = 155;
+/// The `terminal_read` render endpoint.
+pub const METHOD_TERMINAL_READ_RENDER: u32 = 156;
+/// The `terminal_read` present-call endpoint.
+pub const METHOD_TERMINAL_READ_PRESENT_CALL: u32 = 157;
+/// The `terminal_signal` execute endpoint.
+pub const METHOD_TERMINAL_SIGNAL_EXECUTE: u32 = 158;
+/// The `terminal_signal` render endpoint.
+pub const METHOD_TERMINAL_SIGNAL_RENDER: u32 = 159;
+/// The `terminal_signal` present-call endpoint.
+pub const METHOD_TERMINAL_SIGNAL_PRESENT_CALL: u32 = 160;
+/// The `terminal_close` execute endpoint.
+pub const METHOD_TERMINAL_CLOSE_EXECUTE: u32 = 161;
+/// The `terminal_close` render endpoint.
+pub const METHOD_TERMINAL_CLOSE_RENDER: u32 = 162;
+/// The `terminal_close` present-call endpoint.
+pub const METHOD_TERMINAL_CLOSE_PRESENT_CALL: u32 = 163;
+/// The `terminal_list` execute endpoint.
+pub const METHOD_TERMINAL_LIST_EXECUTE: u32 = 164;
+/// The `terminal_list` render endpoint.
+pub const METHOD_TERMINAL_LIST_RENDER: u32 = 165;
+/// The `terminal_list` present-call endpoint.
+pub const METHOD_TERMINAL_LIST_PRESENT_CALL: u32 = 166;
+/// The persistent `bash` execute endpoint.
+pub const METHOD_PERSISTENT_BASH_EXECUTE: u32 = 167;
+/// The persistent `bash` render endpoint.
+pub const METHOD_PERSISTENT_BASH_RENDER: u32 = 168;
+/// The persistent `bash` present-call endpoint.
+pub const METHOD_PERSISTENT_BASH_PRESENT_CALL: u32 = 169;
+/// The persistent `pwsh` execute endpoint.
+pub const METHOD_PERSISTENT_PWSH_EXECUTE: u32 = 170;
+/// The persistent `pwsh` render endpoint.
+pub const METHOD_PERSISTENT_PWSH_RENDER: u32 = 171;
+/// The persistent `pwsh` present-call endpoint.
+pub const METHOD_PERSISTENT_PWSH_PRESENT_CALL: u32 = 172;
+/// The terminal finalize listener (the shared dsh `finalizeContent`
+/// carrier; the six tools' post-execute CPS arm).
+pub const METHOD_TERMINAL_FINALIZE: u32 = 173;
+
 /// The escalate-to modes this composition advertises (the dsh
 /// `ESCALATION_TARGETS` words in table order).
 pub const ESCALATION_MODES: [&str; 2] = ["workspace-write", "danger-full-access"];
@@ -287,6 +343,8 @@ pub struct BuiltinTools {
     schedules: std::sync::Arc<crate::schedule::Schedules>,
     interactions: std::sync::Arc<crate::interaction_tools::InteractionState>,
     session_query: std::sync::Arc<crate::session_query_tools::SessionQueryRuntime>,
+    terminal_finalizes: std::sync::Arc<crate::terminal_tools::FinalizeParks>,
+    persistent_shells: std::sync::Arc<crate::persistent::PersistentShells>,
 }
 
 impl std::fmt::Debug for BuiltinTools {
@@ -316,6 +374,8 @@ impl BuiltinTools {
         schedules: std::sync::Arc<crate::schedule::Schedules>,
         interactions: std::sync::Arc<crate::interaction_tools::InteractionState>,
         session_query: std::sync::Arc<crate::session_query_tools::SessionQueryRuntime>,
+        terminal_finalizes: std::sync::Arc<crate::terminal_tools::FinalizeParks>,
+        persistent_shells: std::sync::Arc<crate::persistent::PersistentShells>,
     ) -> Result<Self, String> {
         Ok(Self {
             seams,
@@ -327,6 +387,8 @@ impl BuiltinTools {
             schedules,
             interactions,
             session_query,
+            terminal_finalizes,
+            persistent_shells,
         })
     }
 
@@ -385,6 +447,19 @@ impl BuiltinTools {
     #[must_use]
     pub const fn directories(&self) -> &std::sync::Arc<working_directory::WorkingDirectories> {
         &self.directories
+    }
+
+    /// The terminal finalize parks (the shared dsh `finalizeContent`
+    /// stash).
+    #[must_use]
+    pub const fn terminal_finalizes(&self) -> &std::sync::Arc<crate::terminal_tools::FinalizeParks> {
+        &self.terminal_finalizes
+    }
+
+    /// The persistent shell ledger (the twins' owner-scoped sessions).
+    #[must_use]
+    pub const fn persistent_shells(&self) -> &std::sync::Arc<crate::persistent::PersistentShells> {
+        &self.persistent_shells
     }
 
     /// The composed cross-plugin seam (the fs tool bodies' standing
@@ -908,6 +983,103 @@ impl BuiltinTools {
                 }))
                 .map_err(|error| format!("observe reply encode failed: {error}"));
             }
+            METHOD_TERMINAL_SEND_EXECUTE => {
+                return self.serve_terminal_body(crate::terminal_tools::execute_send, &request);
+            }
+            METHOD_TERMINAL_OPEN_EXECUTE => {
+                return self.serve_terminal_body(crate::terminal_tools::execute_open, &request);
+            }
+            METHOD_TERMINAL_READ_EXECUTE => {
+                return self.serve_terminal_body(crate::terminal_tools::execute_read, &request);
+            }
+            METHOD_TERMINAL_SIGNAL_EXECUTE => {
+                return self.serve_terminal_body(crate::terminal_tools::execute_signal, &request);
+            }
+            METHOD_TERMINAL_CLOSE_EXECUTE => {
+                return self.serve_terminal_body(crate::terminal_tools::execute_close, &request);
+            }
+            METHOD_TERMINAL_LIST_EXECUTE => {
+                return self.serve_terminal_body(crate::terminal_tools::execute_list, &request);
+            }
+            METHOD_PERSISTENT_BASH_EXECUTE => {
+                return self.serve_persistent_body(crate::persistent::BASH, &request);
+            }
+            METHOD_PERSISTENT_PWSH_EXECUTE => {
+                return self.serve_persistent_body(crate::persistent::PWSH, &request);
+            }
+            METHOD_TERMINAL_SEND_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::terminal_tools::render_send_value(&args, &value))
+            }
+            METHOD_TERMINAL_OPEN_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::terminal_tools::render_open(&args, &value))
+            }
+            METHOD_TERMINAL_READ_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::terminal_tools::render_read_value(&args, &value))
+            }
+            METHOD_TERMINAL_SIGNAL_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::terminal_tools::render_signal(&args, &value))
+            }
+            METHOD_TERMINAL_CLOSE_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::terminal_tools::render_close(&args, &value))
+            }
+            METHOD_TERMINAL_LIST_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::terminal_tools::render_list_value(&args, &value))
+            }
+            METHOD_PERSISTENT_BASH_RENDER | METHOD_PERSISTENT_PWSH_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::persistent::render_persistent(&args, &value))
+            }
+            METHOD_TERMINAL_SEND_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::terminal_tools::present_call_send(&args))
+            }
+            METHOD_TERMINAL_OPEN_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::terminal_tools::present_call_open(&args))
+            }
+            METHOD_TERMINAL_READ_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::terminal_tools::present_call_read(&args))
+            }
+            METHOD_TERMINAL_SIGNAL_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::terminal_tools::present_call_signal(&args))
+            }
+            METHOD_TERMINAL_CLOSE_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::terminal_tools::present_call_close(&args))
+            }
+            METHOD_TERMINAL_LIST_PRESENT_CALL => json!(crate::terminal_tools::present_call_list()),
+            METHOD_PERSISTENT_BASH_PRESENT_CALL | METHOD_PERSISTENT_PWSH_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::persistent::present_call_persistent(&args))
+            }
+            METHOD_TERMINAL_SEND_PRESENT_RESULT => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let result = request.get("result").cloned().unwrap_or(Value::Null);
+                crate::terminal_tools::present_result_send(&args, &result).unwrap_or(Value::Null)
+            }
+            METHOD_TERMINAL_SEND_PRESENTATION_META => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::terminal_tools::presentation_meta_send(&args, &value))
+            }
+            METHOD_TERMINAL_FINALIZE => {
+                return serve_terminal_finalize(self, &request);
+            }
             METHOD_PLAN_POLICY_SECTION => {
                 // The dsh section text fn: the deployment guidance only
                 // renders while plan mode is active or pending for the
@@ -1051,6 +1223,60 @@ impl BuiltinTools {
     }
 }
 
+impl BuiltinTools {
+    /// Serves one terminal body (the ask-arm shape: the frame rides
+    /// whole; the `BodyError` family encodes the code field).
+    fn serve_terminal_body(
+        &self,
+        body: fn(&dyn crate::tools::Seams, &Value) -> Result<Value, crate::tools::BodyError>,
+        request: &Value,
+    ) -> Result<Vec<u8>, String> {
+        let call = request
+            .get("call")
+            .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+        match body(self.seams(), call) {
+            Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                .map_err(|error| format!("body reply encode failed: {error}")),
+            Err(error) => serde_json::to_vec(&json!({
+                "error": {
+                    "code": error.code,
+                    "message": error.message,
+                    "name": error.name,
+                }
+            }))
+            .map_err(|error| format!("body error encode failed: {error}")),
+        }
+    }
+
+    /// Serves one persistent body (the dialect table picks the twin).
+    fn serve_persistent_body(
+        &self,
+        dialect: crate::persistent::Dialect,
+        request: &Value,
+    ) -> Result<Vec<u8>, String> {
+        let call = request
+            .get("call")
+            .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+        match crate::persistent::execute_persistent(
+            &self.persistent_shells,
+            self.seams(),
+            &dialect,
+            call,
+        ) {
+            Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                .map_err(|error| format!("body reply encode failed: {error}")),
+            Err(error) => serde_json::to_vec(&json!({
+                "error": {
+                    "code": error.code,
+                    "message": error.message,
+                    "name": error.name,
+                }
+            }))
+            .map_err(|error| format!("body error encode failed: {error}")),
+        }
+    }
+}
+
 /// Serves one finalize listener call over the post-execute CPS protocol
 /// (the dsh `finalizeContent` carrier; the spill-serve judgment): the
 /// enter leg parks the call and result and answers delegate; the exit
@@ -1089,6 +1315,53 @@ fn serve_job_finalize(tools: &BuiltinTools, request: &Value) -> Result<Vec<u8>, 
             .map_err(|error| format!("finalize reply encode failed: {error}"));
     }
     let Some(content) = finalize_job_content(tools, &call, &result) else {
+        return serde_json::to_vec(&json!({ "kind": "final", "decision": decision }))
+            .map_err(|error| format!("finalize reply encode failed: {error}"));
+    };
+    let contexts = decision
+        .get("additionalContexts")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    serde_json::to_vec(&json!({
+        "kind": "final",
+        "decision": {
+            "kind": "accept",
+            "content": content,
+            "additionalContexts": contexts,
+        },
+    }))
+    .map_err(|error| format!("finalize reply encode failed: {error}"))
+}
+
+/// Serves one terminal finalize listener call (the jobs
+/// finalize-serve judgment over the terminal parks table): the enter
+/// leg parks, the exit leg bounds the single text block against the
+/// result cap.
+fn serve_terminal_finalize(tools: &BuiltinTools, request: &Value) -> Result<Vec<u8>, String> {
+    let token = request.get("token").and_then(Value::as_u64);
+    let Some(token) = token else {
+        return Err("finalize listener frame requires token".to_owned());
+    };
+    if request.get("leg").and_then(Value::as_str) == Some("enter") {
+        let call = request.get("call").cloned().unwrap_or(Value::Null);
+        let result = request.get("result").cloned().unwrap_or(Value::Null);
+        tools.terminal_finalizes().insert(token, call, result);
+        return serde_json::to_vec(&json!({ "kind": "delegate" }))
+            .map_err(|error| format!("finalize reply encode failed: {error}"));
+    }
+    let Some((call, result)) = tools.terminal_finalizes().remove(token) else {
+        return Err(format!(
+            "finalize exit leg has no parked enter for token {token}"
+        ));
+    };
+    let decision = request.get("decision").cloned().unwrap_or(Value::Null);
+    if decision.get("kind").and_then(Value::as_str) != Some("accept") {
+        // A downstream replacement or block rides through verbatim: the
+        // dsh finalizer only adjusts the default rendering.
+        return serde_json::to_vec(&json!({ "kind": "final", "decision": decision }))
+            .map_err(|error| format!("finalize reply encode failed: {error}"));
+    }
+    let Some(content) = crate::terminal_tools::finalize_terminal_content(&call, &result) else {
         return serde_json::to_vec(&json!({ "kind": "final", "decision": decision }))
             .map_err(|error| format!("finalize reply encode failed: {error}"));
     };
@@ -1371,9 +1644,44 @@ const DESCRIBE_SESSION_METHODS: [&str; 16] = [
     "session-query.observe",
 ];
 
-const fn describe_methods() -> [&'static str; 107] {
+/// The 16e batch rows: the six terminal tools, the persistent pair,
+/// and the shared finalize listener. The persistent rows carry the
+/// artifact-side names (`bash_persistent`) because the registered tool
+/// name itself collides with the plain `bash` band by design — the dsh
+/// twins never co-load with the plain shell tools.
+const DESCRIBE_TERMINAL_METHODS: [&str; 27] = [
+    "terminal_send.execute",
+    "terminal_send.render",
+    "terminal_send.presentCall",
+    "terminal_send.presentResult",
+    "terminal_send.presentationMeta",
+    "terminal_open.execute",
+    "terminal_open.render",
+    "terminal_open.presentCall",
+    "terminal_read.execute",
+    "terminal_read.render",
+    "terminal_read.presentCall",
+    "terminal_signal.execute",
+    "terminal_signal.render",
+    "terminal_signal.presentCall",
+    "terminal_close.execute",
+    "terminal_close.render",
+    "terminal_close.presentCall",
+    "terminal_list.execute",
+    "terminal_list.render",
+    "terminal_list.presentCall",
+    "bash_persistent.execute",
+    "bash_persistent.render",
+    "bash_persistent.presentCall",
+    "pwsh_persistent.execute",
+    "pwsh_persistent.render",
+    "pwsh_persistent.presentCall",
+    "terminal.finalize",
+];
+
+const fn describe_methods() -> [&'static str; 134] {
     let mut index = 0;
-    let mut methods: [&'static str; 107] = [""; 107];
+    let mut methods: [&'static str; 134] = [""; 134];
     while index < 91 {
         methods[index] = DESCRIBE_BASE_METHODS[index];
         index += 1;
@@ -1382,6 +1690,11 @@ const fn describe_methods() -> [&'static str; 107] {
     while session_index < 16 {
         methods[91 + session_index] = DESCRIBE_SESSION_METHODS[session_index];
         session_index += 1;
+    }
+    let mut terminal_index = 0;
+    while terminal_index < 27 {
+        methods[107 + terminal_index] = DESCRIBE_TERMINAL_METHODS[terminal_index];
+        terminal_index += 1;
     }
     methods
 }
@@ -1400,5 +1713,29 @@ mod tests {
         );
         assert!(methods.contains(&"bash.execute"));
         assert!(methods.contains(&"pwsh.execute"));
+    }
+
+    /// The 16e rows complete the surface: the six terminal bands, the
+    /// persistent twins' artifact-side rows, and the shared finalize
+    /// listener (134 selectors total).
+    #[test]
+    fn describe_surface_carries_the_terminal_family() {
+        let methods = super::describe_methods();
+        assert_eq!(methods.len(), 134);
+        for name in [
+            "terminal_send.execute",
+            "terminal_send.presentResult",
+            "terminal_send.presentationMeta",
+            "terminal_open.presentCall",
+            "terminal_read.execute",
+            "terminal_signal.render",
+            "terminal_close.presentCall",
+            "terminal_list.render",
+            "bash_persistent.execute",
+            "pwsh_persistent.presentCall",
+            "terminal.finalize",
+        ] {
+            assert!(methods.contains(&name), "missing {name}");
+        }
     }
 }

@@ -77,6 +77,98 @@ fn build_table() -> Vec<(&'static str, Schema)> {
                     150,
                     "Poll interval for a job's pull sources, in milliseconds.",
                 ),
+                string_property(
+                    "backend-type",
+                    &[],
+                    "shell",
+                    "Registry type the local PTY backend registers under.",
+                ),
+                string_property(
+                    "shell-dialect",
+                    &["bash", "pwsh"],
+                    "bash",
+                    "Interactive shell dialect; selects the argv, environment, and startup defaults.",
+                ),
+                optional_string_property(
+                    "shell-path",
+                    "Interactive shell executable; empty selects the dialect default.",
+                ),
+                optional_string_array_property(
+                    "shell-args",
+                    "Shell argument list; empty selects the dialect default.",
+                ),
+                number_property("rows", None, None, 40.0, "Terminal rows."),
+                number_property("cols", None, None, 160.0, "Terminal columns."),
+                number_property(
+                    "scrollback-lines",
+                    None,
+                    None,
+                    10_000.0,
+                    "Maximum retained logical lines.",
+                ),
+                number_property(
+                    "scrollback-max-bytes",
+                    None,
+                    None,
+                    4_194_304.0,
+                    "Maximum retained UTF-8 bytes.",
+                ),
+                number_property(
+                    "max-read-bytes",
+                    None,
+                    None,
+                    262_144.0,
+                    "Maximum bytes returned by one read or settled viewport.",
+                ),
+                number_property(
+                    "poll-interval-ms",
+                    None,
+                    None,
+                    50.0,
+                    "Readiness polling interval in milliseconds.",
+                ),
+                number_property(
+                    "exact-probe-after-ms",
+                    None,
+                    None,
+                    150.0,
+                    "Delay before the exact syscall probes, in milliseconds.",
+                ),
+                number_property(
+                    "idle-silence-ms",
+                    None,
+                    None,
+                    3_000.0,
+                    "Silence duration that settles a send as inferred idle, in milliseconds.",
+                ),
+                number_property(
+                    "handoff-grace-ms",
+                    None,
+                    None,
+                    500.0,
+                    "Extra wait for the foreground handoff once a prompt marker was seen, in milliseconds.",
+                ),
+                number_property(
+                    "prompt-tail-grace-ms",
+                    None,
+                    None,
+                    0.0,
+                    "Extra wait for the prompt tail; zero means no extension.",
+                ),
+                number_property(
+                    "timeout-ms",
+                    None,
+                    None,
+                    30_000.0,
+                    "Absolute bound for one send and the complete pwsh startup, in milliseconds.",
+                ),
+                number_property(
+                    "dispose-grace-ms",
+                    None,
+                    None,
+                    3_000.0,
+                    "Grace before teardown escalates to SIGKILL, in milliseconds.",
+                ),
             ]),
         ),
         (
@@ -210,6 +302,44 @@ fn build_table() -> Vec<(&'static str, Schema)> {
                     5,
                     "Maximum cold prepared observations the inherited reader retains for reuse.",
                 ),
+                boolean_default_property(
+                    "enable-run-in-background",
+                    true,
+                    "Whether terminal sends accept the background variant that returns a job id.",
+                ),
+                integer_property(
+                    "max-result-bytes",
+                    64,
+                    Some(MAX_SAFE_INTEGER),
+                    262_144,
+                    "Maximum UTF-8 bytes in one complete terminal or task-output result.",
+                ),
+                string_property(
+                    "backend-type",
+                    &[],
+                    "shell",
+                    "PTY backend used for each owner-isolated persistent shell (the merged persistent family; the pwsh twin carries the same key).",
+                ),
+                number_property(
+                    "timeout-ms",
+                    None,
+                    None,
+                    300_000.0,
+                    "Wall-clock limit for one persistent-shell command, in milliseconds.",
+                ),
+                number_property(
+                    "max-output-chars",
+                    None,
+                    None,
+                    16_000.0,
+                    "Maximum persistent-shell command-output characters before clipping.",
+                ),
+                string_property(
+                    "description",
+                    &[],
+                    "Run commands in a persistent bash shell. State, including the current directory and exported environment variables, persists across calls for this agent.",
+                    "Model-facing persistent-shell tool description (the bash twin's text; the pwsh twin defaults to its PowerShell wording).",
+                ),
             ]),
         ),
     ]
@@ -331,6 +461,50 @@ fn boolean_property(name: &str, description: &str) -> Property {
     }
 }
 
+/// One boolean property with a declared default (the dsh
+/// `z.boolean().default()` rows; optional, null falls back to the default).
+fn boolean_default_property(name: &str, default: bool, description: &str) -> Property {
+    Property {
+        name: name.to_owned(),
+        required: false,
+        schema: Schema::Boolean {
+            default: Some(default),
+            description: Some(description.to_owned()),
+        },
+    }
+}
+
+/// One free-form string property without a default (the dsh
+/// `z.string().required(false)` rows; absent stays absent).
+fn optional_string_property(name: &str, description: &str) -> Property {
+    Property {
+        name: name.to_owned(),
+        required: false,
+        schema: Schema::String {
+            candidates: Vec::new(),
+            default: None,
+            description: Some(description.to_owned()),
+        },
+    }
+}
+
+/// One optional string-array property (the dsh `z.array(z.string())`
+/// optional rows; absent stays absent).
+fn optional_string_array_property(name: &str, description: &str) -> Property {
+    Property {
+        name: name.to_owned(),
+        required: false,
+        schema: Schema::Array {
+            items: Box::new(Schema::String {
+                candidates: Vec::new(),
+                default: None,
+                description: None,
+            }),
+            description: Some(description.to_owned()),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::lookup;
@@ -369,6 +543,22 @@ mod tests {
                 "retain-bytes",
                 "settled-retain-bytes",
                 "pump-poll-ms",
+                "backend-type",
+                "shell-dialect",
+                "shell-path",
+                "shell-args",
+                "rows",
+                "cols",
+                "scrollback-lines",
+                "scrollback-max-bytes",
+                "max-read-bytes",
+                "poll-interval-ms",
+                "exact-probe-after-ms",
+                "idle-silence-ms",
+                "handoff-grace-ms",
+                "prompt-tail-grace-ms",
+                "timeout-ms",
+                "dispose-grace-ms",
             ]
         );
         // Defaults project and an empty config validates against them.
@@ -380,7 +570,6 @@ mod tests {
             ("max-concurrent-jobs-per-owner", 10),
             ("retain-bytes", 262_144),
             ("settled-retain-bytes", 16_384),
-            ("pump-poll-ms", 150),
         ] {
             let row = projected_properties
                 .get(key)
@@ -414,6 +603,53 @@ mod tests {
         assert_eq!(
             first_message(schema, &serde_json::json!({"unknown": true})),
             "unknown key `unknown`"
+        );
+    }
+
+    /// The 16e terminal-bash group rides the fr-shell row: the 16 keys
+    /// project their dsh defaults, the optional faces validate, and the
+    /// closed face rejects undeclared keys.
+    #[test]
+    fn shell_config_pins_terminal_bash_group() {
+        let schema = lookup("fr-shell").expect("the terminal-bash declaration");
+        let projected = to_json_schema(schema);
+        let rows = projected
+            .pointer("/anyOf/0/properties")
+            .expect("projection properties");
+        for (key, expected) in [
+            ("backend-type", serde_json::json!("shell")),
+            ("shell-dialect", serde_json::json!("bash")),
+            ("rows", serde_json::json!(40.0)),
+            ("cols", serde_json::json!(160.0)),
+            ("scrollback-lines", serde_json::json!(10_000.0)),
+            ("scrollback-max-bytes", serde_json::json!(4_194_304.0)),
+            ("max-read-bytes", serde_json::json!(262_144.0)),
+            ("poll-interval-ms", serde_json::json!(50.0)),
+            ("exact-probe-after-ms", serde_json::json!(150.0)),
+            ("idle-silence-ms", serde_json::json!(3_000.0)),
+            ("handoff-grace-ms", serde_json::json!(500.0)),
+            ("prompt-tail-grace-ms", serde_json::json!(0.0)),
+            ("timeout-ms", serde_json::json!(30_000.0)),
+            ("dispose-grace-ms", serde_json::json!(3_000.0)),
+        ] {
+            let row = rows
+                .get(key)
+                .unwrap_or_else(|| panic!("projection carries {key}"));
+            assert_eq!(row.get("default"), Some(&expected));
+        }
+        // The optional faces validate (absent stays absent; present
+        // validates).
+        assert!(violations_empty(
+            schema,
+            &serde_json::json!({
+                "shell-path": "/bin/zsh",
+                "shell-args": ["--norc"],
+            })
+        ));
+        // The closed face rejects undeclared keys.
+        assert_eq!(
+            first_message(schema, &serde_json::json!({"backend": "shell"})),
+            "unknown key `backend`"
         );
     }
 
@@ -793,6 +1029,47 @@ mod tests {
                 })
             ),
             "above maximum"
+        );
+    }
+
+    /// The 16e tool-terminal and merged persistent family ride the
+    /// fr-tools-builtin row: defaults project and the closed face
+    /// rejects undeclared keys.
+    #[test]
+    fn builtin_config_pins_terminal_tool_group() {
+        let schema = lookup("fr-tools-builtin").expect("the builtin-tools declaration");
+        let projected = to_json_schema(schema);
+        let rows = projected
+            .pointer("/anyOf/0/properties")
+            .expect("projection properties");
+        for (key, expected) in [
+            ("enable-run-in-background", serde_json::json!(true)),
+            ("max-result-bytes", serde_json::json!(262_144)),
+            ("backend-type", serde_json::json!("shell")),
+            ("timeout-ms", serde_json::json!(300_000.0)),
+            ("max-output-chars", serde_json::json!(16_000.0)),
+            (
+                "description",
+                serde_json::json!(
+                    "Run commands in a persistent bash shell. State, including the current directory and exported environment variables, persists across calls for this agent."
+                ),
+            ),
+        ] {
+            let row = rows
+                .get(key)
+                .unwrap_or_else(|| panic!("projection carries {key}"));
+            assert_eq!(row.get("default"), Some(&expected));
+        }
+        assert!(violations_empty(
+            schema,
+            &serde_json::json!({"allow-parallel-in-progress": true, "section": "p", "backend-type": "pty-x", "timeout-ms": 1000.0, "max-output-chars": 100.0, "description": "x"})
+        ));
+        assert_eq!(
+            first_message(
+                schema,
+                &serde_json::json!({"allow-parallel-in-progress": true, "section": "p", "max-result-bytes": 63})
+            ),
+            "below minimum"
         );
     }
 }

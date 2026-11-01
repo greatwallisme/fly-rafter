@@ -1321,6 +1321,9 @@ mod tests {
     }
 
     impl Seams for SpawnSeams {
+        fn terminals(&self) -> Option<&dyn crate::tools::TerminalSeams> {
+            None
+        }
         fn attachments(&self) -> Option<&dyn crate::tools::AttachmentSeam> {
             None
         }

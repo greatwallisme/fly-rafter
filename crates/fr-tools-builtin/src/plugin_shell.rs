@@ -42,12 +42,13 @@ pub const EVENT_JOB_SETTLED: &str = "job/settled";
 /// The claimed event (the fr-agent-loop owner crate's word).
 pub const EVENT_INBOX_CLAIMED: &str = "agent/inbox/claimed";
 
-/// The static descriptor: one provided service, eight injected seams
+/// The static descriptor: one provided service, thirteen injected
+/// seams (the terminals band rides the baked-gated terminal family)
 /// (the search tools' subprocess face rides the injection), and the two
 /// completion-notice events — the spill listeners register at activation
 /// instead (the descriptor `listen` map stays a dylib event face, not a
 /// tools-pipeline registration).
-const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\",\"fs\",\"user-questions\",\"plan-mode\",\"session-query\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\",\"subprocess\",\"attachments\",\"llm\",\"session-projections\",\"storage-domain\"],\"listen\":{\"job/settled\":1,\"agent/inbox/claimed\":2}}";
+const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\",\"fs\",\"user-questions\",\"plan-mode\",\"session-query\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\",\"subprocess\",\"attachments\",\"llm\",\"session-projections\",\"storage-domain\",\"terminals\"],\"listen\":{\"job/settled\":1,\"agent/inbox/claimed\":2}}";
 
 /// The maximum host reply the require loop grows its buffer toward (the
 /// approval judgment).
@@ -525,7 +526,173 @@ impl Seams for WireSeams {
             Err(error) => Err(error),
         }
     }
+
+    fn terminals(&self) -> Option<&dyn crate::tools::TerminalSeams> {
+        Some(self)
+    }
 }
+
+impl crate::tools::TerminalSeams for WireSeams {
+    fn spawn(&self, owner: &str, spec: &Value) -> Result<Value, String> {
+        let mut payload = spec.clone();
+        payload["owner"] = Value::String(owner.to_owned());
+        let bytes = serde_json::to_vec(&payload)
+            .map_err(|error| format!("terminals spawn encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::terminals::SERVICE_NAME,
+            fr_wire::services::terminals::METHOD_SPAWN,
+            &bytes,
+        )?;
+        serde_json::from_slice(&reply).map_err(|error| format!("spawn decode failed: {error}"))
+    }
+
+    fn start_send(
+        &self,
+        owner: &str,
+        session_id: &str,
+        text: &str,
+        submit: bool,
+    ) -> Result<Value, String> {
+        let payload = json!({
+            "owner": owner,
+            "sessionId": session_id,
+            "text": text,
+            "submit": submit,
+        });
+        let bytes = serde_json::to_vec(&payload)
+            .map_err(|error| format!("start-send encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::terminals::SERVICE_NAME,
+            fr_wire::services::terminals::METHOD_START_SEND,
+            &bytes,
+        )?;
+        serde_json::from_slice(&reply).map_err(|error| format!("start-send decode failed: {error}"))
+    }
+
+    fn send_wait(&self, owner: &str, session_id: &str, timeout_ms: u64) -> Result<Value, String> {
+        let payload = json!({
+            "owner": owner,
+            "sessionId": session_id,
+            "timeout_ms": timeout_ms,
+        });
+        let bytes = serde_json::to_vec(&payload)
+            .map_err(|error| format!("send-wait encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::terminals::SERVICE_NAME,
+            fr_wire::services::terminals::METHOD_SEND_WAIT,
+            &bytes,
+        )?;
+        serde_json::from_slice(&reply).map_err(|error| format!("send-wait decode failed: {error}"))
+    }
+
+    fn send_cancel(&self, owner: &str, session_id: &str) -> Result<Value, String> {
+        let payload = json!({
+            "owner": owner,
+            "sessionId": session_id,
+        });
+        let bytes = serde_json::to_vec(&payload)
+            .map_err(|error| format!("send-cancel encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::terminals::SERVICE_NAME,
+            fr_wire::services::terminals::METHOD_SEND_CANCEL,
+            &bytes,
+        )?;
+        serde_json::from_slice(&reply)
+            .map_err(|error| format!("send-cancel decode failed: {error}"))
+    }
+
+    fn send_read(&self, owner: &str, session_id: &str) -> Result<Value, String> {
+        let payload = json!({ "owner": owner, "sessionId": session_id });
+        let bytes = serde_json::to_vec(&payload)
+            .map_err(|error| format!("send-read encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::terminals::SERVICE_NAME,
+            fr_wire::services::terminals::METHOD_SEND_READ,
+            &bytes,
+        )?;
+        serde_json::from_slice(&reply).map_err(|error| format!("send-read decode failed: {error}"))
+    }
+
+    fn read(
+        &self,
+        owner: &str,
+        session_id: &str,
+        offset: Option<u64>,
+        count: Option<u64>,
+    ) -> Result<Value, String> {
+        let mut payload = json!({ "owner": owner, "sessionId": session_id });
+        if let Some(offset) = offset {
+            payload["offset"] = json!(offset);
+        }
+        if let Some(count) = count {
+            payload["count"] = json!(count);
+        }
+        let bytes =
+            serde_json::to_vec(&payload).map_err(|error| format!("read encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::terminals::SERVICE_NAME,
+            fr_wire::services::terminals::METHOD_READ,
+            &bytes,
+        )?;
+        serde_json::from_slice(&reply).map_err(|error| format!("read decode failed: {error}"))
+    }
+
+    fn signal(&self, owner: &str, session_id: &str, signal: &str) -> Result<Value, String> {
+        let payload = json!({
+            "owner": owner,
+            "sessionId": session_id,
+            "signal": signal,
+        });
+        let bytes = serde_json::to_vec(&payload)
+            .map_err(|error| format!("signal encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::terminals::SERVICE_NAME,
+            fr_wire::services::terminals::METHOD_SIGNAL,
+            &bytes,
+        )?;
+        serde_json::from_slice(&reply).map_err(|error| format!("signal decode failed: {error}"))
+    }
+
+    fn kill(&self, owner: &str, session_id: &str, reason: &str) -> Result<Value, String> {
+        let payload = json!({
+            "owner": owner,
+            "sessionId": session_id,
+            "reason": reason,
+        });
+        let bytes =
+            serde_json::to_vec(&payload).map_err(|error| format!("kill encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::terminals::SERVICE_NAME,
+            fr_wire::services::terminals::METHOD_KILL,
+            &bytes,
+        )?;
+        serde_json::from_slice(&reply).map_err(|error| format!("kill decode failed: {error}"))
+    }
+
+    fn list(&self, owner: &str) -> Result<Value, String> {
+        let bytes = serde_json::to_vec(&json!({ "owner": owner }))
+            .map_err(|error| format!("list encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::terminals::SERVICE_NAME,
+            fr_wire::services::terminals::METHOD_LIST,
+            &bytes,
+        )?;
+        serde_json::from_slice(&reply).map_err(|error| format!("list decode failed: {error}"))
+    }
+
+    fn send_background(&self, payload: &Value) -> Result<Value, String> {
+        let bytes = serde_json::to_vec(payload)
+            .map_err(|error| format!("send-background encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::terminals::SERVICE_NAME,
+            fr_wire::services::terminals::METHOD_SEND_BACKGROUND,
+            &bytes,
+        )?;
+        serde_json::from_slice(&reply)
+            .map_err(|error| format!("send-background decode failed: {error}"))
+    }
+}
+
 /// One activation-sequence step: one require, `None` on any refusal
 /// (the fail-closed decline).
 fn step(link: &HostLink, service: &str, method: u32, payload: &[u8]) -> Option<()> {
@@ -614,7 +781,14 @@ fn read_default_mode(link: &HostLink) -> Option<Vec<&'static str>> {
 /// template. The `str_replace_editor` registers no section (the dsh
 /// source injects no systemPrompt; the Q16b-4A ruling).
 pub(crate) fn prompt_sections() -> Vec<(String, f64, String)> {
-    vec![
+    prompt_sections_with(crate::terminal_tools::terminal_tools_registered())
+}
+
+/// The parameterized section table (the gate drives the `tool:pty`
+/// row: the dsh section call lives inside the tool-terminal apply, so
+/// the unmounted composition registers nothing).
+pub(crate) fn prompt_sections_with(terminals: bool) -> Vec<(String, f64, String)> {
+    let mut sections = vec![
         (
             "tool:bash".to_owned(),
             1000.0,
@@ -665,7 +839,15 @@ pub(crate) fn prompt_sections() -> Vec<(String, f64, String)> {
             crate::session_query_tools::SECTION_ORDER,
             crate::catalog_gen::SESSION_QUERY_SECTION_TEXT.to_owned(),
         ),
-    ]
+    ];
+    if terminals {
+        sections.push((
+            "tool:pty".to_owned(),
+            1700.0,
+            crate::catalog_gen::PTY_SECTION_TEXT.to_owned(),
+        ));
+    }
+    sections
 }
 
 /// Registers the dynamic `plan:policy` section (the dsh
@@ -1085,9 +1267,254 @@ fn register_tools(
             serde_json::to_vec(&registration).ok()?.as_slice(),
         )?;
     }
+    // The terminal family (dsh `tool-terminal` + the two persistent
+    // twins; one bake gate — the dsh base bundle mounts none, the
+    // `BAKED_STR_REPLACE_EDITOR` judgment). The registered tool names
+    // of the persistent twins collide with the plain shell tools by
+    // design (the dsh packages never co-load).
+    if crate::terminal_tools::terminal_tools_registered() {
+        for registration in [
+            terminal_open_registration(),
+            terminal_send_registration(),
+            terminal_read_registration(),
+            terminal_signal_registration(),
+            terminal_close_registration(),
+            terminal_list_registration(),
+            persistent_bash_registration(),
+            persistent_pwsh_registration(),
+        ] {
+            step(
+                link,
+                fr_wire::services::tools::SERVICE_NAME,
+                fr_wire::services::tools::METHOD_REGISTER,
+                serde_json::to_vec(&registration).ok()?.as_slice(),
+            )?;
+        }
+    }
     register_spill_listeners(link);
     register_finalize_listeners(link);
     Some(())
+}
+
+/// The `terminal_open` registration row (dsh `ctx.tools.register`,
+/// call-for-call; the partial face carries presentCall only).
+#[must_use]
+pub fn terminal_open_registration() -> Value {
+    json!({
+        "name": "terminal_open",
+        "description": crate::catalog_gen::TERMINAL_OPEN_DESCRIPTION,
+        "parameters": crate::schema::terminal_open_parameters(),
+        "output": {
+            "schema": crate::schema::terminal_open_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_TERMINAL_OPEN_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_TERMINAL_OPEN_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_TERMINAL_OPEN_PRESENT_CALL,
+        },
+    })
+}
+
+/// The `terminal_send` registration row (dsh `ctx.tools.register`;
+/// the full face: presentResult and presentationMeta ride).
+#[must_use]
+pub fn terminal_send_registration() -> Value {
+    json!({
+        "name": "terminal_send",
+        "description": crate::schema::terminal_send_description(
+            crate::terminal_tools::BAKED_ENABLE_RUN_IN_BACKGROUND,
+        ),
+        "parameters": crate::schema::terminal_send_parameters(
+            crate::terminal_tools::BAKED_ENABLE_RUN_IN_BACKGROUND,
+        ),
+        "output": {
+            "schema": crate::schema::terminal_send_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_TERMINAL_SEND_RENDER,
+            },
+            "presentationMeta": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_TERMINAL_SEND_PRESENTATION_META,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_TERMINAL_SEND_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_TERMINAL_SEND_PRESENT_CALL,
+        },
+        "presentResult": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_TERMINAL_SEND_PRESENT_RESULT,
+        },
+    })
+}
+
+/// The `terminal_read` registration row (dsh `ctx.tools.register`,
+/// call-for-call).
+#[must_use]
+pub fn terminal_read_registration() -> Value {
+    json!({
+        "name": "terminal_read",
+        "description": crate::catalog_gen::TERMINAL_READ_DESCRIPTION,
+        "parameters": crate::schema::terminal_read_parameters(),
+        "output": {
+            "schema": crate::schema::terminal_read_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_TERMINAL_READ_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_TERMINAL_READ_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_TERMINAL_READ_PRESENT_CALL,
+        },
+    })
+}
+
+/// The `terminal_signal` registration row (dsh `ctx.tools.register`,
+/// call-for-call).
+#[must_use]
+pub fn terminal_signal_registration() -> Value {
+    json!({
+        "name": "terminal_signal",
+        "description": crate::catalog_gen::TERMINAL_SIGNAL_DESCRIPTION,
+        "parameters": crate::schema::terminal_signal_parameters(),
+        "output": {
+            "schema": crate::schema::terminal_signal_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_TERMINAL_SIGNAL_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_TERMINAL_SIGNAL_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_TERMINAL_SIGNAL_PRESENT_CALL,
+        },
+    })
+}
+
+/// The `terminal_close` registration row (dsh `ctx.tools.register`,
+/// call-for-call).
+#[must_use]
+pub fn terminal_close_registration() -> Value {
+    json!({
+        "name": "terminal_close",
+        "description": crate::catalog_gen::TERMINAL_CLOSE_DESCRIPTION,
+        "parameters": crate::schema::terminal_close_parameters(),
+        "output": {
+            "schema": crate::schema::terminal_close_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_TERMINAL_CLOSE_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_TERMINAL_CLOSE_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_TERMINAL_CLOSE_PRESENT_CALL,
+        },
+    })
+}
+
+/// The `terminal_list` registration row (dsh `ctx.tools.register`,
+/// call-for-call).
+#[must_use]
+pub fn terminal_list_registration() -> Value {
+    json!({
+        "name": "terminal_list",
+        "description": crate::catalog_gen::TERMINAL_LIST_DESCRIPTION,
+        "parameters": crate::schema::terminal_list_parameters(),
+        "output": {
+            "schema": crate::schema::terminal_list_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_TERMINAL_LIST_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_TERMINAL_LIST_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_TERMINAL_LIST_PRESENT_CALL,
+        },
+    })
+}
+
+/// The persistent `bash` registration row (dsh
+/// `tool-bash-persistent`: the plain-string output contract, the
+/// terminal present-call card, no finalizeContent).
+#[must_use]
+pub fn persistent_bash_registration() -> Value {
+    json!({
+        "name": "bash",
+        "description": crate::catalog_gen::BASH_PERSISTENT_DESCRIPTION,
+        "parameters": crate::schema::persistent_bash_parameters(),
+        "output": {
+            "schema": crate::schema::persistent_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_PERSISTENT_BASH_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_PERSISTENT_BASH_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_PERSISTENT_BASH_PRESENT_CALL,
+        },
+    })
+}
+
+/// The persistent `pwsh` registration row (the bash twin over the
+/// PowerShell texts).
+#[must_use]
+pub fn persistent_pwsh_registration() -> Value {
+    json!({
+        "name": "pwsh",
+        "description": crate::catalog_gen::PWSH_PERSISTENT_DESCRIPTION,
+        "parameters": crate::schema::persistent_pwsh_parameters(),
+        "output": {
+            "schema": crate::schema::persistent_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_PERSISTENT_PWSH_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_PERSISTENT_PWSH_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_PERSISTENT_PWSH_PRESENT_CALL,
+        },
+    })
 }
 
 /// The `job_output` registration row (dsh `ctx.tools.register`,
@@ -1343,6 +1770,24 @@ fn register_finalize_listeners(link: &HostLink) -> Option<()> {
                 "endpoint": {
                     "service": crate::service::SERVICE_NAME,
                     "method": method,
+                },
+            }))
+            .ok()?
+            .as_slice(),
+        )?;
+    }
+    // The six terminal tools share one finalizeContent (the dsh
+    // shared const); the listener registers with the family.
+    if crate::terminal_tools::terminal_tools_registered() {
+        step(
+            link,
+            fr_wire::services::tools::SERVICE_NAME,
+            fr_wire::services::tools::METHOD_REGISTER_LISTENER,
+            serde_json::to_vec(&json!({
+                "stage": "post-execute",
+                "endpoint": {
+                    "service": crate::service::SERVICE_NAME,
+                    "method": crate::service::METHOD_TERMINAL_FINALIZE,
                 },
             }))
             .ok()?
@@ -1755,6 +2200,8 @@ impl BuiltinState {
             Arc::clone(&schedules),
             Arc::clone(&interactions),
             Arc::clone(&session_query),
+            std::sync::Arc::new(crate::terminal_tools::FinalizeParks::default()),
+            std::sync::Arc::new(crate::persistent::PersistentShells::default()),
         )
         .ok()?;
 
@@ -2282,6 +2729,12 @@ unsafe extern "C" fn teardown(handle: *mut c_void) {
     }
     if let Some(worker) = state.schedule_worker.take() {
         let _ignored = worker.join();
+    }
+    // The persistent shells close before the vtable goes dark (the
+    // dsh shell-cleanup effect; best-effort — a dead terminals band
+    // cannot block the teardown).
+    if let Some(terminals) = state.tools.seams().terminals() {
+        state.tools.persistent_shells().dispose(terminals);
     }
     drop(state);
 }

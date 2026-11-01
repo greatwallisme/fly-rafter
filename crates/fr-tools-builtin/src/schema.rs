@@ -1354,6 +1354,301 @@ pub fn session_event_read_parameters() -> Value {
         .expect("the frozen session_event_read table parses")
 }
 
+// The terminal family (dsh `experimental/tool-terminal/index.ts`): the
+// parameter tables freeze the catalog rows outright; the output
+// contracts ride the dsh source shapes (the schemastery row form with
+// property-level `required`, `oneOf` unions, `const` discriminators).
+
+/// The shared terminal session status union (the dsh
+/// `SESSION_STATUS_SCHEMA`): running, or exited with code and signal.
+#[must_use]
+pub fn terminal_session_status_schema() -> Value {
+    json!({
+        "oneOf": [
+            {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "kind": { "type": "string", "required": true, "const": "running" },
+                },
+            },
+            {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "kind": { "type": "string", "required": true, "const": "exited" },
+                    "exitCode": {
+                        "required": true,
+                        "oneOf": [{ "type": "integer" }, { "type": "null" }],
+                    },
+                    "signal": {
+                        "required": true,
+                        "oneOf": [{ "type": "string" }, { "type": "null" }],
+                    },
+                },
+            },
+        ],
+    })
+}
+
+/// The shared session-snapshot property rows (the dsh
+/// `SESSION_SNAPSHOT_PROPERTIES`); the caller folds them into the
+/// snapshot object or the array items.
+#[must_use]
+pub fn terminal_snapshot_properties() -> serde_json::Map<String, Value> {
+    let mut properties = serde_json::Map::new();
+    properties.insert(
+        "sessionId".to_owned(),
+        json!({ "type": "string", "required": true }),
+    );
+    properties.insert("name".to_owned(), json!({ "type": "string" }));
+    properties.insert(
+        "type".to_owned(),
+        json!({ "type": "string", "required": true }),
+    );
+    properties.insert("pid".to_owned(), json!({ "type": "integer" }));
+    properties.insert(
+        "status".to_owned(),
+        json!({ "oneOf": terminal_session_status_schema()["oneOf"], "required": true }),
+    );
+    properties
+}
+
+/// The `terminal_open` parameter table (the catalog-frozen base).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON drifts (the generation gate
+/// keeps the constant in sync).
+#[must_use]
+pub fn terminal_open_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::TERMINAL_OPEN_PARAMETERS_JSON)
+        .expect("the frozen terminal_open table parses")
+}
+
+/// The `terminal_open` output contract (the snapshot plus the required
+/// motd, the dsh spread shape).
+#[must_use]
+pub fn terminal_open_output_schema() -> Value {
+    let mut properties = terminal_snapshot_properties();
+    properties.insert(
+        "motd".to_owned(),
+        json!({ "type": "string", "required": true }),
+    );
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": properties,
+    })
+}
+
+/// The `terminal_send` tool description (the composed source
+/// conditional: the background sentence rides while the composition
+/// bakes the knob on, which the catalog documents).
+#[must_use]
+pub fn terminal_send_description(background: bool) -> String {
+    let base = "Send text to a persistent terminal. By default Enter is submitted and the call waits for a prompt, stdin wait, output silence, timeout, or session exit.";
+    if background {
+        format!("{base} Background mode returns a job id for job_output/job_kill.")
+    } else {
+        base.to_owned()
+    }
+}
+
+/// The `terminal_send` parameter table (the catalog-frozen base; the
+/// background key rides while the composition bakes the knob on).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON drifts (the generation gate
+/// keeps the constant in sync).
+#[must_use]
+pub fn terminal_send_parameters(background: bool) -> Value {
+    let mut table =
+        serde_json::from_str::<Value>(crate::catalog_gen::TERMINAL_SEND_PARAMETERS_JSON)
+            .expect("the frozen terminal_send table parses");
+    if !background {
+        table["properties"]
+            .as_object_mut()
+            .expect("the frozen table carries properties")
+            .remove("run_in_background");
+    }
+    table
+}
+
+/// The `terminal_send` output contract (the dsh oneOf: the background
+/// acknowledgement or the foreground result).
+#[must_use]
+pub fn terminal_send_output_schema() -> Value {
+    json!({
+        "oneOf": [
+            {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "kind": { "type": "string", "required": true, "const": "background" },
+                    "jobId": { "type": "string", "required": true },
+                },
+            },
+            {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "kind": { "type": "string", "required": true, "const": "foreground" },
+                    "viewport": { "type": "string", "required": true },
+                    "waitReason": {
+                        "type": "string",
+                        "required": true,
+                        "enum": ["stdin_read", "inferred_idle", "timeout", "session_exit"],
+                    },
+                    "sessionStatus": {
+                        "oneOf": terminal_session_status_schema()["oneOf"],
+                        "required": true,
+                    },
+                    "truncated": { "type": "boolean", "required": true },
+                },
+            },
+        ],
+    })
+}
+
+/// The `terminal_read` parameter table (the catalog-frozen base).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON drifts.
+#[must_use]
+pub fn terminal_read_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::TERMINAL_READ_PARAMETERS_JSON)
+        .expect("the frozen terminal_read table parses")
+}
+
+/// The `terminal_read` output contract (the bounded scrollback page).
+#[must_use]
+pub fn terminal_read_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "text": { "type": "string", "required": true },
+            "totalLines": { "type": "integer", "required": true },
+            "lineBegin": { "type": "integer", "required": true },
+            "lineEnd": { "type": "integer", "required": true },
+            "truncated": { "type": "boolean", "required": true },
+        },
+    })
+}
+
+/// The `terminal_signal` parameter table (the catalog-frozen base).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON drifts.
+#[must_use]
+pub fn terminal_signal_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::TERMINAL_SIGNAL_PARAMETERS_JSON)
+        .expect("the frozen terminal_signal table parses")
+}
+
+/// The `terminal_signal` output contract (the delivered fact).
+#[must_use]
+pub fn terminal_signal_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "delivered": { "type": "boolean", "required": true, "const": true },
+            "targetPgid": { "type": "integer", "required": true },
+        },
+    })
+}
+
+/// The `terminal_close` parameter table (the catalog-frozen base).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON drifts.
+#[must_use]
+pub fn terminal_close_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::TERMINAL_CLOSE_PARAMETERS_JSON)
+        .expect("the frozen terminal_close table parses")
+}
+
+/// The `terminal_close` output contract (the closed outcome word).
+#[must_use]
+pub fn terminal_close_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "sessionId": { "type": "string", "required": true },
+            "outcome": {
+                "type": "string",
+                "required": true,
+                "enum": ["closed", "already-closing"],
+            },
+        },
+    })
+}
+
+/// The `terminal_list` parameter table (the catalog-frozen base; no
+/// rows).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON drifts.
+#[must_use]
+pub fn terminal_list_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::TERMINAL_LIST_PARAMETERS_JSON)
+        .expect("the frozen terminal_list table parses")
+}
+
+/// The `terminal_list` output contract (the snapshot array).
+#[must_use]
+pub fn terminal_list_output_schema() -> Value {
+    json!({
+        "type": "array",
+        "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": terminal_snapshot_properties(),
+        },
+    })
+}
+
+// The persistent twins (dsh `tool-bash-persistent` +
+// `tool-pwsh-persistent`): the parameter tables freeze the catalog
+// rows; the output contract is the shared plain-string shape.
+
+/// The shared persistent-tool output contract (the dsh
+/// `{ type: 'string' }`).
+#[must_use]
+pub fn persistent_output_schema() -> Value {
+    json!({ "type": "string" })
+}
+
+/// The persistent `bash` parameter table (the catalog-frozen base).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON drifts.
+#[must_use]
+pub fn persistent_bash_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::BASH_PERSISTENT_PARAMETERS_JSON)
+        .expect("the frozen persistent bash table parses")
+}
+
+/// The persistent `pwsh` parameter table (the catalog-frozen base).
+///
+/// # Panics
+///
+/// Panics when the frozen catalog JSON drifts.
+#[must_use]
+pub fn persistent_pwsh_parameters() -> Value {
+    serde_json::from_str(crate::catalog_gen::PWSH_PERSISTENT_PARAMETERS_JSON)
+        .expect("the frozen persistent pwsh table parses")
+}
+
 #[cfg(test)]
 mod tests {
     /// The five session-query tables pin their catalog rows (Q97-A:
@@ -1532,5 +1827,179 @@ mod tests {
             true
         );
         assert_eq!(arms[0]["additionalProperties"], false);
+    }
+
+    /// The six terminal tables pin their catalog rows (Q97-A) and the
+    /// persistent twins pin their single-command shape.
+    #[test]
+    fn terminal_family_pins_the_catalog_tables() {
+        // terminal_open: `type` required; the three property rows.
+        let open = super::terminal_open_parameters();
+        assert_eq!(
+            open["required"],
+            serde_json::json!(["type"]),
+            "type is the one required row"
+        );
+        assert_eq!(
+            open.pointer("/properties/type/description")
+                .and_then(Value::as_str),
+            Some("Registered terminal backend type, usually \"shell\".")
+        );
+        // terminal_send: the catalog true-variant carries the
+        // background row; the false variant strips it and the
+        // description loses the background sentence.
+        let send_true = super::terminal_send_parameters(true);
+        assert_eq!(
+            send_true
+                .pointer("/properties")
+                .and_then(Value::as_object)
+                .expect("rows")
+                .len(),
+            4
+        );
+        assert_eq!(
+            super::terminal_send_description(true),
+            crate::catalog_gen::TERMINAL_SEND_DESCRIPTION
+        );
+        let send_false = super::terminal_send_parameters(false);
+        assert_eq!(
+            send_false
+                .pointer("/properties")
+                .and_then(Value::as_object)
+                .expect("rows")
+                .len(),
+            3
+        );
+        assert_eq!(
+            super::terminal_send_description(false),
+            "Send text to a persistent terminal. By default Enter is submitted and the call waits for a prompt, stdin wait, output silence, timeout, or session exit."
+        );
+        // terminal_read: offset/count optional numbers.
+        let read = super::terminal_read_parameters();
+        assert_eq!(read["required"], serde_json::json!(["sessionId"]));
+        assert!(read.pointer("/properties/offset").is_some());
+        assert!(read.pointer("/properties/count").is_some());
+        // terminal_signal: the five-signal enum verbatim.
+        let signal = super::terminal_signal_parameters();
+        assert_eq!(
+            signal.pointer("/properties/signal/enum"),
+            Some(&serde_json::json!([
+                "SIGINT", "SIGTERM", "SIGKILL", "SIGTSTP", "SIGHUP"
+            ]))
+        );
+        // terminal_close: the single session-id row.
+        let close = super::terminal_close_parameters();
+        assert_eq!(
+            close
+                .pointer("/properties")
+                .and_then(Value::as_object)
+                .expect("rows")
+                .len(),
+            1
+        );
+        // terminal_list: the empty table.
+        let list = super::terminal_list_parameters();
+        assert_eq!(
+            list.pointer("/properties")
+                .and_then(Value::as_object)
+                .expect("rows")
+                .len(),
+            0
+        );
+        // The persistent twins: one required command row each.
+        for parameters in [
+            super::persistent_bash_parameters(),
+            super::persistent_pwsh_parameters(),
+        ] {
+            assert_eq!(
+                parameters["required"],
+                serde_json::json!(["command"]),
+                "command is the one required row"
+            );
+            assert_eq!(
+                parameters
+                    .pointer("/properties")
+                    .and_then(Value::as_object)
+                    .expect("rows")
+                    .len(),
+                1
+            );
+        }
+    }
+
+    /// The terminal output contracts pin the dsh shapes: the shared
+    /// status union, the snapshot spread with motd, the send oneOf,
+    /// and the plain-string persistent contract.
+    #[test]
+    fn terminal_family_pins_the_output_contracts() {
+        // The status union: the two const discriminators.
+        let status = super::terminal_session_status_schema();
+        assert_eq!(
+            status.pointer("/oneOf/0/properties/kind/const"),
+            Some(&serde_json::json!("running"))
+        );
+        assert_eq!(
+            status.pointer("/oneOf/1/properties/kind/const"),
+            Some(&serde_json::json!("exited"))
+        );
+        // The open contract: five snapshot rows plus motd.
+        let open = super::terminal_open_output_schema();
+        let rows = open
+            .pointer("/properties")
+            .and_then(Value::as_object)
+            .expect("rows");
+        assert_eq!(rows.len(), 6);
+        assert!(rows.contains_key("motd"));
+        assert_eq!(
+            open.pointer("/properties/sessionId/type"),
+            Some(&serde_json::json!("string"))
+        );
+        // The send contract: the background and foreground arms.
+        let send = super::terminal_send_output_schema();
+        assert_eq!(
+            send.pointer("/oneOf/0/properties/kind/const"),
+            Some(&serde_json::json!("background"))
+        );
+        assert_eq!(
+            send.pointer("/oneOf/1/properties/kind/const"),
+            Some(&serde_json::json!("foreground"))
+        );
+        assert_eq!(
+            send.pointer("/oneOf/1/properties/waitReason/enum"),
+            Some(&serde_json::json!([
+                "stdin_read",
+                "inferred_idle",
+                "timeout",
+                "session_exit"
+            ]))
+        );
+        // The read, signal, and close rows.
+        let read = super::terminal_read_output_schema();
+        assert_eq!(
+            read.pointer("/properties")
+                .and_then(Value::as_object)
+                .expect("rows")
+                .len(),
+            5
+        );
+        let signal = super::terminal_signal_output_schema();
+        assert_eq!(
+            signal.pointer("/properties/delivered/const"),
+            Some(&serde_json::json!(true))
+        );
+        let close = super::terminal_close_output_schema();
+        assert_eq!(
+            close.pointer("/properties/outcome/enum"),
+            Some(&serde_json::json!(["closed", "already-closing"]))
+        );
+        // The list contract rides the snapshot items.
+        let list = super::terminal_list_output_schema();
+        assert_eq!(list["type"], serde_json::json!("array"));
+        assert!(list.pointer("/items/properties/sessionId").is_some());
+        // The persistent pair: the plain string.
+        assert_eq!(
+            super::persistent_output_schema(),
+            serde_json::json!({ "type": "string" })
+        );
     }
 }
