@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-16e 批 2 已收口（2026-11-01，待提交）：terminal_registry.rs 全件落盘（八错误码逐字+三 fence+dispose 聚合+14 钉测），五门绿 workspace 1481=1467+14。**下一动作=提交由用户 /commit 裁决；随后 16e 批 3 收口：service.rs ’terminal’ 3000+ band wire 面+fr-tools-builtin 六工具+terminal_render+persistent bash/pwsh+fr-schema config 行+catalog 抽取+TOOLS/CONFIG spec 绑定（~97 场景）+七步流 4-7+五门。**
+16e 批 3 前段已入库（2026-11-01，720d020）：fr-shell terminals 3000+ band+terminal_bash backend+terminal_render+catalog 扩源，五门绿 workspace 1499。**下一动作=批 3 余段收口：schema.rs 六工具/双 persistent 函数→terminal_tools.rs 六执行体（require 'terminals' band）→persistent.rs（marker=__FR_PERSISTENT_*）→service.rs METHOD 号段 90 起+describe 扩表→plugin_shell 装配（BAKED_TERMINAL_TOOLS gate+tool:pty 第 11 section+finalize listeners）→fr-schema config 行 4 组→五门→TOOLS/CONFIG spec 绑定（~97 场景）→七步流 4-7。**
 
 ## Phases
 
