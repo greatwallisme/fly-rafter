@@ -338,6 +338,18 @@ pub const METHOD_WEB_FETCH_PRESENTATION_META: u32 = 183;
 pub const METHOD_WORKING_DIRECTORY_EXECUTE: u32 = 184;
 /// Method selector: the `working_directory` render projection.
 pub const METHOD_WORKING_DIRECTORY_RENDER: u32 = 185;
+/// Method selector: the `cordis_inspect_list` tool body.
+pub const METHOD_INSPECT_LIST_EXECUTE: u32 = 186;
+/// Method selector: the `cordis_inspect_list` render projection.
+pub const METHOD_INSPECT_LIST_RENDER: u32 = 187;
+/// Method selector: the `cordis_inspect_list` pending-call presentation.
+pub const METHOD_INSPECT_LIST_PRESENT_CALL: u32 = 188;
+/// Method selector: the `cordis_inspect_query` tool body.
+pub const METHOD_INSPECT_QUERY_EXECUTE: u32 = 189;
+/// Method selector: the `cordis_inspect_query` render projection.
+pub const METHOD_INSPECT_QUERY_RENDER: u32 = 190;
+/// Method selector: the `cordis_inspect_query` present-call presentation.
+pub const METHOD_INSPECT_QUERY_PRESENT_CALL: u32 = 191;
 
 /// The escalate-to modes this composition advertises (the dsh
 /// `ESCALATION_TARGETS` words in table order).
@@ -373,6 +385,7 @@ pub struct BuiltinTools {
     session_query: std::sync::Arc<crate::session_query_tools::SessionQueryRuntime>,
     terminal_finalizes: std::sync::Arc<crate::terminal_tools::FinalizeParks>,
     persistent_shells: std::sync::Arc<crate::persistent::PersistentShells>,
+    inspect: std::sync::Arc<crate::inspect_tools::InspectRegistry>,
     web: std::sync::Arc<crate::web_seam::WebRuntime>,
     web_search_provider: Option<String>,
     web_fetch_provider: Option<String>,
@@ -407,6 +420,7 @@ impl BuiltinTools {
         session_query: std::sync::Arc<crate::session_query_tools::SessionQueryRuntime>,
         terminal_finalizes: std::sync::Arc<crate::terminal_tools::FinalizeParks>,
         persistent_shells: std::sync::Arc<crate::persistent::PersistentShells>,
+        inspect: std::sync::Arc<crate::inspect_tools::InspectRegistry>,
         web: std::sync::Arc<crate::web_seam::WebRuntime>,
         web_search_provider: Option<String>,
         web_fetch_provider: Option<String>,
@@ -423,6 +437,7 @@ impl BuiltinTools {
             session_query,
             terminal_finalizes,
             persistent_shells,
+            inspect,
             web,
             web_search_provider,
             web_fetch_provider,
@@ -590,6 +605,47 @@ impl BuiltinTools {
                     .context_text(agent)
                     .map_err(|error| format!("context-text failure: {error}"))?;
                 json!({ "text": text })
+            }
+            METHOD_INSPECT_LIST_EXECUTE => {
+                let call = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
+                return match crate::inspect_tools::execute_list(&self.inspect, &arguments) {
+                    Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                        .map_err(|error| format!("body reply encode failed: {error}")),
+                    Err(error) => serde_json::to_vec(&json!({
+                        "error": { "message": error.message, "name": error.name },
+                    }))
+                    .map_err(|error| format!("body error encode failed: {error}")),
+                };
+            }
+            METHOD_INSPECT_QUERY_EXECUTE => {
+                let call = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let agent = call.get("agent").and_then(Value::as_str);
+                let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
+                return match crate::inspect_tools::execute_query(&self.inspect, &arguments, agent) {
+                    Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                        .map_err(|error| format!("body reply encode failed: {error}")),
+                    Err(error) => serde_json::to_vec(&json!({
+                        "error": { "message": error.message, "name": error.name },
+                    }))
+                    .map_err(|error| format!("body error encode failed: {error}")),
+                };
+            }
+            METHOD_INSPECT_LIST_RENDER | METHOD_INSPECT_QUERY_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::inspect_tools::render(&args, &value))
+            }
+            METHOD_INSPECT_LIST_PRESENT_CALL => {
+                json!(crate::inspect_tools::present_call_list())
+            }
+            METHOD_INSPECT_QUERY_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::inspect_tools::present_call_query(&args))
             }
             METHOD_TODOS_FOLD => {
                 let state = crate::todo::fold(
@@ -1876,9 +1932,21 @@ const DESCRIBE_WORKING_DIRECTORY_METHODS: [&str; 3] = [
     "workingDirectory.contextText",
 ];
 
-const fn describe_methods() -> [&'static str; 147] {
+/// The 16f batch-2 inspect rows: the two cordis-inspect tools' faces
+/// (the dsh `tool-cordis` registration reality; the pair stays baked
+/// off — the rows describe the service methods, not a mounted tool).
+const DESCRIBE_INSPECT_METHODS: [&str; 6] = [
+    "cordis_inspect_list.execute",
+    "cordis_inspect_list.render",
+    "cordis_inspect_list.presentCall",
+    "cordis_inspect_query.execute",
+    "cordis_inspect_query.render",
+    "cordis_inspect_query.presentCall",
+];
+
+const fn describe_methods() -> [&'static str; 153] {
     let mut index = 0;
-    let mut methods: [&'static str; 147] = [""; 147];
+    let mut methods: [&'static str; 153] = [""; 153];
     while index < 91 {
         methods[index] = DESCRIBE_BASE_METHODS[index];
         index += 1;
@@ -1904,6 +1972,11 @@ const fn describe_methods() -> [&'static str; 147] {
             DESCRIBE_WORKING_DIRECTORY_METHODS[working_directory_index];
         working_directory_index += 1;
     }
+    let mut inspect_index = 0;
+    while inspect_index < 6 {
+        methods[147 + inspect_index] = DESCRIBE_INSPECT_METHODS[inspect_index];
+        inspect_index += 1;
+    }
     methods
 }
 
@@ -1928,7 +2001,7 @@ mod tests {
     #[test]
     fn describe_surface_carries_the_web_pair() {
         let methods = super::describe_methods();
-        assert_eq!(methods.len(), 147);
+        assert_eq!(methods.len(), 153);
         for name in [
             "web_search.execute",
             "web_search.presentResult",
@@ -1942,15 +2015,18 @@ mod tests {
     }
 
     /// The 16f batch-2 rows complete the surface: the working-directory
-    /// band rides its three faces (execute/render/contextText).
+    /// band rides its three faces (execute/render/contextText) and the
+    /// inspect pair rides its six faces.
     #[test]
     fn describe_surface_carries_the_working_directory_band() {
         let methods = super::describe_methods();
-        assert_eq!(methods.len(), 147);
+        assert_eq!(methods.len(), 153);
         for name in [
             "workingDirectory.execute",
             "workingDirectory.render",
             "workingDirectory.contextText",
+            "cordis_inspect_list.execute",
+            "cordis_inspect_query.presentCall",
         ] {
             assert!(methods.contains(&name), "missing {name}");
         }
@@ -1962,7 +2038,7 @@ mod tests {
     #[test]
     fn describe_surface_carries_the_terminal_family() {
         let methods = super::describe_methods();
-        assert_eq!(methods.len(), 147);
+        assert_eq!(methods.len(), 153);
         for name in [
             "terminal_send.execute",
             "terminal_send.presentResult",

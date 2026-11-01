@@ -1407,6 +1407,22 @@ fn register_tools(
             .ok()?
             .as_slice(),
     )?;
+    // The cordis-inspect pair (dsh `tool-cordis`; the dsh base bundle
+    // mounts neither tool — web-app/desktop compositions only — so the
+    // baked gate stays off; the Q16f-B ruling).
+    if crate::inspect_tools::BAKED_CORDIS_INSPECT {
+        for registration in [
+            cordis_inspect_list_registration(),
+            cordis_inspect_query_registration(),
+        ] {
+            step(
+                link,
+                fr_wire::services::tools::SERVICE_NAME,
+                fr_wire::services::tools::METHOD_REGISTER,
+                serde_json::to_vec(&registration).ok()?.as_slice(),
+            )?;
+        }
+    }
     // The terminal family (dsh `tool-terminal` + the two persistent
     // twins; one bake gate — the dsh base bundle mounts none, the
     // `BAKED_STR_REPLACE_EDITOR` judgment). The registered tool names
@@ -1532,6 +1548,58 @@ pub fn working_directory_registration() -> Value {
         "execute": {
             "service": crate::service::SERVICE_NAME,
             "method": crate::service::METHOD_WORKING_DIRECTORY_EXECUTE,
+        },
+    })
+}
+
+/// The `cordis_inspect_list` registration row (dsh `ctx.tools.
+/// register`; the baked gate stays off per the Q16f-B ruling).
+#[must_use]
+pub fn cordis_inspect_list_registration() -> Value {
+    json!({
+        "name": "cordis_inspect_list",
+        "description": crate::catalog_gen::CORDIS_INSPECT_LIST_DESCRIPTION,
+        "parameters": crate::schema::cordis_inspect_list_parameters(),
+        "output": {
+            "schema": crate::schema::inspect_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_INSPECT_LIST_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_INSPECT_LIST_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_INSPECT_LIST_PRESENT_CALL,
+        },
+    })
+}
+
+/// The `cordis_inspect_query` registration row (dsh `ctx.tools.
+/// register`; the baked gate stays off per the Q16f-B ruling).
+#[must_use]
+pub fn cordis_inspect_query_registration() -> Value {
+    json!({
+        "name": "cordis_inspect_query",
+        "description": crate::catalog_gen::CORDIS_INSPECT_QUERY_DESCRIPTION,
+        "parameters": crate::schema::cordis_inspect_query_parameters(),
+        "output": {
+            "schema": crate::schema::inspect_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_INSPECT_QUERY_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_INSPECT_QUERY_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_INSPECT_QUERY_PRESENT_CALL,
         },
     })
 }
@@ -2459,6 +2527,7 @@ impl BuiltinState {
             Arc::clone(&session_query),
             std::sync::Arc::new(crate::terminal_tools::FinalizeParks::default()),
             std::sync::Arc::new(crate::persistent::PersistentShells::default()),
+            std::sync::Arc::new(crate::inspect_tools::InspectRegistry::new()),
             std::sync::Arc::new(web),
             Some(crate::web_tools::BAKED_SEARCH_PROVIDER.to_owned()),
             Some(crate::web_tools::BAKED_FETCH_PROVIDER.to_owned()),
@@ -3279,6 +3348,62 @@ mod tests {
         assert_eq!(
             spec["text"]["textProvider"]["method"],
             serde_json::json!(crate::service::METHOD_WORKING_DIRECTORY_CONTEXT_TEXT)
+        );
+    }
+
+    /// The inspect pair keeps its registration rows reachable with
+    /// the baked gate off (the Q16f-B ruling): the rows exist for the
+    /// composed web-app/desktop faces while the dsh base bundle mounts
+    /// neither tool. The list row rides the generic read call card and
+    /// the query row echoes its three-name identity.
+    #[test]
+    fn cordis_inspect_registrations_pin_the_rows_with_the_gate_off() {
+        // The compile-time gate: the const pin rides the baked-off
+        // ruling (the dsh base bundle mounts neither tool).
+        const _: () = assert!(!crate::inspect_tools::BAKED_CORDIS_INSPECT);
+        let list = super::cordis_inspect_list_registration();
+        assert_eq!(list["name"], serde_json::json!("cordis_inspect_list"));
+        assert_eq!(
+            list["description"],
+            serde_json::json!(crate::catalog_gen::CORDIS_INSPECT_LIST_DESCRIPTION)
+        );
+        assert_eq!(
+            list["presentCall"]["method"],
+            serde_json::json!(crate::service::METHOD_INSPECT_LIST_PRESENT_CALL)
+        );
+        assert_eq!(
+            crate::inspect_tools::present_call_list(),
+            serde_json::json!({
+                "card": "generic",
+                "kind": "read",
+                "title": "List Cordis Inspect Providers",
+            })
+        );
+        for absent in [
+            "isConcurrencySafe",
+            "presentResult",
+            "presentationMeta",
+            "timeoutMs",
+        ] {
+            assert!(list.get(absent).is_none(), "{absent} stays absent");
+        }
+        let query = super::cordis_inspect_query_registration();
+        assert_eq!(query["name"], serde_json::json!("cordis_inspect_query"));
+        assert_eq!(
+            query["parameters"],
+            crate::schema::cordis_inspect_query_parameters()
+        );
+        assert_eq!(
+            query["presentCall"]["method"],
+            serde_json::json!(crate::service::METHOD_INSPECT_QUERY_PRESENT_CALL)
+        );
+        assert_eq!(
+            crate::inspect_tools::present_call_query(&serde_json::json!({
+                "platform": "host",
+                "provider": "tools",
+                "method": "schema",
+            }))["title"],
+            serde_json::json!("Query Cordis host tools.schema")
         );
     }
 

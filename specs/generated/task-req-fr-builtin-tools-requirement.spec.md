@@ -2041,91 +2041,91 @@ Scenario: working_directory 行为 1
   那么 shell 与运行进程保留自身目录；origin 元数据与权限根固定
 
 Scenario: cordis_inspect_list 调度与呈现
-  Test: pending_req_fr_builtin_tools_cordis_inspect_list
+  Test: cordis_inspect_registrations_pin_the_rows_with_the_gate_off
   假设 合约要求的行为已实现
   当 读取工具 cordis_inspect_list 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: cordis_inspect_list 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_cordis_inspect_list
+  Test: execute_list_returns_the_empty_directory
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: cordis_inspect_list 说明 section 注册缺席
-  Test: pending_req_fr_builtin_tools_cordis_inspect_list_section
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 cordis_inspect_list 无说明 section（dsh 真源 tool-cordis 不注入 systemPrompt）
 
 Scenario: cordis_inspect_list 行为 1
-  Test: pending_req_fr_builtin_tools_cordis_inspect_list_1
+  Test: registry_stays_empty_and_refuses_honestly
   假设 工具 cordis_inspect_list 执行时
   当 达到触发条件时
   那么 列全部 Inspect Provider；写/配插件前先调用
 
 Scenario: cordis_inspect_query 调度与呈现
-  Test: pending_req_fr_builtin_tools_cordis_inspect_query
+  Test: cordis_inspect_registrations_pin_the_rows_with_the_gate_off
   假设 合约要求的行为已实现
   当 读取工具 cordis_inspect_query 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 read
 
 Scenario: cordis_inspect_query 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_cordis_inspect_query
+  Test: parse_query_args_pins_the_rows
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: cordis_inspect_query 说明 section 注册缺席
-  Test: pending_req_fr_builtin_tools_cordis_inspect_query_section
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 cordis_inspect_query 无说明 section（dsh 真源 tool-cordis 不注入 systemPrompt）
 
 Scenario: cordis_inspect_query 参数 platform 形状
-  Test: pending_req_fr_builtin_tools_cordis_inspect_query_platform
+  Test: cordis_inspect_tools_pin_the_catalog_tables
   假设 工具 cordis_inspect_query 已注册
   当 校验 schema 时
   那么 参数行 [platform:string:req:enum[host|client]] 的名称与类型按目录行实现
 
 Scenario: cordis_inspect_query 参数 platform 约束
-  Test: pending_req_fr_builtin_tools_cordis_inspect_query_platform
+  Test: cordis_inspect_tools_pin_the_catalog_tables
   假设 工具 cordis_inspect_query 已注册
   当 校验 schema 时
   那么 参数行 [platform:string:req:enum[host|client]] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: cordis_inspect_query 参数 provider 形状
-  Test: pending_req_fr_builtin_tools_cordis_inspect_query_provider
+  Test: cordis_inspect_tools_pin_the_catalog_tables
   假设 工具 cordis_inspect_query 已注册
   当 校验 schema 时
   那么 参数行 [provider:string:req（精确 ID）] 的名称与类型按目录行实现
 
 Scenario: cordis_inspect_query 参数 provider 约束
-  Test: pending_req_fr_builtin_tools_cordis_inspect_query_provider
+  Test: cordis_inspect_tools_pin_the_catalog_tables
   假设 工具 cordis_inspect_query 已注册
   当 校验 schema 时
   那么 参数行 [provider:string:req（精确 ID）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: cordis_inspect_query 参数 method 形状
-  Test: pending_req_fr_builtin_tools_cordis_inspect_query_method
+  Test: cordis_inspect_tools_pin_the_catalog_tables
   假设 工具 cordis_inspect_query 已注册
   当 校验 schema 时
   那么 参数行 [method:string:req（manifest 精确方法）] 的名称与类型按目录行实现
 
 Scenario: cordis_inspect_query 参数 method 约束
-  Test: pending_req_fr_builtin_tools_cordis_inspect_query_method
+  Test: cordis_inspect_tools_pin_the_catalog_tables
   假设 工具 cordis_inspect_query 已注册
   当 校验 schema 时
   那么 参数行 [method:string:req（manifest 精确方法）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: cordis_inspect_query 参数 input 形状
-  Test: pending_req_fr_builtin_tools_cordis_inspect_query_input
+  Test: cordis_inspect_tools_pin_the_catalog_tables
   假设 工具 cordis_inspect_query 已注册
   当 校验 schema 时
   那么 参数行 [input:any:opt（满足 input schema）] 的名称与类型按目录行实现
 
 Scenario: cordis_inspect_query 参数 input 约束
-  Test: pending_req_fr_builtin_tools_cordis_inspect_query_input
+  Test: cordis_inspect_tools_pin_the_catalog_tables
   假设 工具 cordis_inspect_query 已注册
   当 校验 schema 时
   那么 参数行 [input:any:opt（满足 input schema）] 的 required、默认值与枚举约束按目录行实现并冻结对照

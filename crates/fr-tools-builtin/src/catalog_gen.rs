@@ -1593,6 +1593,64 @@ pub const WORKING_DIRECTORY_CWD_TEXT: &str = r"Current absolute working director
 pub const WORKING_DIRECTORY_CD_TEXT: &str =
     r"Existing directory to enter. Omit to read the current directory.";
 
+/// The `cordis_inspect_list` tool description (catalog-verbatim).
+pub const CORDIS_INSPECT_LIST_DESCRIPTION: &str = r"List every Cordis Inspect Provider currently known to the Host, including local Host Providers and the latest manifests synchronized from the Client. Each entry includes its platform, purpose, read-only methods, and input/output schemas. Call this Tool before writing or configuring a plugin, then select the provider and method for cordis_inspect_query from its result. Do not guess names or treat an Inspect method as a business Service that Plugin code can call.";
+
+/// The `cordis_inspect_list` parameter table (the json block, verbatim).
+pub const CORDIS_INSPECT_LIST_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {}
+}"#;
+
+/// The `cordis_inspect_query` tool description (catalog-verbatim).
+pub const CORDIS_INSPECT_QUERY_DESCRIPTION: &str = r"Run a read-only query declared by an Inspect Provider. platform, provider, and method must come from cordis_inspect_list, and input must satisfy that method's schema. Use this Tool before writing plugin code to read exact Service methods, Event modes, plugin Config schemas, Tool schemas, theme tokens, or live Slot trees and props. Host queries run locally. A Client query waits for the first valid page response within the configured timeout; otherwise it reports a Client failure or asks you to reconnect and retry. This Tool cannot invoke business Service methods or modify the runtime.";
+
+/// The `cordis_inspect_query` parameter table (the json block, verbatim).
+pub const CORDIS_INSPECT_QUERY_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "platform": {
+      "type": "string",
+      "description": "Runtime platform that owns the Provider.",
+      "enum": [
+        "host",
+        "client"
+      ]
+    },
+    "provider": {
+      "type": "string",
+      "description": "Exact Provider ID returned by cordis_inspect_list."
+    },
+    "method": {
+      "type": "string",
+      "description": "Exact method name declared by the Provider manifest."
+    },
+    "input": {
+      "description": "Optional query input; it must satisfy the method input schema."
+    }
+  },
+  "required": [
+    "platform",
+    "provider",
+    "method"
+  ]
+}"#;
+
+/// The `cordis_inspect_query` `platform` parameter description (catalog-verbatim).
+pub const CORDIS_INSPECT_QUERY_PLATFORM_TEXT: &str = r"Runtime platform that owns the Provider.";
+
+/// The `cordis_inspect_query` `provider` parameter description (catalog-verbatim).
+pub const CORDIS_INSPECT_QUERY_PROVIDER_TEXT: &str =
+    r"Exact Provider ID returned by cordis_inspect_list.";
+
+/// The `cordis_inspect_query` `method` parameter description (catalog-verbatim).
+pub const CORDIS_INSPECT_QUERY_METHOD_TEXT: &str =
+    r"Exact method name declared by the Provider manifest.";
+
+/// The `cordis_inspect_query` `input` parameter description (catalog-verbatim).
+pub const CORDIS_INSPECT_QUERY_INPUT_TEXT: &str =
+    r"Optional query input; it must satisfy the method input schema.";
+
 /// The persistent `bash` tool description (catalog-verbatim; the dsh `@deepseek-ai/dsh-tool-bash-persistent` package section).
 pub const BASH_PERSISTENT_DESCRIPTION: &str = r"Run commands in a persistent bash shell. State, including the current directory and exported environment variables, persists across calls for this agent.";
 

@@ -286,3 +286,14 @@ TOOLS spec 6 条 wd 场景（5 个选择器）+ PROMPT spec 1 条 working-direct
 - **describe 面 144→147**（workingDirectory.execute/render/contextText 三行）；方法号 184/185/906 按批 2 设计钉分配；BuiltinTools 装配位零变更（directories 已在场；FsDomain 构造前移复用）。
 - **测试基线**：fr-tools-builtin 318→325（+registration/context 两钉测+schema 钉测+domain 8 测试-tool 内 2）；workspace 全测 1609 rc=0；clippy -D warnings 全绿（本轮 12 起修尽：message move/redundant clone/doc backticks/too-long-paragraph）。
 - **lifecycle 基线（FR_DSH_SOURCE 下）**：TOOLS **303/0/105**（+6 wd 场景转 pass）；PROMPT **47/0/0**（唯一 pending 收口，基线 46/0/1→47/0/0）；CONFIG 131/0/188 不变。零 fail。
+
+## 十八、16f 批 2 步② 绑定审计（cordis_inspect 双工具，Q16f-B 空注册表诚实面，2026-11-01）
+
+TOOLS spec 15 条 inspect 场景（6 个选择器）全绑真实测试；CONFIG 本步无新增场景。
+
+- **诚实面判例（Q16f-B 裁决 A+PRD 19.2 条 27）**：InspectRegistry=空 provider 表恒无伪造；list 恒 `{"providers": []}`；query 双臂按 dsh 控制流走 provider lookup 优先——空表使 host/client 两臂均经 not-registered 文案拒绝（Host/Client 前缀逐字，inspect-registry.ts:129/180 锚）；no-connected-page 臂在空表下结构性不可达（dsh flow 次序=provider 检查先于页面检查）。baked gate=BAKED_CORDIS_INSPECT const false+编译期 const assert（sre 判例同形）；注册行函数在场（web-app/desktop 组合面）+注册臂 gated。
+- **工具脸（tool-cordis index.ts 74 行+present.ts 全录）**：list `{}`/query 四行（platform enum host|client+provider/method req+input opt json）；output `{type:'json'}` 双件共享；render=单 text 块 JSON.stringify(value,null,2)（serde to_string_pretty 同构）；presentCall 双件（generic/read/List Cordis Inspect Providers+`Query Cordis {platform} {provider}.{method}`）；query execute=dsh 三名回显包络 {platform,provider,method,data}；requireAgent 文案逐字 `Cordis inspection requires an Agent-backed session`。注册行=partial face+presentCall 端点（无 presentResult/presentationMeta/timeoutMs/isConcurrencySafe）。
+- **方法号 186-191**（list execute/render/presentCall 186-188+query 189-191）；describe 147→153（六行 cordis_inspect_*）。
+- **TOOLS 15 条 → 5 钉测**：①「调度与呈现」×2 → `cordis_inspect_registrations_pin_the_rows_with_the_gate_off`（双行 pin+gate-off const assert+presentCall 路由+视图值双 assert——路由 vs 视图首版误绑已修）；②「越界拒绝」→ `execute_list_returns_the_empty_directory`/`parse_query_args_pins_the_rows`；③「section 缺席」×2 → `prompt_sections_pin_the_twelve_tools`；④「行为 1」→ `registry_stays_empty_and_refuses_honestly`（空表+双 not-registered 文案）；⑤「形状/约束」×8 → `cordis_inspect_tools_pin_the_catalog_tables`（Q97-A：query 四行+platform enum+input type json；首版顶层 required 数组断言=目录实为行内 required，探针后修）。
+- **测试基线**：fr-tools-builtin 325→331（inspect 域 4+pin 3+schema pin 1-1 重复断言删）；workspace 1615 rc=0；clippy 全绿（unused param 下划线/const assert 判例/is_err 断言风格三处修）。
+- **lifecycle 基线（FR_DSH_SOURCE 下）**：TOOLS **318/0/90**（+15 inspect 场景转 pass）；CONFIG 131/0/188；PROMPT 47/0/0。零 fail。

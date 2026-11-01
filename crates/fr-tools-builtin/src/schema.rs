@@ -577,6 +577,54 @@ pub fn working_directory_output_schema() -> Value {
     })
 }
 
+/// The `cordis_inspect_list` parameter table (the catalog-frozen base:
+/// the empty object).
+#[must_use]
+pub fn cordis_inspect_list_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {},
+    })
+}
+
+/// The `cordis_inspect_query` parameter table (the catalog-frozen
+/// base: the four rows).
+#[must_use]
+pub fn cordis_inspect_query_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "platform": {
+                "type": "string",
+                "required": true,
+                "enum": ["host", "client"],
+                "description": catalog_gen::CORDIS_INSPECT_QUERY_PLATFORM_TEXT,
+            },
+            "provider": {
+                "type": "string",
+                "required": true,
+                "description": catalog_gen::CORDIS_INSPECT_QUERY_PROVIDER_TEXT,
+            },
+            "method": {
+                "type": "string",
+                "required": true,
+                "description": catalog_gen::CORDIS_INSPECT_QUERY_METHOD_TEXT,
+            },
+            "input": {
+                "type": "json",
+                "description": catalog_gen::CORDIS_INSPECT_QUERY_INPUT_TEXT,
+            },
+        },
+    })
+}
+
+/// The inspect output contract (the dsh `{ type: 'json' }` shape both
+/// tools share).
+#[must_use]
+pub fn inspect_output_schema() -> Value {
+    json!({ "type": "json" })
+}
+
 /// The glob tool description (the composed registration fact).
 ///
 /// The catalog-frozen base carries the sampled over-cap phrase; the
@@ -2061,6 +2109,39 @@ mod tests {
             fields["cwd"]["description"],
             serde_json::json!(catalog_gen::WORKING_DIRECTORY_CWD_TEXT)
         );
+    }
+
+    /// The inspect pair pins their catalog rows (Q97-A: the query's
+    /// four rows and the list's empty object, verbatim texts
+    /// included).
+    #[test]
+    fn cordis_inspect_tools_pin_the_catalog_tables() {
+        let list = super::cordis_inspect_list_parameters();
+        assert_eq!(
+            list,
+            serde_json::json!({ "type": "object", "properties": {} })
+        );
+        let query = super::cordis_inspect_query_parameters();
+        let keys = query
+            .pointer("/properties")
+            .and_then(Value::as_object)
+            .expect("query properties");
+        assert_eq!(
+            keys.keys().collect::<Vec<_>>(),
+            vec!["platform", "provider", "method", "input"]
+        );
+        assert_eq!(
+            keys["platform"]["enum"],
+            serde_json::json!(["host", "client"])
+        );
+        assert_eq!(keys["platform"]["required"], serde_json::json!(true));
+        assert_eq!(keys["provider"]["required"], serde_json::json!(true));
+        assert_eq!(keys["method"]["required"], serde_json::json!(true));
+        assert_eq!(
+            keys["platform"]["description"],
+            serde_json::json!(catalog_gen::CORDIS_INSPECT_QUERY_PLATFORM_TEXT)
+        );
+        assert_eq!(keys["input"]["type"], serde_json::json!("json"));
     }
 
     /// The output contract's three union arms carry the exact key sets.

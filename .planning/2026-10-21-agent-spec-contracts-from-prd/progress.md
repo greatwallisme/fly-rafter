@@ -1561,3 +1561,11 @@
 - 门：fmt/clippy workspace -D warnings 全绿（12 起修尽）；fr-tools-builtin 318→325；workspace 1609 rc=0；lifecycle TOOLS 303/0/105+PROMPT 47/0/0（唯一 pending 收口）+CONFIG 131/0/188。
 - 过程记录：Write 长内容退化 4 起（占位符/乱码标识符/掉括号/双次整文件损坏）——分片写+python 确定性 splice+写后即验纪律执行；rg -rn 误用 1 起（-r=--replace 陷阱再现）。
 - **下一动作=提交步① → 开步②（cordis_inspect 双工具，Q16f-B 空注册表诚实面+baked OFF）。**
+
+## 2026-11-01 — 16f 批 2 步②：cordis_inspect 双工具（Q16f-B 诚实面）
+
+- inspect_tools.rs（registry 空表+list/query+render/presentCall+4 测试）；service.rs 186-191+六臂+describe 153；schema.rs 双行+output json+Q97-A 钉测；plugin_shell 双注册行+gated 臂（BAKED_CORDIS_INSPECT const false+const assert）+BuiltinTools inspect 字段；generator 双表项+regen 幂等。
+- 绑定：TOOLS 15 场景→5 钉测（审计十八节）；lifecycle TOOLS 303→318/0/90；CONFIG/PROMPT 不变。
+- 门：fmt/clippy/workspace 1615/doc 全绿；fr-tools-builtin 325→331。
+- 过程：退化 6 起（乱码标识符×3/截断/括号/错误 old_string）——小步 Edit+heredoc 单函数+写后即验+进程替换陷阱（python3 - <(...) 未执行）复归 heredoc 判例。
+- **下一动作=步③（lsp 工具：schema 1:1+LSP_UNAVAILABLE+config 3 键+section 2200 gate）→ 步④（load_workspace_dependencies）→ 步⑤（plugin_manager）→ 步⑥（skill 全家）→ 步⑦ 收口。**

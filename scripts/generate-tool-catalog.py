@@ -340,6 +340,21 @@ TOOLS = {
         ],
         "none",
     ),
+    "cordis_inspect_list": (
+        "CORDIS_INSPECT_LIST",
+        [],
+        "none",
+    ),
+    "cordis_inspect_query": (
+        "CORDIS_INSPECT_QUERY",
+        [
+            ("platform", "PLATFORM_TEXT"),
+            ("provider", "PROVIDER_TEXT"),
+            ("method", "METHOD_TEXT"),
+            ("input", "INPUT_TEXT"),
+        ],
+        "none",
+    ),
 }
 
 # The persistent-shell pair reuses the `bash`/`pwsh` tool names inside

@@ -47,6 +47,7 @@ pub mod fsio;
 pub mod goal;
 pub mod goal_service;
 pub mod goal_tools;
+pub mod inspect_tools;
 pub mod interaction_tools;
 pub mod job_tools;
 pub mod observation;
