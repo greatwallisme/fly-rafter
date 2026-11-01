@@ -71,4 +71,6 @@ pub mod tools;
 pub mod user_questions;
 #[cfg(test)]
 mod verify;
+pub mod web_fetch_http;
+pub mod web_seam;
 pub mod working_directory;

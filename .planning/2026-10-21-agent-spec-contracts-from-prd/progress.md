@@ -1481,3 +1481,22 @@
 - ureq 3.5 `Agent::with_parts(config, DefaultConnector, PinnedResolver)` 公开面实查通过（agent.rs:130/transport mod.rs:373/resolver trait unversioned::resolver）——fr pinned 解析=dsh network.ts 同构（地址集验证→per-request agent→SNI/Host 保持域名），零新增 crate。
 - rust-guidelines 00 质量门已读；下步落码纪律照旧（写后即验 cargo check、小锚点编辑）。
 - **下一动作=16f 批 1 落码序**：①fr-net 增 PinnedResolver 模块（isPublicIpAddress+NAT64+Resolver impl+测试）②fr-tools-builtin web 域：web_seam.rs（registry+选择语义+WebError 码族）+web_fetch_http.rs（provider+policy+手动重定向循环+读帽）+web_search_deepseek.rs+web_deepseek_api.rs+web_search_exa.rs+web_search_perplexity.rs+web_tools.rs（双工具+sections+config）③html-to-markdown-rs 接入（fetch render）④service.rs 方法号 174-183+describe⑤fr-schema config 7 组行⑥catalog 抽取脚本扩源（web 双 section）⑦cargo 五门。分多个上下文窗口执行，每窗落码+check 即验。
+## 2026-11-01 — 16f 批 1 步①完成：fr-net PinnedResolver 模块全绿
+
+- 新增 crates/fr-net/src/pinned.rs（dsh network.ts 1:1）：is_public_ip_address（ipaddr.js 2.2.0 SpecialRanges 两表逐字镜像，IPv4 十组+IPv6 十八组，含 as112/amt/discard/rfc6145/orchid2 等冷门段；IPv4-mapped 剥嵌套判 embedded v4）+is_non_public_ip_literal+resolve_public_addresses(_with)（字面量直用/否则 lookup 全集+空集拒绝+任一非公网拒绝+NAT64 RFC7050 ipv4only.arpa 哨兵发现臂 RFC6052 六前缀长布局提取）+PinError（四变体=dsh 文案逐字）+PinnedResolver（ureq Resolver impl：pinned 集×URI 端口×ip_family 过滤，http/https 默认端口本地 match——SchemeExt 是 ureq 私有 API）。
+- http.rs 增 UreqFetch::pinned(addresses)（per-request agent=with_parts(config, DefaultConnector, PinnedResolver)，wire 配置与 shared 同构）；零新增 crate。
+- 钉测 7 件 14 断言组：策略全表（public 10+non-public 47 含 fec0::1 判公网=ipaddr.js 2.2.0 语义）、bracket 字面量、RFC6052 六布局提取+reserved octet 毒化臂、空集/非公网/NAT64 非公网拒绝（PinError 文案逐字）、NAT64 公网翻译放行、resolver 族过滤+端口+HostNotFound、loopback 全程（URL 域名 Host 头保持=防重绑定语义实证）。
+- 本窗事故与整改：三次生成降级写入（两次整文件重写 http.rs 乱码+一次 todo! 被 hook 拦截），两次 git restore 恢复；整改=既有大文件只做短锚点插入、新码全部落新文件、每文件写后即 cargo check；bug 两处（192.168.0.0/16 臂误带 c==0、host 头大小写）钉测暴露即修。
+- 五门状态：fmt 绿、clippy -D warnings 绿、cargo test -p fr-net 14/14 绿、doc 绿。**下一动作=16f 批 1 步②：fr-tools-builtin web 域落码（web_seam.rs 起步：types.ts+index.ts 真源在手后写 registry+选择语义+WebError 码族）。**
+## 2026-11-01 — 16f 批 1 步②前半：web_seam 落码+fr-net 传输扩件全绿
+
+- web_seam.rs 落地（钉见 findings「设计钉之三」）：五臂选择语义+注册表+cap+双 wire 视图+env 回退，钉测 5 件绿。
+- fr-net 增 fetch_raw（3xx 直通，dsh redirect:'manual' 面；fetch() 仍拒 3xx）+with_read_window/pinned_with_read_window（web fetch 每 hop 剩余 deadline 作读窗）。check+14 测+clippy 绿。
+- fr-tools-builtin 新依赖三件：url 2（WHATWG URL）、encoding_rs 0.8（TextDecoder 同构）、html-to-markdown-rs 3.19.1（default-features=false，Q16f-D 裁定；feature 缺失面待 web_tools 落码实测）。DEFAULT_USER_AGENT 裁定=fly-rafter/0.1.0 (+<workspace repository>)（品牌映射判例，非 wire）。
+- **下一动作=web_fetch_http.rs 全落（设计钉之三逐条机械执行）→四 search provider→web_tools→集成收口（service 174-183/describe/plugin_shell 注册+sections/schema.rs/fr-schema config/catalog 扩源/十门）。**
+## 2026-11-01 — 16f 批 1 步②后半：web_fetch_http.rs 全绿收窗
+
+- web_fetch_http.rs 落地（findings 钉三逐条）：policy 面（validate_fetch_url UTF-16 计数/凭据拒/scheme 文案冒号、classify_content_type、parse_charset 手写扫描、decoder_for_charset=encoding_rs WHATWG labels）、resolve_limits（kebab 键+默认五值+三文案逐字+MAX_TIMER_DELAY_MS 2^31-1）、HttpFetchProvider（AddressResolver 注入缝=生产 resolve_public_addresses/钉测注录答案；手动重定向循环=五码 isRedirectStatus+budget 先检+Location 缺席+join 失败+target 重验+同源拒 origin 序列化；per-hop 新建 pinned agent 读窗=剩余 deadline，WEB_FETCH_TIMEOUT 臂=elapsed 判；readCapped=Content-Length 先拒+流截断恰满不标+UTF-16 字符帽切点防孤代理=JS slice 结构性等价）。DEFAULT_USER_AGENT="fly-rafter/0.1.0 (+https://github.com/greatwallisme/fly-rafter)"。
+- 钉测 7 件 12 测全绿：URL 策略全臂/classify+charset 表/redirect 解析+同源+origin 序列化（含 IPv6 括号）/UTF-16 切片/limits 默认+三拒绝文案/loopback 全程（200+301 同源跟随+跨源拒+5 跳 budget+octet-stream 拒+latin-1 charset 解码+close 定界流截断）/声明超帽拒。
+- 过程修正：/big 用例首版撞 declared-length 拒臂（改 close 定界才到流截断臂——dsh 语义钉测反向实证）；utf16 切片改「加后判超」；测试内残留 stub 清除。
+- 状态：fr-tools-builtin clippy -D warnings 绿、web 域 12/12、全 crate check 零警告。**下一动作=16f 批 1 步③四 search provider（web_search_deepseek/web_deepseek_api/web_search_exa/web_search_perplexity，findings 钉二全录）→步④ web_tools.rs→步⑤集成收口。**

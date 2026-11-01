@@ -2052,7 +2052,10 @@ mod tests {
             crate::terminal_tools::present_call_close(&json!({ "sessionId": "s1" }))["kind"],
             json!("delete")
         );
-        assert_eq!(crate::terminal_tools::present_call_list()["kind"], json!("read"));
+        assert_eq!(
+            crate::terminal_tools::present_call_list()["kind"],
+            json!("read")
+        );
         let persistent_call =
             crate::persistent::present_call_persistent(&json!({ "command": "cargo test" }));
         assert_eq!(persistent_call["card"], json!("terminal"));

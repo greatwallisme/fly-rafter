@@ -149,10 +149,18 @@ impl UreqFetch {
     /// wire-visible fact.
     #[must_use]
     pub fn new() -> Self {
+        Self::with_read_window(Some(Duration::from_millis(200)))
+    }
+
+    /// Build the backend with an explicit read window (the web-fetch
+    /// provider passes each hop's remaining deadline as the window, so a
+    /// stalled read surfaces at the deadline instead of the default).
+    #[must_use]
+    pub fn with_read_window(window: Option<Duration>) -> Self {
         let config = ureq::Agent::config_builder()
             .max_redirects(0)
             .timeout_connect(Some(Duration::from_secs(10)))
-            .timeout_per_read(Some(Duration::from_millis(200)))
+            .timeout_per_read(window)
             .build();
         Self {
             agent: ureq::Agent::new_with_config(config),
@@ -164,6 +172,37 @@ impl UreqFetch {
     pub fn shared() -> &'static Self {
         static BACKEND: std::sync::OnceLock<UreqFetch> = std::sync::OnceLock::new();
         BACKEND.get_or_init(Self::new)
+    }
+
+    /// Build one pinned transport: a per-request agent whose resolver
+    /// serves only the validated address set (dsh `requestPinned`; the
+    /// agent is this request's own because pinning is how this package
+    /// refuses a DNS answer that changes between validation and
+    /// connection, and it may not apply process-wide).
+    #[must_use]
+    pub fn pinned(addresses: Vec<std::net::IpAddr>) -> Self {
+        Self::pinned_with_read_window(addresses, Some(Duration::from_millis(200)))
+    }
+
+    /// [`Self::pinned`] with an explicit read window (the web-fetch
+    /// provider passes each hop's remaining deadline).
+    #[must_use]
+    pub fn pinned_with_read_window(
+        addresses: Vec<std::net::IpAddr>,
+        window: Option<Duration>,
+    ) -> Self {
+        let config = ureq::Agent::config_builder()
+            .max_redirects(0)
+            .timeout_connect(Some(Duration::from_secs(10)))
+            .timeout_per_read(window)
+            .build();
+        Self {
+            agent: ureq::Agent::with_parts(
+                config,
+                ureq::unversioned::transport::DefaultConnector::default(),
+                crate::pinned::PinnedResolver::new(addresses),
+            ),
+        }
     }
 
     fn send(
@@ -212,13 +251,18 @@ impl Default for UreqFetch {
     }
 }
 
-impl Fetch for UreqFetch {
-    fn fetch(&self, request: HttpRequest) -> Result<HttpResponse, TransportError> {
+impl UreqFetch {
+    /// Execute one request without the redirect-status refusal: a 3xx
+    /// response returns as a response (the web-fetch provider's manual
+    /// same-origin redirect loop reads the `Location` header itself;
+    /// the band split mirrors dsh `redirect: 'manual'` vs `'error'`).
+    ///
+    /// # Errors
+    ///
+    /// [`TransportError`] for connection failures.
+    pub fn fetch_raw(&self, request: HttpRequest) -> Result<HttpResponse, TransportError> {
         let response = self.send(request)?;
         let status = response.status().as_u16();
-        if is_refused_redirect(status) {
-            return Err(TransportError::new("HTTP redirect refused"));
-        }
         let headers = response
             .headers()
             .iter()
@@ -234,6 +278,16 @@ impl Fetch for UreqFetch {
             headers,
             body: Box::new(response.into_body().into_reader()),
         })
+    }
+}
+
+impl Fetch for UreqFetch {
+    fn fetch(&self, request: HttpRequest) -> Result<HttpResponse, TransportError> {
+        let response = self.fetch_raw(request)?;
+        if is_refused_redirect(response.status) {
+            return Err(TransportError::new("HTTP redirect refused"));
+        }
+        Ok(response)
     }
 }
 #[cfg(test)]

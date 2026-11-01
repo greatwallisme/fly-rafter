@@ -14,14 +14,18 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 dougong-abi.workspace = true
+encoding_rs = "0.8"
+fr-net = { version = "0.1.0", path = "../fr-net" }
 fr-sandbox.workspace = true
 fr-session.workspace = true
 fr-wire.workspace = true
+html-to-markdown-rs = { version = "3.19.1", default-features = false }
 jiff = { version = "0.2", features = ["static"] }
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+url = "2"
 uuid.workspace = true
 
 [target.'cfg(windows)'.dependencies]

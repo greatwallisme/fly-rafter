@@ -10,6 +10,7 @@
 //! injected seam belongs to the runtime-registry slice.
 
 pub mod http;
+pub mod pinned;
 pub mod plugin_shell;
 
 // Rust guideline compliant 2026-10-27
