@@ -1651,6 +1651,61 @@ pub const CORDIS_INSPECT_QUERY_METHOD_TEXT: &str =
 pub const CORDIS_INSPECT_QUERY_INPUT_TEXT: &str =
     r"Optional query input; it must satisfy the method input schema.";
 
+/// The `lsp` tool description (catalog-verbatim).
+pub const LSP_DESCRIPTION: &str = r"Query a language server for precise code navigation. operation is one of goToDefinition, findReferences, goToImplementation, hover. line and character are one-based UTF-16 cursor coordinates. findReferences includes the declaration.";
+
+/// The `lsp` parameter table (the json block, verbatim).
+pub const LSP_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "operation": {
+      "type": "string",
+      "description": "goToDefinition, findReferences, goToImplementation, or hover.",
+      "enum": [
+        "goToDefinition",
+        "findReferences",
+        "goToImplementation",
+        "hover"
+      ]
+    },
+    "file_path": {
+      "type": "string",
+      "description": "The source file to query, relative to the workspace or absolute."
+    },
+    "line": {
+      "type": "number",
+      "description": "One-based line of the cursor."
+    },
+    "character": {
+      "type": "number",
+      "description": "One-based UTF-16 column of the cursor."
+    }
+  },
+  "required": [
+    "operation",
+    "file_path",
+    "line",
+    "character"
+  ]
+}"#;
+
+/// The `tool:lsp` prompt-section text (the dsh `LSP_PROMPT_TEXT` constant, source-verbatim).
+pub const LSP_SECTION_TEXT: &str = r"Use search/read for ordinary navigation. Use lsp when textual matches are ambiguous or before a change requires precise definitions, implementations, or references. Positions are one-based line and character (UTF-16) at the cursor; an off-symbol position may return no results. findReferences always includes the declaration.";
+
+/// The `lsp` `operation` parameter description (catalog-verbatim).
+pub const LSP_OPERATION_TEXT: &str =
+    r"goToDefinition, findReferences, goToImplementation, or hover.";
+
+/// The `lsp` `file_path` parameter description (catalog-verbatim).
+pub const LSP_FILE_PATH_TEXT: &str =
+    r"The source file to query, relative to the workspace or absolute.";
+
+/// The `lsp` `line` parameter description (catalog-verbatim).
+pub const LSP_LINE_TEXT: &str = r"One-based line of the cursor.";
+
+/// The `lsp` `character` parameter description (catalog-verbatim).
+pub const LSP_CHARACTER_TEXT: &str = r"One-based UTF-16 column of the cursor.";
+
 /// The persistent `bash` tool description (catalog-verbatim; the dsh `@deepseek-ai/dsh-tool-bash-persistent` package section).
 pub const BASH_PERSISTENT_DESCRIPTION: &str = r"Run commands in a persistent bash shell. State, including the current directory and exported environment variables, persists across calls for this agent.";
 

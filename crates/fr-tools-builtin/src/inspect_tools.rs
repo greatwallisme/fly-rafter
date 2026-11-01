@@ -282,10 +282,7 @@ mod tests {
             serde_json::json!({ "platform": "host", "provider": "p" }),
             serde_json::json!([1]),
         ] {
-            assert!(
-                parse_query_args(&broken).is_err(),
-                "refused: {broken}"
-            );
+            assert!(parse_query_args(&broken).is_err(), "refused: {broken}");
             assert!(
                 execute_query(&InspectRegistry::new(), &broken, Some("a")).is_err(),
                 "refused: {broken}"

@@ -1642,37 +1642,37 @@ Scenario: config dsh-tool-jobs completionDelivery 约束
   那么 配置行 [completionDelivery:'wakeup'] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-lsp maxLocations 默认
-  Test: pending_req_fr_config_config_dsh_tool_lsp_maxlocations
+  Test: builtin_config_pins_tool_lsp_group
   假设 插件 dsh-tool-lsp 已注册
   当 读取解析后配置时
   那么 配置行 [maxLocations:100] 的默认值按目录行实现
 
 Scenario: config dsh-tool-lsp maxLocations 约束
-  Test: pending_req_fr_config_config_dsh_tool_lsp_maxlocations
+  Test: builtin_config_pins_tool_lsp_group
   假设 插件 dsh-tool-lsp 已注册
   当 校验与生效时
   那么 配置行 [maxLocations:100] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-lsp maxResultChars 默认
-  Test: pending_req_fr_config_config_dsh_tool_lsp_maxresultchars
+  Test: builtin_config_pins_tool_lsp_group
   假设 插件 dsh-tool-lsp 已注册
   当 读取解析后配置时
   那么 配置行 [maxResultChars:16000] 的默认值按目录行实现
 
 Scenario: config dsh-tool-lsp maxResultChars 约束
-  Test: pending_req_fr_config_config_dsh_tool_lsp_maxresultchars
+  Test: builtin_config_pins_tool_lsp_group
   假设 插件 dsh-tool-lsp 已注册
   当 校验与生效时
   那么 配置行 [maxResultChars:16000] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-lsp timeoutMs 默认
-  Test: pending_req_fr_config_config_dsh_tool_lsp_timeoutms
+  Test: builtin_config_pins_tool_lsp_group
   假设 插件 dsh-tool-lsp 已注册
   当 读取解析后配置时
   那么 配置行 [timeoutMs:60000] 的默认值按目录行实现
 
 Scenario: config dsh-tool-lsp timeoutMs 约束
-  Test: pending_req_fr_config_config_dsh_tool_lsp_timeoutms
+  Test: builtin_config_pins_tool_lsp_group
   假设 插件 dsh-tool-lsp 已注册
   当 校验与生效时
   那么 配置行 [timeoutMs:60000] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写

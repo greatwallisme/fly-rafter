@@ -625,6 +625,115 @@ pub fn inspect_output_schema() -> Value {
     json!({ "type": "json" })
 }
 
+/// The `lsp` parameter table (the catalog-frozen base: the four rows).
+#[must_use]
+pub fn lsp_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "operation": {
+                "type": "string",
+                "required": true,
+                "enum": ["goToDefinition", "findReferences", "goToImplementation", "hover"],
+                "description": catalog_gen::LSP_OPERATION_TEXT,
+            },
+            "file_path": {
+                "type": "string",
+                "required": true,
+                "description": catalog_gen::LSP_FILE_PATH_TEXT,
+            },
+            "line": {
+                "type": "number",
+                "required": true,
+                "description": catalog_gen::LSP_LINE_TEXT,
+            },
+            "character": {
+                "type": "number",
+                "required": true,
+                "description": catalog_gen::LSP_CHARACTER_TEXT,
+            },
+        },
+    })
+}
+
+/// The `lsp` output contract (the dsh `defineTool` `output.schema`
+/// verbatim two-arm union over the shared position/range shapes).
+#[must_use]
+pub fn lsp_output_schema() -> Value {
+    let position = |required: bool| {
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "line": { "type": "integer", "required": true },
+                "character": { "type": "integer", "required": true },
+            },
+            "required": required,
+        })
+    };
+    let range = json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "start": position(true),
+            "end": position(true),
+        },
+    });
+    json!({
+        "oneOf": [
+            {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "kind": { "type": "string", "required": true, "const": "locations" },
+                    "locations": {
+                        "type": "array",
+                        "required": true,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "uri": { "type": "string", "required": true },
+                                "range": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "start": position(true),
+                                        "end": position(true),
+                                    },
+                                    "required": true,
+                                },
+                            },
+                        },
+                    },
+                    "resolvedWorkspaceUri": { "type": "string", "required": true },
+                },
+            },
+            {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "kind": { "type": "string", "required": true, "const": "hover" },
+                    "hover": {
+                        "required": true,
+                        "oneOf": [
+                            { "type": "null" },
+                            {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                    "contents": { "type": "string", "required": true },
+                                    "range": range,
+                                },
+                            },
+                        ],
+                    },
+                },
+            },
+        ],
+    })
+}
+
 /// The glob tool description (the composed registration fact).
 ///
 /// The catalog-frozen base carries the sampled over-cap phrase; the
@@ -2079,6 +2188,52 @@ mod tests {
             fetch_fields["truncated"],
             serde_json::json!({ "type": "boolean", "required": true })
         );
+    }
+
+    /// The lsp tables pin their catalog rows (Q97-A: the four rows,
+    /// the enum, and the two-arm output union).
+    #[test]
+    fn lsp_tools_pin_the_catalog_tables() {
+        let parameters = super::lsp_parameters();
+        let keys = parameters
+            .pointer("/properties")
+            .and_then(Value::as_object)
+            .expect("lsp properties");
+        assert_eq!(
+            keys.keys().collect::<Vec<_>>(),
+            vec!["operation", "file_path", "line", "character"]
+        );
+        assert_eq!(
+            keys["operation"]["enum"],
+            serde_json::json!([
+                "goToDefinition",
+                "findReferences",
+                "goToImplementation",
+                "hover"
+            ])
+        );
+        assert_eq!(keys["operation"]["required"], serde_json::json!(true));
+        assert_eq!(keys["file_path"]["required"], serde_json::json!(true));
+        assert_eq!(keys["line"]["type"], serde_json::json!("number"));
+        assert_eq!(keys["character"]["type"], serde_json::json!("number"));
+        assert_eq!(
+            keys["operation"]["description"],
+            serde_json::json!(catalog_gen::LSP_OPERATION_TEXT)
+        );
+        let output = super::lsp_output_schema();
+        let arms = output["oneOf"].as_array().expect("two arms");
+        assert_eq!(arms.len(), 2);
+        let locations = &arms[0]["properties"];
+        assert_eq!(locations["kind"]["const"], serde_json::json!("locations"));
+        assert_eq!(
+            locations["resolvedWorkspaceUri"]["required"],
+            serde_json::json!(true)
+        );
+        let hover = &arms[1]["properties"];
+        assert_eq!(hover["kind"]["const"], serde_json::json!("hover"));
+        let hover_arms = hover["hover"]["oneOf"].as_array().expect("hover union");
+        assert_eq!(hover_arms.len(), 2);
+        assert_eq!(hover_arms[0], serde_json::json!({ "type": "null" }));
     }
 
     /// The working-directory tables pin their catalog rows (Q97-A: the

@@ -297,3 +297,18 @@ TOOLS spec 15 条 inspect 场景（6 个选择器）全绑真实测试；CONFIG 
 - **TOOLS 15 条 → 5 钉测**：①「调度与呈现」×2 → `cordis_inspect_registrations_pin_the_rows_with_the_gate_off`（双行 pin+gate-off const assert+presentCall 路由+视图值双 assert——路由 vs 视图首版误绑已修）；②「越界拒绝」→ `execute_list_returns_the_empty_directory`/`parse_query_args_pins_the_rows`；③「section 缺席」×2 → `prompt_sections_pin_the_twelve_tools`；④「行为 1」→ `registry_stays_empty_and_refuses_honestly`（空表+双 not-registered 文案）；⑤「形状/约束」×8 → `cordis_inspect_tools_pin_the_catalog_tables`（Q97-A：query 四行+platform enum+input type json；首版顶层 required 数组断言=目录实为行内 required，探针后修）。
 - **测试基线**：fr-tools-builtin 325→331（inspect 域 4+pin 3+schema pin 1-1 重复断言删）；workspace 1615 rc=0；clippy 全绿（unused param 下划线/const assert 判例/is_err 断言风格三处修）。
 - **lifecycle 基线（FR_DSH_SOURCE 下）**：TOOLS **318/0/90**（+15 inspect 场景转 pass）；CONFIG 131/0/188；PROMPT 47/0/0。零 fail。
+
+## 十九、16f 批 2 步③ 绑定审计（lsp 工具+config 组，2026-11-02）
+
+TOOLS spec 6 条 lsp 场景（4 个选择器）+ CONFIG spec 6 条 dsh-tool-lsp 场景（3 个选择器）全绑真实测试；dsh-lsp-stdio servers 两场景结构性 pending（fr M1 无 lsp-stdio provider，audit 档载）。
+
+- **诚实面判例（Q16f-B 族延伸+Q93-A）**：'lsp' 缝=fr-tools-builtin 内 LspRegistry 空 route 表（extension→provider；M1 无 lsp-stdio 注册者）→query 经 dsh 控制流（parse→agent/workspace ensure→extension 路由查找）落 `LSP_UNAVAILABLE` 结构化错误（LspError 名+code 载体，文案 `no LSP provider handles "{file_path}"` 逐字，lsp/src/index.ts:146 锚）；workspace 缺席文案 `the lsp tool requires a session workspace cwd`（LSP_WORKSPACE_REQUIRED）逐字；ensure 腿复用 working_directory 域（本步①域）。
+- **工具脸（tool-lsp index.ts 245+render.ts 191 全录）**：四行参数表（operation enum/file_path/line/character req，one-based 校验逐字文案）+双臂 output oneOf（locations/hover+position/range 共享形）+render 族全移植（formatLocations 分组/省略 marker、formatHover、boundResult 三臂帽、renderUri file: 相对化——win32 驱动器臂=display-only 结构性缺席档载，fr M1 posix）+presentCall generic/search `LSP {op} {file}:{line}:{char}`+locations 聚焦；timeoutMs=BAKED_LSP_TIMEOUT_MS 60000。
+- **section 判例**：prompt_sections 参数化重构——4 布尔门（typestate lint）折叠为 SectionGates{terminals, web: WebSection{None|SearchOnly|Both}, lsp}；lsp 臂 order 2200（TOOL_LSP 槽）+LSP_SECTION_TEXT（LSP_PROMPT_TEXT 常量抽取，generator 新 kind 分支）；baked off → twelve 不变。
+- **config 组**：fr-schema 嵌套组 tool-lsp 三键（max-locations 100/max-result-chars 16000/timeout-ms 60000+上限 2147483647=MAX_TIMER_DELAY_MS）；钉测含默认投影（float 序）+Finite 比较判例+嵌套投影指针 /anyOf/0/properties/tool-lsp/anyOf/0/properties（批 1 判例两处再现）。
+- **方法号 192-194**；describe 153→156（lsp.execute/render/presentCall）；BAKED_LSP const false+注册臂 gated+const assert（inspect 判例同形）。
+- **TOOLS 6 条 → 4 钉测**：①「调度与呈现+section 注册」→ `lsp_registration_pins_the_row_with_the_gate_off`（行 pin+gate off+timeoutMs+段 2200/LSP_SECTION_TEXT+无段双臂）；②「越界拒绝」→ `lsp_parse_args_pins_the_refusals`（五拒绝+enum 文案；与 web_search 同名冲突改名判例）；③「operation 形状/约束」×2 → `lsp_tools_pin_the_catalog_tables`（Q97-A 四行+enum+双臂 union）；④「行为 1」→ `execute_refuses_unavailable_after_the_workspace_leg`（LSP_UNAVAILABLE 逐字+code+workspace 缺席臂；config 三默认由 baked 常量+fr-schema 默认双面承载，批 1 行为场景判例同构）。
+- **CONFIG 6 条 → bind-config-tests.py +6 对** → `builtin_config_pins_tool_lsp_group`（三默认投影+kebab 键序+封闭面+timeout 上限）。
+- **测试基线**：fr-tools-builtin 331→337（lsp 域 4+pin 2）；fr-schema 47→48；workspace 1622 rc=0；clippy 全绿（LspToolInput 死字段删=诚实面无消费方/SectionGates 结构体化/test struct 前置三修）。
+- **lifecycle 基线（FR_DSH_SOURCE 下）**：TOOLS **324/0/84**（+6）；CONFIG **137/0/182**（+6）；PROMPT 47/0/0。零 fail。
+- **M1 结构性缺席档载**：①dsh-lsp-stdio servers 两 CONFIG 场景 pending（fr 无 stdio provider，M1 不做 language-server 子进程管理=Q94-A 16 范围既裁）；②renderUri win32 驱动器臂缺席（无 Windows lane，Q99-B 判例族）。

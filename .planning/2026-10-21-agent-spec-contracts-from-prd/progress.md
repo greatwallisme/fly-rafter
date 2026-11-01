@@ -1569,3 +1569,9 @@
 - 门：fmt/clippy/workspace 1615/doc 全绿；fr-tools-builtin 325→331。
 - 过程：退化 6 起（乱码标识符×3/截断/括号/错误 old_string）——小步 Edit+heredoc 单函数+写后即验+进程替换陷阱（python3 - <(...) 未执行）复归 heredoc 判例。
 - **下一动作=步③（lsp 工具：schema 1:1+LSP_UNAVAILABLE+config 3 键+section 2200 gate）→ 步④（load_workspace_dependencies）→ 步⑤（plugin_manager）→ 步⑥（skill 全家）→ 步⑦ 收口。**
+
+## 2026-11-02 — 16f 批 2 步③：lsp 工具+config 组
+
+- lsp_tools.rs（LspRegistry 空 route 表+parse/execute+render 族全移植+present+4 测试）；service.rs 192-194+三臂+describe 156；schema.rs 四行+双臂 output+Q97-A 钉测；plugin_shell 注册行+gated 臂+SectionGates 重构（4 布尔→3 场枚举）；fr-schema tool-lsp 嵌套组+钉测；generator lsp 表项+kind 分支+regen 幂等；bind-config +6 对；TOOLS 6 场景绑定。
+- 门：fmt/clippy/workspace 1622/doc 全绿；lifecycle TOOLS 324/0/84+CONFIG 137/0/182；测试名冲突改名判例（lsp_parse_args）。
+- **下一动作=步④（load_workspace_dependencies，Q16f-E opt-in source 必填）→ 步⑤（plugin_manager，Q16f-A）→ 步⑥（skill 全家，Q16f-C 全量）→ 步⑦ 收口（catalog SECTION_TEXTS 扩源+最终门）。**

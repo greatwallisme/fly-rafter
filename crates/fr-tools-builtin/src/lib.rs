@@ -50,6 +50,7 @@ pub mod goal_tools;
 pub mod inspect_tools;
 pub mod interaction_tools;
 pub mod job_tools;
+pub mod lsp_tools;
 pub mod observation;
 pub mod persistent;
 pub mod plan_mode;

@@ -350,6 +350,12 @@ pub const METHOD_INSPECT_QUERY_EXECUTE: u32 = 189;
 pub const METHOD_INSPECT_QUERY_RENDER: u32 = 190;
 /// Method selector: the `cordis_inspect_query` present-call presentation.
 pub const METHOD_INSPECT_QUERY_PRESENT_CALL: u32 = 191;
+/// Method selector: the `lsp` tool body.
+pub const METHOD_LSP_EXECUTE: u32 = 192;
+/// Method selector: the `lsp` render projection.
+pub const METHOD_LSP_RENDER: u32 = 193;
+/// Method selector: the `lsp` pending-call presentation.
+pub const METHOD_LSP_PRESENT_CALL: u32 = 194;
 
 /// The escalate-to modes this composition advertises (the dsh
 /// `ESCALATION_TARGETS` words in table order).
@@ -386,6 +392,7 @@ pub struct BuiltinTools {
     terminal_finalizes: std::sync::Arc<crate::terminal_tools::FinalizeParks>,
     persistent_shells: std::sync::Arc<crate::persistent::PersistentShells>,
     inspect: std::sync::Arc<crate::inspect_tools::InspectRegistry>,
+    lsp: std::sync::Arc<crate::lsp_tools::LspRegistry>,
     web: std::sync::Arc<crate::web_seam::WebRuntime>,
     web_search_provider: Option<String>,
     web_fetch_provider: Option<String>,
@@ -421,6 +428,7 @@ impl BuiltinTools {
         terminal_finalizes: std::sync::Arc<crate::terminal_tools::FinalizeParks>,
         persistent_shells: std::sync::Arc<crate::persistent::PersistentShells>,
         inspect: std::sync::Arc<crate::inspect_tools::InspectRegistry>,
+        lsp: std::sync::Arc<crate::lsp_tools::LspRegistry>,
         web: std::sync::Arc<crate::web_seam::WebRuntime>,
         web_search_provider: Option<String>,
         web_fetch_provider: Option<String>,
@@ -438,6 +446,7 @@ impl BuiltinTools {
             terminal_finalizes,
             persistent_shells,
             inspect,
+            lsp,
             web,
             web_search_provider,
             web_fetch_provider,
@@ -646,6 +655,40 @@ impl BuiltinTools {
             METHOD_INSPECT_QUERY_PRESENT_CALL => {
                 let args = request.get("args").cloned().unwrap_or(Value::Null);
                 json!(crate::inspect_tools::present_call_query(&args))
+            }
+            METHOD_LSP_EXECUTE => {
+                let call = request
+                    .get("call")
+                    .ok_or_else(|| "builtin-tools execute payload requires call".to_string())?;
+                let agent = call.get("agent").and_then(Value::as_str);
+                let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
+                return match crate::lsp_tools::execute(
+                    &self.lsp,
+                    self.directories.as_ref(),
+                    &arguments,
+                    agent,
+                ) {
+                    Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+                        .map_err(|error| format!("body reply encode failed: {error}")),
+                    Err(error) => serde_json::to_vec(&json!({
+                        "error": { "message": error.message, "name": error.name },
+                    }))
+                    .map_err(|error| format!("body error encode failed: {error}")),
+                };
+            }
+            METHOD_LSP_RENDER => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                let value = request.get("value").cloned().unwrap_or(Value::Null);
+                json!(crate::lsp_tools::render(
+                    &args,
+                    &value,
+                    crate::lsp_tools::BAKED_MAX_LOCATIONS,
+                    crate::lsp_tools::BAKED_MAX_RESULT_CHARS,
+                ))
+            }
+            METHOD_LSP_PRESENT_CALL => {
+                let args = request.get("args").cloned().unwrap_or(Value::Null);
+                json!(crate::lsp_tools::present_call(&args))
             }
             METHOD_TODOS_FOLD => {
                 let state = crate::todo::fold(
@@ -1944,9 +1987,14 @@ const DESCRIBE_INSPECT_METHODS: [&str; 6] = [
     "cordis_inspect_query.presentCall",
 ];
 
-const fn describe_methods() -> [&'static str; 153] {
+/// The 16f batch-2 lsp rows: the one tool's three faces (the dsh
+/// `tool-lsp` registration reality; the tool stays baked off — the
+/// rows describe the service methods, not a mounted tool).
+const DESCRIBE_LSP_METHODS: [&str; 3] = ["lsp.execute", "lsp.render", "lsp.presentCall"];
+
+const fn describe_methods() -> [&'static str; 156] {
     let mut index = 0;
-    let mut methods: [&'static str; 153] = [""; 153];
+    let mut methods: [&'static str; 156] = [""; 156];
     while index < 91 {
         methods[index] = DESCRIBE_BASE_METHODS[index];
         index += 1;
@@ -1977,6 +2025,11 @@ const fn describe_methods() -> [&'static str; 153] {
         methods[147 + inspect_index] = DESCRIBE_INSPECT_METHODS[inspect_index];
         inspect_index += 1;
     }
+    let mut lsp_index = 0;
+    while lsp_index < 3 {
+        methods[153 + lsp_index] = DESCRIBE_LSP_METHODS[lsp_index];
+        lsp_index += 1;
+    }
     methods
 }
 
@@ -2001,7 +2054,7 @@ mod tests {
     #[test]
     fn describe_surface_carries_the_web_pair() {
         let methods = super::describe_methods();
-        assert_eq!(methods.len(), 153);
+        assert_eq!(methods.len(), 156);
         for name in [
             "web_search.execute",
             "web_search.presentResult",
@@ -2020,7 +2073,7 @@ mod tests {
     #[test]
     fn describe_surface_carries_the_working_directory_band() {
         let methods = super::describe_methods();
-        assert_eq!(methods.len(), 153);
+        assert_eq!(methods.len(), 156);
         for name in [
             "workingDirectory.execute",
             "workingDirectory.render",
@@ -2038,7 +2091,7 @@ mod tests {
     #[test]
     fn describe_surface_carries_the_terminal_family() {
         let methods = super::describe_methods();
-        assert_eq!(methods.len(), 153);
+        assert_eq!(methods.len(), 156);
         for name in [
             "terminal_send.execute",
             "terminal_send.presentResult",

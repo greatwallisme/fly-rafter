@@ -1969,37 +1969,37 @@ Scenario: load_workspace_dependencies 行为 1
   那么 返回捆绑 Python+库路径与版本（numpy/pandas 等）；Node/pnpm 在 payload 提供时附上
 
 Scenario: lsp 调度与呈现
-  Test: pending_req_fr_builtin_tools_lsp
+  Test: lsp_registration_pins_the_row_with_the_gate_off
   假设 合约要求的行为已实现
   当 读取工具 lsp 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: lsp 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_lsp
+  Test: lsp_parse_args_pins_the_refusals
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: lsp 说明 section 注册
-  Test: pending_req_fr_builtin_tools_lsp_section
+  Test: lsp_registration_pins_the_row_with_the_gate_off
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 lsp 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: lsp 参数 operation 形状
-  Test: pending_req_fr_builtin_tools_lsp_operation
+  Test: lsp_tools_pin_the_catalog_tables
   假设 工具 lsp 已注册
   当 校验 schema 时
   那么 参数行 [operation:string:req:enum[goToDefinition|findReferences|goToImplementation|hover]] 的名称与类型按目录行实现
 
 Scenario: lsp 参数 operation 约束
-  Test: pending_req_fr_builtin_tools_lsp_operation
+  Test: lsp_tools_pin_the_catalog_tables
   假设 工具 lsp 已注册
   当 校验 schema 时
   那么 参数行 [operation:string:req:enum[goToDefinition|findReferences|goToImplementation|hover]] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: lsp 行为 1
-  Test: pending_req_fr_builtin_tools_lsp_1
+  Test: execute_refuses_unavailable_after_the_workspace_leg
   假设 工具 lsp 执行时
   当 达到触发条件时
   那么 无 provider 返回结构化 LSP_UNAVAILABLE 不改 schema；config maxLocations 100、maxResultChars 16000、timeoutMs 60000（即 60000 归属 lsp）

@@ -32,6 +32,12 @@ SPEC = Path("specs/generated/task-req-fr-config-requirement.spec.md")
 
 # (scenario title, expected current selector prefix, new selector)
 PAIRS = [
+    ("config dsh-tool-lsp maxLocations 默认", "pending_req_fr_config", "builtin_config_pins_tool_lsp_group"),
+    ("config dsh-tool-lsp maxLocations 约束", "pending_req_fr_config", "builtin_config_pins_tool_lsp_group"),
+    ("config dsh-tool-lsp maxResultChars 默认", "pending_req_fr_config", "builtin_config_pins_tool_lsp_group"),
+    ("config dsh-tool-lsp maxResultChars 约束", "pending_req_fr_config", "builtin_config_pins_tool_lsp_group"),
+    ("config dsh-tool-lsp timeoutMs 默认", "pending_req_fr_config", "builtin_config_pins_tool_lsp_group"),
+    ("config dsh-tool-lsp timeoutMs 约束", "pending_req_fr_config", "builtin_config_pins_tool_lsp_group"),
     ("默认值 web searchProvider", "pending_req_fr_config", "baked_composition_pins_the_base_patch"),
     ("默认值 web fetchProvider", "pending_req_fr_config", "baked_composition_pins_the_base_patch"),
     ("默认值 tool-web searchTimeoutMs", "pending_req_fr_config", "baked_composition_pins_the_base_patch"),

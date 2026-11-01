@@ -834,21 +834,58 @@ fn build_web_runtime() -> Option<crate::web_seam::WebRuntime> {
 /// template. The `str_replace_editor` registers no section (the dsh
 /// source injects no systemPrompt; the Q16b-4A ruling).
 pub(crate) fn prompt_sections() -> Vec<(String, f64, String)> {
-    prompt_sections_with(
-        crate::terminal_tools::terminal_tools_registered(),
+    let web = match (
         crate::web_tools::BAKED_WEB_SEARCH_ENABLED,
         crate::web_tools::BAKED_WEB_FETCH_ENABLED,
-    )
+    ) {
+        (true, true) => WebSection::Both,
+        (true, false) => WebSection::SearchOnly,
+        _ => WebSection::None,
+    };
+    prompt_sections_with(SectionGates {
+        terminals: crate::terminal_tools::terminal_tools_registered(),
+        web,
+        lsp: crate::lsp_tools::BAKED_LSP,
+    })
 }
 
-/// The parameterized section table (the gate drives the `tool:pty`
-/// row: the dsh section call lives inside the tool-terminal apply, so
-/// the unmounted composition registers nothing).
-pub(crate) fn prompt_sections_with(
-    terminals: bool,
-    web_search: bool,
-    web_fetch: bool,
-) -> Vec<(String, f64, String)> {
+/// The web pair's section mounts (the dsh `tool:web_search` row rides
+/// both arms with a variant text; the `tool:web_fetch` row rides the
+/// both arm only).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WebSection {
+    /// Neither web row.
+    None,
+    /// The search row only (the fallback search text).
+    SearchOnly,
+    /// Both rows (the fetch-variant search text plus the fetch row).
+    Both,
+}
+
+/// The baked section gates (the parameterized table's mounts: the
+/// pty/web/lsp rows gate while the base ten always ride).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SectionGates {
+    /// The terminal-family mount (the pty row).
+    pub terminals: bool,
+    /// The web pair's mount.
+    pub web: WebSection,
+    /// The lsp mount.
+    pub lsp: bool,
+}
+
+/// The parameterized section table (the gates drive the `tool:pty`
+/// and `tool:lsp` rows: the dsh section calls live inside the
+/// tool-terminal and tool-lsp applies, so the unmounted compositions
+/// register nothing).
+pub(crate) fn prompt_sections_with(gates: SectionGates) -> Vec<(String, f64, String)> {
+    let SectionGates {
+        terminals,
+        web,
+        lsp,
+    } = gates;
+    let web_search = web != WebSection::None;
+    let web_fetch = web == WebSection::Both;
     let mut sections = vec![
         (
             "tool:bash".to_owned(),
@@ -920,6 +957,13 @@ pub(crate) fn prompt_sections_with(
             "tool:pty".to_owned(),
             1700.0,
             crate::catalog_gen::PTY_SECTION_TEXT.to_owned(),
+        ));
+    }
+    if lsp {
+        sections.push((
+            "tool:lsp".to_owned(),
+            2200.0,
+            crate::catalog_gen::LSP_SECTION_TEXT.to_owned(),
         ));
     }
     sections
@@ -1423,6 +1467,17 @@ fn register_tools(
             )?;
         }
     }
+    // The lsp tool (dsh `tool-lsp`; the dsh base bundle mounts no row
+    // — web-app/desktop compositions only — so the baked gate stays
+    // off; the Q16f-F mirror).
+    if crate::lsp_tools::BAKED_LSP {
+        step(
+            link,
+            fr_wire::services::tools::SERVICE_NAME,
+            fr_wire::services::tools::METHOD_REGISTER,
+            serde_json::to_vec(&lsp_registration()).ok()?.as_slice(),
+        )?;
+    }
     // The terminal family (dsh `tool-terminal` + the two persistent
     // twins; one bake gate — the dsh base bundle mounts none, the
     // `BAKED_STR_REPLACE_EDITOR` judgment). The registered tool names
@@ -1601,6 +1656,34 @@ pub fn cordis_inspect_query_registration() -> Value {
             "service": crate::service::SERVICE_NAME,
             "method": crate::service::METHOD_INSPECT_QUERY_PRESENT_CALL,
         },
+    })
+}
+
+/// The `lsp` registration row (dsh `ctx.tools.register`; the baked
+/// gate stays off per the base-bundle mirror — the row serves the
+/// web-app/desktop composed faces).
+#[must_use]
+pub fn lsp_registration() -> Value {
+    json!({
+        "name": "lsp",
+        "description": crate::catalog_gen::LSP_DESCRIPTION,
+        "parameters": crate::schema::lsp_parameters(),
+        "output": {
+            "schema": crate::schema::lsp_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_LSP_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_LSP_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_LSP_PRESENT_CALL,
+        },
+        "timeoutMs": crate::lsp_tools::BAKED_LSP_TIMEOUT_MS,
     })
 }
 
@@ -2528,6 +2611,7 @@ impl BuiltinState {
             std::sync::Arc::new(crate::terminal_tools::FinalizeParks::default()),
             std::sync::Arc::new(crate::persistent::PersistentShells::default()),
             std::sync::Arc::new(crate::inspect_tools::InspectRegistry::new()),
+            std::sync::Arc::new(crate::lsp_tools::LspRegistry::new()),
             std::sync::Arc::new(web),
             Some(crate::web_tools::BAKED_SEARCH_PROVIDER.to_owned()),
             Some(crate::web_tools::BAKED_FETCH_PROVIDER.to_owned()),
@@ -3407,6 +3491,54 @@ mod tests {
         );
     }
 
+    /// The lsp row keeps its registration reachable with the baked
+    /// gate off (the base-bundle mirror): the row carries the catalog
+    /// identity, the four-row table, the timeout budget, and the
+    /// generic search call card; the section rides the same gate.
+    #[test]
+    fn lsp_registration_pins_the_row_with_the_gate_off() {
+        const _: () = assert!(!crate::lsp_tools::BAKED_LSP);
+        let row = super::lsp_registration();
+        assert_eq!(row["name"], serde_json::json!("lsp"));
+        assert_eq!(
+            row["description"],
+            serde_json::json!(crate::catalog_gen::LSP_DESCRIPTION)
+        );
+        assert_eq!(row["parameters"], crate::schema::lsp_parameters());
+        assert_eq!(row["output"]["schema"], crate::schema::lsp_output_schema());
+        assert_eq!(
+            row["presentCall"]["method"],
+            serde_json::json!(crate::service::METHOD_LSP_PRESENT_CALL)
+        );
+        assert_eq!(
+            row["timeoutMs"],
+            serde_json::json!(crate::lsp_tools::BAKED_LSP_TIMEOUT_MS)
+        );
+        for absent in ["isConcurrencySafe", "presentResult", "presentationMeta"] {
+            assert!(row.get(absent).is_none(), "{absent} stays absent");
+        }
+        // The gated section arm: on with the gate, off in the baked
+        // composition (twelve sections hold).
+        let with_lsp = super::prompt_sections_with(super::SectionGates {
+            terminals: false,
+            web: super::WebSection::None,
+            lsp: true,
+        });
+        let lsp_rows: Vec<_> = with_lsp
+            .iter()
+            .filter(|(name, _, _)| name == "tool:lsp")
+            .collect();
+        assert_eq!(lsp_rows.len(), 1);
+        assert_eq!(lsp_rows[0].1, 2200.0);
+        assert_eq!(lsp_rows[0].2, crate::catalog_gen::LSP_SECTION_TEXT);
+        let without = super::prompt_sections_with(super::SectionGates {
+            terminals: false,
+            web: super::WebSection::None,
+            lsp: false,
+        });
+        assert!(without.iter().all(|(name, _, _)| name != "tool:lsp"));
+    }
+
     /// The two web registration rows carry the full faces (the dsh
     /// `tool-web` registration: parallel scheduling, the catalog
     /// descriptions, the service-route faces, and the baked budgets).
@@ -3704,7 +3836,11 @@ mod tests {
     /// variant otherwise; the fetch text is the one verbatim guidance.
     #[test]
     fn web_sections_carry_the_variant_texts() {
-        let both = super::prompt_sections_with(true, true, true);
+        let both = super::prompt_sections_with(super::SectionGates {
+            terminals: true,
+            web: super::WebSection::Both,
+            lsp: false,
+        });
         let search = both
             .iter()
             .find(|(name, _, _)| name == "tool:web_search")
@@ -3717,7 +3853,11 @@ mod tests {
             .expect("the fetch section registers");
         assert_eq!(fetch.1, 2100.0);
         assert_eq!(fetch.2, crate::catalog_gen::WEB_FETCH_SECTION_TEXT);
-        let search_only = super::prompt_sections_with(true, true, false);
+        let search_only = super::prompt_sections_with(super::SectionGates {
+            terminals: true,
+            web: super::WebSection::SearchOnly,
+            lsp: false,
+        });
         let fallback = search_only
             .iter()
             .find(|(name, _, _)| name == "tool:web_search")
@@ -3743,7 +3883,11 @@ mod tests {
                 .all(|(name, _, _)| name != "tool:pty"),
             "the baked default carries no pty section"
         );
-        let enabled = super::prompt_sections_with(true, true, true);
+        let enabled = super::prompt_sections_with(super::SectionGates {
+            terminals: true,
+            web: super::WebSection::Both,
+            lsp: false,
+        });
         assert_eq!(enabled.len(), 13);
         let pty = enabled
             .iter()

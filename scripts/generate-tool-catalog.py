@@ -50,6 +50,7 @@ TOOL_SOURCES = {
     "grep": os.path.join("packages", "fs", "tool-fs-search", "src", "grep.ts"),
     "web_search": os.path.join("packages", "web", "tool-web", "src", "search.ts"),
     "web_fetch": os.path.join("packages", "web", "tool-web", "src", "fetch.ts"),
+    "lsp": os.path.join("packages", "lsp", "tool-lsp", "src", "index.ts"),
 }
 
 # The extracted tools: the Rust constant stem, the parameter-text keys
@@ -355,6 +356,16 @@ TOOLS = {
         ],
         "none",
     ),
+    "lsp": (
+        "LSP",
+        [
+            ("operation", "OPERATION_TEXT"),
+            ("file_path", "FILE_PATH_TEXT"),
+            ("line", "LINE_TEXT"),
+            ("character", "CHARACTER_TEXT"),
+        ],
+        "lsp",
+    ),
 }
 
 # The persistent-shell pair reuses the `bash`/`pwsh` tool names inside
@@ -534,6 +545,21 @@ def extract_section_text_segments(source, tool):
     return kept
 
 
+def extract_lsp_section_text(source):
+    """Extracts the `tool:lsp` section text (the dsh `LSP_PROMPT_TEXT`
+    constant: a single-quoted literal whose assignment sits inside its
+    blank-line-delimited statement block)."""
+    anchor = source.find("export const LSP_PROMPT_TEXT")
+    if anchor < 0:
+        raise ExtractError("tool-lsp source carries no LSP_PROMPT_TEXT")
+    end = source.find("\n\n", anchor)
+    statements = source[anchor:end if end > 0 else len(source)]
+    literals = re.findall(r"'((?:[^'\\]|\\.)*)'", statements)
+    if not literals:
+        raise ExtractError("LSP_PROMPT_TEXT parses no literals")
+    return "".join(ts_unescape(segment) for segment in literals)
+
+
 def extract_working_directory_output_texts(source):
     """Extracts the `working_directory` output schema's cwd row text (the
     dsh tool source's output.schema.properties.cwd.description; the
@@ -684,7 +710,16 @@ def emit():
             source_root_tool = os.path.join(source_root, TOOL_SOURCES[tool])
             with open(source_root_tool, encoding="utf-8") as handle:
                 source = handle.read()
-            if section_kind == "plain":
+            if section_kind == "lsp":
+                section_text = brand_map(extract_lsp_section_text(source))
+                blocks.append(
+                    f"\n/// The `tool:{tool}` prompt-section text (the dsh"
+                    f" `LSP_PROMPT_TEXT` constant, source-verbatim).\n"
+                )
+                blocks.append(
+                    f"pub const {stem}_SECTION_TEXT: &str = {raw_literal(section_text)};\n"
+                )
+            elif section_kind == "plain":
                 section_text = brand_map(extract_section_text(source, tool))
                 blocks.append(
                     f"\n/// The `tool:{tool}` prompt-section text (the dsh"

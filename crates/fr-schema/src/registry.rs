@@ -571,6 +571,33 @@ fn build_table() -> Vec<(&'static str, Schema)> {
                         ),
                     ],
                 ),
+                group_property(
+                    "tool-lsp",
+                    "The lsp tool's result caps and its tool-call timeout budget.",
+                    vec![
+                        number_property(
+                            "max-locations",
+                            None,
+                            None,
+                            100.0,
+                            "Largest number of rendered locations before an omission marker.",
+                        ),
+                        number_property(
+                            "max-result-chars",
+                            None,
+                            None,
+                            16_000.0,
+                            "Largest complete rendered result in characters.",
+                        ),
+                        number_property(
+                            "timeout-ms",
+                            None,
+                            Some(2_147_483_647.0),
+                            60_000.0,
+                            "Tool-call timeout budget in ms.",
+                        ),
+                    ],
+                ),
             ]),
         ),
     ]
@@ -1215,6 +1242,77 @@ mod tests {
     /// The four provider groups ride their dsh package sections with
     /// their declared key sets (the nested-groups ruling; the enum
     /// candidates verbatim).
+    #[test]
+    fn builtin_config_pins_tool_lsp_group() {
+        let schema = lookup("fr-tools-builtin").expect("the builtin-tools declaration");
+        let Schema::Object { properties, .. } = schema else {
+            panic!("the builtin-tools declaration is an object");
+        };
+        let property = properties
+            .iter()
+            .find(|property| property.name == "tool-lsp")
+            .expect("the tool-lsp group declaration");
+        let Schema::Object {
+            properties: rows,
+            additional_properties,
+            ..
+        } = &property.schema
+        else {
+            panic!("the tool-lsp group is an object");
+        };
+        assert!(!additional_properties, "tool-lsp refuses unknown keys");
+        let names: Vec<_> = rows.iter().map(|row| row.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["max-locations", "max-result-chars", "timeout-ms"]
+        );
+        for row in rows.iter() {
+            assert!(
+                matches!(
+                    &row.schema,
+                    Schema::Number {
+                        default: Some(_),
+                        ..
+                    }
+                ),
+                "{} is a defaulted number row",
+                row.name
+            );
+        }
+        let projected = to_json_schema(schema);
+        let group_rows = projected
+            .pointer("/anyOf/0/properties/tool-lsp/anyOf/0/properties")
+            .expect("nested tool-lsp projection");
+        assert_eq!(
+            group_rows
+                .get("max-locations")
+                .and_then(|row| row.get("default")),
+            Some(&serde_json::json!(100.0))
+        );
+        assert_eq!(
+            group_rows
+                .get("timeout-ms")
+                .and_then(|row| row.get("default")),
+            Some(&serde_json::json!(60000.0))
+        );
+        assert_eq!(
+            group_rows
+                .get("max-result-chars")
+                .and_then(|row| row.get("default")),
+            Some(&serde_json::json!(16000.0))
+        );
+        // The timeout budget rides the timer bound (the dsh
+        // `MAX_TIMER_DELAY_MS` cap).
+        let row = rows
+            .iter()
+            .find(|row| row.name == "timeout-ms")
+            .expect("timeout row");
+        let Schema::Number { max, .. } = &row.schema else {
+            panic!("timeout-ms is a number row");
+        };
+        assert_eq!(*max, Some(2_147_483_647.0));
+    }
+
     #[test]
     fn builtin_config_pins_web_provider_groups() {
         let schema = lookup("fr-tools-builtin").expect("the builtin-tools declaration");
