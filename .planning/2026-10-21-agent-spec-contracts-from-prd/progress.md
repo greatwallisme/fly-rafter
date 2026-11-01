@@ -1453,3 +1453,31 @@
 - **五门**：fmt ✓（--all 顺带修前批两处 fmt 偏差）/clippy workspace -D warnings 0/**tests 1525/0**/doc ✓/catalog --check exit 0。
 - **lifecycle（FR_DSH_SOURCE 判例确认）**：TOOLS 284/0/124（124 skip=16f 未实现组按设计）；CONFIG 114/0/205（未实现 CLI 面按设计）。binding-audit 第十五节已落。
 - **3b 全链闭环**；下一动作=16f（web+skill+lsp+目录+内省）批 0 设计问答。
+## 2026-11-01 — 16f 批 0：dsh 真源勘察完成（9 工具组全读），裁决问题呈报
+
+- 装配事实（base/cordis.patch.yml 全读）：web×2+skill+working_directory baked ON；plugin_manager tool 行 disabled:true；lsp/cordis×2/workspace-deps 非 base（web-app/desktop 专属）。
+- skill-filesystem watch 默认 true 且 dsh 用 node:fs watchFile（stat 轮询族）→fr 轮询线程同构，零新外部依赖。
+- HTML→Markdown 载体实查：crates.io 候选 html-to-markdown-rs 3.19.1（proxychains cargo search 实证）。
+- PROMPT spec 唯一 pending（working-directory context）确认随 16f working_directory 服务 context 挂载收口。
+- 真源细节全量钉存 findings.md「16f 批 0 真源勘察」节（web seam 选择语义/五 provider config/section 文本/skill catalog+gesture 全语义/lsp servers 表/plugin_manager 13+8+5 文案族）。
+- 待用户裁决：Q16f-A（plugin_manager 载体）/B（cordis_inspect 载体）/C（skill 面）/D（HTML→MD crate）/E（workspace_dependencies）/F（baked 组成+6 条 section 场景勘误确认）。
+## 2026-11-01 — 16f 批 0 收口：六裁决全落（A/A/A/A/A/A）
+
+- **Q16f-A** plugin_manager=方案 A（1:1 schema+审批前置+baked OFF；list 只读/set 写 fr.patch.yml restart-required 臂/install-remove-豁免四动作=ManagementError 结构化拒绝）
+- **Q16f-B** cordis_inspect=方案 A（空 registry 诚实面+baked OFF+client 臂不可达错误）
+- **Q16f-C** skill=方案 A 全量（registry+filesystem+tool+catalog 全生命周期+/name gesture；watch=stat 轮询线程零新依赖）
+- **Q16f-D** HTML→MD=方案 A 用现成库 html-to-markdown-rs 3.19.1（用户疑问「是否造轮子」已澄清：A 即 crates.io 路线，B 才是造轮子；尽调实证 strip_tags/HiddenContent/GFM 表格/whitespace_mode/MIT/feature 门控全过关；用户明确否决造轮子）
+- **Q16f-E** workspace_dependencies=方案 A（1:1 opt-in source 必填，baked 不挂，payload 用户自备——非偏差，dsh 无 payload 部署同构，不入 19.2）
+- **Q16f-F** baked 镜像 dsh base 确认+6 条 section 场景改否定已执行（script 精确替换 6/6，缺席场景累计 10）
+- **PRD 19.2 增 26/27/28 三条**（plugin_manager 生态面/cordis_inspect 空注册表/HTML→MD 转换器设施替换），workspace-dependencies 与 baked 组成经裁决确认非偏差不入。
+- 下一动作=16f 批 1（web 组）：search.ts 377+fetch.ts 515+types.ts 130+五 provider 包真源全读→设计钉→fr-tools-builtin web 域落码（web seam 服务+五 provider+双工具+sections+config 组+fr-net 消费+html-to-markdown-rs 接入）。
+## 2026-11-01 — 16f 批 1（web 组）真源全读完成，设计钉两则落 findings
+
+- 全读清单：web/src/types.ts 130+index.ts 206（seam wire+选择语义）、tool-web search.ts 377+fetch.ts 515+trust.ts 7、web-fetch-http index 94+provider 271+policy 118+network 301（SSRF pin）、web-search-deepseek provider 436、web-deepseek-api index 83+search 111+fetch 50+transport 349、web-search-exa provider 165、web-search-perplexity provider 167——web 组真源 100% 覆盖。
+- 设计钉两则（findings「16f 批 1」之一/之二）：双工具 schema/render/meta/presentCall/presentResult 全脸逐字、五 provider 请求体/映射/错误文案全录、SSRF 解析钉面（NAT64/unicast/pinned lookup+fr 侧 DNS 载体待实查 ureq 定制连接）、config 7 组 38 键清单、方法号 174-183、BAKED provider 注册策略、html-to-markdown-rs 接入点。
+- 下一动作=16f 批 1 落码（fr-tools-builtin web 域）：web_seam.rs（registry+选择+五 provider）+web_tools.rs（双工具）+html 转换接入+schema.rs 参数/输出表+fr-schema config 行+rust-guidelines/dougong-plugin-dev 激活；DNS pinned 连接 ureq 可行性实查先行。
+## 2026-11-01 — 批 1 落码前置全绿：ureq pinned-DNS 实证+rust-guidelines 激活
+
+- ureq 3.5 `Agent::with_parts(config, DefaultConnector, PinnedResolver)` 公开面实查通过（agent.rs:130/transport mod.rs:373/resolver trait unversioned::resolver）——fr pinned 解析=dsh network.ts 同构（地址集验证→per-request agent→SNI/Host 保持域名），零新增 crate。
+- rust-guidelines 00 质量门已读；下步落码纪律照旧（写后即验 cargo check、小锚点编辑）。
+- **下一动作=16f 批 1 落码序**：①fr-net 增 PinnedResolver 模块（isPublicIpAddress+NAT64+Resolver impl+测试）②fr-tools-builtin web 域：web_seam.rs（registry+选择语义+WebError 码族）+web_fetch_http.rs（provider+policy+手动重定向循环+读帽）+web_search_deepseek.rs+web_deepseek_api.rs+web_search_exa.rs+web_search_perplexity.rs+web_tools.rs（双工具+sections+config）③html-to-markdown-rs 接入（fetch render）④service.rs 方法号 174-183+describe⑤fr-schema config 7 组行⑥catalog 抽取脚本扩源（web 双 section）⑦cargo 五门。分多个上下文窗口执行，每窗落码+check 即验。

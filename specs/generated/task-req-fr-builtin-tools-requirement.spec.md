@@ -1926,11 +1926,11 @@ Scenario: skill 参数越界拒绝
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
-Scenario: skill 说明 section 注册
+Scenario: skill 说明 section 注册缺席
   Test: pending_req_fr_builtin_tools_skill_section
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 工具 skill 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
+  那么 工具 skill 无说明 section（dsh 真源 tool-skill 不注入 systemPrompt）
 
 Scenario: skill 参数 name 形状
   Test: pending_req_fr_builtin_tools_skill_name
@@ -1956,11 +1956,11 @@ Scenario: load_workspace_dependencies 参数越界拒绝
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
-Scenario: load_workspace_dependencies 说明 section 注册
+Scenario: load_workspace_dependencies 说明 section 注册缺席
   Test: pending_req_fr_builtin_tools_load_workspace_dependencies_section
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 工具 load_workspace_dependencies 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
+  那么 工具 load_workspace_dependencies 无说明 section（dsh 真源 tool-workspace-dependencies 不注入 systemPrompt）
 
 Scenario: load_workspace_dependencies 行为 1
   Test: pending_req_fr_builtin_tools_load_workspace_dependencies_1
@@ -2016,11 +2016,11 @@ Scenario: working_directory 参数越界拒绝
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
-Scenario: working_directory 说明 section 注册
+Scenario: working_directory 说明 section 注册缺席
   Test: pending_req_fr_builtin_tools_working_directory_section
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 工具 working_directory 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
+  那么 工具 working_directory 无说明 section（dsh 真源 tool-working-directory（目录变更走 user context，非 section） 不注入 systemPrompt）
 
 Scenario: working_directory 参数 cd 形状
   Test: pending_req_fr_builtin_tools_working_directory_cd
@@ -2052,11 +2052,11 @@ Scenario: cordis_inspect_list 参数越界拒绝
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
-Scenario: cordis_inspect_list 说明 section 注册
+Scenario: cordis_inspect_list 说明 section 注册缺席
   Test: pending_req_fr_builtin_tools_cordis_inspect_list_section
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 工具 cordis_inspect_list 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
+  那么 工具 cordis_inspect_list 无说明 section（dsh 真源 tool-cordis 不注入 systemPrompt）
 
 Scenario: cordis_inspect_list 行为 1
   Test: pending_req_fr_builtin_tools_cordis_inspect_list_1
@@ -2076,11 +2076,11 @@ Scenario: cordis_inspect_query 参数越界拒绝
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
-Scenario: cordis_inspect_query 说明 section 注册
+Scenario: cordis_inspect_query 说明 section 注册缺席
   Test: pending_req_fr_builtin_tools_cordis_inspect_query_section
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 工具 cordis_inspect_query 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
+  那么 工具 cordis_inspect_query 无说明 section（dsh 真源 tool-cordis 不注入 systemPrompt）
 
 Scenario: cordis_inspect_query 参数 platform 形状
   Test: pending_req_fr_builtin_tools_cordis_inspect_query_platform
@@ -2142,11 +2142,11 @@ Scenario: plugin_manager 参数越界拒绝
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
-Scenario: plugin_manager 说明 section 注册
+Scenario: plugin_manager 说明 section 注册缺席
   Test: pending_req_fr_builtin_tools_plugin_manager_section
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 工具 plugin_manager 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
+  那么 工具 plugin_manager 无说明 section（dsh 真源 dsh-plugin-manager tools.ts 不注入 systemPrompt）
 
 Scenario: plugin_manager 参数 action 形状
   Test: pending_req_fr_builtin_tools_plugin_manager_action
