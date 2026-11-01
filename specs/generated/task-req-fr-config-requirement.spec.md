@@ -1474,25 +1474,25 @@ Scenario: config dsh-system-prompt includeRuntimeContext 约束
   那么 配置行 [includeRuntimeContext:true] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-terminal-bash backendType 默认
-  Test: pending_req_fr_config_config_dsh_terminal_bash_backendtype
+  Test: shell_config_pins_terminal_bash_group
   假设 插件 dsh-terminal-bash 已注册
   当 读取解析后配置时
   那么 配置行 [backendType:'shell'] 的默认值按目录行实现
 
 Scenario: config dsh-terminal-bash backendType 约束
-  Test: pending_req_fr_config_config_dsh_terminal_bash_backendtype
+  Test: shell_config_pins_terminal_bash_group
   假设 插件 dsh-terminal-bash 已注册
   当 校验与生效时
   那么 配置行 [backendType:'shell'] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-terminal-bash shellDialect 默认
-  Test: pending_req_fr_config_config_dsh_terminal_bash_shelldialect
+  Test: shell_config_pins_terminal_bash_group
   假设 插件 dsh-terminal-bash 已注册
   当 读取解析后配置时
   那么 配置行 [shellDialect:'bash'] 的默认值按目录行实现
 
 Scenario: config dsh-terminal-bash shellDialect 约束
-  Test: pending_req_fr_config_config_dsh_terminal_bash_shelldialect
+  Test: shell_config_pins_terminal_bash_group
   假设 插件 dsh-terminal-bash 已注册
   当 校验与生效时
   那么 配置行 [shellDialect:'bash'] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
@@ -1558,37 +1558,37 @@ Scenario: config dsh-tool-bash / dsh-tool-pwsh promoteOnTimeout 约束
   那么 配置行 [promoteOnTimeout:true（超时转后台 job 不杀；仅后台可用时生效）] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-bash-persistent / dsh-tool-pwsh-persistent backendType 默认
-  Test: pending_req_fr_config_config_dsh_tool_bash_persistent_dsh_tool_pwsh_persistent_backendtype
+  Test: builtin_config_pins_terminal_tool_group
   假设 插件 dsh-tool-bash-persistent / dsh-tool-pwsh-persistent 已注册
   当 读取解析后配置时
   那么 配置行 [backendType:'shell'] 的默认值按目录行实现
 
 Scenario: config dsh-tool-bash-persistent / dsh-tool-pwsh-persistent backendType 约束
-  Test: pending_req_fr_config_config_dsh_tool_bash_persistent_dsh_tool_pwsh_persistent_backendtype
+  Test: builtin_config_pins_terminal_tool_group
   假设 插件 dsh-tool-bash-persistent / dsh-tool-pwsh-persistent 已注册
   当 校验与生效时
   那么 配置行 [backendType:'shell'] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-bash-persistent / dsh-tool-pwsh-persistent timeoutMs 默认
-  Test: pending_req_fr_config_config_dsh_tool_bash_persistent_dsh_tool_pwsh_persistent_timeoutms
+  Test: builtin_config_pins_terminal_tool_group
   假设 插件 dsh-tool-bash-persistent / dsh-tool-pwsh-persistent 已注册
   当 读取解析后配置时
   那么 配置行 [timeoutMs:300000] 的默认值按目录行实现
 
 Scenario: config dsh-tool-bash-persistent / dsh-tool-pwsh-persistent timeoutMs 约束
-  Test: pending_req_fr_config_config_dsh_tool_bash_persistent_dsh_tool_pwsh_persistent_timeoutms
+  Test: builtin_config_pins_terminal_tool_group
   假设 插件 dsh-tool-bash-persistent / dsh-tool-pwsh-persistent 已注册
   当 校验与生效时
   那么 配置行 [timeoutMs:300000] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-bash-persistent / dsh-tool-pwsh-persistent maxOutputChars 默认
-  Test: pending_req_fr_config_config_dsh_tool_bash_persistent_dsh_tool_pwsh_persistent_maxoutputchars
+  Test: builtin_config_pins_terminal_tool_group
   假设 插件 dsh-tool-bash-persistent / dsh-tool-pwsh-persistent 已注册
   当 读取解析后配置时
   那么 配置行 [maxOutputChars:16000] 的默认值按目录行实现
 
 Scenario: config dsh-tool-bash-persistent / dsh-tool-pwsh-persistent maxOutputChars 约束
-  Test: pending_req_fr_config_config_dsh_tool_bash_persistent_dsh_tool_pwsh_persistent_maxoutputchars
+  Test: builtin_config_pins_terminal_tool_group
   假设 插件 dsh-tool-bash-persistent / dsh-tool-pwsh-persistent 已注册
   当 校验与生效时
   那么 配置行 [maxOutputChars:16000] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
@@ -1738,13 +1738,13 @@ Scenario: config dsh-tool-subagent toolName 约束
   那么 配置行 [toolName:'subagent'（实例名互异）] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-tool-terminal enableRunInBackground 默认
-  Test: pending_req_fr_config_config_dsh_tool_terminal_enableruninbackground
+  Test: builtin_config_pins_terminal_tool_group
   假设 插件 dsh-tool-terminal 已注册
   当 读取解析后配置时
   那么 配置行 [enableRunInBackground:true] 的默认值按目录行实现
 
 Scenario: config dsh-tool-terminal enableRunInBackground 约束
-  Test: pending_req_fr_config_config_dsh_tool_terminal_enableruninbackground
+  Test: builtin_config_pins_terminal_tool_group
   假设 插件 dsh-tool-terminal 已注册
   当 校验与生效时
   那么 配置行 [enableRunInBackground:true] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写

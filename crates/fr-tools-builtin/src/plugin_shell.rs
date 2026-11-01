@@ -3119,6 +3119,41 @@ mod tests {
         }
     }
 
+    /// The `tool:pty` section joins only when the terminal family is
+    /// enabled: the baked default stays at the ten rows (the opt-in
+    /// judgment) while the enabled face pins the dsh `TOOL_PTY` order
+    /// 1700 and the extracted text anchors.
+    #[test]
+    fn pty_section_registers_only_when_enabled() {
+        assert!(
+            super::prompt_sections()
+                .iter()
+                .all(|(name, _, _)| name != "tool:pty"),
+            "the baked default carries no pty section"
+        );
+        let enabled = super::prompt_sections_with(true);
+        assert_eq!(enabled.len(), 11);
+        let pty = enabled
+            .iter()
+            .find(|(name, _, _)| name == "tool:pty")
+            .expect("the pty section registers when the family is enabled");
+        assert_eq!(pty.1, 1700.0);
+        assert!(
+            pty.2.starts_with(
+                "Use a terminal session only when work needs persistent terminal state"
+            ),
+            "{}",
+            pty.2
+        );
+        assert!(
+            pty.2.ends_with(
+                "An inferred_idle or timeout result does not prove the foreground command exited."
+            ),
+            "{}",
+            pty.2
+        );
+    }
+
     /// The descriptor declares the two completion-notice events with
     /// their dispatch ids (the fr-agent-loop listen-map judgment), and
     /// the event ids stay paired with the on-event dispatch constants.

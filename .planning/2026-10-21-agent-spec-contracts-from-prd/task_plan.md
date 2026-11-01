@@ -4,7 +4,7 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-16e 批 3 前段已入库（2026-11-01，720d020）：fr-shell terminals 3000+ band+terminal_bash backend+terminal_render+catalog 扩源，五门绿 workspace 1499。**下一动作=批 3 余段收口：schema.rs 六工具/双 persistent 函数→terminal_tools.rs 六执行体（require 'terminals' band）→persistent.rs（marker=__FR_PERSISTENT_*）→service.rs METHOD 号段 90 起+describe 扩表→plugin_shell 装配（BAKED_TERMINAL_TOOLS gate+tool:pty 第 11 section+finalize listeners）→fr-schema config 行 4 组→五门→TOOLS/CONFIG spec 绑定（~97 场景）→七步流 4-7。**
+16e 批 3b 已收口（2026-11-01）：TOOL/CONFIG 双 spec 69 场景绑定+三钉测扩件+Q16e-3b-A 改否定裁决执行+双 lifecycle 0 fail（TOOLS 284/0/124、CONFIG 114/0/205），五门绿 workspace 1525。**下一动作=16f（web+skill+lsp+目录+内省，Q94-A 末子批）批 0 设计问答：六组工具（web_search/web_fetch/skill/load_workspace_dependencies/lsp/working_directory/cordis_inspect_list/cordis_inspect_query/plugin_manager）的 dsh 真源勘察+裁问题清单+Q97-A schema 钉测+config 组+catalog 抽取+spec 绑定+七步流收口。**
 
 ## Phases
 

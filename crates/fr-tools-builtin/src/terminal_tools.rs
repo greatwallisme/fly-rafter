@@ -617,7 +617,10 @@ pub fn presentation_meta_send(_args: &Value, value: &Value) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{BAKED_ENABLE_RUN_IN_BACKGROUND, BAKED_MAX_RESULT_BYTES, MIN_MAX_RESULT_BYTES};
+    use super::{
+        BAKED_ENABLE_RUN_IN_BACKGROUND, BAKED_MAX_RESULT_BYTES, MIN_MAX_RESULT_BYTES,
+        terminal_tools_registered,
+    };
 
     /// The baked composition carries the dsh defaults: the background
     /// variant rides and the cap preserves registry-issued ids.
@@ -632,6 +635,15 @@ mod tests {
             MIN_MAX_RESULT_BYTES == 64,
         ];
         assert_eq!(facts, [true, true, true, true]);
+    }
+
+    /// The M1 bundle ships the terminal family off: the registration
+    /// gate answers false, so the default assembly never registers the
+    /// six terminal tools nor the persistent twins (the opt-in
+    /// ruling, the `BAKED_STR_REPLACE_EDITOR` judgment).
+    #[test]
+    fn baked_bundle_leaves_the_terminal_family_unregistered() {
+        assert!(!terminal_tools_registered());
     }
 }
 
@@ -976,8 +988,11 @@ mod exec_tests {
             .terminals
             .unsettled_waits
             .store(2, std::sync::atomic::Ordering::SeqCst);
-        let value = execute_send(&seams, &call(&json!({ "sessionId": "pty-1", "text": "ls" })))
-            .expect("the foreground send settles");
+        let value = execute_send(
+            &seams,
+            &call(&json!({ "sessionId": "pty-1", "text": "ls" })),
+        )
+        .expect("the foreground send settles");
         assert_eq!(value["kind"], json!("foreground"));
         assert_eq!(value["viewport"], json!("out\n"));
         assert_eq!(value["waitReason"], json!("inferred_idle"));
@@ -997,8 +1012,8 @@ mod exec_tests {
         )
         .expect("the signal lands");
         assert_eq!(value["delivered"], json!(true));
-        let value =
-            execute_close(&seams, &call(&json!({ "sessionId": "pty-1" }))).expect("the close lands");
+        let value = execute_close(&seams, &call(&json!({ "sessionId": "pty-1" })))
+            .expect("the close lands");
         assert_eq!(value, json!({ "sessionId": "pty-1", "outcome": "closed" }));
         let value = execute_list(&seams, &call(&json!({}))).expect("the list lands");
         assert_eq!(value.as_array().map(Vec::len), Some(1));

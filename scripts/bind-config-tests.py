@@ -116,6 +116,22 @@ PAIRS = [
     ("config dsh-tool-jobs completionDelivery 约束", "pending_req_fr_config", "builtin_config_pins_tool_jobs_group"),
     ("config dsh-tool-todo allowParallelInProgress 默认", "pending_req_fr_config", "builtin_config_pins_todo_switch"),
     ("config dsh-tool-todo allowParallelInProgress 约束", "pending_req_fr_config", "builtin_config_pins_todo_switch"),
+    # 16e batch 3b: the terminal-bash group rides the fr-shell row
+    # (the two scenario-carried keys; the whole 16-key face is pinned
+    # by the group test), the merged persistent family and the
+    # tool-terminal group ride the fr-tools-builtin row.
+    ("config dsh-terminal-bash backendType 默认", "pending_req_fr_config", "shell_config_pins_terminal_bash_group"),
+    ("config dsh-terminal-bash backendType 约束", "pending_req_fr_config", "shell_config_pins_terminal_bash_group"),
+    ("config dsh-terminal-bash shellDialect 默认", "pending_req_fr_config", "shell_config_pins_terminal_bash_group"),
+    ("config dsh-terminal-bash shellDialect 约束", "pending_req_fr_config", "shell_config_pins_terminal_bash_group"),
+    ("config dsh-tool-bash-persistent / dsh-tool-pwsh-persistent backendType 默认", "pending_req_fr_config", "builtin_config_pins_terminal_tool_group"),
+    ("config dsh-tool-bash-persistent / dsh-tool-pwsh-persistent backendType 约束", "pending_req_fr_config", "builtin_config_pins_terminal_tool_group"),
+    ("config dsh-tool-bash-persistent / dsh-tool-pwsh-persistent timeoutMs 默认", "pending_req_fr_config", "builtin_config_pins_terminal_tool_group"),
+    ("config dsh-tool-bash-persistent / dsh-tool-pwsh-persistent timeoutMs 约束", "pending_req_fr_config", "builtin_config_pins_terminal_tool_group"),
+    ("config dsh-tool-bash-persistent / dsh-tool-pwsh-persistent maxOutputChars 默认", "pending_req_fr_config", "builtin_config_pins_terminal_tool_group"),
+    ("config dsh-tool-bash-persistent / dsh-tool-pwsh-persistent maxOutputChars 约束", "pending_req_fr_config", "builtin_config_pins_terminal_tool_group"),
+    ("config dsh-tool-terminal enableRunInBackground 默认", "pending_req_fr_config", "builtin_config_pins_terminal_tool_group"),
+    ("config dsh-tool-terminal enableRunInBackground 约束", "pending_req_fr_config", "builtin_config_pins_terminal_tool_group"),
 ]
 
 

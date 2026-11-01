@@ -44,7 +44,7 @@ Scenario: 注册表含第 17 节全部工具
   那么 含 shell、文件、web、任务状态、交互、会话查询、PTY、技能、lsp、working_directory 与内省管理的全部工具名
 
 Scenario: persistent shell 需 opt-in
-  Test: pending_req_fr_builtin_tools_persistent_shell_opt_in
+  Test: baked_bundle_leaves_the_terminal_family_unregistered
   假设 未启用 persistent shell 配置
   当 列举默认装配的工具时
   那么 无 persistent bash 与 persistent pwsh
@@ -211,58 +211,58 @@ Scenario: pwsh 行为 1
   那么 pwsh -Command 方言，每次新进程无持久 PTY；C:\ 原生路径与 $env:NAME；Windows 强杀 [exit code: 1] 视为中断；勿赋值 $HOME 等自动变量；mirror bash 但无沙箱控制
 
 Scenario: persistent-bash 调度与呈现
-  Test: pending_req_fr_builtin_tools_persistent_bash
+  Test: terminal_family_pins_the_catalog_tables
   假设 合约要求的行为已实现
   当 读取工具 persistent bash 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 terminal
 
 Scenario: persistent-bash 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_persistent_bash
+  Test: terminal_family_pins_the_catalog_tables
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
-Scenario: persistent-bash 说明 section 注册
-  Test: pending_req_fr_builtin_tools_persistent_bash_section
+Scenario: persistent-bash 说明 section 注册缺席
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 工具 persistent bash 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
+  那么 工具 persistent bash 无说明 section（dsh 真源 tool-bash-persistent 不注入 systemPrompt）；注册表恰十条 tool:* section 且 order 位于 1000-3000
 
 Scenario: persistent-bash 参数 command 形状
-  Test: pending_req_fr_builtin_tools_persistent_bash_command
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 persistent bash 已注册
   当 校验 schema 时
   那么 参数行 [command:string:req] 的名称与类型按目录行实现
 
 Scenario: persistent-bash 参数 command 约束
-  Test: pending_req_fr_builtin_tools_persistent_bash_command
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 persistent bash 已注册
   当 校验 schema 时
   那么 参数行 [command:string:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: persistent-bash 行为 1
-  Test: pending_req_fr_builtin_tools_persistent_bash_1
+  Test: one_command_runs_the_marker_loop
   假设 工具 persistent bash 执行时
   当 达到触发条件时
   那么 owner 隔离持久 PTY，cwd/env 跨调用保持；config backendType 默认 shell、timeoutMs 300000、maxOutputChars 16000
 
 Scenario: persistent-pwsh 调度与呈现
-  Test: pending_req_fr_builtin_tools_persistent_pwsh
+  Test: terminal_family_pins_the_catalog_tables
   假设 合约要求的行为已实现
   当 读取工具 persistent pwsh 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 terminal
 
 Scenario: persistent-pwsh 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_persistent_pwsh
+  Test: terminal_family_pins_the_catalog_tables
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
-Scenario: persistent-pwsh 说明 section 注册
-  Test: pending_req_fr_builtin_tools_persistent_pwsh_section
+Scenario: persistent-pwsh 说明 section 注册缺席
+  Test: prompt_sections_pin_the_ten_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
-  那么 工具 persistent pwsh 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
+  那么 工具 persistent pwsh 无说明 section（dsh 真源 tool-pwsh-persistent 不注入 systemPrompt）；注册表恰十条 tool:* section 且 order 位于 1000-3000
 
 Scenario: read 调度与呈现
   Test: read_round_trip_pins_the_shapes
@@ -1633,283 +1633,283 @@ Scenario: session_event_trace 行为 1
   那么 读直接替换与关系
 
 Scenario: terminal_open 调度与呈现
-  Test: pending_req_fr_builtin_tools_terminal_open
+  Test: terminal_family_pins_the_catalog_tables
   假设 合约要求的行为已实现
   当 读取工具 terminal_open 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 execute
 
 Scenario: terminal_open 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_terminal_open
+  Test: terminal_family_pins_the_catalog_tables
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: terminal_open 说明 section 注册
-  Test: pending_req_fr_builtin_tools_terminal_open_section
+  Test: pty_section_registers_only_when_enabled
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 terminal_open 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: terminal_open 参数 type 形状
-  Test: pending_req_fr_builtin_tools_terminal_open_type
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_open 已注册
   当 校验 schema 时
   那么 参数行 [type:string:req（通常 shell）] 的名称与类型按目录行实现
 
 Scenario: terminal_open 参数 type 约束
-  Test: pending_req_fr_builtin_tools_terminal_open_type
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_open 已注册
   当 校验 schema 时
   那么 参数行 [type:string:req（通常 shell）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: terminal_open 参数 name 形状
-  Test: pending_req_fr_builtin_tools_terminal_open_name
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_open 已注册
   当 校验 schema 时
   那么 参数行 [name:opt] 的名称与类型按目录行实现
 
 Scenario: terminal_open 参数 name 约束
-  Test: pending_req_fr_builtin_tools_terminal_open_name
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_open 已注册
   当 校验 schema 时
   那么 参数行 [name:opt] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: terminal_open 参数 cwd 形状
-  Test: pending_req_fr_builtin_tools_terminal_open_cwd
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_open 已注册
   当 校验 schema 时
   那么 参数行 [cwd:opt（非绝对按 Session 目录解析）] 的名称与类型按目录行实现
 
 Scenario: terminal_open 参数 cwd 约束
-  Test: pending_req_fr_builtin_tools_terminal_open_cwd
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_open 已注册
   当 校验 schema 时
   那么 参数行 [cwd:opt（非绝对按 Session 目录解析）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: terminal_read 调度与呈现
-  Test: pending_req_fr_builtin_tools_terminal_read
+  Test: terminal_family_pins_the_catalog_tables
   假设 合约要求的行为已实现
   当 读取工具 terminal_read 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: terminal_read 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_terminal_read
+  Test: terminal_family_pins_the_catalog_tables
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: terminal_read 说明 section 注册
-  Test: pending_req_fr_builtin_tools_terminal_read_section
+  Test: pty_section_registers_only_when_enabled
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 terminal_read 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: terminal_read 参数 sessionId 形状
-  Test: pending_req_fr_builtin_tools_terminal_read_sessionid
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_read 已注册
   当 校验 schema 时
   那么 参数行 [sessionId:req] 的名称与类型按目录行实现
 
 Scenario: terminal_read 参数 sessionId 约束
-  Test: pending_req_fr_builtin_tools_terminal_read_sessionid
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_read 已注册
   当 校验 schema 时
   那么 参数行 [sessionId:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: terminal_read 参数 offset 形状
-  Test: pending_req_fr_builtin_tools_terminal_read_offset
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_read 已注册
   当 校验 schema 时
   那么 参数行 [offset:opt:0] 的名称与类型按目录行实现
 
 Scenario: terminal_read 参数 offset 约束
-  Test: pending_req_fr_builtin_tools_terminal_read_offset
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_read 已注册
   当 校验 schema 时
   那么 参数行 [offset:opt:0] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: terminal_read 参数 count 形状
-  Test: pending_req_fr_builtin_tools_terminal_read_count
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_read 已注册
   当 校验 schema 时
   那么 参数行 [count:opt:500（后端封顶）] 的名称与类型按目录行实现
 
 Scenario: terminal_read 参数 count 约束
-  Test: pending_req_fr_builtin_tools_terminal_read_count
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_read 已注册
   当 校验 schema 时
   那么 参数行 [count:opt:500（后端封顶）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: terminal_send 调度与呈现
-  Test: pending_req_fr_builtin_tools_terminal_send
+  Test: terminal_family_pins_the_catalog_tables
   假设 合约要求的行为已实现
   当 读取工具 terminal_send 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: terminal_send 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_terminal_send
+  Test: terminal_family_pins_the_catalog_tables
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: terminal_send 说明 section 注册
-  Test: pending_req_fr_builtin_tools_terminal_send_section
+  Test: pty_section_registers_only_when_enabled
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 terminal_send 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: terminal_send 参数 sessionId 形状
-  Test: pending_req_fr_builtin_tools_terminal_send_sessionid
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_send 已注册
   当 校验 schema 时
   那么 参数行 [sessionId:req] 的名称与类型按目录行实现
 
 Scenario: terminal_send 参数 sessionId 约束
-  Test: pending_req_fr_builtin_tools_terminal_send_sessionid
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_send 已注册
   当 校验 schema 时
   那么 参数行 [sessionId:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: terminal_send 参数 text 形状
-  Test: pending_req_fr_builtin_tools_terminal_send_text
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_send 已注册
   当 校验 schema 时
   那么 参数行 [text:string:req] 的名称与类型按目录行实现
 
 Scenario: terminal_send 参数 text 约束
-  Test: pending_req_fr_builtin_tools_terminal_send_text
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_send 已注册
   当 校验 schema 时
   那么 参数行 [text:string:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: terminal_send 参数 submit 形状
-  Test: pending_req_fr_builtin_tools_terminal_send_submit
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_send 已注册
   当 校验 schema 时
   那么 参数行 [submit:boolean:opt:true] 的名称与类型按目录行实现
 
 Scenario: terminal_send 参数 submit 约束
-  Test: pending_req_fr_builtin_tools_terminal_send_submit
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_send 已注册
   当 校验 schema 时
   那么 参数行 [submit:boolean:opt:true] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: terminal_send 参数 run_in_background 形状
-  Test: pending_req_fr_builtin_tools_terminal_send_run_in_background
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_send 已注册
   当 校验 schema 时
   那么 参数行 [run_in_background:opt（立即返回 job id）] 的名称与类型按目录行实现
 
 Scenario: terminal_send 参数 run_in_background 约束
-  Test: pending_req_fr_builtin_tools_terminal_send_run_in_background
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_send 已注册
   当 校验 schema 时
   那么 参数行 [run_in_background:opt（立即返回 job id）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: terminal_send 行为 1
-  Test: pending_req_fr_builtin_tools_terminal_send_1
+  Test: send_body_runs_both_arms
   假设 工具 terminal_send 执行时
   当 达到触发条件时
   那么 默认等 prompt/静默/超时/退出；后台经 ctx.jobs
 
 Scenario: terminal_signal 调度与呈现
-  Test: pending_req_fr_builtin_tools_terminal_signal
+  Test: terminal_family_pins_the_catalog_tables
   假设 合约要求的行为已实现
   当 读取工具 terminal_signal 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 execute
 
 Scenario: terminal_signal 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_terminal_signal
+  Test: terminal_family_pins_the_catalog_tables
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: terminal_signal 说明 section 注册
-  Test: pending_req_fr_builtin_tools_terminal_signal_section
+  Test: pty_section_registers_only_when_enabled
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 terminal_signal 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: terminal_signal 参数 sessionId 形状
-  Test: pending_req_fr_builtin_tools_terminal_signal_sessionid
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_signal 已注册
   当 校验 schema 时
   那么 参数行 [sessionId:req] 的名称与类型按目录行实现
 
 Scenario: terminal_signal 参数 sessionId 约束
-  Test: pending_req_fr_builtin_tools_terminal_signal_sessionid
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_signal 已注册
   当 校验 schema 时
   那么 参数行 [sessionId:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: terminal_signal 参数 signal 形状
-  Test: pending_req_fr_builtin_tools_terminal_signal_signal
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_signal 已注册
   当 校验 schema 时
   那么 参数行 [signal:string:req:enum[SIGINT|SIGTERM|SIGKILL|SIGTSTP|SIGHUP]] 的名称与类型按目录行实现
 
 Scenario: terminal_signal 参数 signal 约束
-  Test: pending_req_fr_builtin_tools_terminal_signal_signal
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_signal 已注册
   当 校验 schema 时
   那么 参数行 [signal:string:req:enum[SIGINT|SIGTERM|SIGKILL|SIGTSTP|SIGHUP]] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: terminal_signal 行为 1
-  Test: pending_req_fr_builtin_tools_terminal_signal_1
+  Test: signal_foreground_fences_shell_sigkill_and_delivers_int
   假设 工具 terminal_signal 执行时
   当 达到触发条件时
   那么 shell 目标 SIGKILL 被拒用 terminal_close
 
 Scenario: terminal_list 调度与呈现
-  Test: pending_req_fr_builtin_tools_terminal_list
+  Test: terminal_family_pins_the_catalog_tables
   假设 合约要求的行为已实现
   当 读取工具 terminal_list 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 read
 
 Scenario: terminal_list 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_terminal_list
+  Test: terminal_family_pins_the_catalog_tables
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: terminal_list 说明 section 注册
-  Test: pending_req_fr_builtin_tools_terminal_list_section
+  Test: pty_section_registers_only_when_enabled
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 terminal_list 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: terminal_close 调度与呈现
-  Test: pending_req_fr_builtin_tools_terminal_close
+  Test: terminal_family_pins_the_catalog_tables
   假设 合约要求的行为已实现
   当 读取工具 terminal_close 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 delete
 
 Scenario: terminal_close 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_terminal_close
+  Test: terminal_family_pins_the_catalog_tables
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: terminal_close 说明 section 注册
-  Test: pending_req_fr_builtin_tools_terminal_close_section
+  Test: pty_section_registers_only_when_enabled
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 terminal_close 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: terminal_close 参数 sessionId 形状
-  Test: pending_req_fr_builtin_tools_terminal_close_sessionid
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_close 已注册
   当 校验 schema 时
   那么 参数行 [sessionId:req] 的名称与类型按目录行实现
 
 Scenario: terminal_close 参数 sessionId 约束
-  Test: pending_req_fr_builtin_tools_terminal_close_sessionid
+  Test: terminal_family_pins_the_catalog_tables
   假设 工具 terminal_close 已注册
   当 校验 schema 时
   那么 参数行 [sessionId:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: terminal_close 行为 1
-  Test: pending_req_fr_builtin_tools_terminal_close_1
+  Test: terminate_ladder_clears_the_descendant_tree
   假设 工具 terminal_close 执行时
   当 达到触发条件时
   那么 等待 owned 进程树消亡

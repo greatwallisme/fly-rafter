@@ -1444,3 +1444,12 @@
 - **事故档载（生成退化纪律第三次生效）**：本批 Edit 链多处 token 级退化（`JSONSchema-placeholder`/`&string_t`/"pos"/缺括号/expect 残渣）→ 每次写后 cargo check 立即暴露逐处修复；braces 失衡一次由 balance 对照 git HEAD 定位（impl Seams 收括号错位三步修复）。纪律强化：**精确代码禁止 Edit 链从记忆重建 old_string；先读回再改，new_string 最小化，写后即验**。
 - **五门**：fmt ✓（--all 应用后 check 过）/clippy workspace --all-targets -D warnings 0/**tests 1523/0**（FR_DSH_SOURCE；1499→1523=+24）/doc ✓/catalog --check ✓。
 - **3b 余下（收口批）**：TOOLS/CONFIG spec 绑定（~97 场景：terminal 六工具/persistent 对/双 config 组；Q16d 批 0 判例：section 场景改否定族——terminal 六工具无 section 注册？否——tool:pty 有注册（tool-terminal apply 注册 section），六工具 section 正场景成立绑 prompt_sections；persistent 双工具无 section=改否定）+bind 脚本对增+binding-audit 节+七步流 4-7+stamp；fr-config dump 行核对。
+## 2026-11-01 — 16e 批 3b 收口落地：69 场景绑定+三钉测扩件+双 lifecycle 0 fail（五门绿 workspace 1525）
+
+- **三件测试扩件（fr-tools-builtin 253/0，clippy 0）**：①家族钉测 `terminal_family_pins_the_catalog_tables` 扩件=八参数表==catalog 冻结 JSON 逐字节+八注册行调度面（无 isConcurrencySafe=exclusive+execute 端点+presentCall）+七行 partial 脸/send 全脸（presentResult+presentationMeta）+九呈现卡 kind（open/signal=execute、send 前台 terminal/后台 generic、read=read、close=delete、list=read、persistent=terminal）+#[expect(too_many_lines)]（section 钉测判例 reason）→ 承载 42 条 schema/调度/越界/形状/约束场景。②`pty_section_registers_only_when_enabled` 新钉测：baked 默认无 tool:pty+启用面 11 节+order 1700+PTY_SECTION_TEXT 首尾锚 → 承载六工具 section 场景。③`baked_bundle_leaves_the_terminal_family_unregistered` 新钉测（sre 判例同形）：gate==false=opt-in 执法点 → 承载 opt-in 场景。
+- **合同勘误执行（Q16e-3b-A 用户裁决 A）**：persistent 双 section 场景改否定（标题加「缺席」+Then 改否定族文案，dsh 真源 rg 实锤零注入），绑 prompt_sections_pin_the_ten_tools。
+- **绑定**：TOOLS 57 条（家族 42+section 6+改否定 2+opt-in 1+行为 4+send/signal/close 行为各归位）+CONFIG 12 条（bind-config-tests.py +12 对，幂等复放验证 0 terminal pending 残留）。
+- **事故档载（生成退化第四次）**：本批大型 Rust 测试函数连续 4 次生成退化（巨型 Edit/Write/脚本骨架全中招：垃圾 token/缺括号/幻觉函数名 tool_registration）→ 恢复路径=git 还原+改小锚点短行编辑+脚本机械拼接；验证锚=git diff 逐字节核对+逐次 cargo check。纪律再强化：**大型新测试函数生成期退化态下改用「既有测试扩件+短行断言」路径**。
+- **五门**：fmt ✓（--all 顺带修前批两处 fmt 偏差）/clippy workspace -D warnings 0/**tests 1525/0**/doc ✓/catalog --check exit 0。
+- **lifecycle（FR_DSH_SOURCE 判例确认）**：TOOLS 284/0/124（124 skip=16f 未实现组按设计）；CONFIG 114/0/205（未实现 CLI 面按设计）。binding-audit 第十五节已落。
+- **3b 全链闭环**；下一动作=16f（web+skill+lsp+目录+内省）批 0 设计问答。

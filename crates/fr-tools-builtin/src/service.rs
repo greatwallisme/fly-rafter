@@ -452,7 +452,9 @@ impl BuiltinTools {
     /// The terminal finalize parks (the shared dsh `finalizeContent`
     /// stash).
     #[must_use]
-    pub const fn terminal_finalizes(&self) -> &std::sync::Arc<crate::terminal_tools::FinalizeParks> {
+    pub const fn terminal_finalizes(
+        &self,
+    ) -> &std::sync::Arc<crate::terminal_tools::FinalizeParks> {
         &self.terminal_finalizes
     }
 

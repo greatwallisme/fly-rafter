@@ -572,8 +572,8 @@ fn execute_command(
     loop {
         // The shell may flip to exited between iterations; re-observe
         // before the next send (the dsh gap note).
-        if let Some((_, code, signal)) = session_status(terminals, owner, &id)
-            .filter(|(exited, _, _)| *exited)
+        if let Some((_, code, signal)) =
+            session_status(terminals, owner, &id).filter(|(exited, _, _)| *exited)
         {
             {
                 return respond_to_session_exit(

@@ -1830,8 +1830,15 @@ mod tests {
     }
 
     /// The six terminal tables pin their catalog rows (Q97-A) and the
-    /// persistent twins pin their single-command shape.
+    /// persistent twins pin their single-command shape; the frozen
+    /// whole-table comparison and the eight-row scheduling faces ride
+    /// the same anchor set (splitting would hide the family
+    /// correspondence).
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the pin mirrors the eight dsh rows one anchor per row; splitting it would hide the family correspondence"
+    )]
     fn terminal_family_pins_the_catalog_tables() {
         // terminal_open: `type` required; the three property rows.
         let open = super::terminal_open_parameters();
@@ -1925,6 +1932,130 @@ mod tests {
                 1
             );
         }
+        // The whole tables equal the frozen catalog JSON (the frozen
+        // comparison clause; the send true variant carries the
+        // background row).
+        for (composed, frozen) in [
+            (
+                super::terminal_open_parameters(),
+                crate::catalog_gen::TERMINAL_OPEN_PARAMETERS_JSON,
+            ),
+            (
+                super::terminal_send_parameters(true),
+                crate::catalog_gen::TERMINAL_SEND_PARAMETERS_JSON,
+            ),
+            (
+                super::terminal_read_parameters(),
+                crate::catalog_gen::TERMINAL_READ_PARAMETERS_JSON,
+            ),
+            (
+                super::terminal_signal_parameters(),
+                crate::catalog_gen::TERMINAL_SIGNAL_PARAMETERS_JSON,
+            ),
+            (
+                super::terminal_close_parameters(),
+                crate::catalog_gen::TERMINAL_CLOSE_PARAMETERS_JSON,
+            ),
+            (
+                super::terminal_list_parameters(),
+                crate::catalog_gen::TERMINAL_LIST_PARAMETERS_JSON,
+            ),
+            (
+                super::persistent_bash_parameters(),
+                crate::catalog_gen::BASH_PERSISTENT_PARAMETERS_JSON,
+            ),
+            (
+                super::persistent_pwsh_parameters(),
+                crate::catalog_gen::PWSH_PERSISTENT_PARAMETERS_JSON,
+            ),
+        ] {
+            let frozen: Value = serde_json::from_str(frozen).expect("the frozen table parses");
+            assert_eq!(composed, frozen);
+        }
+        // The scheduling faces: the eight registrations stay
+        // exclusive (no isConcurrencySafe; fail-closed exclusive),
+        // execute under the one service, and carry present-call
+        // endpoints; the send row alone rides the full face
+        // (presentResult and the output presentationMeta).
+        for registration in [
+            crate::plugin_shell::terminal_open_registration(),
+            crate::plugin_shell::terminal_send_registration(),
+            crate::plugin_shell::terminal_read_registration(),
+            crate::plugin_shell::terminal_signal_registration(),
+            crate::plugin_shell::terminal_close_registration(),
+            crate::plugin_shell::terminal_list_registration(),
+            crate::plugin_shell::persistent_bash_registration(),
+            crate::plugin_shell::persistent_pwsh_registration(),
+        ] {
+            assert!(
+                registration.get("isConcurrencySafe").is_none(),
+                "the terminal family stays exclusive"
+            );
+            assert_eq!(
+                registration["execute"]["service"],
+                crate::service::SERVICE_NAME
+            );
+            assert!(registration.get("presentCall").is_some());
+        }
+        for registration in [
+            crate::plugin_shell::terminal_open_registration(),
+            crate::plugin_shell::terminal_read_registration(),
+            crate::plugin_shell::terminal_signal_registration(),
+            crate::plugin_shell::terminal_close_registration(),
+            crate::plugin_shell::terminal_list_registration(),
+            crate::plugin_shell::persistent_bash_registration(),
+            crate::plugin_shell::persistent_pwsh_registration(),
+        ] {
+            assert!(registration.get("presentResult").is_none());
+            assert!(
+                registration
+                    .get("output")
+                    .expect("output")
+                    .get("presentationMeta")
+                    .is_none()
+            );
+        }
+        let send = crate::plugin_shell::terminal_send_registration();
+        assert!(send.get("presentResult").is_some());
+        assert!(
+            send.get("output")
+                .expect("output")
+                .get("presentationMeta")
+                .is_some()
+        );
+        // The presentation families: the six pending-call card kinds
+        // and the persistent terminal card (the presentation faces of
+        // the 调度与呈现 clauses).
+        assert_eq!(
+            crate::terminal_tools::present_call_open(&json!({ "type": "shell" }))["kind"],
+            json!("execute")
+        );
+        let foreground =
+            crate::terminal_tools::present_call_send(&json!({ "sessionId": "s1", "text": "ls" }));
+        assert_eq!(foreground["card"], json!("terminal"));
+        let background = crate::terminal_tools::present_call_send(&json!(
+            { "sessionId": "s1", "text": "ls", "run_in_background": true }
+        ));
+        assert_eq!(background["card"], json!("generic"));
+        assert_eq!(background["kind"], json!("execute"));
+        assert_eq!(
+            crate::terminal_tools::present_call_read(&json!({ "sessionId": "s1" }))["kind"],
+            json!("read")
+        );
+        assert_eq!(
+            crate::terminal_tools::present_call_signal(
+                &json!({ "sessionId": "s1", "signal": "SIGINT" })
+            )["kind"],
+            json!("execute")
+        );
+        assert_eq!(
+            crate::terminal_tools::present_call_close(&json!({ "sessionId": "s1" }))["kind"],
+            json!("delete")
+        );
+        assert_eq!(crate::terminal_tools::present_call_list()["kind"], json!("read"));
+        let persistent_call =
+            crate::persistent::present_call_persistent(&json!({ "command": "cargo test" }));
+        assert_eq!(persistent_call["card"], json!("terminal"));
     }
 
     /// The terminal output contracts pin the dsh shapes: the shared
