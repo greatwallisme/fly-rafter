@@ -687,6 +687,14 @@ fr headless [TASK] [--session-id <id>] [--json] [--help]
 
 31. plugin_manager 拒绝族 fr 自创文案与 set_bundle 写载体（2026-11-02 步⑤裁决，细化条 26）：13 码 ERROR_STEPS 与 5 理由 RESTART_STEPS 逐字（三处品牌词 DSH→fr、dsh.bundle→fr.bundle：not-bundle/stop-profile/incompatible-version），FAILURE_STEPS 8 kind 逐字随 ChangeResult.packageResult 形状承载（fr 恒不产出 packageResult）；四生态动作 face=按动作形状分流——install_bundle/set_version_exemption→ChangeResult failed+operation-error+diagnostic（fr 自创：`bundle installation has no carrier in fr: plugins are static Rust artifacts assembled at startup, with no npm runtime, no package registry, and no live reload` / `version exemptions have no carrier in fr: plugins are static Rust artifacts with no runtime compatibility machinery`）；remove_bundle→dsh 流程原样（not-removable+nextStep 逐字）；list_version_exemptions（dsh 读动作无 ChangeResult 形）→工具错误（`version exemptions have no carrier in fr: there is no runtime compatibility machinery to query`）。set_bundle 写载体=dsh 真源同构（profile.yml `bundles:` 选择编辑，非 patch 文件；条 26"写 fr.patch.yml 对应行"表述压缩，以本条为准）。用户裁决 2026-11-02（步⑤四问裁决②③）。
 
+32. skill-filesystem watcher 机制替换（2026-11-02 步⑥三问三裁问 3=A，偏离 dsh）：dsh watcher 为逐目录订阅的 root/ancestor 状态机机体；fr M1 为单线程签名轮询——逐根存在性+浅层 mtime 签名，变更连续稳定达 `watch-stability-threshold-ms`（默认 200）后失效注册表缓存；`watch-max-projects`（默认 128）以 owner 计数承载（超限逐出最旧项目根、owner 在册者保留）。dsh 机体不复制；配置键族逐字承载。
+
+33. skill 目录与 env 名品牌映射（2026-11-02 步⑥三问三裁派生既裁，备案）：dsh 项目根技能目录 `.dsh/skills` → fr `.fr/skills`（`~/.dsh`→`~/.fr` 品牌映射判例的自洽延伸）；user root `dshHome/skills` → `<FR_HOME>/skills`（FR_HOME 解析复用 ShellEnvRegistry 判例：override > `FR_HOME` 环境变量 > `~/.fr`）；agentsHome 默认 `~/.agents` 与项目根 `.agents/skills` 为跨工具惯例目录名，不映射、逐字保留；env `DSH_AGENTS_HOME`→`FR_AGENTS_HOME`、`DSH_BUNDLED_SKILL_DIR`→`FR_BUNDLED_SKILL_DIR`（FR_ 前缀硬约束，条 25 判例同构）；config 键 dshHome→fr-home、agentsHome→agents-home、bundledSkillDir→bundled-skill-dir（12 键族 kebab 直转，条 3 判例）。
+
+34. skill registry scope 层链 M1 单层（备案）：dsh SkillRegistry 为 global→scope 链多层合并（层内 rank 升序→providerOrder→localOrder；scope 层供 agent presets 载体）；fr M1 单一 global 层（scope 层无装配载体，Q69-B 既裁），层内合并序与同名裁决逐字（rank→provider 注册序→provider 内局部序；同名首胜+`a higher-priority skill already exists` 警告文案逐字）；collect 缓存键相应缺 scopes 维度（cwd+revision 双键）。
+
+35. `skills/change` 失效通知事件无消费者（备案）：dsh skill registry 失效时发布 skills/change 事件通知消费者（供监听者即时刷新）；fr M1 该事件无消费者（catalog listener 每步重算目录，Q69-B 既裁），注册表失效为裸 revision bump+缓存清空，不发布事件。
+
 ### 19.3 wire 层声明
 
 与 DeepSeek 官方 API 的交互仅使用标准 Anthropic Messages 协议。不实现 `dsh_session_log` 会话日志回传、`dsh_plugin_packages` 上报与 `x-deepseek-harness-*` 头。官方 API 在无这些扩展时正常工作，仅无 DeepSeek 服务端会话持久化。

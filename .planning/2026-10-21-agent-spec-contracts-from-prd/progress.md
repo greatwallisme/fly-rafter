@@ -1615,3 +1615,11 @@
 - **过程退化 6 起（本会话高发）**：heredoc 追加损坏×2（phantom 字段/括号嵌套/占位符断言/垃圾 trait）、Edit 长块损坏×3、python 探针误插 collect 重复签名×1。复归判例=truncate 到绿态+小步 Edit+python 精确替换（serde 式 replace 全文唯一锚）；code-quality hook eprintln 误报=已裁决判例（dsh ctx.logger.warn 载体，search_core.rs:549 同款）。
 - **续点（下一会话按序）**：①步⑥a 收尾=补 registry 缓存/失效/LRU/ incomplete-observation/provider-error 五件钉测（FakeProvider reads 计数在，read_count/set_output/set_error 三 helper 被裁待回补）+技能组新装 19.2 备案条目 ②步⑥b skill_filesystem.rs（12 键 config/roots .fr-skills 序/frontmatter serde_yaml_ng/发现/读取/watch 签名轮询线程）③步⑥c skill_tools.rs（工具+catalog/gesture+skills 服务面 METHOD_PRE_STEP=0+方法号 201-203/describe 165+schema.rs）④步⑥d loop 接线（descriptor inject skills+driver pre_step 调用）+plugin_shell 注册+fr-schema 三 config 组+catalog_gen+CONFIG/TOOLS 绑定+终门 ⑤19.2 备案：watcher 状态机不逐字、.dsh→.fr 项目目录名、scope 层 M1 单层、skills/change 无消费者。
 - **下一动作=步⑥a 收尾（五件 registry 钉测+19.2 条目）→ 步⑥b。**
+
+## 2026-11-02 — 16f 批 2 步⑥a 收尾：五件 registry 钉测+19.2 条 32-35
+
+- 五件钉测+FakeHandle 三 helper（read_count/set_output/set_error，Script 枚举共享脚本单元）：completed_catalog_caches_until_invalidation（缓存命中+runtime get 走缓存+disposer 失效重发现）/stale_definition_load_invalidates_the_entry（RenamingProvider 改名装载→invalidateEntry+缓存清）/collect_cache_evicts_oldest_insertion_not_recent_reads（容量 2 三键序判定插入序逐出非 move-on-read）/incomplete_observation_is_visible_but_never_cached/failing_provider_is_skipped_and_blocks_caching。
+- PRD 19.2 条 32-35（步⑥既裁备案）：条 32 watcher 签名轮询（问 3=A 逐字）、条 33 品牌映射（.fr/skills、<FR_HOME>/skills、FR_AGENTS_HOME/FR_BUNDLED_SKILL_DIR、12 键 kebab）、条 34 scope 单层（Q69-B）、条 35 skills/change 无消费者（Q69-B）。
+- 门：cargo fmt --check+clippy -D warnings 零警告；skill_runtime 6→11 测全绿；三门禁 0 errors（PRD 改动复跑）。
+- 过程：生成退化 6 起（伪影 9 处：Edit 乱码负载 128KB/placeholder 截断×2/phantom 字段/掉行/条 31 retype 字节漂移×2+19.3 标题重复）——判例升级：**retype 长上下文行必须 git diff 对账**（条 31 两处漂移即此例）；python 小步 append ≤12 行+写后即验为可靠形态；Edit 大块 new_string 为退化高发形态。
+- **下一动作=步⑥b skill_filesystem.rs（12 键 config/roots .fr-skills 序/frontmatter serde_yaml_ng/发现/读取/watch 签名轮询线程+钉测）→ 步⑥c。**

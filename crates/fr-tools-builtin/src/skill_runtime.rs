@@ -1072,21 +1072,43 @@ impl std::fmt::Debug for SkillCatalogSnapshot {
 mod tests {
     use super::*;
 
-    /// The scripted provider: a fixed output per read, a read counter
+    /// The scripted `list` behavior: a cloned output or a provider
+    /// failure.
+    #[derive(Clone)]
+    enum Script {
+        Output(SkillProviderOutput),
+        Error(String),
+    }
+
+    /// The scripted provider: a shared script per read, a read counter
     /// for the cache probes, and the runtime passthrough for `get`.
     struct FakeProvider {
         name: String,
-        output: Mutex<Result<SkillProviderOutput, String>>,
-        reads: std::sync::atomic::AtomicUsize,
+        script: Arc<Mutex<Script>>,
+        reads: Arc<std::sync::atomic::AtomicUsize>,
     }
 
-    impl FakeProvider {
-        fn named(name: &str, candidates: Vec<SkillCandidate>) -> Self {
-            Self {
-                name: name.to_owned(),
-                output: Mutex::new(Ok(SkillProviderOutput::Complete(candidates))),
-                reads: std::sync::atomic::AtomicUsize::new(0),
-            }
+    /// The test-side handle to one registered fake provider: the shared
+    /// script cell and the read counter.
+    struct FakeHandle {
+        script: Arc<Mutex<Script>>,
+        reads: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl FakeHandle {
+        /// The number of `list` reads observed so far.
+        fn read_count(&self) -> usize {
+            self.reads.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        /// Replaces the scripted `list` output.
+        fn set_output(&self, output: SkillProviderOutput) {
+            *self.script.lock().expect("script") = Script::Output(output);
+        }
+
+        /// Replaces the scripted `list` output with a provider failure.
+        fn set_error(&self, message: &str) {
+            *self.script.lock().expect("script") = Script::Error(message.to_owned());
         }
     }
 
@@ -1097,7 +1119,10 @@ mod tests {
 
         fn list(&self, _options: &SkillLookupOptions) -> Result<SkillProviderOutput, String> {
             self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            self.output.lock().expect("output").clone()
+            match &*self.script.lock().expect("script") {
+                Script::Output(output) => Ok(output.clone()),
+                Script::Error(message) => Err(message.clone()),
+            }
         }
 
         fn get(
@@ -1161,17 +1186,42 @@ mod tests {
         skills.iter().map(|skill| skill.name.as_str()).collect()
     }
 
-    /// Assembles one registry over scripted providers (the read-side
-    /// helper; the disposer lives as long as the registry).
-    fn new_registry(providers: &[(&str, Vec<SkillCandidate>)]) -> SkillRegistry {
-        let registry = SkillRegistry::new(DEFAULT_COLLECT_CACHE_ENTRIES).expect("registry");
+    /// Assembles one registry over scripted providers at the given
+    /// cache capacity, returning the provider handles for later
+    /// scripting (the read-side helper; the disposers live as long as
+    /// the registry).
+    fn new_registry_with(
+        collect_cache_max_entries: usize,
+        providers: &[(&str, Vec<SkillCandidate>)],
+    ) -> (SkillRegistry, Vec<FakeHandle>) {
+        let registry = SkillRegistry::new(collect_cache_max_entries).expect("registry");
+        let mut handles = Vec::new();
         for (name, candidates) in providers {
-            let provider = FakeProvider::named(name, candidates.clone());
+            let script = Arc::new(Mutex::new(Script::Output(SkillProviderOutput::Complete(
+                candidates.clone(),
+            ))));
+            let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let name = (*name).to_owned();
+            let script_for_provider = Arc::clone(&script);
+            let reads_for_provider = Arc::clone(&reads);
             let _disposer = registry
-                .register_provider(|_control| Ok(Box::new(provider) as Box<dyn SkillProvider>))
+                .register_provider(move |_control| {
+                    Ok(Box::new(FakeProvider {
+                        name,
+                        script: script_for_provider,
+                        reads: reads_for_provider,
+                    }) as Box<dyn SkillProvider>)
+                })
                 .expect("register");
+            handles.push(FakeHandle { script, reads });
         }
-        registry
+        (registry, handles)
+    }
+
+    /// Assembles one registry at the default cache capacity (the
+    /// read-side helper).
+    fn new_registry(providers: &[(&str, Vec<SkillCandidate>)]) -> (SkillRegistry, Vec<FakeHandle>) {
+        new_registry_with(DEFAULT_COLLECT_CACHE_ENTRIES, providers)
     }
 
     #[test]
@@ -1210,7 +1260,7 @@ mod tests {
 
     #[test]
     fn registry_lists_sorted_and_complete() {
-        let registry = new_registry(&[(
+        let (registry, _) = new_registry(&[(
             "fake",
             vec![
                 local_candidate("z-skill", 300, "custom"),
@@ -1226,7 +1276,7 @@ mod tests {
 
     #[test]
     fn rank_decides_duplicate_names_within_the_layer() {
-        let registry = new_registry(&[(
+        let (registry, _) = new_registry(&[(
             "fake",
             vec![
                 local_candidate("dup", 400, "user-dsh"),
@@ -1243,7 +1293,7 @@ mod tests {
 
     #[test]
     fn runtime_rank_sits_between_project_and_user_ranks() {
-        let registry = new_registry(&[(
+        let (registry, _) = new_registry(&[(
             "fake",
             vec![
                 local_candidate("dup", 400, "user-dsh"),
@@ -1258,5 +1308,150 @@ mod tests {
             .expect("snapshot");
         // Runtime (250) beats the user rank 400; the project rank 100 would outrank it.
         assert_eq!(snapshot.skills[0].provider, "runtime");
+    }
+
+    /// Lists one candidate but loads its definition under a different
+    /// name (the stale-definition trigger).
+    struct RenamingProvider {
+        reads: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl SkillProvider for RenamingProvider {
+        fn name(&self) -> &'static str {
+            "renamer"
+        }
+
+        fn list(&self, _options: &SkillLookupOptions) -> Result<SkillProviderOutput, String> {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(SkillProviderOutput::Complete(vec![SkillCandidate {
+                path: None,
+                name: "real".to_owned(),
+                description: "the real skill".to_owned(),
+                when_to_use: None,
+                invocation: SkillInvocationPolicy {
+                    model_invocable: true,
+                    user_invocable: true,
+                },
+                source: "custom".to_owned(),
+                provider: "renamer".to_owned(),
+                resource_base: None,
+                rank: 300,
+                locator: SkillLocator::Local {
+                    path: "/r/real/SKILL.md".to_owned(),
+                    directory: "/r/real".to_owned(),
+                },
+                metadata: None,
+            }]))
+        }
+
+        fn get(
+            &self,
+            _candidate: &SkillCandidate,
+            _options: &SkillLookupOptions,
+        ) -> Result<Option<SkillDefinition>, String> {
+            let mut definition = runtime_definition("renamed");
+            definition.provider = "renamer".to_owned();
+            Ok(Some(definition))
+        }
+    }
+
+    #[test]
+    fn completed_catalog_caches_until_invalidation() {
+        let (registry, handles) =
+            new_registry(&[("fake", vec![local_candidate("solo", 300, "custom")])]);
+        let dispose_runtime = registry
+            .register(runtime_definition("rt"))
+            .expect("register");
+        let options = SkillLookupOptions { cwd: None };
+        let first = registry.snapshot(&options).expect("snapshot");
+        assert_eq!(names(&first.skills), ["rt", "solo"]);
+        assert!(first.complete);
+        assert_eq!(handles[0].read_count(), 1);
+        // The second read hits the completed-catalog cache.
+        registry.snapshot(&options).expect("snapshot");
+        assert_eq!(handles[0].read_count(), 1);
+        // The happy-path `get` rides the same cache through the runtime
+        // provider arm.
+        let loaded = registry.get("rt", &options).expect("get").expect("loaded");
+        assert_eq!(loaded.content, "body of rt");
+        assert_eq!(handles[0].read_count(), 1);
+        // The runtime disposer invalidates: re-discovery drops the skill.
+        dispose_runtime();
+        let third = registry.snapshot(&options).expect("snapshot");
+        assert_eq!(names(&third.skills), ["solo"]);
+        assert_eq!(handles[0].read_count(), 2);
+    }
+
+    #[test]
+    fn stale_definition_load_invalidates_the_entry() {
+        let registry = SkillRegistry::new(DEFAULT_COLLECT_CACHE_ENTRIES).expect("registry");
+        let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let provider = RenamingProvider {
+            reads: Arc::clone(&reads),
+        };
+        let _disposer = registry
+            .register_provider(move |_control| Ok(Box::new(provider) as Box<dyn SkillProvider>))
+            .expect("register");
+        let options = SkillLookupOptions { cwd: None };
+        assert!(registry.get("real", &options).expect("get").is_none());
+        assert!(registry.get("real", &options).expect("get").is_none());
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn collect_cache_evicts_oldest_insertion_not_recent_reads() {
+        let (registry, handles) =
+            new_registry_with(2, &[("fake", vec![local_candidate("solo", 300, "custom")])]);
+        let options = |cwd: &str| SkillLookupOptions {
+            cwd: Some(cwd.to_owned()),
+        };
+        registry.snapshot(&options("/a")).expect("snapshot");
+        registry.snapshot(&options("/b")).expect("snapshot");
+        assert_eq!(handles[0].read_count(), 2);
+        // A re-read does not refresh the insertion order.
+        registry.snapshot(&options("/a")).expect("snapshot");
+        assert_eq!(handles[0].read_count(), 2);
+        // The third cwd evicts the oldest insertion (/a), not the most
+        // recently read one.
+        registry.snapshot(&options("/c")).expect("snapshot");
+        assert_eq!(handles[0].read_count(), 3);
+        // /a re-discovers after its eviction despite the recent read.
+        registry.snapshot(&options("/a")).expect("snapshot");
+        assert_eq!(handles[0].read_count(), 4);
+        // /c survived the /a re-insertion.
+        registry.snapshot(&options("/c")).expect("snapshot");
+        assert_eq!(handles[0].read_count(), 4);
+    }
+
+    #[test]
+    fn incomplete_observation_is_visible_but_never_cached() {
+        let (registry, handles) = new_registry(&[("fake", vec![])]);
+        handles[0].set_output(SkillProviderOutput::Observation {
+            candidates: vec![local_candidate("solo", 300, "custom")],
+            complete: false,
+        });
+        let options = SkillLookupOptions { cwd: None };
+        let first = registry.snapshot(&options).expect("snapshot");
+        assert_eq!(names(&first.skills), ["solo"]);
+        assert!(!first.complete);
+        registry.snapshot(&options).expect("snapshot");
+        assert_eq!(handles[0].read_count(), 2);
+    }
+
+    #[test]
+    fn failing_provider_is_skipped_and_blocks_caching() {
+        let (registry, handles) = new_registry(&[
+            ("bad", vec![]),
+            ("fake", vec![local_candidate("solo", 300, "custom")]),
+        ]);
+        handles[0].set_error("disk gone");
+        let options = SkillLookupOptions { cwd: None };
+        let snapshot = registry.snapshot(&options).expect("snapshot");
+        assert_eq!(names(&snapshot.skills), ["solo"]);
+        assert!(!snapshot.complete);
+        // Neither provider's rows are cached while one provider fails.
+        registry.snapshot(&options).expect("snapshot");
+        assert_eq!(handles[0].read_count(), 2);
+        assert_eq!(handles[1].read_count(), 2);
     }
 }
