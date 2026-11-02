@@ -2876,3 +2876,58 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - **config 三组**（fr-schema/registry.rs fr-tools-builtin 行）：`skill`=collect-cache-max-entries（int min1 默认 128，dsh assertPositiveInteger 无 minimum=1）；`skill-filesystem`=12 键（provider-name min1 默认 filesystem/include-default-roots true/fr-home/agents-home/custom-skill-dirs []/watch true/watch-use-polling false/watch-stability-threshold-ms 200/watch-poll-interval-ms 100/watch-max-projects 128/watch-follow-symlinks true/bundled-skill-dir）；`tool-skill`=catalog-description-max-length（min 3 默认 500，assertPositiveInteger(…,3)）。组钉测判例=builtin_config_pins_web_groups:1150。
 - **catalog_gen**（scripts/generate-tool-catalog.py）：TOOLS dict 加 "skill"→("SKILL",[("name","NAME_TEXT")],"none")（tool-skill 无 systemPrompt.section，rg 零命中）；dsh tool-catalog.md:1805-1819 有 skill 条目（description+parameters json+required name）。重跑 `FR_DSH_SOURCE=~/project/reference/cordis/deepseek-harness scripts/generate-tool-catalog.py`。
 - **spec 绑定**：CONFIG/TOOLS spec 内联维护（bind 脚本仅 session/config/prompt 三切片）；pending_* 选择器→新真实测试名。
+
+## 2026-11-02 — fr-compaction 切片开工勘察（钉存）
+
+- **dsh 参照面全图**（TS 行数，权威路径 ~/project/reference/cordis/deepseek-harness/packages/）：
+  - `compaction/compaction/src/`：index.ts 195（CompactionEngine 本体+ManualCompactionError）+types.ts 120+checkpoint.ts 51（CHECKPOINT_PREAMBLE/括弧标记）+tool-pairing.ts 126（toolPairingBalancedBefore 配平）+brand.ts 13 ≈ 505 行
+  - `compaction/compaction-basic/src/`：index.ts 452（BasicCompactionEngine：pre-step 压力触发:158-176+overflow 恢复:190-234+compactIfNeeded:269-347+compactNow:383-435）+region.ts 600（selectCompactableRange/compactSurfaceRegion/assertNoActiveCompaction）+config.ts 362（resolveConfig/resolveCompactSpec/resolveTargetPolicy/TargetPressureConfigError）+summarizer.ts 221（summarizeWithLlm+COMPACTION_INSTRUCTION:32-147）+types.ts 80 ≈ 1715 行
+  - `compaction/compaction-tool-result-pruner/src/`：index.ts 185+config.ts 77+types.ts 41 = 303 行（剪枝引擎：8192/4096/1024）
+  - `compaction/compaction-image-offload/src/`：index.ts 41（两监听：agent/request-error IMAGE_OFFLOAD_REQUIRED→offload+retry；compaction/summary-error 同码→recover true）+image-offload.ts 46+projection.ts 74+project-message.ts 36 = 197 行（provider 驱动图片卸载恢复，与 spill 无关）
+  - `spill/`：spill/src 138（index 58+types 80）+spill-local/src 746（cleanup 431+index 164+store 131）+spill-policy/src 325（index 156+notice 59+retention 104+types 26）= 1209 行
+  - `compaction/command-compact/src/index.ts` 108 行（/compact 命令壳，调 compaction.compactNow）
+  - `llm/token-meter/src/` 共 1579 行：types.ts 54（TokenMeasurement{logRevision,baseline:none|estimated|usage,surfaceDeltaTokens,totalTokens,surfaceTokens,nodes[seq,tokens,heuristicTokens]}+TokenMeterConfig=Record<string,never> 固定估算器无配置）+index.ts（measure(session,requestHeader?) O(surface) 重放折算，usage 锚+表面增量重定价）
+- **触发数学与恢复铁证**（compaction-basic/index.ts）：thresholdTokens=floor(min(contextWindow×0.8, messageBudget−65536))；reserved=requestHeader.maxTokens ?? adapter defaultMaxTokens ?? 0；pressure 先剪枝后复查（:294-327）；overflow 分支绕过阈值 retainTokens=0 强制（:294-302）；重试循环 compactionRetries+1 次仍超限报 "compaction still above threshold after N compaction attempts (X estimated tokens >= threshold Y)"（:343-346）；overflow 计数器 idle（agent/status :178-180）与每 assistant/message（session/event :184-188）重置；溢出恢复成功条件=replaceGeneration 增量（:212-233，durable surface progress 即 retry 证据）；compactNow 经 agent.runMaintenance+AbortSignal.any（:390-427）busy 错误 "manual compaction requires an idle agent with no waking queued work"；waterfall 'compaction/summary-error' recover 默认 false（:442-448）。
+- **fr 侧既有缝位**（本仓实勘）：
+  - fr-session 提供 "session-persistence"+"session-projections" 双服务（plugin_shell.rs:59，Q105′A）；方法面 create/append/flush/fork/resume/restore/drain/read/request-header/persisted-list/cold-read（service.rs:71-110）；v4_checks.rs:53-56 已含 compaction/start|summary|end|prune 四影子事件型+1038 CompactionState+1049 orphan_compactions 配对检查；surface.rs 有 surfaceOp replace 支持（v4_checks:700,1216-1283）
+  - fr-agent-loop：waterfall 机制齐备（agent_events.rs:265-275 DriverEvents 内含 pre_step/request_error/status 等监听 Vec；driver.rs:1342 waterfall_pre_step、2126 waterfall_request_error）；SkillPreStep 服务缝判例（driver.rs:195 trait+671 DriverDeps.skills+1361-1375 仅 Enter 调用）；提供 "agent" 服务七方法（plugin_shell.rs:46 METHOD_CANCEL/DESCRIBE/FOLLOWUP/INJECT/SEND/STATUS/STEER），**无 maintenance 方法**；descriptor listen 先例=provider stream 通知事件（plugin_shell.rs:56-60，单向通知非水瀑）
+  - fr-llm 已有 IMAGE_OFFLOAD_REQUIRED 基建（fr-wire/call_config.rs offloadImages 字段+fr-llm-deepseek/images.rs）——image-offload 恢复件有触发源
+  - **fr 无 token-meter**（fr-session projections.rs/surface.rs 零 token 估算；全仓无 token_meter）；PRD 4.5 crate 清单**无** token-meter crate；PRD §12(:445) "token-meter 随 base 装配（dsh cordis.patch.yml）"
+- **范围事实**：PRD 4.5(:154) 已定形态=单 crate fr-compaction（压缩、剪枝、图片卸载、spill 四关切一 crate）；fr-commands 为未来独立 crate（PRD 4.5 有行、未建），/compact 命令壳属其职责面；spec Allowed Changes=crates/fr-compaction/**（单 crate 边界已锁死，无分叉）。coverage-audit.md:41 "压缩契约、剪枝、图片卸载、spill、/compact | 已覆盖"、:119 "COMPACTION 补强后充分（自动触发、summarizer 逐字、图片卸载）"。
+- **范围歧义（待裁决）**：REQ-FR-COMPACTION 11 条无 compaction-image-offload（provider 驱动 IMAGE_OFFLOAD_REQUIRED 恢复件）条款、spec 无其场景；PRD §12(:443) 单列 "图片卸载（compaction-image-offload 语义）"；spill 内图片渲染 `[Image: <readonlyPath>...]` 是另一回事（REQ-FR-COMPACTION-10 已含）。dsh 中两者是不同插件。
+- **度量耦合**：compaction 触发/选区/收缩门全部消费 token meter 的 totalTokens 与节点价（dsh token-meter 为 1579 行重放折算估算器，fixed estimator 无配置）；1:1 口径要求估算数学与 dsh 逐字同型，否则同会话同模型压缩决策漂移。
+
+## 2026-11-02 — 问 2 追加评估：dougong 升级支撑跨插件同步监听（方案 2）可行性
+
+- **裁决回执（用户 2026-11-02）**：Q1=独立插件 fr-token-meter（PRD 4.5 增行+19.2 备案）；Q3=image-offload 纳入本切片（需求修订流程）；Q4=六批。Q2 用户反问"针对方案 2 dougong 升级好实现吗"——本文为评估，结论待用户裁决。
+- **三段源码事实**（~/project/dougong 实勘）：
+  1. **入站方向（kernel→dylib 监听）今天全通**：descriptor `listen` 表声明 + `on_event(event,mode,payload,…)`（模式四值含 MODE_WATERFALL，dougong-abi lib.rs:381-391）+ CPS `STATUS_DEFERRED`→宿主解析续体→`on_next`（v2 事件协议 D14，lib.rs:228-230；续体投递 dougong-dylib lib.rs:1180,1293,1435 deliver_next）。fr 在仓先例=provider stream 事件（fr-agent-loop plugin_shell.rs:56-60，Q84-B2）——fr-compaction 挂四监听的**监听侧零内核改动**。
+  2. **出站方向（dylib→kernel 派发）今天火忘**：`HostExports.emit` 为 enqueue-and-return，无 mode 参、无 out_buf 回程（dougong-abi lib.rs:304,338-346）；`emit_impl` 直转 `Context::emit`（dougong-dylib lib.rs:861 注释 "spawns the dispatch… listener failures are logged, never propagated — the caller neither expects nor receives them"）。**派发方拿不回裁决定——这是唯一缺口**。
+  3. **进程内机制全备**：`Context::waterfall(name, payload, fallback) -> Result<Value>`（context.rs:887-897）+parallel/serial/bail 全模式在；派发经 kernel fiber 基建spawn（非调用线程内联），调用线程阻塞等续体=host_require 同款阻塞模式（ABI 契约"require performs one synchronous, blocking cross-plugin service call"）。
+- **升级形状（若裁方案 2）**：新增一条 `HostExports` 出站入口（如 `dispatch(host,event,event_len,mode,payload,payload_len,out_buf,cap,out_len)->i32`，镜像 require 的缓冲协议；宿主实现=校验→enter runtime→阻塞 await `ctx.waterfall(...)`→终值写 out_buf；waterfall fallback 语义需一项设计裁决——默认 payload 直通、调用方以"未变=未否决"编码自身默认，或 mode 表显式 fallback 策略）+ ABI_VERSION 4→5 锚轮转（exact-match，loader 拒不匹配工件；fr 全部工件同仓重编无分发问题）+ dougong 侧自身纪律（D 决策记录/四门/example/dylib-plugin.md 文档）。wasm WIT 对称扩展可另行裁决（fr M1 全 dylib 工件，PRD 4.5"全部插件以 dylib 工件经真实装载走通"，wasm 不阻塞）。
+- **工作量定性**：中等、边界清晰——难点机制（waterfall 链/CPS 续体/fiber 阻塞协议/重入检测）全部现成，新增≈一条 vtable 入口+宿主实现（镜像 host_require 形状）+版本锚+测试文档。**不是内核重写**。交付通道需裁决：fr 现走 crates.io dougong 0.4.0（Cargo.toml:40-43，无 path 补丁）——升级需 dougong 发 0.5.x 或 fr 过渡期切 path/git 依赖。
+- **风险与约束**：(1) ABI 变更走 dougong 需求文档惯例（用户记忆条款）；(2) 同步阻塞派发的重入约束=监听者 require 回派发者服务→确定性 STATUS_REENTRANCY（dsh 形态天然不回调用，压缩监听经 session-projections/llm 缝消费，无此环）；(3) 监听执行序=注册序，loop 自身监听者是否也收编为 kernel 监听（loop 经 descriptor listen 监听自己派发的事件）vs 保持 loop 内部 waterfall+外部 kernel 事件两层，需升级设计时定；(4) 派发无超时参——是否吃 kernel TimeoutConfig（S3）需设计裁决。
+- **方案对照的架构权重**：本切片 dsh 监听共 6 个（compaction-basic 4+image-offload 2），且 image-offload 与未来命令/守卫家族都挂同两事件——方案 1（服务缝）=每族监听一个 loop 侧 seam+DriverDeps 字段增长；方案 2（kernel 监听）=各插件自注册、loop 零增长，dougong 时间可组合性论题的正中用例，dsh ctx.on 形态 1:1。
+
+## 2026-11-02 — fr-compaction 切片五项终裁（全部落定）
+
+- **裁决 1（度量归属）=独立插件 fr-token-meter**：dsh token-meter 1:1 新 crate，PRD 4.5 增行+19.2 备案；提供 token-meter 服务缝供 compaction 消费。
+- **裁决 2（接线形态）=方案 2 升级 dougong**：dougong 新增出站 dispatch vtable 入口（镜像 host_require 阻塞+缓冲协议，宿主实现阻塞 await 现成 Context::waterfall，context.rs:887）+ ABI_VERSION 4→5 + dougong 侧 D 决策/四门/example/文档；监听侧（descriptor listen+CPS on_event/on_next）零改动全通。本切片 6 监听（compaction-basic 4+image-offload 2）各插件自注册，loop 零膨胀。
+- **裁决 2b（交付通道）=dougong 发版**：其仓完成升级发 0.5.0 到 crates.io，fr 直接依赖新版（现 Cargo.toml:40-43 钉 0.4.0）。
+- **裁决 3（image-offload）=纳入本切片**：走需求修订（intake 的 REQ-FR-COMPACTION 块扩第 12 条 MUST+场景→import→核准→draft 重生成→非目标 spec HEAD 恢复→绑定重放）。
+- **裁决 4（批次）=六批**（fr 侧），映射执行序：17a 文档治理（PRD 4.5/19.2+intake 扩条+三门禁+draft 重生成）→17b dougong dispatch 升级+0.5.0 发版（其仓四门）→17c fr 升 0.5.0+fr-token-meter（批 1 度量引擎）→17d fr-compaction 核心域+config+fr-schema 组（批 2）→17e 选区+压缩管线+括弧+summary-error waterfall（批 3）→17f summarizer+四监听接线+agent 服务 maintenance 法（批 4）→17g pruner+image-offload 两监听（批 5）→17h spill 三件+compactNow+全链绑定+终门+七步收口（批 6）。
+
+## 2026-11-02 — 17b 前置：dougong 出站派发需求文档成稿（dispatch_requirements.md）
+
+- **成稿**：~/project/dougong/doc/maintenance/dispatch_requirements.md（草案，自包含标准对齐 grant_requirements.md 判例：现状事实/术语/缺口/路径裁定/目标 G1-G8/FR-V5-A·B·D/E/F 全系/范围外九项/风险与变更控制；行号基准 4b940aa，锚已逐一核实——修正过一次 emit_impl 锚 858→829/851）。
+- **要害发现（文档 §1.1 事实 6/7 + §1.4 分叉点①）**：方案 2 与 v3 需求文档 function_requirements.md §5.5 冻结结构性排除正面相撞（"emit 非 emit 模式出站——次序/否决语义在应用层组装，内核只做广播"）；其依据与 dsh 真源不符（dsh compaction-basic/index.ts:158 ctx.on('agent/pre-step')、:442 ctx.waterfall(…,()=>false) 即 cordis 内核事件面，cordis ctx.waterfall 对全部插件可用，dougong 对应物只对进程内插件存在）。推翻唯一途径=维护者显式裁决（grant 文档变更控制判例）；文档以"分叉点待裁决后冻结、未裁决不得动码"承载（v3 文档同款纪律）。
+- **设计要害（文档 B6/B8，E1.8 钉测）**：从外来入口帧内发起 dispatch = 检测不可达死锁（派发等待是 channel 非 armed 实例锁边，D-V3-3 等待图无环可循）——按仓内"确定性失败优于静默死锁"判例定为：dispatch 必须自插件自有线程发起，帧栈检查前置拒绝 STATUS_REENTRANCY；插件自有线程发起时派发方不持实例锁，链内监听者 require 派发者服务=普通依赖边放行（E1.9 正向钉）。
+- **三分叉点待用户裁决**：①推翻 v3 §5.5（前提必裁）；②v5 出站面=仅 waterfall 单模式（提案，签名即语义）vs 五模式全开；③链内监听者失败=STATUS_FAILED 传播（提案）+恒等续体 fallback（提案）vs 吞并走 fallback。
+- **下一动作=用户裁决三分叉点→文档冻结→17b 实现（vtable+host_dispatch+帧栈检查+发版 0.5.0）。**
+
+## 2026-11-02 — code-review 结论消化（dougong ABI v5 diff，8 发现 7 修 1 跳）
+
+- **已修 7**（review 方落地+本会话独立复验）：①E1.13/14 注册序缺陷真评（null listener 原注册在桥 listener 后=恒不执行的死臂——新增 boot_with_in_process_listener 先注册 null 再桥，null-continuation 臂真正受钉）；②write_failure class 硬编码 "Logic"→`ErrorClass::Logic.as_str()`（S5 小写词表）；③④dylib-plugin.md ABI_VERSION=4 陈述+vtable 示例缺 dispatch（F3 缺口）；⑤⑥MODE_EMIT 白付深克隆（分组 await 臂后才 clone）+B4 恒等路径 to_vec 多余 memcpy（Cow 借用）；⑦SKILL.md 义务 4 缺 dispatch+v4 陈述残留+README 双语 v4→v5。
+- **跳过 1（维护者姿态待裁，不阻塞）**：host_dispatch 的 catch_unwind 路径裸 STATUS_HOST_ERROR、无 host_panic 详情——review 者裁跳理由=emit/grant 同胞刻意裸+ABI 文档"详情可选"；若要与 require 面一致需加 {"code":"host_panic"} 详情。**此为合同姿态项，呈用户裁决（默认维持裸=与 emit/grant 一致）。**
+- **复验**（本会话独立）：fmt/clippy/37 target 测试/doc 四关绿+outbound_demo exit0+write_failure 与分组臂源码落点核实。review 方报告：测试 240 passed/0 failed、六 demo exit0、0 subagent（用户 ≤2 上限合规）。
+- **测试设计判例再固化**：注册序决定链序（E1.5 已证）——凡"先后序"断言的测试必须让序差可观察（array tag/计数器），否则死臂测试照样全绿。

@@ -220,6 +220,23 @@ pub(crate) const unsafe extern "C" fn quiet_grant(
     dougong_abi::STATUS_OK
 }
 
+/// Test double for the host side of `dispatch` (D32): no fr test drives an
+/// outbound dispatch, so any surprise call fails loudly.
+#[cfg(test)]
+pub(crate) const unsafe extern "C" fn noop_dispatch(
+    _host: *mut std::ffi::c_void,
+    _event: *const u8,
+    _event_len: usize,
+    _mode: u32,
+    _payload: *const u8,
+    _payload_len: usize,
+    _out_buf: *mut u8,
+    _cap: usize,
+    _out_len: *mut usize,
+) -> i32 {
+    dougong_abi::STATUS_FAILED
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Outbound, RequireError};
@@ -389,6 +406,7 @@ mod tests {
     ) -> Outbound {
         Outbound::new(HostExports {
             grant: crate::outbound::quiet_grant,
+            dispatch: crate::outbound::noop_dispatch,
             host_handle,
             require,
             emit,
@@ -404,6 +422,7 @@ mod tests {
         };
         let outbound = Outbound::new(HostExports {
             grant: recording_grant,
+            dispatch: crate::outbound::noop_dispatch,
             host_handle: &raw const fake as *mut c_void,
             require: undeclared_require,
             emit: quiet_emit,
@@ -418,6 +437,7 @@ mod tests {
 
         let refusing = Outbound::new(HostExports {
             grant: failed_grant,
+            dispatch: crate::outbound::noop_dispatch,
             host_handle: std::ptr::null_mut(),
             require: undeclared_require,
             emit: quiet_emit,

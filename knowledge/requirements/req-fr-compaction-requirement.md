@@ -24,6 +24,7 @@ tags: [compaction, context]
 - [REQ-FR-COMPACTION-9] 工具结果剪枝 MUST：仅触 tool/result 表面事件；度量=文本块 Unicode 码点（非文本块计 0）；total > 8192 才剪；移除段 = [4096, total−1024) 码点区间；标记仅在首个相交块插入一次，文本逐字 `\n\n[... tool result middle pruned ...]\n\n`；非文本块保序；替换结果须更小且 ≤ threshold；每次替换 append compaction/prune 影子事件 + surfaceOp replace 的 tool/result（sourceEventSeqs=[seq]）；配置校验 head+marker+tail ≤ threshold。
 - [REQ-FR-COMPACTION-10] spill MUST：max-inline-tokens 12500（省略=禁用）；挂 tools/post-execute 的 accepted 结果（跳过 exec.name==='read' 与纯文本 PTC 子调用）并限界 PTC dispatch 日志；定价=文本估算 + 每图模型 adapter 图像定价；超限全文落盘（图片渲染为 `[Image: <readonlyPath>; <mediaType>; <w>x<h>. Use read_image to view it.]`）；模型面替换 = 保留头 + `\n\n[...]\n\n` + 保留尾 + footer `(Omitted N bytes.[ Omitted M images.] Full formatted result stored at: <locator>. <retrievalHint>)`；预算预留最坏 notice 后头尾对半、图片不可分、surrogate 安全切片；任一步失败警告 `spill-policy: ...; keeping the inline content` 保留内联；存储布局 `<root>/session-<sha256(sessionId) 前 12hex>/<12hex 随机>-<encodedName>`、文件 0600 目录 0700、缺省 root=OS temp 下 mkdtemp `dsh-spill-XXXXXX`；启动清扫删 mtime 超清理期（默认 30 天、0 禁用）并剪空目录。
 - [REQ-FR-COMPACTION-11] /compact MUST：仅空闲 agent（busy → "manual compaction requires an idle agent with no waking queued work"）；选区 retainTokens 0；成功 → `Compacted N history items (~M tokens).`；无可压缩 → 'No compactable history yet.'；取消 → "Compaction cancelled."；错误码 busy/cancelled/changed/summary/commit/persistence 各有固定文案；落地前 ctx.sessions.flush 确保持久。
+- [REQ-FR-COMPACTION-12] 图片卸载恢复 MUST（dsh compaction-image-offload 1:1）：agent/request-error 码 IMAGE_OFFLOAD_REQUIRED 且 failure.offloadImages 已定义且未中止 → 按 failed 请求输入序扫 user/message|tool/result 表面事件，深度优先图序（含已卸载与嵌套）选最旧未卸载 occurrence，append 持久 `image/offload` 决策事件 `{targets:[{seq,imageIndexes}]}`（索引严格递增、每 seq 至多一 target），返回 {kind:'retry'}（持久表面修复：不耗重试预算、不记 retry 事件）；无可卸载或中止 → next()。compaction/summary-error waterfall：LlmError 同码同位 → 对 sourceEventSeqs 同法卸载 → recover=true；非该码/未定义/不可卸载 → next()（默认 false）。image/offload 投影 MUST fail-closed：data 单键 targets 非空数组、target 恰 {seq,imageIndexes}、索引严格递增非负安全整数、seq 为当前表面节点、源为 user/message|tool/result、无重复 seq、选中 occurrence 未卸载且存在——违者报错；合法 targets 将选中图置 offloaded:true，消息身份与节点不变；后续请求对已卸载 occurrence 发送占位文本（PRD 19.2 条 14 的 message projection 机制随本消费方补加）。
 
 ## Scenarios
 
@@ -155,6 +156,23 @@ Rule: REQ-FR-COMPACTION-10 — spill
   假设 spill 落盘或替换任一步失败
   当 结算时
   那么 警告 spill-policy: ...; keeping the inline content 并保留内联原文
+
+Rule: REQ-FR-COMPACTION-12 — 图片卸载恢复
+
+场景: 溢出卸载恢复重试
+  假设 provider 以 IMAGE_OFFLOAD_REQUIRED 拒绝且 failure.offloadImages 为 2
+  当 request-error 恢复结算时
+  那么 记录 image/offload 决策选中保留面最旧的 2 个未卸载输入图并返回 retry，不耗重试预算不记 retry 事件；无可卸载则透传 next()
+
+场景: 摘要失败卸载恢复臂
+  假设 摘要调用失败码为 IMAGE_OFFLOAD_REQUIRED
+  当 compaction/summary-error waterfall 裁决时
+  那么 影子区按序卸载最旧未卸载输入图返回 recover=true；非该码默认 false
+
+场景: 卸载投影 fail-closed
+  假设 image/offload 事件 targets 含重复 seq 或越界索引或重复卸载
+  当 投影重放时
+  那么 报错拒绝；合法 targets 将选中图置 offloaded:true 且消息身份与节点不变
 
 Rule: REQ-FR-COMPACTION-11 — 手动压缩
 

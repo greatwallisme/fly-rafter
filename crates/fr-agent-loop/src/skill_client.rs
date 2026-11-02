@@ -114,6 +114,7 @@ mod tests {
             require: script_require,
             emit: quiet_emit,
             grant: quiet_grant,
+            dispatch: crate::outbound::noop_dispatch,
         };
         (host, Outbound::new(exports))
     }

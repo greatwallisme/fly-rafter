@@ -3445,6 +3445,7 @@ mod tests {
         let session_handle = Box::into_raw(Box::new(Arc::clone(&session)));
         let outbound = Outbound::new(HostExports {
             grant: crate::outbound::quiet_grant,
+            dispatch: crate::outbound::noop_dispatch,
             host_handle: session_handle.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,

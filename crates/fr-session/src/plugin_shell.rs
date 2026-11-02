@@ -454,6 +454,22 @@ pub static DOUGONG_PLUGIN_EXPORTS: PluginExports = PluginExports {
 
 #[cfg(test)]
 mod tests {
+    /// Test double for the host side of `dispatch` (D32): no fr test drives an
+    /// outbound dispatch, so any surprise call fails loudly.
+    #[cfg(test)]
+    const unsafe extern "C" fn noop_dispatch(
+        _host: *mut std::ffi::c_void,
+        _event: *const u8,
+        _event_len: usize,
+        _mode: u32,
+        _payload: *const u8,
+        _payload_len: usize,
+        _out_buf: *mut u8,
+        _cap: usize,
+        _out_len: *mut usize,
+    ) -> i32 {
+        dougong_abi::STATUS_FAILED
+    }
     use super::{
         DESCRIPTOR, METHOD_DECLARE_EVENT_TYPES, METHOD_DESCRIBE, METHOD_PROJECTIONS_REGISTER,
         METHOD_PROJECTIONS_STATE_OF, ShellState, baked_sessions_root_from, dispatch,
@@ -745,6 +761,7 @@ mod tests {
             require: fold_require,
             emit: ok_emit,
             grant: ok_grant,
+            dispatch: noop_dispatch,
         };
         let mut vocabulary = EventVocabulary::core();
         vocabulary

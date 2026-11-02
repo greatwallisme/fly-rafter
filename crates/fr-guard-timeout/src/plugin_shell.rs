@@ -456,7 +456,7 @@ mod tests {
         let parsed: Value = serde_json::from_slice(&reply).expect("json");
         assert_eq!(parsed["name"], PLUGIN_NAME);
         assert_eq!(parsed["service"], SERVICE_NAME);
-        assert_eq!(parsed["abiVersion"], 4);
+        assert_eq!(parsed["abiVersion"], 5);
     }
 
     #[test]

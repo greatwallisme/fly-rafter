@@ -605,9 +605,9 @@ dependencies = [
 
 [[package]]
 name = "dougong"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73c0f22fcb8956148d528aa3ded253f64a6fc0cd6d42bb4cd8e9217210eec6c3"
+checksum = "a54f9d173abb37703e3e7c554a6cc09f5692ac394394cf6c6a54a7a27beae53c"
 dependencies = [
  "parking_lot",
  "serde",
@@ -618,15 +618,15 @@ dependencies = [
 
 [[package]]
 name = "dougong-abi"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f270945b418815c87bd1bf33128b49b62c1f7859c798736f1def5591eea8ee0"
+checksum = "cc508eab8c247f2db59964fdf066863359456f5b565479026aa32f15da0cd187"
 
 [[package]]
 name = "dougong-dylib"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8f0a1008ac7c73f8883ad32e5dbc88039c0d98837ef3828271f7fa9d0ab129a"
+checksum = "641224271340a141e0c418458f84a54e776d729b5892e7eb138e57af76bf7311"
 dependencies = [
  "dougong",
  "dougong-abi",
@@ -638,9 +638,9 @@ dependencies = [
 
 [[package]]
 name = "dougong-loader"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "369813ce8a7dcc61bb89cb6976a9951ac78fd94f6f0b2d2e1b1343f5968cafe0"
+checksum = "cc05c11847b5f453e09c823821639d3d085c33f6bd3fafe2a595a704ae8d54c4"
 dependencies = [
  "dougong",
  "dougong-dylib",
@@ -652,9 +652,9 @@ dependencies = [
 
 [[package]]
 name = "dougong-wasm"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e0187de61fe64cb296af1f7c0638259396210dc8710e18e712a27bfe2a37928"
+checksum = "200d232abcb9fe91f823f2d6c2188ca5a4ca1ad29c840c075b6f36ea80e558c3"
 dependencies = [
  "dougong",
  "parking_lot",

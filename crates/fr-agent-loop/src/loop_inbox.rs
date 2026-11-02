@@ -447,6 +447,7 @@ mod tests {
         }));
         let outbound = Outbound::new(HostExports {
             grant: crate::outbound::quiet_grant,
+            dispatch: crate::outbound::noop_dispatch,
             host_handle: fake.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,

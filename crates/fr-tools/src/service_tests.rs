@@ -20,6 +20,22 @@ use crate::definition::{DefineTool, ToolDefinition};
 use crate::registry::ToolRegistry;
 use crate::types::{ToolExecutionMode, ToolPresentationMode, text_content};
 
+/// Test double for the host side of `dispatch` (D32): no fr-tools test
+/// drives an outbound dispatch, so any surprise call fails loudly.
+const unsafe extern "C" fn noop_dispatch(
+    _host: *mut std::ffi::c_void,
+    _event: *const u8,
+    _event_len: usize,
+    _mode: u32,
+    _payload: *const u8,
+    _payload_len: usize,
+    _out_buf: *mut u8,
+    _cap: usize,
+    _out_len: *mut usize,
+) -> i32 {
+    STATUS_FAILED
+}
+
 /// The scripted endpoint handler shape (method, payload) -> reply.
 type Endpoint = Box<dyn Fn(u32, &[u8]) -> Result<Vec<u8>, String> + Send>;
 
@@ -46,6 +62,7 @@ impl TestHost {
                 require: test_require,
                 emit: test_emit,
                 grant: test_grant,
+                dispatch: noop_dispatch,
             },
         }
     }
@@ -270,7 +287,7 @@ fn describe_reports_metadata() {
     let parsed: Value = serde_json::from_slice(&reply).expect("json");
     assert_eq!(parsed["name"], PLUGIN_NAME);
     assert_eq!(parsed["service"], "tools");
-    assert_eq!(parsed["abiVersion"], 4);
+    assert_eq!(parsed["abiVersion"], 5);
 }
 
 #[test]

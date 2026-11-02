@@ -233,6 +233,7 @@ mod tests {
         }));
         let outbound = Outbound::new(HostExports {
             grant: crate::outbound::quiet_grant,
+            dispatch: crate::outbound::noop_dispatch,
             host_handle: fake.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,
@@ -321,6 +322,7 @@ mod tests {
         }
         let outbound = Outbound::new(HostExports {
             grant: crate::outbound::quiet_grant,
+            dispatch: crate::outbound::noop_dispatch,
             host_handle: std::ptr::null_mut(),
             require: failing_require,
             emit: quiet_emit,
@@ -334,6 +336,7 @@ mod tests {
         // A provider reply outside the contract fails the decode instead.
         let outbound = Outbound::new(HostExports {
             grant: crate::outbound::quiet_grant,
+            dispatch: crate::outbound::noop_dispatch,
             host_handle: std::ptr::null_mut(),
             require: broken_require,
             emit: quiet_emit,
@@ -425,6 +428,7 @@ mod tests {
 
         let outbound = Outbound::new(HostExports {
             grant: crate::outbound::quiet_grant,
+            dispatch: crate::outbound::noop_dispatch,
             host_handle: handle.cast::<c_void>(),
             require: real_dispatch_require,
             emit: quiet_emit,

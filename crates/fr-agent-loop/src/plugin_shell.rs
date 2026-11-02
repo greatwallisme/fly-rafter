@@ -735,6 +735,7 @@ mod tests {
     fn empty_map() -> SessionMap {
         SessionMap::new(Outbound::new(HostExports {
             grant: crate::outbound::quiet_grant,
+            dispatch: crate::outbound::noop_dispatch,
             host_handle: std::ptr::null_mut(),
             require: quiet_require,
             emit: quiet_emit,

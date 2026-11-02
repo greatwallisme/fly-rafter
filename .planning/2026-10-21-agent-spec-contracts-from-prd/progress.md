@@ -1662,3 +1662,56 @@
 - lifecycle：CONFIG 139/0/180（skip=未来切片 pending，既有裁决非本步门），两 skill 场景 pass；BUILTIN-TOOLS 355/0/53，五 skill 场景全 pass。stamp 首跑报 1 failed——三连复验 401/0×3+直跑 lifecycle 两轮 0 failed=系统负载瞬时非确定性 flake（证据记录在案）。
 - 退化统计（本窗全程）：Edit 伪影 5+python 误插 13 行+hook 误报 9（\uXXXX 文档句/桩面/生成器机制）。
 - **下一动作=步⑦ 提交收口；16f 批 2 步⑥全链完，批 2 余 16f 收尾事项随下窗计划。**
+- **步⑦ 收口完成：提交 7b3d364（15 文件 +1010/-24）。pre-commit guard 按既有裁决 --no-verify（guard 全量并行跑测另揭：builtin-tools 2 failed+agent-loop/subagent/sdk/quality 各 1 failed 的负载瞬时串行全清白——workspace 1694/0 与 lifecycle 直跑均为 0 failed，并行全量=flake 源）。16f 批 2 步⑥d 全链闭。**
+
+## 2026-11-02 — fr-compaction 切片开工：勘察+落盘+呈交四裁决
+
+- 用户指令"完成 fr-compaction"。勘察完成（findings.md 新节「fr-compaction 切片开工勘察」）：dsh 参照面 ~5500 行 TS（compaction 505/basic 1715/pruner 303/image-offload 197/spill 1209/command-compact 108/token-meter 1579）；fr 缝位=session 双服务+compaction/* 影子事件四型已备（v4_checks.rs:53-56）+loop waterfall 与 SkillPreStep 判例在+IMAGE_OFFLOAD_REQUIRED 基建在（fr-llm-deepseek/images.rs）；缺口=token-meter 无、agent 服务无 maintenance 法。
+- task_plan.md Next Step 已换为 fr-compaction 开工态。
+- 事故：heredoc 双 cat 命令构造错误（首 cat 无输入源挂 stdin 120s 超时转后台），残留 0 字节文件已核空删除；progress.md 无损。
+- **下一动作=四裁决问题呈交用户（token-meter 归属/触发接线形态/image-offload 范围/批次划分），裁决后激活合约开工。**
+- **fr-compaction 五项终裁落定（2026-11-02）**：①fr-token-meter 独立插件（PRD 4.5 增行+19.2 备案）；②方案 2=升级 dougong（出站 dispatch vtable 入口+ABI v5，监听侧零改动）；②b 交付=dougong 发版 0.5.0；③image-offload 纳入本切片（需求修订流程）；④六批划分。执行序 17a-17h 已钉 task_plan.md。
+- **下一动作=17a 文档治理：PRD 4.5 增 fr-token-meter 行+19.2 备案（kernel dispatch 升级+fr-token-meter+image-offload 纳入）+intake REQ-FR-COMPACTION 块扩第 12 条 MUST+三门禁+draft 重生成+非目标 spec HEAD 恢复+绑定重放。**
+- **17b 前置完成（2026-11-02）**：dougong 升级需求文档成稿 dispatch_requirements.md（草案；自包含；三分叉点待裁决；B6 外来入口帧拒绝设计入文）。用户中途指令两点已执行：①详细需求文档生成（本条）；②文档自包含保证=清空上下文后仅凭文档可完整理解（对齐 grant 判例结构+锚定行号+阅读顺序即依赖顺序）。
+- **下一动作=三分叉点呈交用户（①推翻 v3 §5.5 前提必裁/②出站面宽度/③失败传播语义），裁决后冻结文档并进 17b 实现。**
+- **分叉点②③已裁（2026-11-02）**：②=五模式全开（dispatch +mode:u32，值域=既有 MODE_* 词表；§2.0 五模式语义表+E1.13-16+范围外第 1 项改写为"语义偏离排除"）；③=失败传播（STATUS_FAILED+三元组）+恒等续体 fallback。文档已同步。①影响面问答已呈（方案 1 服务缝=fr-agent-loop 局部+两新 crate 服务面、其余模块零变更、可立即开工；路径二=宿主进程内 provider 角色+私有协议，最差）。**待①终裁后冻结文档进 17b 实现。**
+- **分叉点①终裁（2026-11-02）：推翻 v3 §5.5（仅此一条），走方案 2。** dispatch_requirements.md 已转定稿（三分叉点全裁入文：①推翻/②五模式/③失败传播+恒等续体）。17b 实现解锁。
+- **下一动作=17b dougong 实现（触点序）：abi v5（ABI_VERSION=5+dispatch 字段）→ dylib host_dispatch（阻塞等待+帧栈前置拒绝+恒等续体+失败映射）→ loader 构造点 → outbound_demo dispatch 臂 → E1 矩阵 16 项 → 四门 → skills/design doc D32/CHANGELOG 同步 → 0.5.0 发版就绪。**
+- **用户中途指令（2026-11-02）**：dougong 升级完成后必须跑 code-review --fix（--max-findings all，问题数不设上限），subagent 用量上限 2 个，对升级 diff 做 review+fix。已钉入 17b 收尾序（四门绿后、发版前）。
+
+## 2026-11-02 — 17b dougong 实现：abi v5+host_dispatch+E1 矩阵全绿
+
+- **dougong-abi**：ABI_VERSION 4→5（lib.rs:249，v5 历史注释入版本块）；HostExports 第 5 字段 `dispatch(host,event,event_len,mode:u32,payload,payload_len,out_buf,cap,out_len)`（grant 后，契约注释载 A3 阻塞/A4 UB/B6 帧拒绝/恒等续体）；版本断言测试同步 5。
+- **dougong-dylib**：`host_dispatch`+`dispatch_impl`+`ReplyBuffer`（lib.rs，置于 host_grant 后）：B6 帧栈前置拒绝（ENTRY_STACK 非空→STATUS_REENTRANCY+reentrancy_cycle 详情）→UTF-8/internal/* 校验→JSON 校验→五模式臂（WATERFALL=恒等续体 drive+SERIAL/BAIL/PARALLEL 各 drive 同名方法+EMIT=enter+spawn 即返）→非法 mode=invalid_dispatch_mode；`write_settled`：Ok 且值==解析输入→**回写原始字节**（B4 字节稳定，serde_json 无 preserve_order 的键序归一对策）；Err→STATUS_FAILED+{code,class,message} 三元组（B3）。vtable 构造点（:1534 区）+dispatch 指针。
+- **dispatch_tests.rs 新模块（E1 矩阵 14 测全绿）**：driver fixture（DISPATCH_JOIN/IN_ENTRY/BG/POLL/PING 五方法，BG 结果按 nonce 全局注册表）+listener fixture（listen 六事件：ECHO/ORDER=DEFER+transform、VETO=裸输出否决、FAIL=裸 FAILED、SERIAL=非空 bail、REQ_LOOP=链内 require 派发者服务）。**事故三起已修**：①on_event 输出走内核桥直通必须裸 JSON（误用 call 通道测试帧→payload_codec 立即败）；②poll 信封 nonce 放 body 而 envelope_parts 读 nonce 字段（恒查 0 号→bg 恒超时）；③E1.9 listener descriptor inject 空（v3 能力模型 UNDECLARED——补声明 "svc-dispatcher"）。设计陷阱规避记录：BG+poll 形态避免"join 在 call entry 内+链内 require 派发者"=检测不可达死锁（B6 论证活体）。
+- **clippy 消化**：doc_markdown 反引号/similar_names（ping/pong→payload）/precedence 加括号/u32 try_from/significant_drop（POLL 单锁域 span position+remove）/dead_code expect 标注/assert 语义化（assert_ne/assert_eq b""）/expect_err。
+- **四关全绿（dougong 仓）**：fmt ✓/clippy -D warnings 0/全仓测试 37 target 零失败（含 dispatch 14+outbound+fault 既有全绿）/doc -D warnings ✓。
+- **下一动作=17b 收尾：outbound_demo dispatch 臂（D3/E2）→ design doc D32+附录 A（F1）→ CHANGELOG（F2）→ skills 同步（F3）→ 版本 0.5.0 bump（D2）→ code-review --fix（用户指令：max-findings 不设上限、subagent ≤2）→ 发版就绪。**
+
+## 2026-11-02 — 17b 收尾：demo 臂+文档同步+版本 bump+四关六 demo 全绿
+
+- **outbound_demo dispatch 臂（D3/E2）**：greeter-plugin 增 `GREETER_WORKER_DISPATCH=4` 方法+`DISPATCH_EVENT="greeter/dispatch"`+`plugin_dispatch` 助手+第二驻留槽（DispatchRuling 类型别名解 type_complexity）；worker_main 序=require→dispatch(waterfall)→emit。demo 侧内嵌 DISPATCH_LISTENER_TABLE（listen greeter/dispatch:1，DEFER+handled:true 变换+on_next 回投），listener 先于 greeter 装配，full_chain_arm/dispatch_arm 双提取解 too_many_lines。
+- **文档同步**：design doc D32 裁决全文（推翻 v3 §5.5 依据修正+恒等续体+失败传播+B6 姿态门+ABI v5）+附录 A 改题 dylib-v5+两行（出站同步派发/姿态约束）；CHANGELOG 0.5.0 条目；skills 同步（SKILL.md 版本锚 v5+dispatch 契约句+pitfall；dylib-plugin.md 增 dispatch 节+出站节改题 v3/v4/v5）。
+- **版本 bump**：workspace 0.4.0→0.5.0（root+全部 path deps+greeter descriptor 内嵌版本）。
+- **门与验收**：fmt/clippy -D warnings/全测 37 target 零失败/doc -D warnings 四关绿；E1 矩阵 14/14；六 demo（dylib_demo/outbound_demo/wasm_demo/loader_demo/harness_demo/health_demo）全 exit 0。
+- **下一动作=code-review --fix（用户指令：--max-findings all，subagent ≤2，对升级 diff）→ release-handoff-0.5.0 → fr 侧吸收（17c）。**
+
+## 2026-11-02 — 17a 文档治理完成
+
+- PRD 4.5 增 fr-token-meter 行（fr-compaction 前）+19.2 增条 37/38/39（fr-token-meter 勘误备案/ABI v5 dispatch 载体声明/image-offload 纳入）。
+- intake REQ-FR-COMPACTION 块扩第 12 条 MUST（image-offload 三面：request-error 卸载重试/summary-error 恢复臂/image/offload 投影 fail-closed）+Rule 12 三场景。
+- 重导入序列全程：三门禁 0 errors→import→20 需求全部 transition accepted（LLM 与 PTC 实际 id 为 REQ-FR-LLM/REQ-FR-PTC，首趟两失败已补）→draft-specs 重生成→refine-drafts→sed depends→非目标 19 spec HEAD 恢复→三绑定脚本幂等重放（git status 净变更仅 compaction knowledge+spec 两文件）。
+- compaction spec 重生成含第 12 条三场景（26 Scenario 总数；英文 Scenario 标头形态）。三门禁复绿（1095 findings 0 errors/graph-plan 净空）。
+- **17a 闭。当前挂起=code-review（后台）；下一动作=review 结论消化→release-handoff-0.5.0→17c。**
+- **两项裁决落定+执行（2026-11-02）**：①由我执行 publish——五 crate 全部发布成功（dougong-abi→dougong→dougong-dylib/wasm/loader，v0.5.0 @ crates-io，--registry crates-io 因 rsproxy 镜像需显式旗标）；②panic 姿态=维持裸（与 emit/grant 一致），追加式备案入 dispatch_requirements.md §8。
+- **17b 全链闭（升级→review→handoff→提交 9bb3b0b→发布）。下一动作=17c：fr 升 dougong*=0.5.0+全工件 ABI v5 重编+fr-token-meter 插件（度量引擎 1:1 移植）。**
+
+## 2026-11-02 — 17c 前半完成：fr 吸收 dougong 0.5.0
+
+- Cargo.toml 四依赖 0.4.0→0.5.0；全工件 ABI v5 源级重编。
+- 34 个测试字面量补 `dispatch` 桩：fr-agent-loop 12 文件引 crate::outbound::noop_dispatch 公共桩（cfg(test) pub(crate) const 风格，意外调用=STATUS_FAILED fail-closed）；approval/permission-presets/sandbox/session/llm 五文件各自 tests 模块内私有桩；fr-tools service_tests.rs 独立测试文件顶层桩（无 mod tests 包装）。
+- 4 处 `abiVersion` 钉测 4→5（guard-repeat-reminder/guard-timeout/fr-tools×2——describe 报告工件真实事实，钉测随 ABI bump）。
+- 事故两起：①桩误带 pub(crate) 于私有 mod tests（clippy redundant_pub_crate，缩进形态致首轮 sed 未中，二轮修正）；②verify::generated_constants 钉测挂=我漏设 FR_DSH_SOURCE（CLAUDE.md 既载按设计缺席即挂，非缺陷）。
+- hook 误报 5 处透明接受（service_tests 947+ 行既有测试惯用法，HEAD 同形，本 diff 仅 +17 行于 23-49 区）。
+- **终门认证**：fmt ✓/clippy -D warnings 0/全测（FR_DSH_SOURCE）51 target 零失败/doc ✓；diff 28 文件 +321/-19。
+- **下一动作=17c 后半：fr-token-meter 新 crate（度量引擎 1:1 移植+provide "token-meter" 服务缝+PRD 4.5 已备行；勘察锚见 findings「fr-compaction 切片开工勘察」token-meter 节）→17d-17h。**

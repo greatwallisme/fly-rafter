@@ -1439,6 +1439,22 @@ fn encode_reply<T: serde::Serialize>(reply: &T) -> Result<Vec<u8>, ServiceError>
 
 #[cfg(test)]
 mod tests {
+    /// Test double for the host side of `dispatch` (D32): no fr test drives an
+    /// outbound dispatch, so any surprise call fails loudly.
+    #[cfg(test)]
+    const unsafe extern "C" fn noop_dispatch(
+        _host: *mut std::ffi::c_void,
+        _event: *const u8,
+        _event_len: usize,
+        _mode: u32,
+        _payload: *const u8,
+        _payload_len: usize,
+        _out_buf: *mut u8,
+        _cap: usize,
+        _out_len: *mut usize,
+    ) -> i32 {
+        dougong_abi::STATUS_FAILED
+    }
     use super::GenerationSource;
     use super::{
         AbortRequest, AdapterSource, BeginReply, BeginRequest, CHUNK_READY_EVENT, DrainReply,
@@ -2025,6 +2041,7 @@ mod tests {
             require: unreachable_require,
             emit: recording_emit,
             grant: unreachable_grant,
+            dispatch: noop_dispatch,
         });
         vtable.notify_seam()(Some("s1"), "gen-0");
         let log = seen.lock().expect("emit log");

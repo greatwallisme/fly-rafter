@@ -375,6 +375,7 @@ mod tests {
         let service = service_with_section();
         let outbound = Outbound::new(HostExports {
             grant: crate::outbound::quiet_grant,
+            dispatch: crate::outbound::noop_dispatch,
             host_handle: service.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,
@@ -394,6 +395,7 @@ mod tests {
         // driver always holds one before refreshing).
         let mut fresh = SystemPromptClient::new(Outbound::new(HostExports {
             grant: crate::outbound::quiet_grant,
+            dispatch: crate::outbound::noop_dispatch,
             host_handle: service.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,
@@ -410,6 +412,7 @@ mod tests {
         let service = service_with_section();
         let outbound = Outbound::new(HostExports {
             grant: crate::outbound::quiet_grant,
+            dispatch: crate::outbound::noop_dispatch,
             host_handle: service.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,
@@ -455,6 +458,7 @@ mod tests {
         let service = Box::into_raw(Box::new(service));
         let outbound = Outbound::new(HostExports {
             grant: crate::outbound::quiet_grant,
+            dispatch: crate::outbound::noop_dispatch,
             host_handle: service.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,
@@ -487,6 +491,7 @@ mod tests {
     fn host_failures_surface_as_face_errors() {
         let outbound = Outbound::new(HostExports {
             grant: crate::outbound::quiet_grant,
+            dispatch: crate::outbound::noop_dispatch,
             host_handle: std::ptr::null_mut(),
             require: failing_require,
             emit: quiet_emit,
