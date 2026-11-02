@@ -67,6 +67,7 @@ pub mod session_query;
 pub mod session_query_time;
 pub mod session_query_tools;
 pub mod shell_env;
+pub mod skill_filesystem;
 pub mod skill_runtime;
 pub mod sre_tools;
 pub mod terminal_render;

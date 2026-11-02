@@ -632,6 +632,18 @@ impl SkillRegistry {
         }))
     }
 
+    /// Invalidates completed catalogs (the fr carrier of the provider
+    /// control's invalidation: the dsh `invalidateCache` semantics, a
+    /// revision bump and a cleared cache; the watch thread and the
+    /// host-mutation observer hold a weak registry handle).
+    ///
+    /// # Panics
+    ///
+    /// A poisoned registry lock.
+    pub fn invalidate(&self) {
+        self.inner.lock().expect("registry lock").invalidate();
+    }
+
     /// Lists invocation-neutral skill summaries for a workspace (dsh
     /// `list`).
     ///

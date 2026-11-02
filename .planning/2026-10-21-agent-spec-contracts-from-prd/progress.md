@@ -1623,3 +1623,12 @@
 - 门：cargo fmt --check+clippy -D warnings 零警告；skill_runtime 6→11 测全绿；三门禁 0 errors（PRD 改动复跑）。
 - 过程：生成退化 6 起（伪影 9 处：Edit 乱码负载 128KB/placeholder 截断×2/phantom 字段/掉行/条 31 retype 字节漂移×2+19.3 标题重复）——判例升级：**retype 长上下文行必须 git diff 对账**（条 31 两处漂移即此例）；python 小步 append ≤12 行+写后即验为可靠形态；Edit 大块 new_string 为退化高发形态。
 - **下一动作=步⑥b skill_filesystem.rs（12 键 config/roots .fr-skills 序/frontmatter serde_yaml_ng/发现/读取/watch 签名轮询线程+钉测）→ 步⑥c。**
+
+## 2026-11-02 — 16f 批 2 步⑥b：skill_filesystem.rs 本体落码
+
+- 全模块（~1800 行）：12 键 FileSystemProviderConfig（dsh Config 1:1 四布尔面 expect 判例）+resolve_config（三正整数校验文案逐字+fr-home 复用 shell_env resolve_home 判例+agents-home FR_AGENTS_HOME>~/.agents+bundled env 仅 include-default-roots）+resolve_roots（序/rank/skipSystem/trustedHost 1:1；.fr/skills+user-fr 源词品牌映射条 33）+find_project_root（.git 向上）+frontmatter 族（split 双 fence/serde_yaml_ng 三分臂/boolean 值族/legacy 拒/invocation 默认/metadata mapping）+读取面（FsDomain 域面=ctx.fs 等价：resolve→stat file→read_text，FS_NOT_TEXT warn 逐字；bundled trusted=std face lossy utf8=Node utf8 等价）+发现（case-fold sort=localeCompare 载体/dir+flat.md locator/hollow+ignored+absent 跳过）+WatchManager（owner 簿记 1:1：shared 累积/project 插入序/max-projects 逐出即失效）+签名轮询（两水平签名=存在性+浅层 mtime+SKILL.md mtime；baseline 不失效/回退清 pending/稳定阈值后失效；单线程 poll=poll-interval-ms；stop flag Arc-only Drop 安全）+observe_host_mutation（is_watched_mutation 门=fs write/edit 直调载体）。
+- SkillRegistry 增 pub invalidate（fr 载体=provider Weak 句柄失效入口，dsh control.invalidate 语义）。
+- 12 测绿：config 三文案/roots 序名/isolated 排 env bundled/frontmatter 五臂/boolean 十值族/legacy 三拒+默认/discovery 四形/provider 端到端 list+get（Complete 臂+content trim+resourceBase）/watch 稳定梯（50ms pend→150 未届→250 失效→300 稳）/project 逐出/shared 累积/host mutation 门（嵌 SKILL.md+flat.md+深文件排除+根外排除+.system）。
+- 门：fmt/clippy -D warnings 零警告（expect×3 带 reason：excessive_bools=12 键 1:1 面、case_sensitive×2=dsh endsWith('.md') 逐字）；全 crate 381/381 绿（FR_DSH_SOURCE 门含）。
+- 过程：退化 2 起（Edit 大块 new_string placeholder 截断续现）；**事故 1 起=clippy question_mark 建议误应用：`line_start = next_newline? + 1` 丢行首偏移→split_frontmatter 对无闭 fence 输入振荡死循环（三测 100% CPU 挂死，活体栈+逐测试二分定位）**——教训：机械应用 lint 建议必须重推等价性，行进算术逐字核；300% CPU 进程=失控循环非慢编译，`ps` CPU% 是第一判据。clippy 23 错一轮修尽（无 lint 放宽）。
+- **下一动作=步⑥c skill_tools.rs（工具+catalog/gesture 双 pre-step listener+skills 服务面 METHOD_PRE_STEP=0+方法号 201-203+describe 165+schema.rs）→ 步⑥d loop 接线+plugin_shell 注册+fr-schema+绑定+终门。**
