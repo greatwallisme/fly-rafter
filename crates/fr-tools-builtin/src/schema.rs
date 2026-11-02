@@ -724,6 +724,65 @@ pub fn plugin_manager_output_schema() -> Value {
     json!({ "type": "string" })
 }
 
+/// The `skill` parameter table (the dsh `defineTool` `parameters`: the
+/// one required row).
+#[must_use]
+pub fn skill_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "required": true,
+                "description": "The exact skill name from the available skills list.",
+            },
+        },
+    })
+}
+
+/// The `skill` output contract (the dsh `defineTool` `output.schema`:
+/// the loaded summary plus the body, with the three-arm resource base).
+#[must_use]
+pub fn skill_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "name": { "type": "string", "required": true },
+            "provider": { "type": "string", "required": true },
+            "resourceBase": {
+                "oneOf": [
+                    {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "kind": { "type": "string", "required": true, "const": "directory" },
+                            "path": { "type": "string", "required": true },
+                        },
+                    },
+                    {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "kind": { "type": "string", "required": true, "const": "url" },
+                            "url": { "type": "string", "required": true },
+                        },
+                    },
+                    {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "kind": { "type": "string", "required": true, "const": "opaque" },
+                            "description": { "type": "string", "required": true },
+                        },
+                    },
+                ],
+            },
+            "content": { "type": "string", "required": true },
+        },
+    })
+}
+
 /// The `lsp` parameter table (the catalog-frozen base: the four rows).
 #[must_use]
 pub fn lsp_parameters() -> Value {
@@ -2399,6 +2458,73 @@ mod tests {
             super::plugin_manager_output_schema(),
             serde_json::json!({ "type": "string" })
         );
+    }
+
+    /// The `skill` tables pin their catalog rows (Q97-A: the one
+    /// required name row with its description verbatim, the three-arm
+    /// resource-base oneOf with `const` discriminators, and the
+    /// additionalProperties faces).
+    #[test]
+    fn skill_pins_the_catalog_table() {
+        let parameters = super::skill_parameters();
+        let keys = parameters
+            .pointer("/properties")
+            .and_then(Value::as_object)
+            .expect("skill properties");
+        assert_eq!(
+            keys.keys().collect::<Vec<_>>(),
+            vec!["name"],
+            "the name row is the only parameter"
+        );
+        assert_eq!(keys["name"]["type"], serde_json::json!("string"));
+        assert_eq!(keys["name"]["required"], serde_json::json!(true));
+        assert_eq!(
+            keys["name"]["description"],
+            serde_json::json!("The exact skill name from the available skills list.")
+        );
+        let output = super::skill_output_schema();
+        assert_eq!(output["type"], serde_json::json!("object"));
+        assert_eq!(output["additionalProperties"], serde_json::json!(false));
+        let fields = output
+            .pointer("/properties")
+            .and_then(Value::as_object)
+            .expect("skill output properties");
+        assert_eq!(
+            fields.keys().collect::<Vec<_>>(),
+            vec!["name", "provider", "resourceBase", "content"],
+        );
+        for row in ["name", "provider", "content"] {
+            assert_eq!(fields[row]["type"], serde_json::json!("string"), "{row}");
+            assert_eq!(fields[row]["required"], serde_json::json!(true), "{row}");
+        }
+        let arms = fields["resourceBase"]
+            .get("oneOf")
+            .and_then(Value::as_array)
+            .expect("resourceBase oneOf");
+        assert_eq!(arms.len(), 3);
+        let expects = [
+            ("directory", "path"),
+            ("url", "url"),
+            ("opaque", "description"),
+        ];
+        for (arm, (kind, field)) in arms.iter().zip(expects) {
+            assert_eq!(arm["type"], serde_json::json!("object"));
+            assert_eq!(arm["additionalProperties"], serde_json::json!(false));
+            assert_eq!(arm["properties"]["kind"]["const"], serde_json::json!(kind));
+            assert_eq!(
+                arm["properties"]["kind"]["required"],
+                serde_json::json!(true)
+            );
+            assert_eq!(
+                arm["properties"][field]["type"],
+                serde_json::json!("string")
+            );
+            assert_eq!(
+                arm["properties"][field]["required"],
+                serde_json::json!(true)
+            );
+            assert_eq!(arm["properties"].as_object().expect("arm fields").len(), 2);
+        }
     }
 
     /// The lsp tables pin their catalog rows (Q97-A: the four rows,

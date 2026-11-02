@@ -98,6 +98,25 @@ pub mod session_query {
     pub const METHOD_OBSERVE: u32 = 1400;
 }
 
+/// The `'skills'` service face (owner crate `fr-tools-builtin`; the dsh
+/// `ctx.skills` seam name verbatim).
+///
+/// One method: the pre-step transform the agent loop consumes after its
+/// waterfall and before instruction folding — `{session, messages}` →
+/// `{messages}` (the skill catalog maintenance plus `/name` gesture
+/// injections).
+pub mod skills {
+    /// The provided service name consumers inject.
+    pub const SERVICE_NAME: &str = "skills";
+    /// `{"session", "messages"}` → `{"messages"}` — one pre-step
+    /// transform (the durable catalog pass, then the gesture pass).
+    ///
+    /// The selector sits in the 1500+ band (the disjoint method-space
+    /// judgment; the 2026-11-02 ruling keeps the single-method shape of
+    /// the pre-step seam while dodging the artifact-local `0` slot).
+    pub const METHOD_PRE_STEP: u32 = 1500;
+}
+
 /// The `'user-questions'` service face (owner crate `fr-tools-builtin`;
 /// the dsh `ctx.userQuestions` seam).
 pub mod user_questions {

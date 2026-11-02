@@ -695,6 +695,8 @@ fr headless [TASK] [--session-id <id>] [--json] [--help]
 
 35. `skills/change` 失效通知事件无消费者（备案）：dsh skill registry 失效时发布 skills/change 事件通知消费者（供监听者即时刷新）；fr M1 该事件无消费者（catalog listener 每步重算目录，Q69-B 既裁），注册表失效为裸 revision bump+缓存清空，不发布事件。
 
+36. skill catalog toolVisible 门载体（2026-11-02 步⑥c裁决，机制替换备案）：dsh 门=每步 `ctx.tools.get('skill', agent) === skillTool` 精确定义身份（防 scoped 遮蔽与 restrict 两臂）；fr M1 为注册活性位——激活时登记、注销仅 teardown disposer 且与监听者同亡（M1 结构下 tools registry 拒重名注册、restrict 无 scoped context 不可达，dsh 门要防的两臂无载体），每一可达态观察行为与 dsh 等价（结构死臂注记，live-agent/bash-pwsh switcher 判例同族）。skills 服务面方法号同日裁决：METHOD_PRE_STEP=1500（问2=A 原 0 值与 in-artifact 号段不相交结构事实冲突——dylib 形态全部 provide 共享一张 export table、call 只透传 method 无服务名，1200/1300/1400 高段步进判例延续），单方法 `{session,messages}→{messages}` 形状钉不变。用户裁决 2026-11-02（步⑥c两问裁决）。
+
 ### 19.3 wire 层声明
 
 与 DeepSeek 官方 API 的交互仅使用标准 Anthropic Messages 协议。不实现 `dsh_session_log` 会话日志回传、`dsh_plugin_packages` 上报与 `x-deepseek-harness-*` 头。官方 API 在无这些扩展时正常工作，仅无 DeepSeek 服务端会话持久化。

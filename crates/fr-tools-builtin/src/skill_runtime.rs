@@ -572,6 +572,12 @@ impl SkillRegistry {
                 },
             )?
         };
+        // The dsh registration-invalidates-right-after-the-layer-change
+        // judgment (ScopedLayers.effect's onChange fires on apply, not
+        // only on disposal): the new provider must be visible to a
+        // collect whose cache still holds the pre-registration
+        // revision.
+        self.invalidate();
         Ok(Box::new(move || {
             let Ok(lock) = self.inner.lock() else {
                 return;
@@ -624,6 +630,11 @@ impl SkillRegistry {
         let Some(undo) = undo else {
             return Ok(Box::new(|| {}));
         };
+        // The dsh registration effect invalidates right after the layer
+        // change (ScopedLayers.effect's onChange fires on apply, not
+        // only on disposal): the new row must be visible to a collect
+        // whose cache still holds the pre-registration revision.
+        self.invalidate();
         Ok(Box::new(move || {
             if let Ok(mut inner) = self.inner.lock() {
                 undo.apply(&mut inner);

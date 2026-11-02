@@ -2701,6 +2701,9 @@ impl BuiltinState {
             std::sync::Arc::new(web),
             Some(crate::web_tools::BAKED_SEARCH_PROVIDER.to_owned()),
             Some(crate::web_tools::BAKED_FETCH_PROVIDER.to_owned()),
+            // The skill runtime rides the ⑥d assembly (the registry, the
+            // provider, and the tool registration row land together).
+            None,
         )
         .ok()?;
 

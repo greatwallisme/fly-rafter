@@ -1632,3 +1632,12 @@
 - 门：fmt/clippy -D warnings 零警告（expect×3 带 reason：excessive_bools=12 键 1:1 面、case_sensitive×2=dsh endsWith('.md') 逐字）；全 crate 381/381 绿（FR_DSH_SOURCE 门含）。
 - 过程：退化 2 起（Edit 大块 new_string placeholder 截断续现）；**事故 1 起=clippy question_mark 建议误应用：`line_start = next_newline? + 1` 丢行首偏移→split_frontmatter 对无闭 fence 输入振荡死循环（三测 100% CPU 挂死，活体栈+逐测试二分定位）**——教训：机械应用 lint 建议必须重推等价性，行进算术逐字核；300% CPU 进程=失控循环非慢编译，`ps` CPU% 是第一判据。clippy 23 错一轮修尽（无 lint 放宽）。
 - **下一动作=步⑥c skill_tools.rs（工具+catalog/gesture 双 pre-step listener+skills 服务面 METHOD_PRE_STEP=0+方法号 201-203+describe 165+schema.rs）→ 步⑥d loop 接线+plugin_shell 注册+fr-schema+绑定+终门。**
+
+## 2026-11-02 — 16f 批 2 步⑥c：skill_tools.rs 本体落码+⑥a 缺陷修复
+
+- 双裁决（用户）：METHOD_PRE_STEP=1500（号段不相交结构事实）；toolVisible=in-crate 注册活性。PRD 19.2 条 36 落档，三门禁复跑 0 errors。
+- skill_tools.rs（~1700 行）：catalog 族/gesture 族/pre_step 组合/工具体三法/serve 单方法；service.rs 201-203+describe 162→165+Option<SkillRuntime> 槽（plugin_shell 暂传 None，⑥d 装配）；schema.rs skill 两表+Q97-A 钉测；fr-wire skills 服务常量。
+- **缺陷修复（新钉测揭出）**：SkillRegistry register/register_provider 注册后未失效 collect 缓存——dsh ScopedLayers.effect onChange（store.ts:271-272）佐证注册即失效，两处补 self.invalidate()。
+- 门：fmt/clippy -D warnings 零警告；workspace 1684/0；doc 绿；三门禁 0 errors。fr-tools-builtin 381→399。
+- 退化 5 起（Edit 大块×2 含吞闭包一起、heredoc 伪影×3）——判例固化：≤50 行/步+tripwire 惯例。
+- **下一动作=步⑥d loop 接线+plugin_shell 注册+fr-schema 三 config 组+catalog_gen+CONFIG/TOOLS 绑定+终门 → 步⑦ 收口。**
