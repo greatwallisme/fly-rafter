@@ -691,6 +691,84 @@ fn build_table() -> Vec<(&'static str, Schema)> {
                 ),
             ]),
         ),
+        ("fr-compaction", compaction_row()),
+    ]
+}
+
+/// The `fr-compaction` declaration: the dsh compaction-basic schemastery
+/// face (`packages/compaction/compaction-basic/src/index.ts:81-128`) with
+/// kebab-case keys — the nine policy fields top-level, the exact-target
+/// policy table, and the automatic-listener switch.
+fn compaction_row() -> Schema {
+    let mut model_policy_properties = vec![
+        required_string_property("provider", "Registered provider route to match."),
+        required_string_property("model", "Exact routed model id to match within provider."),
+    ];
+    model_policy_properties.extend(compaction_policy_properties());
+    let mut properties = compaction_policy_properties();
+    properties.push(Property {
+        name: "model-policies".to_owned(),
+        required: false,
+        schema: Schema::Array {
+            items: Box::new(object(model_policy_properties)),
+            description: Some(
+                "Exact provider/model overrides; duplicate targets fail plugin load.".to_owned(),
+            ),
+        },
+    });
+    properties.push(optional_boolean_property(
+        "auto",
+        "Enable automatic step-boundary pressure and overflow-recovery listeners. Defaults to true.",
+    ));
+    object(properties)
+}
+
+/// The nine compaction policy fields shared by the top-level defaults and
+/// each exact-target override (the dsh `CompactionPolicyConfig` fields; the
+/// schemastery declares no defaults — resolution owns them).
+fn compaction_policy_properties() -> Vec<Property> {
+    vec![
+        optional_unbounded_number_property(
+            "threshold-ratio",
+            "Window fraction for pressure; capped at context window minus reserved output and headroom tokens. Defaults to 0.8.",
+        ),
+        optional_integer_property(
+            "headroom-tokens",
+            0,
+            "Additional pressure headroom beyond the routed output reservation. Non-negative integer; defaults to 65536.",
+        ),
+        optional_unbounded_number_property(
+            "retain-ratio",
+            "Recent context retained as a fraction of context window minus reserved output tokens. Defaults to 0.16.",
+        ),
+        optional_integer_property(
+            "retain-tokens",
+            0,
+            "Absolute recent-context budget; mutually exclusive with retain-ratio.",
+        ),
+        optional_string_property(
+            "summarization-provider",
+            "Summary provider; set together with summarization-model, or inherit the conversation target.",
+        ),
+        optional_string_property(
+            "summarization-model",
+            "Summary model; set together with summarization-provider, or inherit the conversation target.",
+        ),
+        optional_integer_property(
+            "max-tokens",
+            1,
+            "Provider generation cap for summarization. Defaults to the resolved headroom; an explicit cap must be positive.",
+        ),
+        optional_integer_property(
+            "compaction-retries",
+            0,
+            "Extra attempts after the first compaction when pressure remains above threshold. Defaults to 1.",
+        ),
+        optional_integer_property(
+            "max-overflow-retries",
+            0,
+            "Maximum retries after canonical context overflow; 0 disables recovery. Defaults to 1.",
+        ),
     ]
 }
 
@@ -760,6 +838,34 @@ fn optional_number_property(name: &str, description: &str) -> Property {
         schema: Schema::Number {
             min: Some(1.0),
             max: None,
+            default: None,
+            description: Some(description.to_owned()),
+        },
+    }
+}
+
+/// One optional number property without bounds or default (the dsh
+/// `z.number()` raw rows; range discipline belongs to resolution).
+fn optional_unbounded_number_property(name: &str, description: &str) -> Property {
+    Property {
+        name: name.to_owned(),
+        required: false,
+        schema: Schema::Number {
+            min: None,
+            max: None,
+            default: None,
+            description: Some(description.to_owned()),
+        },
+    }
+}
+
+/// One optional boolean property without a default (the dsh `z.boolean()`
+/// raw rows).
+fn optional_boolean_property(name: &str, description: &str) -> Property {
+    Property {
+        name: name.to_owned(),
+        required: false,
+        schema: Schema::Boolean {
             default: None,
             description: Some(description.to_owned()),
         },
@@ -2012,6 +2118,97 @@ mod tests {
         assert!(
             !unknown_nested_key.is_empty(),
             "the camelCase dsh key is not an fr key"
+        );
+    }
+
+    /// The fr-compaction row pins the dsh compaction-basic schemastery
+    /// face: eleven optional top-level keys, the required provider/model
+    /// identity pair inside each policy entry, and the closed object faces.
+    #[test]
+    fn compaction_config_pins_the_policy_table() {
+        let schema = lookup("fr-compaction").expect("the compaction declaration");
+        let Schema::Object {
+            properties,
+            additional_properties,
+            ..
+        } = schema
+        else {
+            panic!("the compaction declaration is an object");
+        };
+        assert!(!additional_properties);
+        let names: Vec<_> = properties
+            .iter()
+            .map(|property| property.name.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "threshold-ratio",
+                "headroom-tokens",
+                "retain-ratio",
+                "retain-tokens",
+                "summarization-provider",
+                "summarization-model",
+                "max-tokens",
+                "compaction-retries",
+                "max-overflow-retries",
+                "model-policies",
+                "auto",
+            ]
+        );
+        // Every key is optional; the defaults live in resolution.
+        assert!(
+            violations_empty(schema, &serde_json::json!({})),
+            "an empty config validates"
+        );
+        // The closed face rejects undeclared keys.
+        assert_eq!(
+            first_message(schema, &serde_json::json!({"models": {}})),
+            "unknown key `models`"
+        );
+        // The integer and number faces reject their probes.
+        assert_eq!(
+            first_message(schema, &serde_json::json!({"headroom-tokens": -1})),
+            "below minimum"
+        );
+        assert_eq!(
+            first_message(schema, &serde_json::json!({"max-tokens": 0})),
+            "below minimum"
+        );
+        assert_eq!(
+            first_message(schema, &serde_json::json!({"compaction-retries": 1.5})),
+            "expected integer"
+        );
+        // Each policy entry carries the required identity pair.
+        assert!(violations_empty(
+            schema,
+            &serde_json::json!({"model-policies": [{"provider": "p", "model": "m"}]})
+        ));
+        assert_eq!(
+            first_message(
+                schema,
+                &serde_json::json!({"model-policies": [{"model": "m"}]})
+            ),
+            "missing required key `provider`"
+        );
+        let below_headroom_floor = validate(
+            schema,
+            &serde_json::json!({"model-policies": [{"provider": "p", "model": "m", "headroom-tokens": -1}]}),
+        );
+        assert!(
+            below_headroom_floor
+                .iter()
+                .any(|violation| violation.path.contains("headroom-tokens")),
+            "{below_headroom_floor:?}"
+        );
+        // The nested policy object projects the closed face.
+        let projected = to_json_schema(schema);
+        assert_eq!(
+            projected.pointer(
+                "/anyOf/0/properties/model-policies/anyOf/0/items/anyOf/0/\
+                 additionalProperties"
+            ),
+            Some(&serde_json::json!(false))
         );
     }
 }

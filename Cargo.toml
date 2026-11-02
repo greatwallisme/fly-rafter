@@ -24,6 +24,7 @@ members = [
     "crates/fr-shell",
     "crates/fr-storage",
     "crates/fr-token-meter",
+    "crates/fr-compaction",
     "crates/fr-tools-builtin",
 ]
 

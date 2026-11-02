@@ -835,6 +835,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fr-compaction"
+version = "0.1.0"
+dependencies = [
+ "dougong-abi",
+ "fr-wire",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fr-config"
 version = "0.1.0"
 dependencies = [

@@ -1732,3 +1732,12 @@
 - **事故**：Write/heredoc 退化多起（estimate.rs 两次语法碎片、offload_targets 坏替换、raw string 丢引号）——全部当轮发现当轮修复；refine 重跑 strip 手工边界（HEAD 恢复判例固化）。
 - **终门认证**：fmt ✓/clippy workspace -D warnings 0/全测（FR_DSH_SOURCE）1729 passed 0 failed（+35）/doc -D warnings ✓/三门禁 0 errors；lifecycle compaction 26 场景全 pending（17h 绑定前设计态，quality 1.0）。
 - **下一动作=17d：fr-compaction 核心域+config+fr-schema 组（批 2：CompactionEngine 本体+config 解析族+checkpoint/tool-pairing 纯件）。**
+
+## 2026-11-03 — 17d 完成：fr-compaction 核心域+config+fr-schema 组全落地
+
+- **新 crate fr-compaction**（cdylib+rlib，5 模块+28 钉测）：brand（CompactionId newtype serde transparent）/types（CompactionTrigger+ManualCompactionErrorCode 六码+ManualCompactionError+ShadowedRange+四 shadow-event payload 结构体 start/summary/end/prune+CompactionResult+event_type 常量；turn=Option<u64> 序列化 null、summary 并集=raw_output/llm_stream_call 双 Option skip-none、v4_checks 形状全兼容）/checkpoint（COMPACT_CHECKPOINT_KIND+CheckpointTag 定串行化+compact_checkpoint_source const fn+is_compact_checkpoint_source 谓词走 MessageSource::Other raw kind）/tool_pairing（BalanceCache{generation,cut_balanced,index_by_seq,in_progress_tool_calls}+balance_cache rebuild/extend/cached 三臂镜像 dsh 条件+校验先行不半提交+binary search event_at+三 verbatim 错误文案）/config（resolve_config/resolve_target_policy/resolve_compact_spec+TargetPressureConfigError+ParsedPolicy 验证提取合一+kebab-case 键与文案+SAFE_INTEGER 整数纪律+f64 乘 floor 数学+dsh 35 项 bad 表全移植拆两测试）。
+- **fr-schema**：registry 增 "fr-compaction" 行（REQ-FR-CONFIG spec 边界判例）+compaction_row/compaction_policy_properties 助手+schemastery 1:1（z.number() 无界→新助手 optional_unbounded_number_property——既有 optional_number_property 带 min 1 不适用+z.boolean() 可省→optional_boolean_property；provider/model required；model-policies=Array<Object closed>）+1 钉测（11 键序/空配置/unknown key/整数探针/required 对/嵌套 additionalProperties 投影 anyOf/0 深指针）。
+- **判决**：CompactionEngine trait/服务缝不落 17d（=17f 插件 shell 的 "compaction" 服务面，依赖实现先存在）；CompactionAgentContext 随 17e；CHECKPOINT_PREAMBLE/括弧标记=dsh summarizer.ts（17f，开工勘察 checkpoint.ts 归属勘误）。
+- **事故**：Write 退化 5 起（lib.rs 两次/CheckpointTag 截断/skip_serial_if 错名/types.rs prune:: 碎片）全部写后即验当轮修复；SessionSeq 无 Display→错误文案 .get()；测试助手 seq()/seq_list() 构造判例。
+- **终门认证**：fmt ✓/clippy workspace -D warnings 0/全测（FR_DSH_SOURCE）1759 passed 0 failed（+30）/doc -D warnings ✓/三门禁 0 errors（exit 0×3）。
+- **下一动作=17e：选区+压缩管线+括弧+summary-error waterfall（dsh compaction-basic/src/region.ts 600 行+index.ts 压力触发/溢出恢复管线核心）。**
