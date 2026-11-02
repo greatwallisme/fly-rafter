@@ -29,7 +29,7 @@ pub use service::{
     METHOD_SESSION_APPEND, METHOD_SESSION_CREATE, METHOD_SESSION_DRAIN, METHOD_SESSION_FLUSH,
     METHOD_SESSION_FORK, METHOD_SESSION_RESTORE, METHOD_SESSION_RESUME, SessionService,
 };
-pub use session::{Session, SurfaceIntent, canonical_header};
+pub use session::{Session, SurfaceIntent, canonical_header, derive_event_message};
 pub use store::{DetachHandle, SessionMeta, SessionStore, SubscriberId};
 pub use surface::{SurfaceFoldResult, SurfaceReplacement, fold_surface};
 pub use tool_history::ToolHistoryProjection;

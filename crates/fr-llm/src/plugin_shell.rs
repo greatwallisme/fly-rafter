@@ -27,7 +27,8 @@ pub const PLUGIN_NAME: &str = "fr-llm";
 pub const METHOD_DESCRIBE: u32 = 1;
 
 pub use crate::generation::{
-    METHOD_ABORT, METHOD_BEGIN, METHOD_DRAIN, METHOD_PREPARE_CALL, METHOD_RESOLVE_MODEL_INFO,
+    METHOD_ABORT, METHOD_BEGIN, METHOD_DRAIN, METHOD_FILE_REQUEST_TEXT,
+    METHOD_IMAGE_REQUEST_PRICING, METHOD_PREPARE_CALL, METHOD_RESOLVE_MODEL_INFO,
 };
 
 /// The descriptor the loader consumes: the `llm` service over the dynamic
@@ -107,7 +108,9 @@ pub fn dispatch(state: &ShellState, method: u32, payload: &[u8]) -> Result<Vec<u
         | METHOD_BEGIN
         | METHOD_DRAIN
         | METHOD_ABORT
-        | METHOD_RESOLVE_MODEL_INFO => {
+        | METHOD_RESOLVE_MODEL_INFO
+        | METHOD_IMAGE_REQUEST_PRICING
+        | METHOD_FILE_REQUEST_TEXT => {
             match crate::generation::serve(&state.service, method, payload) {
                 Ok(reply) => Ok(reply),
                 Err(crate::generation::ServiceError::Llm(failure)) => {
@@ -265,7 +268,10 @@ pub static DOUGONG_PLUGIN_EXPORTS: PluginExports = PluginExports {
 
 #[cfg(test)]
 mod tests {
-    use super::{METHOD_BEGIN, METHOD_DESCRIBE, PLUGIN_NAME, SERVICE_NAME, ShellState, dispatch};
+    use super::{
+        METHOD_BEGIN, METHOD_DESCRIBE, METHOD_FILE_REQUEST_TEXT, PLUGIN_NAME, SERVICE_NAME,
+        ShellState, dispatch,
+    };
 
     fn quiet_state() -> ShellState {
         ShellState::new(None)
@@ -319,6 +325,56 @@ mod tests {
         assert_eq!(parsed["provide"][0], "llm");
         assert_eq!(parsed["inject"], serde_json::json!([]));
         assert_eq!(parsed["listen"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn method_constants_match_the_fr_wire_table() {
+        use fr_wire::services::llm as wire;
+        assert_eq!(super::METHOD_DESCRIBE, wire::METHOD_DESCRIBE);
+        assert_eq!(super::METHOD_PREPARE_CALL, wire::METHOD_PREPARE_CALL);
+        assert_eq!(super::METHOD_BEGIN, wire::METHOD_BEGIN);
+        assert_eq!(super::METHOD_DRAIN, wire::METHOD_DRAIN);
+        assert_eq!(super::METHOD_ABORT, wire::METHOD_ABORT);
+        assert_eq!(
+            super::METHOD_RESOLVE_MODEL_INFO,
+            wire::METHOD_RESOLVE_MODEL_INFO
+        );
+        assert_eq!(
+            super::METHOD_IMAGE_REQUEST_PRICING,
+            wire::METHOD_IMAGE_REQUEST_PRICING
+        );
+        assert_eq!(
+            super::METHOD_FILE_REQUEST_TEXT,
+            wire::METHOD_FILE_REQUEST_TEXT
+        );
+    }
+
+    /// The meter's file-text face routes through the shell and answers
+    /// the no-path handle (the dispatch projection is not wired yet).
+    #[test]
+    fn file_request_text_answers_the_no_path_handle() {
+        use fr_wire::content::FileAttachmentRef;
+        let state = quiet_state();
+        let reference = FileAttachmentRef {
+            attachment_id: fr_wire::ids::AttachmentId::new("6f0a3f6c8f6c4b9fb5d1d0a3f6c8f6c4"),
+            name: "report.txt".to_owned(),
+            bytes: 128,
+        };
+        let payload = serde_json::json!({ "ref": reference }).to_string();
+        let reply =
+            dispatch(&state, METHOD_FILE_REQUEST_TEXT, payload.as_bytes()).expect("file text");
+        let reply: serde_json::Value = serde_json::from_slice(&reply).expect("json");
+        assert_eq!(
+            reply["text"],
+            crate::projection::file_handle_text(&reference, None)
+        );
+        assert!(
+            reply["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("cannot access a readable path")),
+            "the no-path arm names the limitation: {:?}",
+            reply["text"]
+        );
     }
 }
 

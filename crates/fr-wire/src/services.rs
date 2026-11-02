@@ -538,6 +538,52 @@ pub mod llm {
     /// `{provider, model}` → `WireModelInfo` — exact-route model metadata
     /// without starting a generation (the dsh `llm.resolveModelInfo`).
     pub const METHOD_RESOLVE_MODEL_INFO: u32 = 6;
+    /// Per-occurrence route image pricing (`{provider, model, images}` →
+    /// `{prices}`).
+    ///
+    /// The reply prices are `[{visualTokens, text}]`, or `null` when the
+    /// route declares no pricing (the meter keeps the fixed heuristic).
+    /// The dsh `imageRequestPricing` + `priceImages` pair merges into one
+    /// call because the pricing object cannot cross the wire.
+    /// Synchronous, no I/O.
+    pub const METHOD_IMAGE_REQUEST_PRICING: u32 = 7;
+    /// The exact file handle text the request dispatch uses
+    /// (`{ref}` → `{text}`; the dsh `fileRequestText`).
+    ///
+    /// Until the attachments path resolver wires into dispatch (the
+    /// projection is not wired today), the face answers the no-path arm.
+    pub const METHOD_FILE_REQUEST_TEXT: u32 = 8;
+}
+
+/// The `'token-meter'` service face (owner crate `fr-token-meter`).
+///
+/// The PRD 4.5 row and 19.2 entry 37 erratum: the replay-metering
+/// authority the compaction trigger, selection, and shrink gates
+/// consume. Method numbering is per-service (the permission-presets
+/// precedent: one artifact export table, one band per service face);
+/// the three fold selectors are this plugin's projection-unit endpoints
+/// the session-projections relay invokes under the runtime grant
+/// (Q110′A′).
+pub mod token_meter {
+    /// The provided service name consumers inject.
+    pub const SERVICE_NAME: &str = "token-meter";
+    /// Face metadata echo (`{name, service, abiVersion}`).
+    pub const METHOD_DESCRIBE: u32 = 0;
+    /// `{id, requestHeader?}` → `TokenMeasurement` (the dsh
+    /// `tokenMeter.measure(session, requestHeader?)`).
+    pub const METHOD_MEASURE: u32 = 1;
+    /// `{message}` → `{tokens}` (the dsh instance face
+    /// `tokenMeter.estimateMessage`).
+    pub const METHOD_ESTIMATE_MESSAGE: u32 = 2;
+    /// Full log → `{state}`: the `tokenUsage` projection unit (dsh
+    /// stateVersion 2).
+    pub const METHOD_FOLD_TOKEN_USAGE: u32 = 3;
+    /// Full log → `{state}`: the `contextPressure` projection unit (dsh
+    /// stateVersion 5).
+    pub const METHOD_FOLD_CONTEXT_PRESSURE: u32 = 4;
+    /// Full log → `{state}`: the `contextBreakdown` projection unit (dsh
+    /// stateVersion 6).
+    pub const METHOD_FOLD_CONTEXT_BREAKDOWN: u32 = 5;
 }
 
 /// The `'terminals'` service face (the fr-shell PTY registry band; PRD

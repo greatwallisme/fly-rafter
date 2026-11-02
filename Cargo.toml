@@ -23,6 +23,7 @@ members = [
     "crates/fr-sandbox",
     "crates/fr-shell",
     "crates/fr-storage",
+    "crates/fr-token-meter",
     "crates/fr-tools-builtin",
 ]
 
@@ -83,6 +84,7 @@ fr-shell = { path = "crates/fr-shell" }
 fr-storage = { path = "crates/fr-storage" }
 fr-tools-builtin = { path = "crates/fr-tools-builtin" }
 fr-sandbox = { path = "crates/fr-sandbox" }
+fr-token-meter = { path = "crates/fr-token-meter" }
 
 # Lint table aligned with the dougong workspace (PRD 21): the zero-warning
 # gates (fmt / clippy -D warnings / test / doc) must stay reproducible.

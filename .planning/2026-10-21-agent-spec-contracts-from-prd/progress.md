@@ -1715,3 +1715,20 @@
 - hook 误报 5 处透明接受（service_tests 947+ 行既有测试惯用法，HEAD 同形，本 diff 仅 +17 行于 23-49 区）。
 - **终门认证**：fmt ✓/clippy -D warnings 0/全测（FR_DSH_SOURCE）51 target 零失败/doc ✓；diff 28 文件 +321/-19。
 - **下一动作=17c 后半：fr-token-meter 新 crate（度量引擎 1:1 移植+provide "token-meter" 服务缝+PRD 4.5 已备行；勘察锚见 findings「fr-compaction 切片开工勘察」token-meter 节）→17d-17h。**
+- **步⑦ 收口：提交 3194403**（fr master，28 文件 +331/-19，pre-commit guard 按既有裁决 --no-verify）：17a 文档治理+17c 前半 dougong 0.5.0 吸收一体提交，提交信息载 17a/17c 全明细与 17b 背景引用（dougong 侧 9bb3b0b+五 crate 已发布）。
+
+## 2026-11-03 — 17c 后半 fr-token-meter 开工：三裁决落定
+
+- 用户裁决（2026-11-03，三项全采推荐）：①compaction spec 边界=refine-drafts.py 映射扩 ["crates/fr-compaction/**","crates/fr-token-meter/**"]+重跑 refine；②fr-llm 服务面本切片即增 METHOD_IMAGE_REQUEST_PRICING+METHOD_FILE_REQUEST_TEXT（GenerationSource 增 default-None pricing 法；文件 no-path 臂=dispatch 未接线一致形态）；③token-meter descriptor inject 硬依赖 "llm"（降级臂在声明式模型不可达，crate 文档备案）。
+- 备案项（不阻塞）：eager session/event 监听省略（fr 无该内核事件，measure 按需同步输出逐字节一致）；ReplayState 表 LRU 内部上限（dsh WeakMap+GC 对应物，逐出重算结果不变）；turn_usage 随 crate 全量移植；方法号段 DESCRIBE=0/MEASURE=1/ESTIMATE_MESSAGE=2/FOLD_TOKEN_USAGE=3/FOLD_CONTEXT_PRESSURE=4/FOLD_CONTEXT_BREAKDOWN=5；fr-session projected_message 转 pub derive_event_message。
+- 执行序：refine 映射→fr-wire token_meter+llm 两方法→fr-session derive export→fr-llm GenerationSource+serve→fr-token-meter 新 crate（types/estimate/surface_fold/route_pricing/surface_projection/usage_projection/breakdown_projection/turn_usage/meter/plugin_shell+tests）→workspace members→四门+三门禁。
+
+## 2026-11-03 — 17c 后半完成：fr-token-meter 新 crate 全量落地
+
+- **文档治理**：refine-drafts.py REQ-FR-COMPACTION 映射扩 ["crates/fr-compaction/**","crates/fr-token-meter/**"]+重跑 refine（判例：refine 重跑会覆盖手工维护的 spec 边界扩——builtin-tools/llm 两 spec 被 strip 后已 HEAD 恢复，仅 compaction spec +1 行 Allowed）；三门禁复绿。
+- **三缝**：fr-wire services.rs 增 token_meter 模块（SERVICE "token-meter"+方法 0-5）+llm 两方法（IMAGE_REQUEST_PRICING=7/FILE_REQUEST_TEXT=8）；fr-session projected_message→pub derive_event_message（lib re-export）；fr-llm GenerationSource 增 default-None image_request_pricing（AdapterSource 代理转发）+GenerationService 两法+serve 两臂+plugin_shell 路由；llm 钉测 4 新（常量表/图价双臂含 null 回退/文件 no-path 面×2）。
+- **fr-token-meter crate**（11 模块，cdylib+rlib）：types/estimate（UTF-16 码元计数+raw 消息双形状）/surface_fold（plan/commit+verbatim 错误）/route_pricing（FileTextResolver/ImagePriceResolver 别名+价数错配 verbatim）/surface_projection（shadow-price fold）/usage_projection（tokenUsage v2+contextPressure v5）/breakdown_projection（v6 systems+claim）/turn_usage（derive_turn_token_usage 状态机，fold_retry_marker/fold_lifecycle_event 双层）/meter（ReplayState+fold_event plan-commit 纪律+measure 三基线臂+headerEquals 同构）/projection（ContextPressureProjection.view）/plugin_shell（DESCRIPTOR inject 三服务+grant+3 单元注册+LRU 128 会话表+增量 catch_up from offset+wire resolvers）。
+- **钉测 35 新**：UTF-16 计数（CJK/emoji 向量）/密度数学/surface 折算配平+verbatim 错误/shadow 三臂/usage addReplacing+retry-started 闭槽/pressure 投影/breakdown 三分类+系统替换拒绝 verbatim/turn 全生命周期（双缓存桶约束/retry-started 前置/route 丢弃规则）/meter 三基线+offload 补丁+step 配对 verbatim/shell 端到端（fake host：grant 序+三注册键版本+measure 增量 catch_up+fold state+estimate 面）。
+- **事故**：Write/heredoc 退化多起（estimate.rs 两次语法碎片、offload_targets 坏替换、raw string 丢引号）——全部当轮发现当轮修复；refine 重跑 strip 手工边界（HEAD 恢复判例固化）。
+- **终门认证**：fmt ✓/clippy workspace -D warnings 0/全测（FR_DSH_SOURCE）1729 passed 0 failed（+35）/doc -D warnings ✓/三门禁 0 errors；lifecycle compaction 26 场景全 pending（17h 绑定前设计态，quality 1.0）。
+- **下一动作=17d：fr-compaction 核心域+config+fr-schema 组（批 2：CompactionEngine 本体+config 解析族+checkpoint/tool-pairing 纯件）。**

@@ -66,6 +66,16 @@ pub const METHOD_ABORT: u32 = 5;
 /// `llm.resolveModelInfo`; `{provider, model}` → `WireModelInfo`).
 pub const METHOD_RESOLVE_MODEL_INFO: u32 = 6;
 
+/// Method selector: price one ordered image list under one exact route
+/// (the dsh `imageRequestPricing` + `priceImages` pair merged into one
+/// call; `{provider, model, images}` → `{prices}` or `{prices: null}`).
+pub const METHOD_IMAGE_REQUEST_PRICING: u32 = 7;
+
+/// Method selector: resolve the exact file handle text one durable file
+/// occurrence contributes to requests (the dsh `fileRequestText`;
+/// `{ref}` → `{text}`).
+pub const METHOD_FILE_REQUEST_TEXT: u32 = 8;
+
 /// The notification event every buffer append emits (decision 46); the
 /// payload is `{sessionId?, generationId}` — tiny by contract.
 pub const CHUNK_READY_EVENT: &str = "llm/chunk-ready";
@@ -336,6 +346,27 @@ pub struct ResolveModelInfoRequest {
 pub struct AbortRequest {
     /// The generation to flag cancelled.
     pub generation_id: String,
+}
+
+/// The `image-request-pricing` request body: one route plus the ordered
+/// image occurrences (surface blocks, `offloaded` marks included).
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImagePricingRequest {
+    /// Registered provider route.
+    pub provider: String,
+    /// Provider-owned model id.
+    pub model: String,
+    /// The image blocks in request order, one entry per occurrence.
+    pub images: Vec<fr_wire::content::ContentBlock>,
+}
+
+/// The `file-request-text` request body.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct FileTextRequest {
+    /// The durable verbatim file reference.
+    #[serde(rename = "ref")]
+    pub reference: fr_wire::content::FileAttachmentRef,
 }
 
 /// The `llm/chunk-ready` notification payload.
@@ -827,6 +858,17 @@ pub trait GenerationSource: Send + Sync {
         };
         self.prepare(&config).map(|(record, _)| record.model)
     }
+
+    /// Provider-side request-image pricing for one exact route (the dsh
+    /// base-adapter default); `None` declares none — the token meter
+    /// keeps the fixed heuristic. Synchronous, no I/O.
+    fn image_request_pricing(
+        &self,
+        _provider: &str,
+        _model: &str,
+    ) -> Option<Arc<dyn crate::adapter::ImageRequestPricing>> {
+        None
+    }
 }
 
 /// The dsh runtime `prepareCall` default-fill arm (index.ts:976-986):
@@ -922,6 +964,14 @@ impl<A: LlmAdapter> GenerationSource for AdapterSource<A> {
 
     fn stream(&self, options: GenerateOptions) -> Pin<Box<dyn Stream<Item = StreamChunk> + Send>> {
         self.adapter.stream(options)
+    }
+
+    fn image_request_pricing(
+        &self,
+        provider: &str,
+        model: &str,
+    ) -> Option<Arc<dyn crate::adapter::ImageRequestPricing>> {
+        self.adapter.image_request_pricing(provider, model)
     }
 }
 
@@ -1223,6 +1273,34 @@ impl GenerationService {
         source.resolve_model(provider, model)
     }
 
+    /// Resolves one route's request-image pricing and prices the ordered
+    /// image list (the dsh `imageRequestPricing` + `priceImages` pair).
+    /// `None` when the provider is unregistered or the source declares
+    /// no pricing: the meter keeps the fixed heuristic, matching the dsh
+    /// soft-get where a missing route answers `undefined`.
+    #[must_use]
+    pub fn image_request_pricing(
+        &self,
+        provider: &str,
+        model: &str,
+        images: &[fr_wire::content::ContentBlock],
+    ) -> Option<Vec<crate::adapter::ImageRequestPrice>> {
+        let source = lock(&self.sources).get(provider).cloned()?;
+        let pricing = source.image_request_pricing(provider, model)?;
+        Some(pricing.price_images(images))
+    }
+
+    /// Resolves the exact file handle text one durable file occurrence
+    /// contributes to requests (the dsh `fileRequestText`). The
+    /// attachments path resolver is not wired into dispatch yet, so the
+    /// face answers the no-path arm — the same text the unwired
+    /// projection would send; the wiring slice upgrades the answer and
+    /// the meter follows automatically.
+    #[must_use]
+    pub fn file_request_text(&self, reference: &fr_wire::content::FileAttachmentRef) -> String {
+        crate::projection::file_handle_text(reference, None)
+    }
+
     /// Starts one generation and returns its id.
     ///
     /// # Errors
@@ -1418,6 +1496,30 @@ pub fn serve(
                 .map_err(ServiceError::Llm)?;
             encode_reply(&WireModelInfo::from(&resolved))
         }
+        METHOD_IMAGE_REQUEST_PRICING => {
+            let request: ImagePricingRequest = decode_payload(method, payload)?;
+            let prices =
+                service.image_request_pricing(&request.provider, &request.model, &request.images);
+            encode_reply(&serde_json::json!({
+                "prices": prices.map(|prices| {
+                    prices
+                        .iter()
+                        .map(|price| {
+                            serde_json::json!({
+                                "visualTokens": price.visual_tokens,
+                                "text": price.text,
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                }),
+            }))
+        }
+        METHOD_FILE_REQUEST_TEXT => {
+            let request: FileTextRequest = decode_payload(method, payload)?;
+            encode_reply(&serde_json::json!({
+                "text": service.file_request_text(&request.reference),
+            }))
+        }
         _ => Err(ServiceError::Text(format!(
             "unknown llm service method {method}"
         ))),
@@ -1459,8 +1561,9 @@ mod tests {
     use super::{
         AbortRequest, AdapterSource, BeginReply, BeginRequest, CHUNK_READY_EVENT, DrainReply,
         DrainRequest, EmitVtable, GenerateOptions, GenerationService, METHOD_ABORT, METHOD_BEGIN,
-        METHOD_DRAIN, METHOD_RESOLVE_MODEL_INFO, Notify, PreparedRecord, ServiceError,
-        WireGenerateOptions, WireModelInfo, serve,
+        METHOD_DRAIN, METHOD_FILE_REQUEST_TEXT, METHOD_IMAGE_REQUEST_PRICING,
+        METHOD_RESOLVE_MODEL_INFO, Notify, PreparedRecord, ServiceError, WireGenerateOptions,
+        WireModelInfo, serve,
     };
     use crate::adapter::{
         AbortSignal, LlmAdapter, LlmCallConfig, ModelContext, ModelModality, ModelReasoningInfo,
@@ -2230,6 +2333,108 @@ mod tests {
             }
             ServiceError::Text(_) => panic!("expected the llm failure"),
         }
+    }
+
+    /// The token-meter's route-pricing face: a pricing-declaring adapter
+    /// prices the ordered occurrences, and an unregistered route answers
+    /// `null` prices (the dsh soft-get keeps the fixed heuristic instead
+    /// of failing).
+    #[test]
+    fn image_request_pricing_prices_and_answers_null_without_a_route() {
+        struct VisionPricing;
+        impl crate::adapter::ImageRequestPricing for VisionPricing {
+            fn price_images(
+                &self,
+                images: &[fr_wire::content::ContentBlock],
+            ) -> Vec<crate::adapter::ImageRequestPrice> {
+                images
+                    .iter()
+                    .map(|_| crate::adapter::ImageRequestPrice {
+                        visual_tokens: 42,
+                        text: "T".to_owned(),
+                    })
+                    .collect()
+            }
+        }
+        struct PricingAdapter;
+        impl LlmAdapter for PricingAdapter {
+            fn stream(
+                &self,
+                _options: GenerateOptions,
+            ) -> Pin<Box<dyn Stream<Item = StreamChunk> + Send>> {
+                loaded(vec![finish()])
+            }
+
+            fn image_request_pricing(
+                &self,
+                _provider: &str,
+                _model: &str,
+            ) -> Option<Arc<dyn crate::adapter::ImageRequestPricing>> {
+                Some(Arc::new(VisionPricing))
+            }
+        }
+        let service = GenerationService::new(crate::generation::quiet_notify());
+        service.register_source(
+            "vision",
+            Arc::new(AdapterSource::new(Arc::new(PricingAdapter))),
+        );
+        let image = serde_json::json!({
+            "type": "image",
+            "attachment": {
+                "attachmentId": "a1",
+                "mediaType": "image/png",
+                "bytes": 10,
+                "width": 4,
+                "height": 4,
+            },
+        });
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "provider": "vision",
+            "model": "vl",
+            "images": [image, image],
+        }))
+        .expect("encodes");
+        let reply = serve(&service, METHOD_IMAGE_REQUEST_PRICING, &payload).expect("prices");
+        let parsed: serde_json::Value = serde_json::from_slice(&reply).expect("json");
+        assert_eq!(
+            parsed["prices"],
+            serde_json::json!([
+                {"visualTokens": 42, "text": "T"},
+                {"visualTokens": 42, "text": "T"},
+            ])
+        );
+
+        // The unregistered route answers null prices: the meter prices
+        // the same occurrences under the fixed heuristic.
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "provider": "missing",
+            "model": "m",
+            "images": [image],
+        }))
+        .expect("encodes");
+        let reply = serve(&service, METHOD_IMAGE_REQUEST_PRICING, &payload).expect("null prices");
+        let parsed: serde_json::Value = serde_json::from_slice(&reply).expect("json");
+        assert_eq!(parsed["prices"], serde_json::Value::Null);
+    }
+
+    /// The token-meter's file-text face answers the no-path handle at
+    /// the service level too (the dispatch projection is not wired).
+    #[test]
+    fn file_request_text_serves_the_no_path_handle() {
+        let service = GenerationService::new(crate::generation::quiet_notify());
+        let reference = fr_wire::content::FileAttachmentRef {
+            attachment_id: fr_wire::ids::AttachmentId::new("a1"),
+            name: "report.txt".to_owned(),
+            bytes: 128,
+        };
+        let payload =
+            serde_json::to_vec(&serde_json::json!({ "ref": reference })).expect("encodes");
+        let reply = serve(&service, METHOD_FILE_REQUEST_TEXT, &payload).expect("file text");
+        let parsed: serde_json::Value = serde_json::from_slice(&reply).expect("json");
+        assert_eq!(
+            parsed["text"],
+            crate::projection::file_handle_text(&reference, None)
+        );
     }
 
     /// The [`AdapterSource`] face: the AFIT `prepare_call` future resolves

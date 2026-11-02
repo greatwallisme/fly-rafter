@@ -32,7 +32,12 @@ BOUNDARIES: dict[str, list[str]] = {
     "REQ-FR-PROMPT": ["crates/fr-system-prompt/**"],
     "REQ-FR-APPROVAL": ["crates/fr-approval/**"],
     "REQ-FR-SANDBOX": ["crates/fr-sandbox/**"],
-    "REQ-FR-COMPACTION": ["crates/fr-compaction/**"],
+    # 2026-11-02 裁决 1：度量归属=独立插件 fr-token-meter（PRD 4.5 行+
+    # 19.2 条 37），压缩消费其 token-meter 服务缝——交付面含两 crate。
+    "REQ-FR-COMPACTION": [
+        "crates/fr-compaction/**",
+        "crates/fr-token-meter/**",
+    ],
     "REQ-FR-LLM": [
         "crates/fr-llm/**",
         "crates/fr-llm-deepseek/**",

@@ -344,7 +344,7 @@ impl Session {
                 let event = self
                     .log
                     .get(usize::try_from(node.get()).unwrap_or(usize::MAX))?;
-                projected_message(event)
+                derive_event_message(event)
             })
             .collect()
     }
@@ -352,7 +352,7 @@ impl Session {
     fn projects_message(&self, seq_value: SessionSeq) -> bool {
         self.log
             .get(usize::try_from(seq_value.get()).unwrap_or(usize::MAX))
-            .and_then(projected_message)
+            .and_then(derive_event_message)
             .is_some()
     }
 
@@ -372,9 +372,13 @@ impl Session {
     }
 }
 
-/// Projects one event to the message it contributes to derived history, or
-/// `None` when it produces none.
-fn projected_message(event: &SessionEvent) -> Option<&Message> {
+/// Projects one event to the message it contributes to derived history,
+/// or `None` when it produces none.
+///
+/// The dsh `deriveEventMessage` import shape: the token-meter folds
+/// price the exact derived messages cross-plugin.
+#[must_use]
+pub fn derive_event_message(event: &SessionEvent) -> Option<&Message> {
     match &event.data {
         SessionEventData::UserMessage(message) => Some(message),
         SessionEventData::SystemMessage(data) => non_empty(&data.message),

@@ -28,6 +28,7 @@ satisfies: [REQ-FR-COMPACTION]
 
 ### Allowed Changes
 - crates/fr-compaction/**
+- crates/fr-token-meter/**
 
 ### Forbidden
 - Do not weaken or remove the source requirement clauses.

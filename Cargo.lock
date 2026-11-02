@@ -1033,6 +1033,18 @@ name = "fr-timeout"
 version = "0.1.0"
 
 [[package]]
+name = "fr-token-meter"
+version = "0.1.0"
+dependencies = [
+ "dougong-abi",
+ "fr-llm",
+ "fr-session",
+ "fr-wire",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fr-tools"
 version = "0.1.0"
 dependencies = [
