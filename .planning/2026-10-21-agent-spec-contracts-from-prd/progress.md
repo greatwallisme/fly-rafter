@@ -1590,3 +1590,28 @@
 - 门：fmt/clippy 零警告；workspace 1643×2（+16）；doc 零警告；lifecycle TOOLS 350/0/58+CONFIG 137/0/182+PROMPT 47/0/0 零 fail。
 - 过程：退化 8 起（表达式位置属性 E0658/python 区间误删三函数/.pipe 幻 method/YAML 续行吃缩进/断言中断保盘）——一次一函数最小分片+写后即验复归判例；判定序勘误（2.5 落默认 25→可选整数 present-else-refuse）；insert 子行根提升勘误。
 - **下一动作=步⑥（skill 全家，Q16f-C 全量：registry+filesystem+catalog+gesture，最大件）→ 步⑦ 收口（catalog SECTION_TEXTS 扩源+终门）。**
+
+## 2026-11-02 — 16f 批 2 步⑥批 0：skill 全家真源勘察完成（2335 行全读）
+
+- 真源全读：tool-skill/src 433（工具+两 pre-step listener=gesture 先 catalog 后+三文案+digest/replace 生命周期）+skill/src 868（registry 合并/cache/校验族+渲染件）+skill-filesystem/src 1056（12 键 config/roots/frontmatter/发现/读取/chokidar watcher 族）；skill-office 95=19.1 桌面既裁不移植。设计钉全量落 findings.md「16f 批 2 步⑥设计钉」节（逐字文案/判定序/品牌映射/方法号 201-203/describe 165 规划）。
+- fr 载体勘察：fr-agent-loop 已有 pre-step waterfall+admit_step_inputs 批全量入账（Enter.messages 追加帧自动 durable）；session-persistence SESSION_READ 可供 history 扫描；MessageSource::Other 未知 kind verbatim 直通；fr-tools-builtin 现 provide 五服务+BAKED 常量判例齐备。
+- 待用户裁决（集中提问）：问 1 loop 接线时机（本步 vs Phase 18）/问 2 skills 服务面（新第六 provide vs 折 builtin-tools）/问 3 watch 等价深度（签名轮询 vs 逐字状态机）。
+- **下一动作=步⑥四问裁决落定后按分片 a→b→c→d 落码。**
+
+## 2026-11-02 — 16f 批 2 步⑥三问三裁（用户 2026-11-02）
+
+- **问 1=A** loop 本步接线（descriptor inject 增 skills、driver waterfall 尾后/指令折叠前调 skills.pre_step、loop 侧钉测）。
+- **问 2=A** 新第六 provide "skills" 逐字缝名，METHOD_PRE_STEP=0 单方法 {session,messages}→{messages}；list/get 工具体 in-process 直调不占号。
+- **问 3=A** watcher 签名轮询：单线程逐根存在性+浅层 mtime 签名、变更稳定 stability-threshold-ms 后失效；owner 计数+max-projects 逐出保留；dsh root/ancestor 机体不复制=19.2 备案。
+- 派生既裁应用：skill-office 不移植（19.1 Electron 桌面）；项目根目录名 .dsh/skills→.fr/skills（~/.dsh→~/.fr 品牌映射判例的自洽延伸，19.2 备案）；user root=<FR_HOME>/skills、agentsHome ~/.agents 不映射。
+- **下一动作=步⑥a skill_runtime.rs（渲染件+registry+校验族+钉测）。**
+- 步⑥a chunk 1 已落（skill_runtime.rs 头+词表+渲染件+类型；is_skill_name 字节级 kebab 判定；escape pair；render_skill_content dsh 文案逐字四臂；summary/candidate/locator 枚举+to_summary/summary 转换+双 invocable 判别）。
+- **下一动作=步⑥a chunk 2（registry 本体）→ chunk 3（钉测）→ cargo check 验证。**
+
+## 2026-11-02 — 16f 批 2 步⑥a：skill_runtime.rs 本体落码（未完，钉存续点）
+
+- 已落：skill_runtime.rs 全模块（词表 is_skill_name 字节级 kebab/escape pair/render_skill_content 四臂逐字/ResourceBase+InvocationPolicy+Summary+Candidate+Definition+Locator 枚举/runtime_candidate/RuntimeSkillProvider 单例/SkillRegistry 单层 registry：register_provider 恒拒绝+runtime 保留名+register 首胜 no-op disposer/collect 缓存 {cwd,revision} 键+MAX_COLLECT_ATTEMPTS=2 重试梯+LRU 容量逐出+insert 期 revision 复核/get 校验族+stale-definition invalidateEntry/validate_candidate|runtime|definition fr 有意义子集文案逐字/UndoKind 恒反转）+6 钉测绿（name grammar/escapes/render 四臂 directory 全文/registry 排序 complete/rank 层内裁决/runtime 250 位次）。fmt/clippy -D 零警告零错误，6/6 测试绿。
+- 门：cargo check/test/clippy -p fr-tools-builtin 全绿；workspace 门未跑（步⑥d 终门）。
+- **过程退化 6 起（本会话高发）**：heredoc 追加损坏×2（phantom 字段/括号嵌套/占位符断言/垃圾 trait）、Edit 长块损坏×3、python 探针误插 collect 重复签名×1。复归判例=truncate 到绿态+小步 Edit+python 精确替换（serde 式 replace 全文唯一锚）；code-quality hook eprintln 误报=已裁决判例（dsh ctx.logger.warn 载体，search_core.rs:549 同款）。
+- **续点（下一会话按序）**：①步⑥a 收尾=补 registry 缓存/失效/LRU/ incomplete-observation/provider-error 五件钉测（FakeProvider reads 计数在，read_count/set_output/set_error 三 helper 被裁待回补）+技能组新装 19.2 备案条目 ②步⑥b skill_filesystem.rs（12 键 config/roots .fr-skills 序/frontmatter serde_yaml_ng/发现/读取/watch 签名轮询线程）③步⑥c skill_tools.rs（工具+catalog/gesture+skills 服务面 METHOD_PRE_STEP=0+方法号 201-203/describe 165+schema.rs）④步⑥d loop 接线（descriptor inject skills+driver pre_step 调用）+plugin_shell 注册+fr-schema 三 config 组+catalog_gen+CONFIG/TOOLS 绑定+终门 ⑤19.2 备案：watcher 状态机不逐字、.dsh→.fr 项目目录名、scope 层 M1 单层、skills/change 无消费者。
+- **下一动作=步⑥a 收尾（五件 registry 钉测+19.2 条目）→ 步⑥b。**

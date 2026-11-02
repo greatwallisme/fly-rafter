@@ -2796,3 +2796,45 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - **fr 自创文案集（19.2 备案逐字）**：profile 缺席（上）；install 载体 `bundle installation has no carrier in fr: plugins are static Rust artifacts assembled at startup, with no npm runtime, no package registry, and no live reload`；exemption 读 `version exemptions have no carrier in fr: there is no runtime compatibility machinery to query`；exemption 写 `version exemptions have no carrier in fr: plugins are static Rust artifacts with no runtime compatibility machinery`；profile.yml 读失败 diagnostic=OS io error 原文。
 - **19.2 备案义务（本步落 PRD）**：条 27 磁盘面 rows 破缺+FR_PROFILE 事实、条 28 注释丢失、条 29 fr 自创诊断文案集+三文案品牌词。
 - **实现序**：①plugin_manager_tools.rs 纯核（码表/文案表/with_next_step/校验/分页）②磁盘面（patch 视图/list/set_plugin 写/set_bundle/remove/install/exemptions）③service.rs 198-200+describe 162+plugin_shell 注册行+BAKED_PLUGIN_MANAGER gate+assert ④schema.rs 10 参+Q97-A 钉测+catalog_gen 抽取（generate-tool-catalog.py）⑤fr-schema 组+generator 表项+19.2 三条 ⑥TOOLS spec 绑定+lifecycle+审计 ⑦四门+stamp。
+
+## 16f 批 2 步⑥设计钉：skill 全家（2026-11-02 真源全读：tool-skill/src/index.ts 433 + skill/src/index.ts 868 + skill-filesystem/src/index.ts 1056；skill-office 95 行不移植=19.1 Electron 桌面既裁、dsh base 不挂、office 载体属桌面打包面 PRD:636/650）
+
+### dsh 工具面（tool-skill 全录；catalog 抽取源 docs/tool-catalog.md:1805-1828）
+- description/params{name req}/output schema{name,provider,resourceBase oneOf(directory{path}/url{url}/opaque{description}),content}逐字；render=renderSkillContent；presentCall {card generic,title `Load skill {name}`,kind read,rawInput args.name}；无 section、无 timeoutMs/isConcurrencySafe=exclusive fail-closed；config `catalogDescriptionMaxLength` default 500 min 3，校验文案 `tool-skill: {name} must be an integer greater than or equal to {min}`。
+- execute 序（index.ts:128-158）：isSkillName 拒 `invalid skill name "{name}"`→cwd=workingDirectory.ensure（agent 缺席=undefined）→list().find(name) 缺 `skill "{name}" is unknown or no longer available`→!isModelInvocable `skill "{name}" is not available for model invocation`→get 缺/!model 同前两文案→返回 {name,provider,resourceBase?,content}。
+
+### 渲染件（skill 包纯函数全录）
+- renderSkillContent（skill/src:170-183）：`<skill_content name="{escapeAttr(name)}">`+`<skill_resources>`+resourceHint+`</skill_resources>`+空行+`<skill_instructions>`+content+`</skill_instructions>`+`</skill_content>` join '\n'；escapeAttr=&"\<；escapeText=&<>（:216-228）。
+- resourceHint 四臂逐字（:185-214）：缺省=provider 句+`Load referenced resources only as needed.`；directory=`Base directory for this skill: {path}`+`Resolve relative paths mentioned by this skill against the base directory before using them. Load referenced resources only as needed.`；url 同构；opaque=`Resources for this skill: {description}`+短尾句。
+- isSkillName=`^[a-z0-9]+(?:-[a-z0-9]+)*$`（:21）。
+
+### catalog 生命周期（tool-skill 两 pre-step listener；注册序 gesture 先 catalog 后→waterfall 外层 gesture 内层 catalog；最终批序=claimed→runtime-context→catalog→gesture 注入，tool-skill 注释 :165-178+装配序旁证 agent-instructions:303 先于 tool-skill:315=指令折叠最外层最后）
+- 初帧 renderCatalogMessage（:256-279）逐字；替代帧 renderCatalogUpdate（:281-313）空/非空 availability 两分支逐字；source={kind 'skill-catalog',form 'catalog',update? true,entries}；行=`- \`{name}\`: {escapeText(description)}`。
+- description 归一化（:393-396）：\s+→' '、trim、>maxLength 截 [0,maxLength-3]+'...'。
+- digest（:330-337）=sha256(entries.map(e=>JSON.stringify([e.name,e.description])).join('\n')) hex。
+- history（:363-380）：session 事件从尾向首扫 user/message+source.kind 'skill-catalog'+entries 可读（不可读=跳过非抛 :350-361）；published=遇首条 skill-catalog 即 true；visibleDigest=首条 seq∈surface.nodes 的 digest。
+- 判定序（:227-253）：!snapshot.complete→不动；skills=modelInvocable 过滤；visibleDigest==digest→existing 有则移除无则不动；existing.digest==digest→不动；!published&&skills 空→existing 有则移除（未发布空表不发布）；否则 published→替代帧/!published→初帧，existing 同位替换否则 append。
+- 可见性 gate（:222）=ctx.tools.get('skill',agent)===本插件注册定义；不可见→snapshot 空 complete true。
+- gesture（:411-433+179-206）：SKILL_GESTURE=/(^|\s)\/([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$)/g 仅扫 source.kind=='user' 消息全部 text 块、首现序去重；get 缺或 !isUserInvocable→跳过（普通 prose）；命中→注入 source={kind 'skill-invocation',name,form 'instructions'} 消息（renderSkillContent 文本）；reject decision 直通。
+- durable 闭环：dsh agent.ts:426-437 步批全量 user/message append 入日志（runtime-context 例外）→catalog/gesture 帧成为可扫描事件；fr admit_step_inputs（driver.rs:1638-1668）同构既在，Enter.messages 追加帧即自动入账。
+
+### skill-filesystem provider（全录）
+- config 12 键默认（:48-88）：providerName 'filesystem'/includeDefaultRoots true/dshHome/agentsHome/customSkillDirs[]/watch true/watchUsePolling false/watchStabilityThresholdMs 200/watchPollIntervalMs 100/watchMaxProjects 128/watchFollowSymlinks true/bundledSkillDir；三项校验 `skill-filesystem: {field} must be a positive integer`（:710-714）。
+- roots 序（:244-264）：includeDefaultRoots&&cwd→findProjectRoot(.git 向上 :952-962) `.dsh/skills`(rank 100)+`.agents/skills`(200) 带 projectRoot；custom(300) resolve；includeDefaultRoots→dshHome/skills(400,skipSystem:true)+agentsHome/skills(500)；bundledSkillDir(600,trustedHost:true)（config 缺省时 env DSH_BUNDLED_SKILL_DIR 仅 includeDefaultRoots 才读 :172-176）。
+- 发现（:730-758）：entries 名 localeCompare 序；dir→join SKILL.md+directory=entry.path、.md 文件→本体+directory=root.path、其他跳过；skipSystem 根跳 `.system`；parseSkillFile 失败=warn 跳过。
+- frontmatter（:924-950）：首行 `---`（\r 剥）→逐行找闭 `---`（无闭=undefined）→yaml 解析非对象/数组=undefined；:804-847 name/description 必需非空 string→isSkillName→invocation（:1007-1044：legacy 键 disableModelInvocation/modelInvocable/userInvocable 拒 `frontmatter field "{legacy}" is unsupported; use "{canonical}"`；disable-model-invocation/user-invocable 布尔族 true|1|'1'|yes|on 等，违 `frontmatter field "{key}" must be a boolean`）→whenToUse opt 非空→metadata opt object；body=trim；失败各臂 warn `skill file {path} ignored: {reason}`。
+- 读取（:853-922）：非 trustedHost 走 ctx.fs（resolve→stat type==file→readText，path=processPath；FS_NOT_TEXT=warn `failed to read text file at {displayPath}: {err}` 跳过）；trustedHost=直接 node fs realpath+read；absent 族=ENOENT|ENOTDIR|FS_NOT_FOUND|FS_NOT_DIRECTORY→undefined。
+- definition（:209-225）：{...parsed,source:candidate.source,provider:this.name,resourceBase:{kind directory,path:locator.directory},path,content}。
+- watcher（:286-617 chokidar 载体）：owner 引用计数（shared:path 与 project:root 分组）+maxProjects 逐出（LRU 首、逐出即 invalidate）+root/ancestor 双模式+awaitWriteFinish 稳定窗+unhealthy/rewatch+host mutation（fs/observed 事件 actor∈{edit,write} 过滤 :142-146,704-708→observeHostMutation→invalidate）+dispose；watch 启动失败=list 返回 {candidates,complete:false}（:185-201）。
+- host 合并（registry skill/src:519-660）：层序 global→scope 链（fr M1 单层）；层内 rank 升→providerOrder→localOrder；同名后来者 warn `skill "{name}" from {source} ignored because a higher-priority skill already exists`；runtime skills rank 250 provider 'runtime' 首胜 no-op disposer（:439-460）；BUNDLED_SKILL_RANK=600；provider list 抛=warn `skill provider "{name}" skipped: {err}`+cacheable=false（:599-618）；观察形状=数组|{candidates,complete}（:662-678）；collect cache 键 JSON{cwd,scopes,revision} LRU collectCacheMaxEntries 128 min 1（`skill: {name} must be an integer greater than or equal to {min}`）+MAX_COLLECT_ATTEMPTS=2 次内 revision 变更重试；snapshot 按 name code-point 序；get：!isSkillName→undefined、definition.name≠candidate.name→invalidateEntry+undefined、validateDefinition/validateCandidate 文案族逐字（:707-767）。
+
+### fr 载体映射钉
+- 域服务归属 fr-tools-builtin（Q93-A）；工具与 registry/provider 同 crate in-process 直调不占跨 crate 方法号（web seam 判例）。
+- 方法号：skill 工具 EXECUTE 201/RENDER 202/PRESENT_CALL 203；describe 162→165；skills 跨 crate 服务面=待裁决问 2；loop 接线=待裁决问 1。
+- 品牌：dshHome config 键→fr-home+解析复用 ShellEnvRegistry FR_HOME 判例（override→env→~/.fr）；agentsHome→agents-home `~/.agents` 不映射、env `$DSH_AGENTS_HOME`→`$FR_AGENTS_HOME`；`$DSH_BUNDLED_SKILL_DIR`→`$FR_BUNDLED_SKILL_DIR`（2712 行既钉）；.dsh/skills 项目根目录名保留（跨工具惯例=.agents 同类，19.2 备案确认项）。
+- watch=stat 轮询线程（Q16f-C 裁决）；等价深度=待裁决问 3；host mutation observe=fs write/edit 工具体直调 provider（dsh fs/observed actor 过滤的 in-crate 等价，fs_domain 在同 crate）。
+- catalog history 扫描=SESSION_READ（session-persistence 已 inject，service.rs:752-786 全事件切片）+surfaceOp 本地折叠可见性；消息构造=fr-wire MessageSource::Other(RawObject) verbatim 未知 kind（message.rs:86-91，skill-catalog/skill-invocation 零改动直通）。
+- baked：BAKED_SKILL_TOOLS=true（base 挂 skill+skill-filesystem+tool-skill:2702 行装配事实）；skill-filesystem provider 常驻+12 config 键（kebab：provider-name/include-default-roots/fr-home/agents-home/custom-skill-dirs/watch/watch-use-polling/watch-stability-threshold-ms/watch-poll-interval-ms/watch-max-projects/watch-follow-symlinks/bundled-skill-dir）→运行值 baked 常量对 base 判例（无 patch 覆盖）；tool-skill config catalog-description-max-length 500；skill registry collect-cache-max-entries 128。
+- fr-schema：tool-skill 工具组+三 config 组+Q97-A 全形状钉测；catalog_gen 表项（generator kind 分支）+regen 幂等；CONFIG/TOOLS spec 绑定随步⑥d。
+- YAML frontmatter=serde_yaml_ng（步⑤ 既有依赖）。
+- 分片（判例族=步①-⑤ 小步分片）：a=skill_runtime.rs（渲染件+registry+校验族+钉测）→b=skill_filesystem.rs（config/roots/frontmatter/发现/读取/watch+钉测）→c=skill_tools.rs（工具+catalog/gesture+skills 服务面+方法号/describe+schema.rs）→d=loop 接线（问 1）+plugin_shell 注册+fr-schema+catalog_gen+绑定+终门。
