@@ -182,6 +182,27 @@ pub trait InstructionsBridge: Send {
     ) -> Result<Option<Message>, String>;
 }
 
+/// The loop-side skills pre-step bridge (16f batch 2): one
+/// catalog+gesture transform per step boundary (dsh tool-skill's
+/// `agent/pre-step` listeners, composed).
+///
+/// Present exactly when the `'skills'` service is wired into the
+/// assembly. The driver calls it only on an `Enter` waterfall decision
+/// (dsh both listeners early-return a `reject` untouched), after the
+/// runtime-context tail and before the workspace-instructions fold —
+/// the skill injections land last in the batch, right before the
+/// instructions insert.
+pub trait SkillPreStep: Send {
+    /// Transforms one step batch (dsh the catalog pass then the gesture
+    /// pass).
+    ///
+    /// # Errors
+    ///
+    /// Returns the transform's refusal family text (the driver fails
+    /// the step boundary like the dsh listener throw).
+    fn pre_step(&mut self, session: &str, messages: Vec<Message>) -> Result<Vec<Message>, String>;
+}
+
 /// The driver-visible facts of one prepared call (dsh `PreparedLlmCall`
 /// minus the stream closure, which the B2 face carries by generation id).
 #[derive(Debug, Clone)]
@@ -379,6 +400,9 @@ pub enum DriverError {
     Llm(LlmError),
     /// A system-prompt seam failure.
     Prompt(String),
+    /// A skills pre-step seam failure (the 16f batch-2 service band;
+    /// the dsh pre-step listener throw).
+    Skills(String),
     /// A tools seam failure.
     Tool(String),
     /// A turn-stopping listener failed (dsh serial rejection).
@@ -412,7 +436,9 @@ impl fmt::Display for DriverError {
             Self::Session(error) => write!(f, "{error}"),
             Self::Inbox(error) => write!(f, "{error}"),
             Self::Llm(error) => write!(f, "{error}"),
-            Self::Prompt(text) | Self::Tool(text) | Self::Text(text) => f.write_str(text),
+            Self::Prompt(text) | Self::Skills(text) | Self::Tool(text) | Self::Text(text) => {
+                f.write_str(text)
+            }
             Self::Listener(error) => write!(f, "{error}"),
             Self::Settlement { .. } => {
                 f.write_str("Assistant stream failed and its durable settlement was rejected")
@@ -434,7 +460,11 @@ impl Error for DriverError {
             Self::Settlement { source, .. } | Self::StepRecovery { step: source, .. } => {
                 Some(source.as_ref())
             }
-            Self::Aborted(_) | Self::Prompt(_) | Self::Tool(_) | Self::Text(_) => None,
+            Self::Aborted(_)
+            | Self::Prompt(_)
+            | Self::Skills(_)
+            | Self::Tool(_)
+            | Self::Text(_) => None,
         }
     }
 }
@@ -638,6 +668,10 @@ pub struct DriverDeps {
     /// `'system-prompt'` service (dsh mounts `agent-instructions`; absent
     /// here means the compose endpoint is not wired).
     pub instructions: Option<Box<dyn InstructionsBridge>>,
+    /// The skills pre-step bridge, when the assembly wires the
+    /// `'skills'` service (dsh mounts `tool-skill`; absent here means
+    /// the catalog+gesture transform is not wired).
+    pub skills: Option<Box<dyn SkillPreStep>>,
     /// The wall clock for stream chunk timestamps.
     pub clock: Box<dyn Fn() -> i64 + Send>,
     /// The stable identity source for created messages.
@@ -676,6 +710,9 @@ pub struct LoopDriver {
     llm: Box<dyn LlmFace>,
     tools: Box<dyn ToolsFace>,
     instructions: Option<Box<dyn InstructionsBridge>>,
+    /// The skills pre-step bridge (the `'skills'` service seam; absent
+    /// = the transform is not wired).
+    skills: Option<Box<dyn SkillPreStep>>,
     /// Paths the fs tools touched since the last compose (dsh
     /// `executionTouches` collapsed into the pre-step call; the
     /// asynchronous projection tail is a structural absence under the
@@ -757,6 +794,7 @@ impl LoopDriver {
             llm,
             tools,
             instructions,
+            skills,
             clock,
             next_id,
             max_parallel_tool_calls,
@@ -776,6 +814,7 @@ impl LoopDriver {
             llm,
             tools,
             instructions,
+            skills,
             touched_paths: Vec::new(),
             clock,
             next_id,
@@ -1319,6 +1358,29 @@ impl LoopDriver {
             }),
         );
         self.poll()?;
+        // The skills pre-step transform (the 16f batch-2 service band):
+        // called only on an `Enter` decision (dsh both pre-step
+        // listeners early-return a reject untouched), after the
+        // runtime-context tail and before the workspace-instructions
+        // fold — the skill injections land last in the batch.
+        let decision = match self.skills.as_mut() {
+            None => decision,
+            Some(bridge) => match decision {
+                PreStepDecision::Reject => decision,
+                PreStepDecision::Enter {
+                    messages,
+                    starts_request_series,
+                } => {
+                    let messages = bridge
+                        .pre_step(self.session_id.as_str(), messages)
+                        .map_err(DriverError::Skills)?;
+                    PreStepDecision::Enter {
+                        messages,
+                        starts_request_series,
+                    }
+                }
+            },
+        };
         let decision = match self.instructions.take() {
             None => decision,
             Some(mut bridge) => {
@@ -2637,7 +2699,7 @@ impl LoopDriver {
 mod tests {
     use super::{
         AgentOptions, DrainedGeneration, DriverDeps, DriverError, InstructionsBridge, LoopDriver,
-        PreparedCall, PromptAssembly, RestoreView, SessionReads, SystemPromptFace,
+        PreparedCall, PromptAssembly, RestoreView, SessionReads, SkillPreStep, SystemPromptFace,
         TOOL_ABORTED_BEFORE_DISPATCH, ToolExecution, ToolExecutionMode, ToolExecutionResult,
         ToolPrepared, ToolSettlement, ToolsFace, is_user_message,
     };
@@ -3437,6 +3499,7 @@ mod tests {
                 llm: Box::new(SharedLlm(Arc::clone(&llm))),
                 tools: Box::new(SharedTools(Arc::clone(&tools))),
                 instructions,
+                skills: None,
                 clock: Box::new(|| 1_700_000_000_000),
                 next_id,
                 max_parallel_tool_calls: Box::new(move || max_parallel),
@@ -4794,5 +4857,194 @@ mod tests {
             serde_json::from_value(serde_json::json!({ "role": "custom" }))
                 .expect("fixture message");
         assert!(!is_user_message(&other_envelope));
+    }
+    /// The skills-bridge double: records every received batch's source
+    /// kinds, optionally injects one skill-invocation message, and
+    /// optionally fails.
+    struct SkillsDouble {
+        calls: Arc<Mutex<Vec<Vec<String>>>>,
+        inject: Option<Message>,
+        fail: Option<String>,
+    }
+
+    impl SkillPreStep for SkillsDouble {
+        fn pre_step(
+            &mut self,
+            _session: &str,
+            messages: Vec<Message>,
+        ) -> Result<Vec<Message>, String> {
+            if let Some(error) = &self.fail {
+                return Err(error.clone());
+            }
+            let kinds: Vec<String> = messages.iter().map(kinds_of).collect();
+            self.calls.lock().expect("test bridge lock").push(kinds);
+            let mut messages = messages;
+            if let Some(injection) = self.inject.take() {
+                messages.push(injection);
+            }
+            Ok(messages)
+        }
+    }
+
+    fn skill_injection(id: &str) -> Message {
+        serde_json::from_value(serde_json::json!({
+            "role": "user",
+            "id": id,
+            "content": [{ "type": "text", "text": "<skill_content>body</skill_content>" }],
+            "source": { "kind": "skill-invocation", "name": "pdf", "form": "instructions" },
+        }))
+        .expect("fixture message")
+    }
+
+    /// The skills transform sits between the waterfall tail and the
+    /// workspace-instructions fold: it sees the claimed batch only, and
+    /// its injections commit after the instructions insert (dsh the two
+    /// `agent/pre-step` listeners' registration order).
+    #[test]
+    fn skills_transform_runs_between_the_waterfall_and_the_instructions_fold() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let skills = SkillsDouble {
+            calls: Arc::clone(&calls),
+            inject: Some(skill_injection("sk1")),
+            fail: None,
+        };
+        let instructions = RecordingBridge {
+            desired: Some(instruction_message("i1")),
+            calls: Arc::new(Mutex::new(Vec::new())),
+        };
+        let mut harness = harness_with(
+            vec![ScriptedLlm::text_generation("done")],
+            ToolExecutionMode::Parallel,
+            false,
+            Vec::new(),
+            10,
+            |_| {},
+            Some(Box::new(instructions)),
+        );
+        harness.driver.skills = Some(Box::new(skills));
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the skills turn ends",
+        );
+        drop(thread);
+        let calls = calls.lock().expect("test bridge lock");
+        assert_eq!(calls.len(), 1, "one transform per step boundary");
+        assert_eq!(
+            calls[0],
+            ["user".to_owned()],
+            "the transform sees the claimed batch before the fold"
+        );
+        drop(calls);
+        assert_eq!(
+            user_message_kinds(&harness.session),
+            [
+                "user".to_owned(),
+                "agent-instructions".to_owned(),
+                "skill-invocation".to_owned(),
+            ],
+            "the injection commits after the instructions insert"
+        );
+    }
+
+    /// A rejected waterfall skips the transform entirely (dsh both
+    /// pre-step listeners early-return a reject untouched).
+    #[test]
+    fn skills_transform_skips_a_rejected_waterfall() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let skills = SkillsDouble {
+            calls: Arc::clone(&calls),
+            inject: Some(skill_injection("sk1")),
+            fail: None,
+        };
+        let mut harness = harness_with(
+            vec![ScriptedLlm::text_generation("done")],
+            ToolExecutionMode::Parallel,
+            false,
+            Vec::new(),
+            10,
+            |events| {
+                events.on_pre_step(Box::new(|_payload, _next| {
+                    crate::agent_events::PreStepDecision::Reject
+                }));
+            },
+            None,
+        );
+        harness.driver.skills = Some(Box::new(skills));
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the rejected turn ends",
+        );
+        drop(thread);
+        let session = harness.session.lock().expect("test session lock");
+        assert!(
+            session.typed("assistant/message").is_empty(),
+            "a rejected boundary spends no model call"
+        );
+        drop(session);
+        let calls = calls.lock().expect("test bridge lock");
+        assert_eq!(calls.len(), 0, "the reject reaches the transform skipped");
+        drop(calls);
+    }
+
+    /// A transform failure fails the step boundary like the dsh listener
+    /// throw: the turn ends with the error reason and no model call.
+    #[test]
+    fn skills_transform_failure_fails_the_step_boundary() {
+        let skills = SkillsDouble {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            inject: None,
+            fail: Some("skills service call failed: transport: boom".to_owned()),
+        };
+        let mut harness = harness_with(
+            vec![ScriptedLlm::text_generation("done")],
+            ToolExecutionMode::Parallel,
+            false,
+            Vec::new(),
+            10,
+            |_| {},
+            None,
+        );
+        harness.driver.skills = Some(Box::new(skills));
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the failed skills turn ends",
+        );
+        drop(thread);
+        let reason = turn_end_reason(&harness.session, 0);
+        assert_eq!(reason["reason"]["kind"], "error");
+        assert!(
+            reason["reason"]["error"]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("skills service call failed: transport: boom"),
+            "{reason}"
+        );
+        let session = harness.session.lock().expect("test session lock");
+        assert!(
+            session.typed("assistant/message").is_empty(),
+            "the failed boundary spends no model call"
+        );
+        drop(session);
     }
 }

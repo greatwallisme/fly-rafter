@@ -144,6 +144,13 @@ TOOLS = {
         ],
         "none",
     ),
+    "skill": (
+        "SKILL",
+        [
+            ("name", "NAME_TEXT"),
+        ],
+        "none",
+    ),
     "todo_write": (
         "TODO_WRITE",
         [

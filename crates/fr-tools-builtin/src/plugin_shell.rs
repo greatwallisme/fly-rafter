@@ -48,7 +48,7 @@ pub const EVENT_INBOX_CLAIMED: &str = "agent/inbox/claimed";
 /// completion-notice events — the spill listeners register at activation
 /// instead (the descriptor `listen` map stays a dylib event face, not a
 /// tools-pipeline registration).
-const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\",\"fs\",\"user-questions\",\"plan-mode\",\"session-query\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\",\"subprocess\",\"attachments\",\"llm\",\"session-projections\",\"storage-domain\",\"terminals\"],\"listen\":{\"job/settled\":1,\"agent/inbox/claimed\":2}}";
+const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\",\"fs\",\"user-questions\",\"plan-mode\",\"session-query\",\"skills\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\",\"subprocess\",\"attachments\",\"llm\",\"session-projections\",\"storage-domain\",\"terminals\"],\"listen\":{\"job/settled\":1,\"agent/inbox/claimed\":2}}";
 
 /// The maximum host reply the require loop grows its buffer toward (the
 /// approval judgment).
@@ -715,6 +715,10 @@ pub struct BuiltinState {
     tools: BuiltinTools,
     fs: Arc<crate::fs_domain::FsDomain>,
     gate: crate::observation::ObservedStateGate,
+    /// The activation's outbound seam copy the `'skills'` serve face
+    /// requires its session reads through (the session-query engine
+    /// holds its own copy; `Copy`).
+    link: HostLink,
     /// The spill listeners' CPS pairing stash (the enter leg parks the
     /// call and result; the exit leg consumes them).
     pending: std::sync::Mutex<std::collections::HashMap<u64, (Value, Value)>>,
@@ -1451,6 +1455,18 @@ fn register_tools(
             .ok()?
             .as_slice(),
     )?;
+    // The skill loader (dsh `tool-skill`; the dsh base bundle mounts
+    // the row unconditionally — the `BAKED_SKILL_TOOLS` toggle carries
+    // the same judgment, and the toolVisible gate flips right after
+    // the row lands: dsh `ctx.tools.get('skill', agent) === skillTool`).
+    if crate::skill_tools::BAKED_SKILL_TOOLS {
+        step(
+            link,
+            fr_wire::services::tools::SERVICE_NAME,
+            fr_wire::services::tools::METHOD_REGISTER,
+            serde_json::to_vec(&skill_registration()).ok()?.as_slice(),
+        )?;
+    }
     // The cordis-inspect pair (dsh `tool-cordis`; the dsh base bundle
     // mounts neither tool — web-app/desktop compositions only — so the
     // baked gate stays off; the Q16f-B ruling).
@@ -1631,6 +1647,35 @@ pub fn working_directory_registration() -> Value {
         "execute": {
             "service": crate::service::SERVICE_NAME,
             "method": crate::service::METHOD_WORKING_DIRECTORY_EXECUTE,
+        },
+    })
+}
+
+/// The `skill` registration row (dsh `ctx.tools.register(skillTool)`, 1:1).
+///
+/// The catalog-verbatim description, the single `name` parameter, the
+/// output schema with the render projection, and the three endpoints
+/// (the fr service's own selector band; tool-skill/src/index.ts:106-165).
+#[must_use]
+pub fn skill_registration() -> Value {
+    json!({
+        "name": "skill",
+        "description": crate::catalog_gen::SKILL_DESCRIPTION,
+        "parameters": crate::schema::skill_parameters(),
+        "output": {
+            "schema": crate::schema::skill_output_schema(),
+            "render": {
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_SKILL_RENDER,
+            },
+        },
+        "execute": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SKILL_EXECUTE,
+        },
+        "presentCall": {
+            "service": crate::service::SERVICE_NAME,
+            "method": crate::service::METHOD_SKILL_PRESENT_CALL,
         },
     })
 }
@@ -2573,6 +2618,10 @@ impl BuiltinState {
     /// Assembles the state over one copied vtable, wiring the whole
     /// registration sequence; `None` declines the activation
     /// fail-closed.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the assembly mirrors the dsh plugin composition one arm per domain; splitting it would hide the correspondence"
+    )]
     #[must_use]
     pub fn try_new(link: Option<HostLink>) -> Option<Self> {
         let link = link?;
@@ -2683,6 +2732,56 @@ impl BuiltinState {
         // availability gates absorbing the missing credentials, and the
         // baked selection keeps the ambiguity arm unreachable).
         let web = build_web_runtime()?;
+        // The skill runtime over the single-layer registry (Q93-A): the
+        // baked collect-cache cap (the dsh `DEFAULT_COLLECT_CACHE_ENTRIES`
+        // judgment), the filesystem provider registers first (the dsh
+        // base composition's only skill provider), and the toolVisible
+        // gate flips right after the registration row landed in
+        // `register_tools` above.
+        let registry = std::sync::Arc::new(
+            crate::skill_runtime::SkillRegistry::new(
+                crate::skill_runtime::DEFAULT_COLLECT_CACHE_ENTRIES,
+            )
+            .ok()?,
+        );
+        // The filesystem provider over the in-crate fs domain and the
+        // process environment (the dsh `$DSH_HOME` resolution chain; the
+        // baked config carries no overrides, so the defaults resolve the
+        // real roots).
+        let skills_provider = crate::skill_filesystem::FileSystemSkillProvider::new(
+            std::sync::Arc::downgrade(&registry),
+            std::sync::Arc::clone(&fs),
+            &crate::skill_filesystem::FileSystemProviderConfig::default(),
+            &|key: &str| std::env::var(key).ok(),
+        )
+        .ok()?;
+        // The registration disposer never fires: the teardown drops the
+        // whole registry and the provider's Drop stops its watch thread
+        // (the kernel reverses the activation; the dsh provider
+        // registration is likewise never unregistered).
+        drop(
+            registry
+                .register_provider(|_| Ok(Box::new(skills_provider)))
+                .ok()?,
+        );
+        let skills = std::sync::Arc::new(crate::skill_tools::SkillRuntime {
+            catalog_description_max_length:
+                crate::skill_tools::resolve_catalog_description_max_length(
+                    crate::skill_tools::DEFAULT_CATALOG_DESCRIPTION_MAX_LENGTH,
+                )
+                .ok()?,
+            registered: std::sync::atomic::AtomicBool::new(false),
+            next_id: std::sync::Arc::new(|| {
+                fr_wire::ids::MessageId::new(uuid::Uuid::new_v4().to_string())
+            }),
+            registry,
+        });
+        // The registration row landed in `register_tools` above (the
+        // dsh `ctx.tools.get('skill', agent) === skillTool` gate); the
+        // gate flip is the row's liveness fact.
+        if crate::skill_tools::BAKED_SKILL_TOOLS {
+            skills.mark_registered();
+        }
         let tools = BuiltinTools::new(
             Box::new(seams),
             env_arc,
@@ -2701,9 +2800,7 @@ impl BuiltinState {
             std::sync::Arc::new(web),
             Some(crate::web_tools::BAKED_SEARCH_PROVIDER.to_owned()),
             Some(crate::web_tools::BAKED_FETCH_PROVIDER.to_owned()),
-            // The skill runtime rides the ⑥d assembly (the registry, the
-            // provider, and the tool registration row land together).
-            None,
+            Some(std::sync::Arc::clone(&skills)),
         )
         .ok()?;
 
@@ -2711,6 +2808,7 @@ impl BuiltinState {
             tools,
             fs,
             gate: crate::observation::ObservedStateGate::new(),
+            link,
             pending: std::sync::Mutex::new(std::collections::HashMap::new()),
             tasks: Some(tasks),
             worker: Some(worker),
@@ -3146,6 +3244,18 @@ unsafe extern "C" fn call(
             advertised: state.fs().sandbox_mode().is_some(),
         };
         crate::sre_tools::serve(&deps, method, payload)
+    } else if method == fr_wire::services::skills::METHOD_PRE_STEP {
+        // The `'skills'` service's own selector band (the single
+        // pre-step method): the loop-side transform over the wire
+        // session reads (the dsh `agent/pre-step` listeners' service
+        // carrier; the per-artifact method-space judgment).
+        let reads = WireSessionQuery { link: state.link };
+        let deps = crate::skill_tools::SkillServiceDeps {
+            runtime: state.tools().skills(),
+            seams: state.tools().seams(),
+            reads: &reads,
+        };
+        crate::skill_tools::serve(&deps, method, payload)
     } else {
         state.tools().serve(method, payload)
     };
@@ -3862,8 +3972,9 @@ mod tests {
                 && !name.contains("image")
                 && !name.contains("schedule")
                 && !name.contains("ask-user")
-                && !name.contains("exit-plan")),
-            "the section-free tools stay absent (the dsh truth; the Q16b-4A, Q16b-5A, Q16c batch-2, Q16c batch-0 schedule, and Q16d-4A ask/exit rulings)"
+                && !name.contains("exit-plan")
+                && !name.contains("skill")),
+            "the section-free tools stay absent (the dsh truth; the Q16b-4A, Q16b-5A, Q16c batch-2, Q16c batch-0 schedule, Q16d-4A ask/exit, and Q16f batch-2 skill rulings)"
         );
         let jobs = sections
             .iter()
@@ -4102,5 +4213,71 @@ mod tests {
         assert_eq!(super::EV_INBOX_CLAIMED, 2);
         assert_eq!(super::EVENT_JOB_SETTLED, "job/settled");
         assert_eq!(super::EVENT_INBOX_CLAIMED, "agent/inbox/claimed");
+        // The provided-service face: the skill pre-step seam is the
+        // sixth provide row (the 16f batch-2 service band).
+        assert_eq!(
+            parsed["provide"],
+            serde_json::json!([
+                "builtin-tools",
+                "fs",
+                "user-questions",
+                "plan-mode",
+                "session-query",
+                "skills"
+            ])
+        );
+    }
+
+    /// The `skill` registration row pins the catalog description and
+    /// the three fr endpoints (the Q97-A full-shape judgment).
+    #[test]
+    fn skill_registration_pins_the_row() {
+        let row = super::skill_registration();
+        assert_eq!(row["name"], serde_json::json!("skill"));
+        assert_eq!(
+            row["description"],
+            serde_json::json!(crate::catalog_gen::SKILL_DESCRIPTION)
+        );
+        assert_eq!(row["parameters"], crate::schema::skill_parameters());
+        assert_eq!(
+            row["output"]["schema"],
+            crate::schema::skill_output_schema()
+        );
+        assert_eq!(
+            row["output"]["render"],
+            serde_json::json!({
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_SKILL_RENDER,
+            })
+        );
+        assert_eq!(
+            row["execute"],
+            serde_json::json!({
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_SKILL_EXECUTE,
+            })
+        );
+        assert_eq!(
+            row["presentCall"],
+            serde_json::json!({
+                "service": crate::service::SERVICE_NAME,
+                "method": crate::service::METHOD_SKILL_PRESENT_CALL,
+            })
+        );
+    }
+    /// The `skill` row carries no concurrency flag (the fr-tools
+    /// fail-closed exclusive default applies, the Q94-A tool-pipeline
+    /// carrier) and the presentation is the read family (dsh
+    /// `presentCall`).
+    #[test]
+    fn skill_row_defaults_to_exclusive_with_read_presentation() {
+        let row = super::skill_registration();
+        assert!(
+            row.get("isConcurrencySafe").is_none(),
+            "no concurrency flag: the fail-closed exclusive applies"
+        );
+        let view = crate::skill_tools::present_call(&serde_json::json!({ "name": "pdf" }));
+        assert_eq!(view["card"], serde_json::json!("generic"));
+        assert_eq!(view["kind"], serde_json::json!("read"));
     }
 }

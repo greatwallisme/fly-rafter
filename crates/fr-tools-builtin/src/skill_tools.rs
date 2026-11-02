@@ -54,6 +54,11 @@ use crate::tools::BodyError;
 /// `DEFAULT_CATALOG_DESCRIPTION_MAX_LENGTH`).
 pub const DEFAULT_CATALOG_DESCRIPTION_MAX_LENGTH: usize = 500;
 
+/// The baked skill-tool registration gate (the dsh base composition
+/// mounts the row unconditionally; the `BAKED_WEB_SEARCH_ENABLED`
+/// toggle judgment — the M1 bundle keeps the default on).
+pub const BAKED_SKILL_TOOLS: bool = true;
+
 /// The `tool-skill` config cap resolved for the baked composition (the
 /// dsh Config default plus the `assertPositiveInteger` gate, text
 /// verbatim).
@@ -93,8 +98,10 @@ pub struct SkillRuntime {
     /// The toolVisible carrier: set at activation, cleared never (the
     /// 2026-11-02 ruling; see the module docs).
     pub registered: AtomicBool,
-    /// The message identity generator for emitted frames.
-    pub next_id: Box<dyn Fn() -> MessageId + Send>,
+    /// The message identity generator for emitted frames (the shared
+    /// runtime's face reads from any thread; the dsh `createUserMessage`
+    /// judgment).
+    pub next_id: std::sync::Arc<dyn Fn() -> MessageId + Send + Sync>,
 }
 
 impl std::fmt::Debug for SkillRuntime {
@@ -1029,9 +1036,9 @@ mod tests {
 
     /// One deterministic identity source (the assembly's generator
     /// judgment; tests pin the emission order).
-    fn counter_ids() -> Box<dyn Fn() -> MessageId + Send> {
+    fn counter_ids() -> std::sync::Arc<dyn Fn() -> MessageId + Send + Sync> {
         let counter = AtomicU64::new(1);
-        Box::new(move || {
+        std::sync::Arc::new(move || {
             let value = counter.fetch_add(1, AtomicOrdering::SeqCst);
             MessageId::new(format!("m-{value}"))
         })

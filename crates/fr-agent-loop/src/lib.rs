@@ -27,4 +27,5 @@ pub mod plugin_shell;
 pub mod prompt_client;
 pub mod runtime_context;
 pub mod session_client;
+pub mod skill_client;
 pub mod turn_boundary;

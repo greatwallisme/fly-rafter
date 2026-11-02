@@ -452,6 +452,26 @@ pub const STR_REPLACE_EDITOR_OLD_STR_TEXT: &str = r"Required string parameter of
 /// The `str_replace_editor` `view_range` parameter description (catalog-verbatim).
 pub const STR_REPLACE_EDITOR_VIEW_RANGE_TEXT: &str = r"Optional parameter of `view` command when `path` points to a file. If omitted or null, the full file is shown. If provided, the file will be shown in the indicated line number range, e.g. [11, 12] will show lines 11 and 12. Indexing at 1 to start. Setting `[start_line, -1]` shows all lines from `start_line` to the end of the file.";
 
+/// The `skill` tool description (catalog-verbatim).
+pub const SKILL_DESCRIPTION: &str = r"Load the full instructions for a skill. Call it before acting on a task that names or clearly matches a skill in the session skill catalog.";
+
+/// The `skill` parameter table (the json block, verbatim).
+pub const SKILL_PARAMETERS_JSON: &str = r#"{
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "The exact skill name from the available skills list."
+    }
+  },
+  "required": [
+    "name"
+  ]
+}"#;
+
+/// The `skill` `name` parameter description (catalog-verbatim).
+pub const SKILL_NAME_TEXT: &str = r"The exact skill name from the available skills list.";
+
 /// The `todo_write` tool description (catalog-verbatim).
 pub const TODO_WRITE_DESCRIPTION: &str = r"Record and update a task list to plan multi-step work and show progress; skip it for trivial single-step tasks. Add one todo per concrete step before you start. While work remains, keep the todos being worked on `in_progress`, several only when work runs in parallel. Mark each todo `completed` as soon as it is done.";
 

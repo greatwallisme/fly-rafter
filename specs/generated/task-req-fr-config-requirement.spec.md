@@ -1378,13 +1378,13 @@ Scenario: config dsh-session-query-sqlite preparedSessionCacheSize 约束
   那么 配置行 [preparedSessionCacheSize:5] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写
 
 Scenario: config dsh-skill-filesystem providerName 默认
-  Test: pending_req_fr_config_config_dsh_skill_filesystem_providername
+  Test: builtin_config_pins_skill_groups
   假设 插件 dsh-skill-filesystem 已注册
   当 读取解析后配置时
   那么 配置行 [providerName:'filesystem'] 的默认值按目录行实现
 
 Scenario: config dsh-skill-filesystem providerName 约束
-  Test: pending_req_fr_config_config_dsh_skill_filesystem_providername
+  Test: builtin_config_pins_skill_groups
   假设 插件 dsh-skill-filesystem 已注册
   当 校验与生效时
   那么 配置行 [providerName:'filesystem'] 的类型与约束生效，自有键 kebab-case 转换、wire 键保持原拼写

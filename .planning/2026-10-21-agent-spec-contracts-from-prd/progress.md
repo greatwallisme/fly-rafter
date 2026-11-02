@@ -1641,3 +1641,24 @@
 - 门：fmt/clippy -D warnings 零警告；workspace 1684/0；doc 绿；三门禁 0 errors。fr-tools-builtin 381→399。
 - 退化 5 起（Edit 大块×2 含吞闭包一起、heredoc 伪影×3）——判例固化：≤50 行/步+tripwire 惯例。
 - **下一动作=步⑥d loop 接线+plugin_shell 注册+fr-schema 三 config 组+catalog_gen+CONFIG/TOOLS 绑定+终门 → 步⑦ 收口。**
+
+## 2026-11-02 — 16f 批 2 步⑥d 前半：catalog_gen+builtin 注册+loop 接线
+
+- catalog_gen：生成器 TOOLS 加 "skill"→("SKILL",[("name","NAME_TEXT")],"none")，重跑产出 SKILL_DESCRIPTION/SKILL_PARAMETERS_JSON/SKILL_NAME_TEXT（--check 幂等）；hook 误报 7 处（行号漂移+print/placeholder=生成器既有机制）透明接受。
+- fr-tools-builtin plugin_shell：DESCRIPTOR provide 第 6 项 "skills"；skill_registration() 行（201/202/203 三端点+catalog description+schema.rs 两表，working_directory 判例同构）；register_tools 加 BAKED_SKILL_TOOLS 门行；try_new 装配=SkillRegistry::new(128)+Weak→FileSystemSkillProvider(fs/env 闭包)+register_provider(disposer drop 判例注)+SkillRuntime{resolve(500),AtomicBool false,next_id uuid v4}+mark_registered；BuiltinState 加 link 字段；call-export 加 1500 段臂（SkillServiceDeps{runtime:skills(),seams,reads:&WireSessionQuery{link}}）；service.rs 加 skills() getter（const+expect 判例）。
+- SkillRuntime.next_id 升 `Arc<dyn Fn + Send + Sync>`（clippy arc_with_non_send_sync；dsh createUserMessage 无线程亲和）；测试 counter_ids 同步返 Arc。
+- 退化窗记录：本窗 Edit 伪影 5 起（占位 token/phantom 字段/既有注释词形漂移/错常量 500≠128/getter 截断）+python 误插 None 13 行（driver.rs 整文件回滚重放六刀后以构造后赋值方案落地——harness 签名不动，tests 直写私有字段）。**判例再固化：JSON/large new_string 一律最小锚点+git diff 即验；签名级改动禁止波及调用点，优先"构造后赋值"。**
+- fr-agent-loop：DriverError::Skills 变体（Display/source 臂）；SkillPreStep trait（InstructionsBridge 旁）；DriverDeps.skills+LoopDriver.skills+new() 解构；pre_step 接线=waterfall 后/instructions 前、仅 Enter（dsh agent.ts:267-287 铁证：两 listener await next 后 reject 早退）；skill_client.rs=SkillsClient over Outbound（payload {session,messages}→{messages}，call_error 前缀 skills service call failed）；DESCRIPTOR inject 第 5 项+describe 臂同改；lib.rs 注册。
+- **持久化链闭合（本窗关键发现）**：dsh agent.ts:424-434 core 首尝试把 decision.messages 全提交 user/message（catalog 持久化载体）；fr 对应=admit_step_inputs:1698-1718 提交 enter.messages——skills 注入经 EnterStep.messages 免费获得持久化，sync_instructions 只管 inbox，无双提交。
+- 三钉测绿：ordering（skills 见 claimed only+注入提交序 user→agent-instructions→skill-invocation）/reject-skip（零调用+零 assistant）/failure（turn/end reason kind error+文本含 skills service call failed）。
+- 门：fr-agent-loop 100/100 全绿（含 FR_DSH_SOURCE 门）、clippy 0 警告、fmt 绿；fr-tools-builtin 400/400、clippy 0、fmt 绿。
+- **下一动作=fr-schema 三 config 组（skill/skill-filesystem/tool-skill）+组钉测 → CONFIG/TOOLS spec 绑定 → 终门 → 步⑦。**
+
+## 2026-11-02 — 16f 批 2 步⑥d 后半：fr-schema 三组+spec 绑定+终门+ Flake 三连验
+
+- fr-schema registry.rs：fr-tools-builtin 行加三组（skill=collect-cache-max-entries int min1 默认128；skill-filesystem=12 键 kebab 默认 filesystem/true/200/100/128 面；tool-skill=catalog-description-max-length min3 默认500）+`builtin_config_pins_skill_groups` 钉测（键集/默认表/投影指针/三越界拒绝/camelCase 拒绝）。
+- spec 绑定 8 场景：builtin-tools 六场景（调度呈现→skill_row_defaults_to_exclusive_with_read_presentation 新钉测；越界拒绝→validate_args_reports_argument_violations；section 缺席→prompt_sections_pin_the_twelve_tools 扩 skill 缺席过滤；name 形状/约束→skill_pins_the_catalog_table×2）+CONFIG 两场景→builtin_config_pins_skill_groups。TOOLS spec 无 skill 场景（无需动）。
+- 终门全绿：fmt/clippy -D warnings 0 警告/workspace 1694/0（1684+10：skill_client 4+driver 3+plugin_shell 2+registry 1）/doc -D warnings 绿/三门禁 0 errors。
+- lifecycle：CONFIG 139/0/180（skip=未来切片 pending，既有裁决非本步门），两 skill 场景 pass；BUILTIN-TOOLS 355/0/53，五 skill 场景全 pass。stamp 首跑报 1 failed——三连复验 401/0×3+直跑 lifecycle 两轮 0 failed=系统负载瞬时非确定性 flake（证据记录在案）。
+- 退化统计（本窗全程）：Edit 伪影 5+python 误插 13 行+hook 误报 9（\uXXXX 文档句/桩面/生成器机制）。
+- **下一动作=步⑦ 提交收口；16f 批 2 步⑥全链完，批 2 余 16f 收尾事项随下窗计划。**

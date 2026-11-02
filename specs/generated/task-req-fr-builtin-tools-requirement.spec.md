@@ -1915,31 +1915,31 @@ Scenario: terminal_close 行为 1
   那么 等待 owned 进程树消亡
 
 Scenario: skill 调度与呈现
-  Test: pending_req_fr_builtin_tools_skill
+  Test: skill_row_defaults_to_exclusive_with_read_presentation
   假设 合约要求的行为已实现
   当 读取工具 skill 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 read
 
 Scenario: skill 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_skill
+  Test: validate_args_reports_argument_violations
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: skill 说明 section 注册缺席
-  Test: pending_req_fr_builtin_tools_skill_section
+  Test: prompt_sections_pin_the_twelve_tools
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 skill 无说明 section（dsh 真源 tool-skill 不注入 systemPrompt）
 
 Scenario: skill 参数 name 形状
-  Test: pending_req_fr_builtin_tools_skill_name
+  Test: skill_pins_the_catalog_table
   假设 工具 skill 已注册
   当 校验 schema 时
   那么 参数行 [name:string:req（精确技能名）] 的名称与类型按目录行实现
 
 Scenario: skill 参数 name 约束
-  Test: pending_req_fr_builtin_tools_skill_name
+  Test: skill_pins_the_catalog_table
   假设 工具 skill 已注册
   当 校验 schema 时
   那么 参数行 [name:string:req（精确技能名）] 的 required、默认值与枚举约束按目录行实现并冻结对照

@@ -64,7 +64,7 @@ const DESCRIPTOR: &[u8] = concat!(
     "{\"name\":\"fr-agent-loop\",\"version\":\"",
     env!("CARGO_PKG_VERSION"),
     "\",\"provide\":[\"agent\"],\"inject\":[\"llm\",\"tools\",\"system-prompt\",",
-    "\"session-persistence\"],\"listen\":{\"llm/chunk-ready\":1}}"
+    "\"session-persistence\",\"skills\"],\"listen\":{\"llm/chunk-ready\":1}}"
 )
 .as_bytes();
 
@@ -436,7 +436,7 @@ pub fn dispatch(method: u32, payload: &[u8], sessions: &SessionMap) -> Result<Ve
                 "name": PLUGIN_NAME,
                 "service": SERVICE_NAME,
                 "injects": [
-                    "llm", "tools", "system-prompt", "session-persistence"
+                    "llm", "tools", "system-prompt", "session-persistence", "skills"
                 ],
                 "abiVersion": ABI_VERSION,
             }))
@@ -771,7 +771,13 @@ mod tests {
         assert_eq!(parsed["provide"], serde_json::json!(["agent"]));
         assert_eq!(
             parsed["inject"],
-            serde_json::json!(["llm", "tools", "system-prompt", "session-persistence"])
+            serde_json::json!([
+                "llm",
+                "tools",
+                "system-prompt",
+                "session-persistence",
+                "skills"
+            ])
         );
         assert_eq!(
             parsed["listen"],

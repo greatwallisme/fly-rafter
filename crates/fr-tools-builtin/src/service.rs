@@ -494,6 +494,23 @@ impl BuiltinTools {
         &self.schedules
     }
 
+    /// The hosted skill runtime (the pre-step serve face's registry,
+    /// catalog cap, and visibility gate). The baked composition mounts
+    /// it whenever the skill tool row registers
+    /// (`crate::skill_tools::BAKED_SKILL_TOOLS`; the getter arms the
+    /// serve face only over that same gate).
+    ///
+    /// # Panics
+    ///
+    /// A composition that registered no skill runtime (tests pass
+    /// `None`; only the gate-on compositions call this).
+    #[must_use]
+    pub const fn skills(&self) -> &std::sync::Arc<crate::skill_tools::SkillRuntime> {
+        self.skills
+            .as_ref()
+            .expect("the baked composition mounts the skill runtime")
+    }
+
     /// The hosted interaction runtime (the ask/exit bodies' owning
     /// state).
     #[must_use]

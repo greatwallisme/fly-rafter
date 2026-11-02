@@ -598,6 +598,97 @@ fn build_table() -> Vec<(&'static str, Schema)> {
                         ),
                     ],
                 ),
+                group_property(
+                    "skill",
+                    "The skill registry's completed-catalog cache capacity.",
+                    vec![integer_property(
+                        "collect-cache-max-entries",
+                        1,
+                        Some(MAX_SAFE_INTEGER),
+                        128,
+                        "Maximum number of completed cwd/provider catalogs kept in memory.",
+                    )],
+                ),
+                group_property(
+                    "skill-filesystem",
+                    "The local filesystem skill provider's roots, watch behavior, and bundled root.",
+                    vec![
+                        string_property(
+                            "provider-name",
+                            &[],
+                            "filesystem",
+                            "Unique provider name.",
+                        ),
+                        boolean_default_property(
+                            "include-default-roots",
+                            true,
+                            "Whether project and user roots are included around custom roots.",
+                        ),
+                        optional_string_property(
+                            "fr-home",
+                            "Harness config root; defaults to `$FR_HOME` or `~/.fr`.",
+                        ),
+                        optional_string_property(
+                            "agents-home",
+                            "Shared agent config root; defaults to `$FR_AGENTS_HOME` or `~/.agents`.",
+                        ),
+                        optional_string_array_property(
+                            "custom-skill-dirs",
+                            "Additional skill roots scanned after project roots and before user roots; empty selects none.",
+                        ),
+                        boolean_default_property(
+                            "watch",
+                            true,
+                            "Whether host-local skill roots are watched for catalog changes.",
+                        ),
+                        boolean_default_property(
+                            "watch-use-polling",
+                            false,
+                            "Whether the watcher uses polling instead of native filesystem events.",
+                        ),
+                        integer_property(
+                            "watch-stability-threshold-ms",
+                            1,
+                            Some(MAX_SAFE_INTEGER),
+                            200,
+                            "Milliseconds a changed skill entry must remain stable before it is observed.",
+                        ),
+                        integer_property(
+                            "watch-poll-interval-ms",
+                            1,
+                            Some(MAX_SAFE_INTEGER),
+                            100,
+                            "Milliseconds between stability or polling probes.",
+                        ),
+                        integer_property(
+                            "watch-max-projects",
+                            1,
+                            Some(MAX_SAFE_INTEGER),
+                            128,
+                            "Maximum distinct project roots whose skill directories remain watched.",
+                        ),
+                        boolean_default_property(
+                            "watch-follow-symlinks",
+                            true,
+                            "Whether watched symbolic links follow their target files.",
+                        ),
+                        optional_string_property(
+                            "bundled-skill-dir",
+                            "Bundled skill root; defaults to `$FR_BUNDLED_SKILL_DIR` when default roots are included, otherwise mounts none.",
+                        ),
+                    ],
+                ),
+                group_property(
+                    "tool-skill",
+                    "The model-facing skill catalog's description budget.",
+                    vec![integer_property(
+                        "catalog-description-max-length",
+                        3,
+                        Some(MAX_SAFE_INTEGER),
+                        500,
+                        "Maximum normalized description length rendered in the session catalog; minimum 3.",
+                    )],
+                ),
             ]),
         ),
     ]
@@ -1734,6 +1825,193 @@ mod tests {
                 &serde_json::json!({"allow-parallel-in-progress": true, "section": "p", "max-result-bytes": 63})
             ),
             "below minimum"
+        );
+    }
+    /// The 16f batch-2 skill family: the three groups pin their dsh
+    /// key sets, defaults, and range bounds (the tool-lsp judgment),
+    /// and the range bounds refuse inside the nested objects.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the pin mirrors the dsh skill-family configs one arm per group; splitting it would hide the correspondence"
+    )]
+    #[test]
+    fn builtin_config_pins_skill_groups() {
+        let schema = lookup("fr-tools-builtin").expect("the builtin-tools declaration");
+        let Schema::Object { properties, .. } = schema else {
+            panic!("the builtin-tools declaration is an object");
+        };
+        let skill = properties
+            .iter()
+            .find(|property| property.name == "skill")
+            .expect("the skill group declaration");
+        let Schema::Object {
+            properties: rows,
+            additional_properties,
+            ..
+        } = &skill.schema
+        else {
+            panic!("the skill group is an object");
+        };
+        assert!(
+            !additional_properties,
+            "the skill group refuses unknown keys"
+        );
+        let names: Vec<_> = rows.iter().map(|row| row.name.as_str()).collect();
+        assert_eq!(names, vec!["collect-cache-max-entries"]);
+        let Schema::Integer {
+            min, max, default, ..
+        } = &rows[0].schema
+        else {
+            panic!("collect-cache-max-entries is an integer row");
+        };
+        assert_eq!(
+            (min, max, default),
+            (&Some(1), &Some(super::MAX_SAFE_INTEGER), &Some(128))
+        );
+
+        let filesystem = properties
+            .iter()
+            .find(|property| property.name == "skill-filesystem")
+            .expect("the skill-filesystem group declaration");
+        let Schema::Object {
+            properties: rows,
+            additional_properties,
+            ..
+        } = &filesystem.schema
+        else {
+            panic!("the skill-filesystem group is an object");
+        };
+        assert!(
+            !additional_properties,
+            "the skill-filesystem group refuses unknown keys"
+        );
+        let names: Vec<_> = rows.iter().map(|row| row.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "provider-name",
+                "include-default-roots",
+                "fr-home",
+                "agents-home",
+                "custom-skill-dirs",
+                "watch",
+                "watch-use-polling",
+                "watch-stability-threshold-ms",
+                "watch-poll-interval-ms",
+                "watch-max-projects",
+                "watch-follow-symlinks",
+                "bundled-skill-dir",
+            ]
+        );
+        let defaults: Vec<_> = rows
+            .iter()
+            .map(|row| match &row.schema {
+                Schema::Integer { default, .. } => default.map(serde_json::Value::from),
+                Schema::Number { default, .. } => default.map(serde_json::Value::from),
+                Schema::Boolean { default, .. } => default.map(serde_json::Value::from),
+                Schema::String { default, .. } => default.clone().map(serde_json::Value::from),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            defaults,
+            [
+                Some(serde_json::json!("filesystem")),
+                Some(serde_json::json!(true)),
+                None,
+                None,
+                None,
+                Some(serde_json::json!(true)),
+                Some(serde_json::json!(false)),
+                Some(serde_json::json!(200)),
+                Some(serde_json::json!(100)),
+                Some(serde_json::json!(128)),
+                Some(serde_json::json!(true)),
+                None,
+            ]
+        );
+
+        let tool_skill = properties
+            .iter()
+            .find(|property| property.name == "tool-skill")
+            .expect("the tool-skill group declaration");
+        let Schema::Object {
+            properties: rows,
+            additional_properties,
+            ..
+        } = &tool_skill.schema
+        else {
+            panic!("the tool-skill group is an object");
+        };
+        assert!(
+            !additional_properties,
+            "the tool-skill group refuses unknown keys"
+        );
+        let names: Vec<_> = rows.iter().map(|row| row.name.as_str()).collect();
+        assert_eq!(names, vec!["catalog-description-max-length"]);
+        let Schema::Integer { min, default, .. } = &rows[0].schema else {
+            panic!("catalog-description-max-length is an integer row");
+        };
+        assert_eq!((min, default), (&Some(3), &Some(500)));
+
+        let projected = to_json_schema(schema);
+        let rows = projected
+            .pointer("/anyOf/0/properties/tool-skill/anyOf/0/properties")
+            .expect("nested tool-skill projection");
+        assert_eq!(
+            rows.get("catalog-description-max-length")
+                .expect("row")
+                .get("default"),
+            Some(&serde_json::json!(500))
+        );
+
+        // The range bounds refuse inside the nested objects (the
+        // web-groups judgment).
+        let below_minimum = validate(
+            schema,
+            &serde_json::json!({
+                "skill": { "collect-cache-max-entries": 0 },
+            }),
+        );
+        assert!(
+            below_minimum
+                .iter()
+                .any(|violation| violation.path.contains("collect-cache-max-entries")),
+            "{below_minimum:?}"
+        );
+        let below_catalog_floor = validate(
+            schema,
+            &serde_json::json!({
+                "tool-skill": { "catalog-description-max-length": 2 },
+            }),
+        );
+        assert!(
+            below_catalog_floor
+                .iter()
+                .any(|violation| violation.path.contains("catalog-description-max-length")),
+            "{below_catalog_floor:?}"
+        );
+        let below_watch_floor = validate(
+            schema,
+            &serde_json::json!({
+                "skill-filesystem": { "watch-stability-threshold-ms": 0 },
+            }),
+        );
+        assert!(
+            below_watch_floor
+                .iter()
+                .any(|violation| violation.path.contains("watch-stability-threshold-ms")),
+            "{below_watch_floor:?}"
+        );
+        let unknown_nested_key = validate(
+            schema,
+            &serde_json::json!({
+                "skill-filesystem": { "watchMaxProjects": 4 },
+            }),
+        );
+        assert!(
+            !unknown_nested_key.is_empty(),
+            "the camelCase dsh key is not an fr key"
         );
     }
 }
