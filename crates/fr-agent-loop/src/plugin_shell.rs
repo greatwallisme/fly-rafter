@@ -13,12 +13,16 @@
 //! runs control flow; the session's loop thread drains its mailbox and
 //! owns every durable mutation (inbox splice persistence, abort latch).
 //!
-//! The `llm/chunk-ready` listener obeys the on-event fast-path invariant:
-//! no `require`, no blocking — parse the notification, park the generation
-//! id, wake the driver, return. Notifications carry only
-//! `{session_id, generation_id}`; ordering, duplication, and loss are all
-//! harmless because the loop thread batch-pulls the real chunks from the
-//! provider's per-generation buffer (Q84-B2).
+//! The event listeners obey the on-event fast-path invariant: no
+//! `require`, no blocking — parse the notification, raise the session's
+//! one-bit pending wake, return. `llm/chunk-ready` carries
+//! `{session_id, generation_id}`; `tools/settled` carries only the
+//! settling call's token (no session routing), so its wake fans out to
+//! every session mailbox. Ordering, duplication, and loss are all
+//! harmless because the loop thread pulls the real facts from its
+//! authoritative sources — the provider's per-generation buffer and the
+//! tools settlement queue — and the wake is a single pending bit, not a
+//! fact cache (Q84-B2).
 //!
 //! Thread discipline: every plugin-owned thread is joined before
 //! `teardown` returns (vtable calls after `teardown` are documented
@@ -57,15 +61,22 @@ pub const EV_CHUNK_READY: u32 = 1;
 /// The provider stream notification event name (Q84-B2).
 pub const EVENT_CHUNK_READY: &str = "llm/chunk-ready";
 
+/// Event id the descriptor's listen map binds to `tools/settled`.
+pub const EV_TOOLS_SETTLED: u32 = 2;
+
+/// The tool settle notification event name (the Q84-B2 pattern applied to
+/// the tools fabric; the tools service emits it from its dispatch worker).
+pub const EVENT_TOOLS_SETTLED: &str = "tools/settled";
+
 /// The descriptor the loader consumes: provides the `agent` service,
-/// injects the four consumed services, listens for the provider stream
-/// notification. The version is sourced from crate metadata so it cannot
-/// drift from the artifact.
+/// injects the five consumed services, listens for the provider stream
+/// and tool settle notifications. The version is sourced from crate
+/// metadata so it cannot drift from the artifact.
 const DESCRIPTOR: &[u8] = concat!(
     "{\"name\":\"fr-agent-loop\",\"version\":\"",
     env!("CARGO_PKG_VERSION"),
     "\",\"provide\":[\"agent\"],\"inject\":[\"llm\",\"tools\",\"system-prompt\",",
-    "\"session-persistence\",\"skills\"],\"listen\":{\"llm/chunk-ready\":1}}"
+    "\"session-persistence\",\"skills\"],\"listen\":{\"llm/chunk-ready\":1,\"tools/settled\":2}}"
 )
 .as_bytes();
 
@@ -73,20 +84,6 @@ const DESCRIPTOR: &[u8] = concat!(
 /// the four shapes a cancel cause takes on the session log. The wire
 /// authority is the fr-session slice A/B event vocabulary.
 pub use fr_wire::event::CancelCause;
-
-/// One parked wake source besides inbound commands (decision 46: slow work
-/// lives on provider-owned worker threads and announces itself; the loop
-/// thread parks on this mailbox and pulls).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DriverNotification {
-    /// `llm/chunk-ready`: the named generation's FIFO buffer has new
-    /// chunks (Q84-B2; ordering, duplication, and loss are all harmless).
-    Chunks(String),
-    /// A dispatched tool call settled; poll the tools face for its outcome
-    /// (the Phase 14 bridge shape — tool execution is slow work on the
-    /// tools plugin's worker threads).
-    ToolSettled(fr_wire::ToolCallId),
-}
 
 /// One queued inbound command. Durable application — the inbox splice via
 /// [`crate::inbox::plan_splice`], its persistence, abort-latch arming —
@@ -141,6 +138,16 @@ pub struct SessionMailbox {
     /// driver's cancel arm share this one marker, and the driver mirrors
     /// it into its phase machine at its park points.
     window: Mutex<Option<WindowState>>,
+    /// The transition mutex: the serialization domain shared by
+    /// `maintenance_begin` (busy check + window insert) and the driver's
+    /// idle-to-running commit (window mirror + phase commit). Holding it
+    /// across both halves is what makes the admission atomic — without
+    /// it, a turn starting between the status read and the window insert
+    /// would run beside an open window and both sides would pass their
+    /// checks (the dsh busy contract would break). Lock order: this
+    /// mutex is always the outermost lock; `window` and `inner` may be
+    /// taken while it is held, never the reverse.
+    transition: Mutex<()>,
     inner: Mutex<MailboxInner>,
     wake: Condvar,
 }
@@ -166,7 +173,12 @@ struct WindowState {
 #[derive(Debug)]
 struct MailboxInner {
     commands: VecDeque<InboundCommand>,
-    notifications: VecDeque<DriverNotification>,
+    /// The one-bit pending wake (Q84-B2): a signal that "a data source
+    /// the driver polls has new facts", never a fact cache. Producers
+    /// set it; `wait_step` consumes it one-shot, so a stale wake costs
+    /// exactly one extra poll of the authoritative sources and never a
+    /// busy loop.
+    pending_wake: bool,
     shutdown: bool,
 }
 
@@ -177,9 +189,10 @@ impl SessionMailbox {
             status: std::sync::Arc::new(crate::phase::StatusCell::new()),
             route: Mutex::new(None),
             window: Mutex::new(None),
+            transition: Mutex::new(()),
             inner: Mutex::new(MailboxInner {
                 commands: VecDeque::new(),
-                notifications: VecDeque::new(),
+                pending_wake: false,
                 shutdown: false,
             }),
             wake: Condvar::new(),
@@ -235,6 +248,12 @@ impl SessionMailbox {
     /// capability token the remote job echoes back. The driver mirrors
     /// the window into its phase machine at its next park point.
     ///
+    /// The busy check and the window insert run under the transition
+    /// mutex, the same domain the driver's idle-to-running commit takes:
+    /// "see an idle status, open a window" and "see an empty window,
+    /// commit running" are therefore atomic against each other and can
+    /// never interleave into a running turn beside an open window.
+    ///
     /// # Errors
     ///
     /// Returns the verbatim dsh busy rejection when work is active.
@@ -243,6 +262,7 @@ impl SessionMailbox {
     ///
     /// Panics if a shared lock is poisoned (a holder panicked).
     pub fn maintenance_begin(&self, session_id: &str) -> Result<String, String> {
+        let _transition = self.transition.lock().expect("transition lock poisoned");
         if self.status() == crate::phase::AgentStatus::Running {
             return Err(format!("agent \"{session_id}\" already has active work"));
         }
@@ -351,36 +371,36 @@ impl SessionMailbox {
         }
     }
 
-    /// Parks one `llm/chunk-ready` notification and wakes the driver (a
-    /// buffered batch may now be drainable). Ordering, duplication, and
-    /// loss are all harmless (Q84-B2).
+    /// Raises the session's one-bit pending wake (a `llm/chunk-ready`
+    /// announced itself: a buffered batch may now be drainable).
+    /// Ordering, duplication, and loss are all harmless (Q84-B2).
     ///
     /// # Panics
     ///
     /// Panics if the mailbox lock is poisoned (a holder panicked).
-    pub fn notify_chunks(&self, generation_id: String) {
-        self.notify(DriverNotification::Chunks(generation_id));
+    pub fn notify_chunks(&self) {
+        self.notify_wake();
     }
 
-    /// Parks one tool-settle notification and wakes the driver (a polled
-    /// dispatch may now have its outcome).
+    /// Raises the session's one-bit pending wake (a dispatched tool call
+    /// settled: a polled dispatch may now have its outcome).
     ///
     /// # Panics
     ///
     /// Panics if the mailbox lock is poisoned (a holder panicked).
-    pub fn notify_tool_settled(&self, call_id: fr_wire::ToolCallId) {
-        self.notify(DriverNotification::ToolSettled(call_id));
+    pub fn notify_tool_settled(&self) {
+        self.notify_wake();
     }
 
-    /// Parks one notification and wakes the driver.
+    /// Raises the one-bit pending wake and wakes the parked driver.
     ///
     /// # Panics
     ///
     /// Panics if the mailbox lock is poisoned (a holder panicked).
-    fn notify(&self, notification: DriverNotification) {
+    fn notify_wake(&self) {
         {
             let mut inner = self.inner.lock().expect("mailbox lock poisoned");
-            inner.notifications.push_back(notification);
+            inner.pending_wake = true;
         }
         self.wake.notify_all();
     }
@@ -409,20 +429,23 @@ impl SessionMailbox {
         inner.commands.drain(..).collect()
     }
 
-    /// Takes every parked chunk notification, in arrival order.
+    /// Absorbs a pending wake without acting on it (the idle driver
+    /// consumes no notifications — Q84-B2 loss is harmless). Returns
+    /// whether a wake was pending.
     ///
     /// # Panics
     ///
     /// Panics if the mailbox lock is poisoned (a holder panicked).
-    pub fn drain_notifications(&self) -> Vec<DriverNotification> {
+    pub fn absorb_wake(&self) -> bool {
         let mut inner = self.inner.lock().expect("mailbox lock poisoned");
-        inner.notifications.drain(..).collect()
+        std::mem::replace(&mut inner.pending_wake, false)
     }
 
     /// Parks the calling driver thread until an inbound command or the
     /// shutdown flag arrives (the idle wait point). A stray notification
-    /// wakes the thread, which finds no command and parks again — a
-    /// notification no live step consumes is lost by design (Q84-B2).
+    /// wakes the thread, which finds no command and parks again — the
+    /// pending wake bit is not a wait-idle condition; the run loop
+    /// absorbs strays at the idle boundary (Q84-B2 loss is harmless).
     ///
     /// # Panics
     ///
@@ -436,18 +459,38 @@ impl SessionMailbox {
     }
 
     /// Parks the calling driver thread until any wake source arrives — a
-    /// command, a notification, or the shutdown flag (the in-step wait
-    /// point: chunk batches, tool settlements, and cancels all proceed).
+    /// command, the one-bit pending wake, or the shutdown flag (the
+    /// in-step wait point: chunk batches, tool settlements, and cancels
+    /// all proceed). The wake bit is consumed one-shot on exit: a stale
+    /// wake costs the loop exactly one extra poll of its authoritative
+    /// data sources, never a busy spin.
     ///
     /// # Panics
     ///
     /// Panics if the mailbox lock is poisoned (a holder panicked).
     pub fn wait_step(&self) {
         let mut inner = self.inner.lock().expect("mailbox lock poisoned");
-        while inner.commands.is_empty() && inner.notifications.is_empty() && !inner.shutdown {
+        while !inner.pending_wake && inner.commands.is_empty() && !inner.shutdown {
             inner = self.wake.wait(inner).expect("mailbox wait");
         }
+        inner.pending_wake = false;
         drop(inner);
+    }
+
+    /// Runs one step with the transition mutex held — the serialization
+    /// domain shared with `maintenance_begin`. The driver's idle-to-running
+    /// commit takes this so its "mirror the window, then commit running"
+    /// half is atomic against "check the status, then open the window";
+    /// the only work under the mutex is an atomic cell write and the
+    /// phase commit's fire-and-forget status emit (decision 46: emit
+    /// never blocks).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the transition lock is poisoned (a holder panicked).
+    pub fn with_turn_transition<R>(&self, step: impl FnOnce() -> R) -> R {
+        let _transition = self.transition.lock().expect("transition lock poisoned");
+        step()
     }
 
     /// Reports whether shutdown was requested.
@@ -480,6 +523,24 @@ impl SessionMap {
         Self {
             outbound,
             sessions: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Raises the one-bit tool-settle wake on every session mailbox. The
+    /// `tools/settled` event carries only the settling call's token — no
+    /// session routing — and the on-event fast path never calls
+    /// `require` (decision 46), so the wake fans out: a driver without
+    /// pending settlements absorbs it with one empty poll of its own
+    /// settlement queue and parks again (Q84-B2: duplication and loss
+    /// are harmless for a one-bit wake).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the session map lock is poisoned (a holder panicked).
+    pub fn notify_tool_settled(&self) {
+        let sessions = self.sessions.lock().expect("session map lock poisoned");
+        for mailbox in sessions.values() {
+            mailbox.notify_tool_settled();
         }
     }
 }
@@ -662,9 +723,12 @@ pub fn dispatch(method: u32, payload: &[u8], sessions: &SessionMap) -> Result<Ve
     Ok(serde_json::to_vec(&serde_json::json!({ "queued": true })).unwrap_or_default())
 }
 
-/// Handles one `llm/chunk-ready` notification: park the generation id on
-/// the session's mailbox and wake the driver. Fast-path only — no
-/// `require`, no blocking (PRD decision 46 on-event invariant).
+/// Handles one `llm/chunk-ready` notification (the on-event fast path:
+/// no `require`, no blocking — PRD decision 46).
+///
+/// Raises the session's one-bit pending wake; the generation id
+/// validates the wire shape but is never consumed — the loop pulls real
+/// chunks from the provider's buffer.
 ///
 /// # Errors
 ///
@@ -673,11 +737,48 @@ pub fn handle_chunk_ready(payload: &[u8], sessions: &SessionMap) -> Result<(), S
     #[derive(Deserialize)]
     struct Notification {
         session_id: String,
+        /// Pinned for wire-shape validation only (Q84-B2: the wake is a
+        /// one-bit signal; the id is never consumed).
+        #[expect(
+            dead_code,
+            reason = "wire-shape pin: the id validates the payload but is never consumed"
+        )]
         generation_id: String,
     }
     let notification: Notification = serde_json::from_slice(payload)
         .map_err(|error| format!("{EVENT_CHUNK_READY} payload is invalid: {error}"))?;
-    session_mailbox(sessions, &notification.session_id).notify_chunks(notification.generation_id);
+    let Notification { session_id, .. } = notification;
+    session_mailbox(sessions, &session_id).notify_chunks();
+    Ok(())
+}
+
+/// Handles one `tools/settled` notification (the on-event fast path: no
+/// `require`, no blocking — PRD decision 46).
+///
+/// Fans the one-bit pending wake out to every session mailbox: the
+/// payload carries only the settling call's token — no session routing
+/// — so each parked driver receives the wake and re-polls its own
+/// settlement queue; a driver without pending settlements absorbs it
+/// with one empty poll (Q84-B2: duplication and loss are harmless for a
+/// one-bit wake).
+///
+/// # Errors
+///
+/// Returns the failure text for a malformed notification payload.
+pub fn handle_tools_settled(payload: &[u8], sessions: &SessionMap) -> Result<(), String> {
+    #[derive(Deserialize)]
+    struct Notification {
+        /// Pinned for wire-shape validation only (Q84-B2: the wake is a
+        /// one-bit signal; the token routes nothing).
+        #[expect(
+            dead_code,
+            reason = "wire-shape pin: the token validates the payload but routes nothing"
+        )]
+        token: u64,
+    }
+    let _notification: Notification = serde_json::from_slice(payload)
+        .map_err(|error| format!("{EVENT_TOOLS_SETTLED} payload is invalid: {error}"))?;
+    sessions.notify_tool_settled();
     Ok(())
 }
 
@@ -817,9 +918,9 @@ unsafe extern "C" fn call(
     }
 }
 
-// The only listened event is `llm/chunk-ready` (emit dispatch): park the
-// notification and wake the driver. No `require`, no blocking — the
-// on-event fast-path invariant.
+// The two listened events (`llm/chunk-ready`, `tools/settled` — both
+// emit dispatch): raise the one-bit wake and return. No `require`, no
+// blocking — the on-event fast-path invariant.
 unsafe extern "C" fn on_event(
     handle: *mut std::os::raw::c_void,
     event: u32,
@@ -831,7 +932,7 @@ unsafe extern "C" fn on_event(
     cap: usize,
     out_len: *mut usize,
 ) -> i32 {
-    if handle.is_null() || event != EV_CHUNK_READY {
+    if handle.is_null() {
         return STATUS_FAILED;
     }
     // SAFETY: live handle per the export-table contract.
@@ -844,7 +945,12 @@ unsafe extern "C" fn on_event(
         // for `in_len` readable bytes per the host contract.
         unsafe { std::slice::from_raw_parts(in_data, in_len) }
     };
-    match handle_chunk_ready(payload, &state.sessions) {
+    let handled = match event {
+        EV_CHUNK_READY => handle_chunk_ready(payload, &state.sessions),
+        EV_TOOLS_SETTLED => handle_tools_settled(payload, &state.sessions),
+        _ => return STATUS_FAILED,
+    };
+    match handled {
         Ok(()) => {
             // SAFETY: host buffer contract; an empty JSON object reply.
             if unsafe { write_out(b"{}", out, cap, out_len) } {
@@ -906,7 +1012,7 @@ mod tests {
         CancelCause, InboundCommand, METHOD_CANCEL, METHOD_DESCRIBE, METHOD_FOLLOWUP,
         METHOD_INJECT, METHOD_MAINTENANCE_BEGIN, METHOD_MAINTENANCE_END, METHOD_MAINTENANCE_POLL,
         METHOD_SEND, METHOD_STATUS, METHOD_STEER, PLUGIN_NAME, SessionMap, dispatch,
-        handle_chunk_ready, session_mailbox, shutdown_and_join,
+        handle_chunk_ready, handle_tools_settled, session_mailbox, shutdown_and_join,
     };
     use crate::inbox::InboxTarget;
     use crate::outbound::Outbound;
@@ -991,7 +1097,7 @@ mod tests {
         );
         assert_eq!(
             parsed["listen"],
-            serde_json::json!({ "llm/chunk-ready": 1 })
+            serde_json::json!({ "llm/chunk-ready": 1, "tools/settled": 2 })
         );
     }
 
@@ -1107,7 +1213,7 @@ mod tests {
     }
 
     #[test]
-    fn chunk_ready_routes_by_session_and_tolerates_duplicates() {
+    fn chunk_ready_wakes_the_session_and_coalesces_duplicates() {
         let map = empty_map();
         for generation in ["g1", "g1", "g2"] {
             let payload = serde_json::json!({
@@ -1119,18 +1225,15 @@ mod tests {
         let other = serde_json::json!({ "session_id": "s8", "generation_id": "g9" });
         handle_chunk_ready(other.to_string().as_bytes(), &map).expect("other session");
 
-        assert_eq!(
-            session_mailbox(&map, "s7").drain_notifications(),
-            vec![
-                super::DriverNotification::Chunks("g1".to_owned()),
-                super::DriverNotification::Chunks("g1".to_owned()),
-                super::DriverNotification::Chunks("g2".to_owned()),
-            ]
-        );
-        assert_eq!(
-            session_mailbox(&map, "s8").drain_notifications(),
-            vec![super::DriverNotification::Chunks("g9".to_owned())]
-        );
+        // The one-bit wake: repeated notifications coalesce into one
+        // pending bit, consumed one-shot (Q84-B2 — a signal, not a fact
+        // cache).
+        let s7 = session_mailbox(&map, "s7");
+        assert!(s7.absorb_wake());
+        assert!(!s7.absorb_wake());
+        let s8 = session_mailbox(&map, "s8");
+        assert!(s8.absorb_wake());
+        assert!(!s8.absorb_wake());
         assert_eq!(super::EV_CHUNK_READY, 1);
         assert_eq!(super::EVENT_CHUNK_READY, "llm/chunk-ready");
 
@@ -1138,6 +1241,32 @@ mod tests {
             handle_chunk_ready(br#"{"session_id": "s7"}"#, &map)
                 .expect_err("missing generation id")
                 .contains("llm/chunk-ready payload is invalid")
+        );
+    }
+
+    #[test]
+    fn tools_settled_fans_the_wake_out_to_every_session() {
+        let map = empty_map();
+        // Both mailboxes exist before the event (the driver contacts its
+        // mailbox at session start).
+        let s7 = session_mailbox(&map, "s7");
+        let s8 = session_mailbox(&map, "s8");
+
+        handle_tools_settled(br#"{"token": 7}"#, &map).expect("notification");
+
+        // No session routing in the payload, so both parked drivers get
+        // the wake; each consumes it one-shot.
+        assert!(s7.absorb_wake());
+        assert!(!s7.absorb_wake());
+        assert!(s8.absorb_wake());
+        assert!(!s8.absorb_wake());
+        assert_eq!(super::EV_TOOLS_SETTLED, 2);
+        assert_eq!(super::EVENT_TOOLS_SETTLED, "tools/settled");
+
+        assert!(
+            handle_tools_settled(br#"{"session_id": "s7"}"#, &map)
+                .expect_err("missing token")
+                .contains("tools/settled payload is invalid")
         );
     }
 

@@ -6,7 +6,7 @@ satisfies: [REQ-FR-HEADLESS]
 
 ## Intent
 
-headless 是第一个交付入口（M1）：一次性任务、`--json` 事件流、审批 fail-closed、`--session-id` 续用。装配不挂任何 Host/HTTP/Web 运行时，禁用交互式凭证插件，无 UI answerer。
+headless 是第一个交付入口（M1）：一次性任务、`--json` 事件流、审批 fail-closed、`--session-id` 续用。装配不挂任何 Host/HTTP/Web 运行时，禁用交互式凭证插件，无 UI answerer。宿主壳（fr bin）为装配器+事件泵+入口分发：headless 组合经 fr-config 编译为 loader 文档、以真实 cdylib 工件经 dougong loader 装载走通，信号面与启动诊断落盘构成 boot 链的失败面。
 
 ## Decisions
 
@@ -20,10 +20,17 @@ headless 是第一个交付入口（M1）：一次性任务、`--json` 事件流
 - `--session-id <id>` MUST 采纳已持久化会话继续（不存在的 id 直接失败；拒绝采纳子代理/fork 会话与 agent preset 不匹配的会话）；默认新 `session-<uuid>`。
 - 装配 MUST 不挂任何 Host/HTTP/Web 运行时；禁用交互式凭证插件；无 UI answerer。
 - 续用与输出硬细则 MUST：连字符任务参数必须唯一；任务参数非空但 trim 后为空报错；--session-id trim 后判空但原串交付（空白属身份）；--json 下语法错误也发 error 事件；采纳四拒（preset 不匹配、子代理与 fork、无 cwd、cwd 不一致）加 live Agent 拒绝加 resume 双重复查；final 文本 = durable log 最后一段非空 assistant text、exit reason 取 turn/end reason；等待托管子孙结束（子代理收尾提前唤醒时以 seq 未变且无存活子判定抑制）；--json 首事件含 cwd；字符串与 key 均封顶 8KiB、行限 32KiB 二级降级梯；usage 跨 attempt 累加且任一 attempt 无样本则整 step 省略；tool_result 仅 surfaceOp 为 append 时投影（dsh startup.ts:83-113、index.ts:73-99,212-292,375-386、json-stream.ts:16-66,132-149,266-303）。
+- 宿主壳三件套 MUST（PRD 4.3、决策 16/27）：`fr` bin = 装配器（fr-config 编译装配文档，入口默认 bundle 嵌入常量走同一解析路径）+ 事件泵（emit 事件按订阅插件 descriptor 的 listen 表送达 on_event）+ 入口分发；装载文档每槽 `{name, source{kind}, config, isolate}`，第一方槽一律 dylib 源，builtin 源在 fr 装配中从不使用（决策 16）。
+- dylib 装载清单 MUST 覆盖 headless 组合所需的全部第一方插件 cdylib 工件（现 20 crate 均为 cdylib+rlib 双输出，已实勘）；fr-llm-retry 与 fr-working-directory 两行占位待各自切片兑现（2026-11-04 裁决 2B）。
+- cmdline/appExit MUST 为宿主值注入形态（决策 47 5A）：宿主壳解析根 argv，入口事实（app argv 快照）烘进装载文档行 config 交入口插件激活期读取；宿主壳持有信号注册与有界退出通道，插件不直接退出进程。
+- 信号面 MUST：SIGINT 映射退出码 130、SIGTERM 映射退出码 0，宿主壳先广播 shutdown 再有界 join 插件自有线程（teardown join 纪律，dsh profile-boot.ts:307-308 同码）。
+- 启动诊断 MUST：boot 期致命错误 stderr 单行摘要 + 完整报告落盘 `$FR_HOME/logs/startup-<时间>-<uuid>.log`（警告头 "WARNING: Raw diagnostics may contain configuration or credential values from plugin errors. Review before sharing." 逐字）后退出码 1（PRD 18.1、dsh startup-diagnostics.ts:34-67 + bin.ts:43-47）。
+- realm 声明位 MUST：装载文档槽位支持 isolate 声明（dougong D15 isolate_realm；每会话 realm 挂载落码属后续切片，18a 只钉声明面被 loader 接受）。
 
 ## Boundaries
 
 ### Allowed Changes
+- crates/fr/**
 - crates/fr-headless/**
 
 ### Forbidden
@@ -183,6 +190,40 @@ Scenario: tool_result 仅 append 投影
   假设 某工具结果曾被压缩替换（surfaceOp 非 append）
   当 投影 --json 流时
   那么 原始结果不出现，仅 append 形态的 tool_result 投影
+
+Scenario: headless 组合经真实 dylib 装载走通
+  Test: headless_assembly_boots_real_dylibs
+  假设 各第一方插件 crate 的 cdylib 工件已构建
+  当 宿主壳以 fr-config 编译 headless 组合并交 dougong loader 装载时
+  那么 全部第一方槽以 dylib 源装载成功、各 provide 服务可 require、槽位 isolate 声明形态被 loader 接受
+
+Scenario: 装载清单无 builtin 源
+  Test: assembly_manifest_has_no_builtin_sources
+  当 检查 headless 组合编译产物的每个槽位时
+  那么 不存在 kind 为 builtin 的源（决策 16 红线）
+
+Scenario: 入口事实经文档行注入
+  Test: entry_facts_injected_through_document_rows
+  假设 宿主壳解析到根 argv
+  当 组装装载文档时
+  那么 app argv 快照落在入口插件槽位 config 中且激活期可读
+
+Scenario: 装配失败启动诊断落盘
+  Test: startup_failure_writes_diagnostic_log
+  假设 装配在 boot 期遭遇致命错误（如坏配置）
+  当 启动诊断面处置该错误时
+  那么 stderr 输出单行摘要、完整报告落盘 $FR_HOME/logs/startup-<时间>-<uuid>.log 且含逐字警告头，随后退出码 1
+
+Scenario: 信号映射退出码
+  Test: signals_map_to_dsh_exit_codes
+  当 宿主壳收到 SIGINT 或 SIGTERM 时
+  那么 SIGINT 映射退出码 130、SIGTERM 映射退出码 0，且先广播 shutdown 再有界 join 插件自有线程
+
+Scenario: 事件泵送达 listened 事件
+  Test: event_pump_delivers_listened_events
+  假设 装配完成且订阅插件 descriptor 声明 listen 表
+  当 发布插件 emit 事件时
+  那么 事件按 listen 表送达对应订阅插件 on_event 且载荷逐字无损
 
 ## Questions
 

@@ -4,4 +4,4 @@
 将 doc/prd.md（fly-rafter 唯一需求真源）转化为 agent-spec 合约体系（已完成，1193 场景门禁全绿）；随后按 PRD 第 20 节实现 M1（headless）：约 20 个 crate、六条验收标准，质量门四关全绿。
 
 ## Next Step
-**17h-d ✓（全链绑定收口：26 场景 26 全真绑定 pending 归零，12 复合场景断言加固+7 新测试，lifecycle 26/26+trace liveness=Honored+stamp true，四关+三门禁绿，基线 1891）**。**下一动作=呈用户裁决：Phase 17 收口确认，Phase 18（入口装配 headless）启动方式。**
+**Phase 18 切片划分裁决 1A 2B（18a→f 顺序批准；18c/18d 脚手架随各自切片建，18a 装载清单留两行占位）。当前切片=18a 宿主装配面：开工勘察三事实项（dougong realm 契约/cmdline-appExit 等价面/cdylib 工件核查）→ headless spec 扩边界+18a 场景 → lint 0.7 → 实现。**

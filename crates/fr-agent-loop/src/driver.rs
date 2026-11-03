@@ -575,6 +575,7 @@ enum TurnFlow {
 }
 
 /// One scheduler group outcome (dsh `GroupOutcome`).
+#[derive(Debug)]
 struct GroupOutcome {
     consumed: usize,
     aborted: bool,
@@ -813,6 +814,15 @@ impl LoopDriver {
             max_parallel_tool_calls,
             emit_user_admitted,
         } = deps;
+        // The config contract (`dsh maxParallelToolCalls` zod `min(1)`,
+        // agent-loop/src/index.ts:346) holds at construction too: reject
+        // a zero cap loudly here, where the assembling face can map it,
+        // instead of discovering it as a silent no-progress group later.
+        if (max_parallel_tool_calls)() == 0 {
+            return Err(DriverError::Text(
+                "max-parallel-tool-calls must be at least 1".to_owned(),
+            ));
+        }
         Ok(Self {
             session_id,
             options,
@@ -857,9 +867,10 @@ impl LoopDriver {
             if self.mailbox.is_shutdown() {
                 return;
             }
-            // An idle driver consumes no notifications; dropping them here
-            // keeps the queue bounded (Q84-B2 loss is harmless).
-            drop(self.mailbox.drain_notifications());
+            // An idle driver consumes no notifications; absorbing the
+            // wake here keeps the next step's first park honest (Q84-B2
+            // loss is harmless).
+            self.mailbox.absorb_wake();
             self.sync_window();
             self.apply_commands();
             while self.kick_pending {
@@ -1070,30 +1081,40 @@ impl LoopDriver {
 
     /// Starts one driver, or latches its wake behind maintenance or an
     /// aborted activity (dsh `wakeDriver`): disposal never latches, so
-    /// teardown waits on no model turn. The idle arm opens the running
-    /// phase and marks the kick the run loop then executes.
+    /// a tearing down driver waits on no model turn. The idle arm opens
+    /// the running phase under the transition mutex — the same
+    /// serialization domain as `SessionMailbox::maintenance_begin`, so
+    /// "mirror the window, then commit running" is atomic against
+    /// "check the status, then open the window" and the two admission
+    /// checks can never interleave into a running turn beside an open
+    /// window.
     fn wake_driver(&mut self, wake_after_abort: bool) {
-        // Mirror a fresh remote window before the idle arm runs, so a
-        // send racing the window latches behind maintenance instead of
-        // opening a running phase beside it.
-        self.sync_window();
-        if !matches!(self.machine.phase(), Phase::Idle { .. }) {
-            let disposed = matches!(self.abort_cause(), Some(CancelCause::Disposed));
-            let latching = matches!(self.machine.phase(), Phase::Maintenance { .. });
-            if !disposed && (latching || wake_after_abort) {
-                self.set_wake_requested(true);
+        // An owned clone: the closure borrows `self` mutably, so the
+        // mailbox must not be reached through `self` inside the call.
+        let mailbox = Arc::clone(&self.mailbox);
+        mailbox.with_turn_transition(|| {
+            // Mirror a fresh remote window before the idle arm runs, so a
+            // send racing the window latches behind maintenance instead of
+            // opening a running phase beside it.
+            self.sync_window();
+            if !matches!(self.machine.phase(), Phase::Idle { .. }) {
+                let disposed = matches!(self.abort_cause(), Some(CancelCause::Disposed));
+                let latching = matches!(self.machine.phase(), Phase::Maintenance { .. });
+                if !disposed && (latching || wake_after_abort) {
+                    self.set_wake_requested(true);
+                }
+                return;
             }
-            return;
-        }
-        self.kick_pending = true;
-        let Phase::Idle { last_turn } = *self.machine.phase() else {
-            unreachable!("the idle check above holds");
-        };
-        self.machine.commit(Phase::Running {
-            abort: AbortLatch::new(),
-            turn: last_turn,
-            step: 0,
-            wake_requested: false,
+            self.kick_pending = true;
+            let Phase::Idle { last_turn } = *self.machine.phase() else {
+                unreachable!("the idle check above holds");
+            };
+            self.machine.commit(Phase::Running {
+                abort: AbortLatch::new(),
+                turn: last_turn,
+                step: 0,
+                wake_requested: false,
+            });
         });
     }
 
@@ -2643,6 +2664,15 @@ impl LoopDriver {
         mode: ToolExecutionMode,
     ) -> Result<GroupOutcome, DriverError> {
         let max_parallel = (self.max_parallel_tool_calls)();
+        // The config contract (`dsh maxParallelToolCalls` zod `min(1)`,
+        // agent-loop/src/index.ts:346) is enforced loudly at every read:
+        // a zero cap would start no call ever and the group would
+        // conclude with nothing consumed.
+        if max_parallel == 0 {
+            return Err(DriverError::Text(
+                "max-parallel-tool-calls must be at least 1".to_owned(),
+            ));
+        }
         let mut state = GroupState {
             slots: group.iter().map(|_| None).collect(),
             call_seqs: group.iter().map(|_| None).collect(),
@@ -2898,9 +2928,9 @@ impl LoopDriver {
 mod tests {
     use super::{
         AgentOptions, DrainedGeneration, DriverDeps, DriverError, InstructionsBridge, LoopDriver,
-        PreparedCall, PromptAssembly, RestoreView, SessionReads, SkillPreStep, SystemPromptFace,
-        TOOL_ABORTED_BEFORE_DISPATCH, ToolExecution, ToolExecutionMode, ToolExecutionResult,
-        ToolPrepared, ToolSettlement, ToolsFace, is_user_message,
+        PlannedCall, PreparedCall, PromptAssembly, RestoreView, SessionReads, SkillPreStep,
+        SystemPromptFace, TOOL_ABORTED_BEFORE_DISPATCH, ToolExecution, ToolExecutionMode,
+        ToolExecutionResult, ToolPrepared, ToolSettlement, ToolsFace, is_user_message,
     };
     use crate::agent_events::AgentEvents;
     use crate::outbound::Outbound;
@@ -3492,7 +3522,7 @@ mod tests {
                 },
             ));
             if let Some(mailbox) = &self.mailbox {
-                mailbox.notify_tool_settled(exec.call_id.clone());
+                mailbox.notify_tool_settled();
             }
             Ok(())
         }
@@ -3634,6 +3664,111 @@ mod tests {
             |_| {},
             None,
         )
+    }
+
+    /// Builds a minimal driver over empty scripts with a caller-owned
+    /// parallel-limit closure (the config-contract rejection tests).
+    fn zero_limit_driver(
+        max_parallel_tool_calls: Box<dyn Fn() -> usize + Send>,
+    ) -> Result<LoopDriver, DriverError> {
+        let session = Arc::new(Mutex::new(TestSession::new()));
+        let session_handle = Box::into_raw(Box::new(Arc::clone(&session)));
+        let outbound = Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
+            dispatch: crate::outbound::identity_dispatch,
+            host_handle: session_handle.cast::<c_void>(),
+            require: serving_require,
+            emit: quiet_emit,
+        });
+        let events = Arc::new(AgentEvents::new(outbound, Arc::new(|_warning: &str| {})));
+        let map = SessionMap::new(outbound);
+        let mailbox = session_mailbox(&map, "s1");
+        let reads = TestReads {
+            session: Arc::clone(&session),
+        };
+        let llm = Arc::new(Mutex::new(ScriptedLlm {
+            session: Arc::clone(&session),
+            mailbox: Some(Arc::clone(&mailbox)),
+            scripts: Vec::new().into(),
+            prepared: Vec::new(),
+            requests: Vec::new(),
+            in_history: false,
+        }));
+        let tools = Arc::new(Mutex::new(ScriptedTools {
+            mailbox: Some(Arc::clone(&mailbox)),
+            mode: ToolExecutionMode::Parallel,
+            mode_overrides: std::collections::HashMap::new(),
+            flip_on_dispatch: None,
+            results: Vec::new().into(),
+            settled: Vec::new(),
+            dispatches: Vec::new(),
+            cancel_on_dispatch: false,
+            in_flight_now: Vec::new(),
+            timeline: Vec::new(),
+        }));
+        LoopDriver::new(
+            "s1",
+            AgentOptions {
+                provider: Some("p".to_owned()),
+                model: Some("m".to_owned()),
+                reasoning_effort: None,
+                max_tokens: None,
+            },
+            Arc::clone(&mailbox),
+            Arc::clone(&events),
+            DriverDeps {
+                reads: Box::new(reads),
+                prompt: Box::new(FixedPrompt { text: "system" }),
+                llm: Box::new(SharedLlm(Arc::clone(&llm))),
+                tools: Box::new(SharedTools(Arc::clone(&tools))),
+                instructions: None,
+                skills: None,
+                clock: Box::new(|| 1_700_000_000_000),
+                next_id: Box::new(|| fr_wire::MessageId::new("id-0".to_owned())),
+                max_parallel_tool_calls,
+                emit_user_admitted: Box::new(|_agent: &str| {}),
+            },
+        )
+    }
+
+    #[test]
+    fn zero_parallel_limit_is_rejected_at_construction() {
+        // dsh validates maxParallelToolCalls with zod min(1) at plugin
+        // load (agent-loop/src/index.ts:346); the driver mirrors the
+        // contract loudly at construction instead of a silent
+        // no-progress scheduler state.
+        let error =
+            zero_limit_driver(Box::new(|| 0)).expect_err("a zero limit refuses construction");
+        assert!(
+            error
+                .to_string()
+                .contains("max-parallel-tool-calls must be at least 1")
+        );
+    }
+
+    #[test]
+    fn zero_parallel_limit_is_rejected_at_group_start() {
+        // The limit is a dynamic closure; a cap that flips to zero after
+        // construction errors at the group start instead of concluding
+        // the group with nothing consumed (review finding five).
+        let live = Arc::new(std::sync::atomic::AtomicUsize::new(1));
+        let limit = Arc::clone(&live);
+        let mut driver = zero_limit_driver(Box::new(move || limit.load(Ordering::Relaxed)))
+            .expect("driver restores");
+        live.store(0, Ordering::Relaxed);
+        let planned = [PlannedCall {
+            id: ToolCallId::new("call-0".to_owned()),
+            name: "p".to_owned(),
+            raw_arguments: String::new(),
+        }];
+        let error = driver
+            .run_group(1, 1, &planned, ToolExecutionMode::Parallel)
+            .expect_err("a zero limit refuses the group");
+        assert!(
+            error
+                .to_string()
+                .contains("max-parallel-tool-calls must be at least 1")
+        );
     }
 
     fn harness_with(

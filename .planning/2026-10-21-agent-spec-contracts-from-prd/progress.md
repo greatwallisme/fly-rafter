@@ -1820,3 +1820,32 @@
 - **工具错误两枚**（当回合修复）：Edit 误将草稿文本写入 plugin_shell harness 尾（当场发现当场修，git diff 核验零残留）；sed 行区间限定 GAP_TEXT 全路径避免误伤既有行。
 - **终门**：fmt ✓/clippy workspace --all-targets -D warnings 0（too_many_lines 107/100→提取 spill_post_execute_round 辅助+needless_pass_by_value 修）/全测（FR_DSH_SOURCE）1891 passed 0 failed 两连/doc ✓/三门禁 exit 0×3。基线 1884→1891（+7=新测试数）。
 - **下一动作=呈用户裁决：Phase 17 是否收口（fr-compaction 全链已闭环），Phase 18 入口装配（headless）启动。**
+
+## 2026-11-04 — 状态恢复+doc/review/agent-loop.md 对勘（四实证+一缝，问题单已呈待裁决）
+
+- **状态恢复**：resolve-plan-dir 确认 .planning/2026-10-21-agent-spec-contracts-from-prd；git 干净（唯 doc/review/ 未跟踪）；17h-d 终态与任务计划一致。
+- **新输入**：doc/review/agent-loop.md（用户投入的外部审查，约 260 行，2026-11-03 18:34 落盘）批评 fr-agent-loop 通知/驱动设计。逐条对源码核验完毕，全部实证已落 findings.md「2026-11-04 对勘实证」节（含 file:line 逐条）。要旨：忙循环=成立（通知逐事件追加 plugin_shell.rs:380-386，step 内零消费点，唯一消费在 idle 边界 driver.rs:862 ⇒ pump_generation driver.rs:2178-2193 与工具组循环 driver.rs:2657-2660 在首枚通知后退化为热轮询，park 失效）；maintenance_begin TOCTOU=成立（plugin_shell.rs:245-260 状态读与窗插分离两同步域，run_maintenance driver.rs:895-919 同族）；max_parallel_tool_calls=0 无校验=成立（driver.rs:689/2645/2727，全仓零校验）；深藏指控六~九多数由构造满足（generation 收窄/陈旧 settle 丢弃/单线程跃迁/槽位幂等/恢复折叠幂等，引证见 findings）。**新发现（审查之外）：tools/settled 唤醒缝未接线**（fr-tools service.rs:82-84/1533 已 emit，agent-loop 壳 descriptor plugin_shell.rs:68 只听 llm/chunk-ready，notify_tool_settled 生产零调用点 ⇒ 真装配下首个 in-flight 工具挂起，Phase 14 测试双掩盖）。
+- **定性**：三库内缺陷+一装配缝，全 fr 内部零协议影响零 19.2 登记，修复属"修码不改合同"；详见 findings.md 对勘节。
+- **呈裁决**：问题单四题（Phase 17 收口确认 / 缺陷处置方式 / Phase 18 启动方式 / 跨切片 skip 偿还安排）已单条消息统一编号呈报，等显式编号裁决后执行。
+
+## 2026-11-04 — 用户裁决「全部选a」→ Phase 17 收口+17i 修复切片完成（1894/0）+Phase 18 调研落盘
+
+- **裁决执行**：Q1A=Phase 17 归档（本节起 17 系切片关闭）；Q2A=四枚全修（含 tools/settled 接线）；Q3A=Phase 18 先真源集中呈报（调研已落盘，问题单随本日呈报）；Q4A=四枚跨切片 skip 随 Phase 18 对应切片偿还。
+- **17i 修复切片**：四枚全修完成（单 bit 唤醒/tools-settled 接线/transition 互斥/parallel 校验），三新测试，合约零改动。终门：fmt ✓/clippy 0/全测 1894×2 连绿（1891→1894）/doc ✓/三门禁 0×3/lifecycle 23+3 零回归/guard 判例一致/stamp 同基线。全程细节+file:line 锚已落 findings.md 2026-11-04「17i 修复切片完成」节。
+- **过程纪律两枚**：一次生成退化（伪 Edit 被工具拒绝零损坏）；clippy 三枚新 lint（wildcard/文档首段）当场修。
+- **Phase 18 调研**：后台 subagent 只读完成，research-phase18-dsh-headless.md（341 行八节逐条引证）落盘；§8 七条待裁决+第 3 条事实核查项（cdylib 工件现状）已转问题单/开工勘察项。
+- **下一动作=呈 Phase 18 设计裁决问题单（七题），裁决后写合同动工。**
+
+## 2026-11-04 — 用户裁决「均选a」（Phase 18 六题全 A）→ PRD 落盘四处+切片计划呈报
+
+- **裁决执行**：1A realm 挂载（开工先核 dougong loader 装配面）/2A 独立 fr-llm-retry/3A 独立 fr-working-directory/4A 启动诊断 $FR_HOME/logs/startup-*.log/5A 宿主值注入/6A session-title 两侧禁用。
+- **PRD 四处落盘**（核验锚 rg 通过）：4.5 增 fr-llm-retry（:161）+fr-working-directory（:152）两行；18.1 增「启动诊断」面（:528，含 dsh 逐字警告头+退出码 1）；19.1 增会话标题排除行（:647）；§23 增决策 47（:808，六裁决全引证+非 19.2 定性+cdylib 勘察项）。
+- **过程事故**：又一次生成退化（Windows 伪路径+缺参 Edit，工具拒绝零损坏）——重锚 Read 后干净完成；退化集中在长编辑序列中段，后续 PRD 类长文编辑一律先 Read 再 Edit。
+- **下一动作=呈 Phase 18 切片划分问题单，裁决后写合同动工（七步流 step 1）。**
+
+## 2026-11-04 — 切片裁决 1A 2B 执行：18a 合同扩写收口（lint 100%）+ 开工勘察三事实落盘
+
+- **裁决执行**：Q1A=18a→f 顺序批准；Q2B=18c/18d 脚手架随各自切片建、18a 清单留两行占位。
+- **18a 合同**（step 1-2）：headless spec 扩写完成——Intent 增宿主壳句、Decisions 增六行（含决策 16/47 引证）、Allowed += crates/fr/**、场景六枚（真实选择器，18a 实现后绑定生效）；parse 31 scenarios、lint Quality 100%（0 error，警告全为 generated-draft/pending 设计态 advisory）。
+- **勘察三事实**：①dougong D9/D15 isolate_realm 面（设计文档 :77-79/:106-107）+fiber_realm 场景要求每会话 realm（18e 细勘）；②宿主值注入落位=文档行 config（builtin 源被决策 16 禁用）；③cdylib 20/20 全双输出零工件缺口；依赖面 libc 0.2+uuid v4 已在 workspace（零新增外部 crate）。全锚落 findings.md 2026-11-04「18a 开工勘察」节。
+- **下一动作=18a 实现：fr 增 dougong/dougong-loader 依赖→boot 装配臂+事件泵面+宿主值注入行→信号面→启动诊断→六测试→四关+七步收口。**
