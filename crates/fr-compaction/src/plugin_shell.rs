@@ -36,7 +36,7 @@ use dougong_abi::{
     ABI_VERSION, MODE_WATERFALL, PluginExports, STATUS_CAPACITY, STATUS_DEFERRED, STATUS_FAILED,
     STATUS_OK, write_out,
 };
-use fr_llm::error::CONTEXT_WINDOW_EXCEEDED_CODE;
+use fr_llm::error::{CONTEXT_WINDOW_EXCEEDED_CODE, IMAGE_OFFLOAD_REQUIRED_CODE};
 use fr_llm::generation::{
     AbortRequest, BeginReply, BeginRequest, DrainReply, DrainRequest, WireGenerateOptions,
     WireModelInfo,
@@ -112,7 +112,8 @@ struct SessionEventMirror {
 }
 
 /// The consumer-side wire mirror of the `agent/request-error` payload's
-/// failure facts (the overflow arm reads the code).
+/// failure facts (the overflow arm reads the code; the image-offload
+/// arm reads the offload count).
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RequestErrorMirror {
@@ -120,11 +121,16 @@ struct RequestErrorMirror {
     failure: FailureMirror,
 }
 
-/// The decoded failure facts the overflow arm consumes.
+/// The decoded failure facts the request-error arms consume.
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct FailureMirror {
     #[serde(default)]
     code: Option<String>,
+    /// With code `IMAGE_OFFLOAD_REQUIRED`: how many more of the oldest
+    /// retained occurrences the route needs offloaded.
+    #[serde(default)]
+    offload_images: Option<u64>,
 }
 
 /// The `compaction/summary-error` wire payload (the dsh
@@ -182,7 +188,27 @@ impl HostLink {
     /// Returns the host status plus any JSON detail on a non-OK terminal
     /// status.
     pub fn require(&self, service: &str, method: u32, payload: &[u8]) -> Result<Vec<u8>, String> {
-        let mut cap = 4096_usize;
+        self.require_with_initial(service, method, payload, INITIAL_REPLY_CAPACITY)
+    }
+
+    /// The require leg over an explicit initial capacity. A
+    /// `STATUS_CAPACITY` retry re-executes the service method (the
+    /// kernel's `require_impl` runs the invocation once per call), so a
+    /// mutating call must start large enough to fit its reply in the
+    /// first pass — the append face sizes from its request length.
+    ///
+    /// # Errors
+    ///
+    /// Returns the host status plus any JSON detail on a non-OK terminal
+    /// status.
+    pub fn require_with_initial(
+        &self,
+        service: &str,
+        method: u32,
+        payload: &[u8],
+        initial_capacity: usize,
+    ) -> Result<Vec<u8>, String> {
+        let mut cap = initial_capacity.max(INITIAL_REPLY_CAPACITY);
         loop {
             let mut buf = vec![0_u8; cap];
             let mut len = 0_usize;
@@ -276,6 +302,9 @@ impl HostLink {
 /// The host protocol's documented out-buffer ceiling (the loop shell's
 /// 16 MiB judgment).
 const MAX_REPLY_CAPACITY: usize = 16 * 1024 * 1024;
+
+/// The default first-pass reply capacity for idempotent reads.
+const INITIAL_REPLY_CAPACITY: usize = 4096;
 
 /// One relay job: the dispatch the foreign entry cannot originate
 /// itself, answered on the one-shot reply channel.
@@ -527,12 +556,18 @@ fn run_pressure_compaction(
         session_id: session_id.to_owned(),
         relay: &state.relay,
     };
+    let prune = PruneHook {
+        session_id: session_id.to_owned(),
+        link: state.link,
+        config: state.config.prune,
+    };
     let capacity = CapacityHook { link: state.link };
     let mut deps = EngineDeps {
         meter: &meter,
         summarize: &mut |input| summarize.run(input),
-        recover: &mut |failure, seqs| recover.run(failure, seqs),
+        recover: &mut |failure, seqs, view| recover.run(failure, seqs, view),
         model_capacity: &mut |provider, model| capacity.run(provider, model),
+        prune: Some(&mut |view| prune.run(view)),
     };
     compact_if_needed(
         &mut view,
@@ -578,6 +613,19 @@ pub fn handle_session_event(state: &mut ShellState, payload: &[u8]) -> Result<()
     Ok(())
 }
 
+/// Runs the request-error image-offload arm: the durable surface
+/// repair (the dsh listener's offload-and-retry ruling).
+///
+/// The dsh `signal.aborted` short-circuit has no wire face: the loop
+/// driver polls its latch before dispatching, and a cancel landing
+/// mid-dispatch cannot reach a foreign entry (the 17f documented
+/// deviation; the auto path only).
+fn run_offload_arm(state: &ShellState, session_id: &str, count: u64) -> Result<bool, String> {
+    let mut view = state.open_session(session_id)?;
+    let surface = view.surface_nodes().to_vec();
+    crate::image_offload::offload_oldest_images(&mut view, &surface, count)
+}
+
 /// Handles one `agent/request-error` crossing (waterfall).
 ///
 /// One provider-confirmed context overflow arms the recovery sequence —
@@ -593,6 +641,13 @@ pub fn handle_session_event(state: &mut ShellState, payload: &[u8]) -> Result<()
 pub fn handle_request_error(state: &mut ShellState, payload: &[u8]) -> Result<bool, String> {
     let event: RequestErrorMirror = serde_json::from_slice(payload)
         .map_err(|error| format!("agent/request-error payload is invalid: {error}"))?;
+    // The image-offload arm first (the dsh request-error listener pair;
+    // the codes are disjoint so the shared entry dispatches by code).
+    if event.failure.code.as_deref() == Some(IMAGE_OFFLOAD_REQUIRED_CODE)
+        && let Some(count) = event.failure.offload_images
+    {
+        return run_offload_arm(state, &event.session_id, count);
+    }
     if event.failure.code.as_deref() != Some(CONTEXT_WINDOW_EXCEEDED_CODE) {
         return Ok(false);
     }
@@ -626,12 +681,18 @@ pub fn handle_request_error(state: &mut ShellState, payload: &[u8]) -> Result<bo
         session_id: event.session_id.clone(),
         relay: &state.relay,
     };
+    let prune = PruneHook {
+        session_id: event.session_id.clone(),
+        link: state.link,
+        config: state.config.prune,
+    };
     let capacity = CapacityHook { link: state.link };
     let mut deps = EngineDeps {
         meter: &meter,
         summarize: &mut |input| summarize.run(input),
-        recover: &mut |failure, seqs| recover.run(failure, seqs),
+        recover: &mut |failure, seqs, view| recover.run(failure, seqs, view),
         model_capacity: &mut |provider, model| capacity.run(provider, model),
+        prune: Some(&mut |view| prune.run(view)),
     };
     match compact_if_needed(
         &mut view,
@@ -833,7 +894,35 @@ struct RecoverHook<'relay> {
 }
 
 impl RecoverHook<'_> {
-    fn run(&self, failure: &CompactionFailure, seqs: &[fr_wire::SessionSeq]) -> bool {
+    fn run(
+        &self,
+        failure: &CompactionFailure,
+        seqs: &[fr_wire::SessionSeq],
+        view: &mut dyn crate::region::SessionView,
+    ) -> bool {
+        // The in-process image-offload consumer (the dsh summary-error
+        // listener): the built-in answers before any external dispatch
+        // (the dsh waterfall's registration order), and a kernel
+        // round-trip to self mid-entry is deterministically refused by
+        // the per-instance lock (the D-V3-3 wait graph), so the
+        // built-in arm runs here against the transaction's own view.
+        if let CompactionFailure::Llm {
+            code: Some(code),
+            failure: Some(provider_failure),
+            ..
+        } = failure
+            && code == IMAGE_OFFLOAD_REQUIRED_CODE
+            && let Some(count) = provider_failure.offload_images
+        {
+            match crate::image_offload::offload_oldest_images(view, seqs, count) {
+                Ok(true) => return true,
+                Ok(false) => {}
+                Err(error) => {
+                    log_warn_global(&format!("compaction summary-error offload failed: {error}"));
+                    return false;
+                }
+            }
+        }
         let error = FailureFacts {
             message: failure.message(),
             code: match failure {
@@ -893,6 +982,29 @@ impl RecoverHook<'_> {
 /// The capacity hook (the dsh `ctx.llm.resolveModelInfo` projection).
 struct CapacityHook {
     link: HostLink,
+}
+
+/// The prune hook (the dsh `ctx.get('toolResultPruner')` face): the
+/// one-crate pruner over the wire-backed view and meter. The dsh
+/// soft-get's absent arm stays expressible at the engine seam; the
+/// one-crate assembly always provides it.
+struct PruneHook {
+    session_id: String,
+    link: HostLink,
+    config: crate::pruner::PruneConfig,
+}
+
+impl PruneHook {
+    fn run(
+        &self,
+        view: &mut dyn crate::region::SessionView,
+    ) -> Result<crate::pruner::PruneResult, String> {
+        let meter = RemoteMeter {
+            link: self.link,
+            session_id: self.session_id.clone(),
+        };
+        crate::pruner::prune_session(view, &meter, &self.config)
+    }
 }
 
 impl CapacityHook {
@@ -1260,6 +1372,9 @@ mod tests {
         agent_route: Mutex<Option<(Option<String>, Option<String>)>>,
         agent_fails: AtomicBool,
         dispatch_log: Mutex<Vec<(String, Vec<u8>)>>,
+        /// Every `'llm'` BEGIN request body, in call order (the
+        /// summarizer-input pin point).
+        begin_log: Mutex<Vec<serde_json::Value>>,
     }
 
     /// Routes one `'session-persistence'` require to the real service.
@@ -1276,14 +1391,25 @@ mod tests {
     }
 
     /// Routes one `'llm'` require to the scripted faces.
-    fn serve_llm(state: &TestHost, method: u32) -> Result<serde_json::Value, String> {
+    fn serve_llm(
+        state: &TestHost,
+        method: u32,
+        payload: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
         match method {
             fr_wire::services::llm::METHOD_RESOLVE_MODEL_INFO => Ok(serde_json::json!({
                 "provider": "deepseek", "id": "m1", "name": "M1",
                 "context": { "contextWindow": 262_144 },
                 "defaultMaxTokens": 4_096,
             })),
-            fr_wire::services::llm::METHOD_BEGIN => Ok(serde_json::json!({ "generationId": "g1" })),
+            fr_wire::services::llm::METHOD_BEGIN => {
+                state
+                    .begin_log
+                    .lock()
+                    .expect("host begin lock")
+                    .push(payload.clone());
+                Ok(serde_json::json!({ "generationId": "g1" }))
+            }
             fr_wire::services::llm::METHOD_DRAIN => {
                 let mut batches = state.llm_batches.lock().expect("host batches lock");
                 let batch = if batches.is_empty() {
@@ -1398,7 +1524,7 @@ mod tests {
                 }
                 _ => Err(format!("unknown token-meter method {method}")),
             },
-            fr_wire::services::llm::SERVICE_NAME => serve_llm(state, method),
+            fr_wire::services::llm::SERVICE_NAME => serve_llm(state, method, &payload),
             fr_wire::services::agent::SERVICE_NAME => {
                 if state.agent_fails.load(Ordering::Acquire) {
                     return STATUS_FAILED;
@@ -1508,6 +1634,7 @@ mod tests {
                 "compaction/summary".to_owned(),
                 "compaction/end".to_owned(),
                 "compaction/prune".to_owned(),
+                "image/offload".to_owned(),
             ])
             .expect("compaction vocabulary declares");
         let mut sessions = {
@@ -1564,6 +1691,7 @@ mod tests {
             agent_route: Mutex::new(Some((Some("deepseek".to_owned()), Some("m1".to_owned())))),
             agent_fails: AtomicBool::new(false),
             dispatch_log: Mutex::new(Vec::new()),
+            begin_log: Mutex::new(Vec::new()),
         });
         let exports = HostExports {
             grant: host_grant,
@@ -1767,6 +1895,257 @@ mod tests {
         assert!(
             !types.contains(&"compaction/summary".to_owned()),
             "the failed capture spends no summarization: {types:?}"
+        );
+        state.join_relay();
+    }
+
+    /// Builds one user/message event body carrying `count` image
+    /// attachments (the decision writer's target shape).
+    fn image_user_body(id: &str, count: usize) -> serde_json::Value {
+        serde_json::json!({
+            "role": "user",
+            "id": id,
+            "content": (0..count)
+                .map(|index| serde_json::json!({
+                    "type": "image",
+                    "attachment": {
+                        "attachmentId": format!("a-{id}-{index}"),
+                        "mediaType": "image/png",
+                        "bytes": 10,
+                        "width": 1,
+                        "height": 1,
+                    },
+                }))
+                .collect::<Vec<_>>(),
+            "source": { "kind": "user" },
+        })
+    }
+
+    /// Appends one plain text user message to the live session.
+    fn seed_plain_user(host: &TestHost) {
+        let mut sessions = host.sessions.lock().expect("host session lock");
+        session_dispatch(
+            fr_wire::services::session_persistence::METHOD_SESSION_APPEND,
+            serde_json::json!({
+                "id": "s1", "type": "user/message",
+                "data": {
+                    "role": "user",
+                    "id": "usr-trailer",
+                    "content": [{ "type": "text", "text": "after" }],
+                    "source": { "kind": "user" },
+                },
+                "surfaceOp": "append",
+            })
+            .to_string()
+            .as_bytes(),
+            &mut sessions,
+        )
+        .expect("seed plain user");
+    }
+
+    /// Appends one image-carrying user message to the live session.
+    fn seed_image_user(host: &TestHost, id: &str, count: usize) {
+        let mut sessions = host.sessions.lock().expect("host session lock");
+        session_dispatch(
+            fr_wire::services::session_persistence::METHOD_SESSION_APPEND,
+            serde_json::json!({
+                "id": "s1", "type": "user/message", "data": image_user_body(id, count),
+                "surfaceOp": "append",
+            })
+            .to_string()
+            .as_bytes(),
+            &mut sessions,
+        )
+        .expect("seed image user");
+    }
+
+    /// The failing summary batch: a terminal error finish carrying the
+    /// `IMAGE_OFFLOAD_REQUIRED` failure facts.
+    fn offload_fail_batch(count: u64) -> serde_json::Value {
+        serde_json::json!({
+            "generationId": "g1",
+            "chunks": [
+                { "type": "finish", "reason": { "kind": "error", "failure": {
+                    "message": "offload", "code": "IMAGE_OFFLOAD_REQUIRED",
+                    "offloadImages": count,
+                } } },
+            ],
+            "done": true,
+        })
+    }
+
+    /// The overflow recovery rides the pruner and the summary-error
+    /// offload arm: the failing summary reports one offload, the
+    /// built-in consumer lands the decision in the transaction view,
+    /// the re-prepared input carries the offloaded mark, and the retry
+    /// completes the compaction into a ruled retry.
+    #[test]
+    fn overflow_offload_recovery_completes_with_marks() {
+        let (mut state, host) = harness(
+            "offload-recover",
+            vec![offload_fail_batch(1), checkpoint_batch("recovered body")],
+            true,
+        );
+        seed_image_user(&host, "u-img", 1);
+        // A trailing plain node keeps the image inside the shadowed
+        // region (the selection retains the newest surface node).
+        seed_plain_user(&host);
+
+        let failure =
+            br#"{"sessionId":"s1","failure":{"message":"window","code":"CONTEXT_WINDOW_EXCEEDED"}}"#;
+        let (status, reply) = drive(&mut state, EV_REQUEST_ERROR, failure);
+        assert_eq!(status, STATUS_OK);
+        assert_eq!(reply, RETRY_CHAIN_VALUE, "the recovery rules a retry");
+
+        // The durable decision landed before the compaction close.
+        let types = event_types(&host);
+        assert!(
+            types.contains(&"image/offload".to_owned()),
+            "the decision event lands: {types:?}"
+        );
+        assert!(types.contains(&"compaction/end".to_owned()), "{types:?}");
+
+        // The re-prepared summarizer input carries the projected mark.
+        let begins = host.begin_log.lock().expect("begin log").clone();
+        assert!(begins.len() >= 2, "two summarizer calls: {}", begins.len());
+        let second = &begins[1];
+        let messages = second["request"]["messages"].as_array().expect("messages");
+        let offloaded = serde_json::to_string(&messages).expect("json");
+        assert!(
+            offloaded.contains("\"offloaded\":true"),
+            "the re-prepared input sees the offloaded mark: {offloaded}"
+        );
+        state.join_relay();
+    }
+
+    /// The request-error image-offload arm: the offload count selects
+    /// the oldest un-offloaded occurrences in surface order and rules
+    /// the retry without spending overflow budget.
+    #[test]
+    fn request_error_offload_arm_rules_retry() {
+        let (mut state, host) = harness("offload-req", vec![], true);
+        seed_image_user(&host, "u-a", 1);
+        seed_image_user(&host, "u-b", 2);
+
+        let failure = br#"{"sessionId":"s1","failure":{"message":"budget","code":"IMAGE_OFFLOAD_REQUIRED","offloadImages":2}}"#;
+        let (status, reply) = drive(&mut state, EV_REQUEST_ERROR, failure);
+        assert_eq!(status, STATUS_OK);
+        assert_eq!(reply, RETRY_CHAIN_VALUE, "the landed offload rules a retry");
+
+        let types = event_types(&host);
+        assert!(
+            types.iter().filter(|t| *t == "image/offload").count() == 1,
+            "one decision event: {types:?}"
+        );
+        // The decision selects the oldest two occurrences across the
+        // two messages in surface order.
+        let sessions = host.sessions.lock().expect("host session lock");
+        let session = sessions
+            .store()
+            .get(&fr_wire::ids::SessionId::new("s1"))
+            .expect("live session");
+        let decision = session
+            .events()
+            .iter()
+            .rev()
+            .find(|event| event.event_type() == "image/offload")
+            .expect("decision event");
+        let fr_wire::event::SessionEventData::Unknown(unknown) = &decision.data else {
+            panic!("unknown carrier");
+        };
+        let data = serde_json::Value::Object(unknown.data.clone());
+        let targets = data["targets"].as_array().expect("targets");
+        assert_eq!(targets.len(), 2);
+        // The harness seeds four plain users first, so the image
+        // messages occupy surface nodes 6 and 7; the oldest two
+        // occurrences spread across both in surface order.
+        assert_eq!(targets[0]["seq"], serde_json::json!(6));
+        assert_eq!(targets[0]["imageIndexes"], serde_json::json!([0]));
+        assert_eq!(targets[1]["seq"], serde_json::json!(7));
+        assert_eq!(targets[1]["imageIndexes"], serde_json::json!([0]));
+        drop(sessions);
+        state.join_relay();
+    }
+
+    /// Nothing to offload keeps the chain untouched (the dsh `next()`
+    /// arm): no decision event and the identity echo.
+    #[test]
+    fn request_error_offload_arm_defers_without_targets() {
+        let (mut state, _host) = harness("offload-defer", vec![], true);
+        let failure = br#"{"sessionId":"s1","failure":{"message":"budget","code":"IMAGE_OFFLOAD_REQUIRED","offloadImages":1}}"#;
+        let (status, reply) = drive(&mut state, EV_REQUEST_ERROR, failure);
+        assert_eq!(status, STATUS_OK);
+        assert_eq!(reply, failure, "the untouched chain echoes the payload");
+        state.join_relay();
+    }
+
+    /// The pruner lands over-budget tool results as shadow-priced
+    /// replacements inside the overflow recovery, and the pass runs
+    /// before the range selection (the dsh overflow arm).
+    #[test]
+    fn overflow_prune_lands_shadow_priced_replacements() {
+        let (mut state, host) = harness(
+            "prune-recover",
+            vec![checkpoint_batch("checkpoint body")],
+            true,
+        );
+        // A tool result whose text far exceeds the 8192 default.
+        let long_text = "x".repeat(9_000);
+        let mut sessions = host.sessions.lock().expect("host session lock");
+        session_dispatch(
+            fr_wire::services::session_persistence::METHOD_SESSION_APPEND,
+            serde_json::json!({
+                "id": "s1", "type": "tool/result",
+                "data": {
+                    "turn": 1, "step": 1,
+                    "message": {
+                        "role": "tool", "id": "t-1",
+                        "content": [{ "type": "text", "text": long_text }],
+                        "source": { "kind": "tool", "callId": "c-1" },
+                        "toolCallId": "c-1",
+                    },
+                },
+                "surfaceOp": "append",
+            })
+            .to_string()
+            .as_bytes(),
+            &mut sessions,
+        )
+        .expect("seed tool result");
+        drop(sessions);
+        // A trailing plain node keeps the tool result inside the shadowed
+        // region (the selection retains the newest surface node).
+        {
+            let mut sessions = host.sessions.lock().expect("host session lock");
+            session_dispatch(
+                fr_wire::services::session_persistence::METHOD_SESSION_APPEND,
+                serde_json::json!({
+                    "id": "s1", "type": "user/message",
+                    "data": {
+                        "role": "user",
+                        "id": "usr-trailer",
+                        "content": [{ "type": "text", "text": "after" }],
+                        "source": { "kind": "user" },
+                    },
+                    "surfaceOp": "append",
+                })
+                .to_string()
+                .as_bytes(),
+                &mut sessions,
+            )
+            .expect("seed trailer");
+        }
+
+        let failure =
+            br#"{"sessionId":"s1","failure":{"message":"window","code":"CONTEXT_WINDOW_EXCEEDED"}}"#;
+        let (status, reply) = drive(&mut state, EV_REQUEST_ERROR, failure);
+        assert_eq!(status, STATUS_OK);
+        assert_eq!(reply, RETRY_CHAIN_VALUE, "the prune progress rules a retry");
+
+        let types = event_types(&host);
+        assert!(
+            types.contains(&"compaction/prune".to_owned()),
+            "the shadow price lands: {types:?}"
         );
         state.join_relay();
     }

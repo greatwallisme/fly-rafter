@@ -34,8 +34,9 @@ const DEFAULT_MAX_OVERFLOW_RETRIES: i64 = 1;
 
 /// Complete public top-level configuration key set (the dsh
 /// `POLICY_CONFIG_KEYS` fields plus the table-level keys; the exact-target
-/// key set reuses the same policy fields).
-const BASIC_COMPACT_CONFIG_KEYS: [&str; 11] = [
+/// key set reuses the same policy fields, and the three pruner keys join
+/// the one-crate namespace per PRD 4.5).
+const BASIC_COMPACT_CONFIG_KEYS: [&str; 14] = [
     "threshold-ratio",
     "headroom-tokens",
     "retain-ratio",
@@ -47,6 +48,9 @@ const BASIC_COMPACT_CONFIG_KEYS: [&str; 11] = [
     "max-overflow-retries",
     "model-policies",
     "auto",
+    "threshold-chars",
+    "head-chars",
+    "tail-chars",
 ];
 
 /// Complete exact-target override key set.
@@ -168,6 +172,9 @@ pub struct ResolvedConfig {
     pub model_policies: Vec<ModelCompactPolicyConfig>,
     /// Whether automatic step-boundary listeners are enabled.
     pub auto: bool,
+    /// Validated pruner budgets (the dsh `ToolResultPruneConfig`; the
+    /// keys join the one-crate namespace per PRD 4.5).
+    pub prune: crate::pruner::PruneConfig,
 }
 
 /// Fully merged policy for one routed conversation target, before capacity
@@ -289,6 +296,7 @@ pub fn resolve_config(config: &Value) -> Result<ResolvedConfig, String> {
         resolved_policies.push(policy);
     }
 
+    let prune = resolve_prune_config(map)?;
     Ok(ResolvedConfig {
         threshold_ratio,
         headroom_tokens,
@@ -304,7 +312,72 @@ pub fn resolve_config(config: &Value) -> Result<ResolvedConfig, String> {
             .unwrap_or(DEFAULT_MAX_OVERFLOW_RETRIES),
         model_policies: resolved_policies,
         auto: map.get("auto").and_then(Value::as_bool).unwrap_or(true),
+        prune,
     })
+}
+
+/// Resolves and validates the pruner budgets (the dsh
+/// `ToolResultPruneConfig.resolveConfig` with the fr kebab keys; the
+/// per-config diagnostic prefix stays verbatim). Defaults: 8192 / 4096
+/// / 1024 code points; head + marker + tail must fit the threshold.
+fn resolve_prune_config(
+    map: &serde_json::Map<String, Value>,
+) -> Result<crate::pruner::PruneConfig, String> {
+    const DEFAULT_THRESHOLD_CHARS: u64 = 8_192;
+    const DEFAULT_HEAD_CHARS: u64 = 4_096;
+    const DEFAULT_TAIL_CHARS: u64 = 1_024;
+
+    let threshold = match map.get("threshold-chars") {
+        Some(value) => positive_integer("ToolResultPruneConfig: threshold-chars", value)?,
+        None => DEFAULT_THRESHOLD_CHARS,
+    };
+    let head = match map.get("head-chars") {
+        Some(value) => non_negative_integer("ToolResultPruneConfig: head-chars", value)?,
+        None => DEFAULT_HEAD_CHARS,
+    };
+    let tail = match map.get("tail-chars") {
+        Some(value) => non_negative_integer("ToolResultPruneConfig: tail-chars", value)?,
+        None => DEFAULT_TAIL_CHARS,
+    };
+    let emitted = head + code_point_length(crate::pruner::PRUNE_MARKER) as u64 + tail;
+    if emitted > threshold {
+        return Err(format!(
+            "ToolResultPruneConfig: head-chars + marker + tail-chars ({emitted}) \
+             must be at most threshold-chars ({threshold})"
+        ));
+    }
+    Ok(crate::pruner::PruneConfig {
+        threshold_chars: threshold,
+        head_chars: head,
+        tail_chars: tail,
+    })
+}
+
+/// `Number.isInteger(value) && value > 0`.
+fn positive_integer(name: &str, value: &Value) -> Result<u64, String> {
+    value.as_u64().map_or_else(
+        || Err(format!("{name} ({value}) must be a positive integer")),
+        |number| {
+            if number == 0 {
+                Err(format!("{name} (0) must be a positive integer"))
+            } else {
+                Ok(number)
+            }
+        },
+    )
+}
+
+/// `Number.isInteger(value) && value >= 0`.
+fn non_negative_integer(name: &str, value: &Value) -> Result<u64, String> {
+    value.as_u64().map_or_else(
+        || Err(format!("{name} ({value}) must be a non-negative integer")),
+        Ok,
+    )
+}
+
+/// Counts Unicode code points (the dsh `codePointLength` walk).
+fn code_point_length(text: &str) -> usize {
+    text.chars().count()
 }
 
 /// Merge the exact provider/model override over the validated default
@@ -757,6 +830,11 @@ mod tests {
                 max_overflow_retries: 1,
                 model_policies: Vec::new(),
                 auto: true,
+                prune: crate::pruner::PruneConfig {
+                    threshold_chars: 8_192,
+                    head_chars: 4_096,
+                    tail_chars: 1_024,
+                },
             }
         );
         // A null config maps to the dsh default-parameter face.

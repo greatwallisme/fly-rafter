@@ -9,6 +9,7 @@ pub mod admission;
 pub mod closer_text;
 pub mod error;
 pub mod fork;
+pub mod message_projection;
 pub mod persist;
 pub mod plugin_shell;
 pub mod projections;
@@ -25,13 +26,17 @@ pub(crate) mod tests_support;
 
 pub use admission::{is_plugin_record_type, validate_event_data};
 pub use error::{AdmissionError, SessionError};
+pub use message_projection::{
+    IMAGE_OFFLOAD, MESSAGE_PROJECTION_EVENT_TYPES, MessageProjection, offload_message_images,
+};
 pub use service::{
     METHOD_SESSION_APPEND, METHOD_SESSION_CREATE, METHOD_SESSION_DRAIN, METHOD_SESSION_FLUSH,
     METHOD_SESSION_FORK, METHOD_SESSION_RESTORE, METHOD_SESSION_RESUME, SessionService,
 };
+pub use session::derive_event_message_with;
 pub use session::{Session, SurfaceIntent, canonical_header, derive_event_message};
 pub use store::{DetachHandle, SessionMeta, SessionStore, SubscriberId};
-pub use surface::{SurfaceFoldResult, SurfaceReplacement, fold_surface};
+pub use surface::{SurfaceFoldResult, SurfaceReplacement, fold_surface, fold_surface_with};
 pub use tool_history::ToolHistoryProjection;
 pub use vocabulary::{EventVocabulary, refuse_unknown_required};
 

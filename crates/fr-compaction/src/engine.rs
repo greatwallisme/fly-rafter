@@ -38,11 +38,17 @@ pub struct ModelCapacity {
     pub default_max_tokens: Option<u64>,
 }
 
+/// The summary-error recovery hook's seam: `true` re-prepares and
+/// retries. The view rides the call so a durable recovery reflects in
+/// the transaction's own view.
+pub type RecoverHook<'a> =
+    &'a mut dyn FnMut(&CompactionFailure, &[fr_wire::SessionSeq], &mut dyn SessionView) -> bool;
+
 /// The engine's seams (dsh `BasicCompactionEngine`'s member services).
 ///
-/// The meter, the summarizer hook, the recovery hook, and the capacity
-/// lookup: borrowed per pipeline run; the shell constructs them over the
-/// wire faces.
+/// The meter, the summarizer hook, the recovery hook, the capacity
+/// lookup, and the optional pruner: borrowed per pipeline run; the
+/// shell constructs them over the wire faces (the pruner in-process).
 pub struct EngineDeps<'a> {
     /// The effective token meter.
     pub meter: &'a dyn crate::region::MeterView,
@@ -50,11 +56,20 @@ pub struct EngineDeps<'a> {
     pub summarize:
         &'a mut dyn FnMut(&SummarizationInput) -> Result<SummaryResult, CompactionFailure>,
     /// The summary-error recovery hook; `true` re-prepares and retries.
-    pub recover: &'a mut dyn FnMut(&CompactionFailure, &[fr_wire::SessionSeq]) -> bool,
+    /// The view rides the call so a durable recovery reflects in the
+    /// transaction's own view.
+    pub recover: RecoverHook<'a>,
     /// The routed model's capacity facts (the dsh
     /// `ctx.llm.resolveModelInfo` projection).
     pub model_capacity: &'a mut dyn FnMut(&str, &str) -> Result<ModelCapacity, String>,
+    /// The optional model-free prune pass (the dsh `ctx.get
+    /// ('toolResultPruner')` soft seam): `None` skips the pass.
+    pub prune: Option<PruneHook<'a>>,
 }
+
+/// The optional model-free prune pass's seam.
+pub type PruneHook<'a> =
+    &'a mut dyn FnMut(&mut dyn SessionView) -> Result<crate::pruner::PruneResult, String>;
 
 impl std::fmt::Debug for EngineDeps<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -177,7 +192,14 @@ pub fn compact_if_needed(
 
     if trigger == CompactionTrigger::ContextOverflow {
         // Overflow always qualifies; the retained-tail policy bypasses
-        // to force one useful balanced reduction.
+        // to force one useful balanced reduction. The model-free pass
+        // lands before the range selection, then the measurement
+        // refreshes through the singleton replay fold (the dsh
+        // overflow arm).
+        if let Some(prune) = deps.prune.as_mut() {
+            prune(view).map_err(|error| Box::new(EngineError::Plain(error)))?;
+            measurement = measure(view, deps.meter)?;
+        }
         let Some((start, end)) = select(view, &measurement, 0)? else {
             return Ok(None);
         };
@@ -213,9 +235,16 @@ pub fn compact_if_needed(
     }
 
     // Once pressure qualifies, the model-free pass lands before choosing
-    // a summary range (the optional pruner's face; absent here, the
-    // measurement stands) and the retry loop re-selects against each
-    // post-compaction measurement.
+    // a summary range and the retry loop re-selects against each
+    // post-compaction measurement (the dsh pressure arm: prune,
+    // remeasure, and re-check the threshold first).
+    if let Some(prune) = deps.prune.as_mut() {
+        prune(view).map_err(|error| Box::new(EngineError::Plain(error)))?;
+        measurement = measure(view, deps.meter)?;
+        if below(&measurement, &spec) {
+            return Ok(None);
+        }
+    }
     let mut result: Option<CompactionResult> = None;
     let attempts = usize::try_from(spec.compaction_retries.max(0)).unwrap_or(usize::MAX);
     for _attempt in 0..=attempts {
@@ -484,14 +513,16 @@ mod tests {
         summarize: &'a mut dyn FnMut(
             &SummarizationInput,
         ) -> Result<SummaryResult, CompactionFailure>,
-        recover: &'a mut dyn FnMut(&CompactionFailure, &[SessionSeq]) -> bool,
+        recover: super::RecoverHook<'a>,
         capacity: &'a mut dyn FnMut(&str, &str) -> Result<ModelCapacity, String>,
+        prune: Option<super::PruneHook<'a>>,
     ) -> EngineDeps<'a> {
         EngineDeps {
             meter,
             summarize,
             recover,
             model_capacity: capacity,
+            prune,
         }
     }
 
@@ -519,8 +550,10 @@ mod tests {
         summary_of("a summary that frames small")
     }
 
-    fn no_recover() -> impl FnMut(&CompactionFailure, &[SessionSeq]) -> bool {
-        |_failure, _seqs| false
+    fn no_recover()
+    -> impl FnMut(&CompactionFailure, &[SessionSeq], &mut dyn crate::region::SessionView) -> bool
+    {
+        |_failure, _seqs, _view| false
     }
 
     #[test]
@@ -562,7 +595,7 @@ mod tests {
             &mut |input: &SummarizationInput| Ok::<_, CompactionFailure>(ok_summarize(input));
         let mut recover = no_recover();
         let mut capacity = capacity(262_144);
-        let mut engine = deps(&meter, summarize, &mut recover, &mut capacity);
+        let mut engine = deps(&meter, summarize, &mut recover, &mut capacity, None);
         let outcome = compact_if_needed(
             &mut session,
             &mut engine,
@@ -583,7 +616,7 @@ mod tests {
             &mut |input: &SummarizationInput| Ok::<_, CompactionFailure>(ok_summarize(input));
         let mut recover = no_recover();
         let mut capacity = capacity(262_144);
-        let mut engine = deps(&meter, summarize, &mut recover, &mut capacity);
+        let mut engine = deps(&meter, summarize, &mut recover, &mut capacity, None);
         let outcome = compact_if_needed(
             &mut session,
             &mut engine,
@@ -604,7 +637,7 @@ mod tests {
             &mut |input: &SummarizationInput| Ok::<_, CompactionFailure>(ok_summarize(input));
         let mut recover = no_recover();
         let cap = &mut |provider: &str, model: &str| Ok::<_, String>(no_capacity(provider, model));
-        let mut engine = deps(&meter, summarize, &mut recover, cap);
+        let mut engine = deps(&meter, summarize, &mut recover, cap, None);
         let error = compact_if_needed(
             &mut session,
             &mut engine,
@@ -635,7 +668,7 @@ mod tests {
             &mut |input: &SummarizationInput| Ok::<_, CompactionFailure>(ok_summarize(input));
         let mut recover = no_recover();
         let mut cap = capacity(262_144);
-        let mut engine = deps(&meter, summarize, &mut recover, &mut cap);
+        let mut engine = deps(&meter, summarize, &mut recover, &mut cap, None);
         let outcome = compact_if_needed(
             &mut session,
             &mut engine,
@@ -666,7 +699,7 @@ mod tests {
             &mut |input: &SummarizationInput| Ok::<_, CompactionFailure>(ok_summarize(input));
         let mut recover = no_recover();
         let mut cap = capacity(262_144);
-        let mut engine = deps(&meter, summarize, &mut recover, &mut cap);
+        let mut engine = deps(&meter, summarize, &mut recover, &mut cap, None);
         let error = compact_if_needed(
             &mut session,
             &mut engine,

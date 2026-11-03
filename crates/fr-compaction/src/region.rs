@@ -57,6 +57,14 @@ pub trait SessionView {
     /// The latest durable `request/header` snapshot, when one exists.
     fn request_header(&self) -> Option<&EpochHeader>;
 
+    /// The projected message for one event seq, when a committed
+    /// message projection replaced it (the dsh `projectedMessages`
+    /// lookup; the derive faces consult it before the raw event).
+    fn projected_message(&self, seq: SessionSeq) -> Option<&fr_wire::message::Message> {
+        let _ = seq;
+        None
+    }
+
     /// Append one event and reflect it in the view.
     ///
     /// # Errors
@@ -65,6 +73,12 @@ pub trait SessionView {
     /// refuses the event.
     fn append(&mut self, request: AppendRequest<'_>) -> Result<SessionEvent, String>;
 }
+
+/// The summary-error recovery hook's seam: `true` re-prepares and
+/// retries; the view rides the call so a durable recovery reflects in
+/// the transaction's own view.
+pub type RecoverHook<'a> =
+    &'a mut dyn FnMut(&CompactionFailure, &[SessionSeq], &mut dyn SessionView) -> bool;
 
 /// One decoded append: type key, raw data object, and the optional surface
 /// metadata (the session-service append wire face).
@@ -104,8 +118,11 @@ pub struct RegionDeps<'a> {
     pub summarize:
         &'a mut dyn FnMut(&SummarizationInput) -> Result<SummaryResult, CompactionFailure>,
     /// The summary-error recovery hook; returns whether the failure was
-    /// durably recovered and the summarizer should re-prepare and retry.
-    pub recover: &'a mut dyn FnMut(&CompactionFailure, &[SessionSeq]) -> bool,
+    /// durably recovered and the summarizer should re-prepare and
+    /// retry. The view rides the call so a durable recovery (the
+    /// image-offload decision) reflects in the transaction's own view
+    /// before the re-prepare.
+    pub recover: RecoverHook<'a>,
 }
 
 impl std::fmt::Debug for RegionDeps<'_> {
@@ -783,7 +800,7 @@ fn prepare_compaction(
 /// `summarizeCompaction`).
 fn summarize_compaction(
     deps: &mut RegionDeps<'_>,
-    session: &dyn SessionView,
+    session: &mut dyn SessionView,
     prepared: PreparedCompaction,
     compaction_id: &CompactionId,
     source_command_id: Option<&str>,
@@ -798,7 +815,7 @@ fn summarize_compaction(
                 // check; the abort carrier lands with the 17f wiring.
                 assert_stable(rule, deps.meter, session, &prepared)
                     .map_err(|failure| (failure, Stage::Summary))?;
-                if !(deps.recover)(&error, &prepared.selection.shadowed_seqs) {
+                if !(deps.recover)(&error, &prepared.selection.shadowed_seqs, session) {
                     return Err((error, Stage::Summary));
                 }
                 let selection = validate_surface_region(
@@ -989,9 +1006,17 @@ fn build_summarization_input(
         .and_then(|event| derive_event_message(event).cloned());
     let region_messages = shadowed_seqs
         .iter()
-        .filter_map(|seq| event_at(session.events(), *seq))
-        .filter_map(derive_event_message)
-        .cloned()
+        .filter_map(|seq| {
+            // The projected value wins (the dsh `deriveEventMessage`
+            // consults the committed projections first), else the raw
+            // event's own derivation.
+            if let Some(projected) = session.projected_message(*seq) {
+                return Some(projected.clone());
+            }
+            event_at(session.events(), *seq)
+                .and_then(derive_event_message)
+                .cloned()
+        })
         .collect::<Vec<Message>>();
     let mut messages = Vec::with_capacity(region_messages.len() + 1);
     if let Some(system) = system {
@@ -1253,8 +1278,8 @@ mod tests {
         move |_| Ok(summary_of(text))
     }
 
-    fn no_recover() -> impl FnMut(&CompactionFailure, &[SessionSeq]) -> bool {
-        |_, _| false
+    fn no_recover() -> impl FnMut(&CompactionFailure, &[SessionSeq], &mut dyn SessionView) -> bool {
+        |_, _, _| false
     }
 
     #[test]
@@ -1564,10 +1589,11 @@ mod tests {
             }
         };
         let recovered = RefCell::new(0);
-        let mut recover = |_: &CompactionFailure, _: &[SessionSeq]| -> bool {
-            *recovered.borrow_mut() += 1;
-            true
-        };
+        let mut recover =
+            |_: &CompactionFailure, _: &[SessionSeq], _: &mut dyn SessionView| -> bool {
+                *recovered.borrow_mut() += 1;
+                true
+            };
         let mut deps = RegionDeps {
             meter: &meter,
             summarize: &mut summarize,

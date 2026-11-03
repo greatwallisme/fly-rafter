@@ -1769,3 +1769,12 @@
 - **测试**：+29（loop 内核派发消费 4+窗口 2+route/窗口面 3+agent 面钉 1+engine 7+llm_face 5+壳集成 7 含 FFI 直驱 on_event/on_next 全链+wire_shapes 字面量钉 3）；新钉=恒等续体消费/决策解码/窗口 latch+重放/cancel 置旗/压力压缩全事务/溢出恢复 retry+预算耗尽/bookkeeping 重置/auto 门/capture 失败失败收尾迹/summary-error 载荷形状。
 - **终门认证**：fmt ✓/clippy workspace -D warnings 0/全测（FR_DSH_SOURCE）1807 passed 0 failed 两连/doc -D warnings ✓/三门禁 0 errors/extract --check ✓。
 - **下一动作=17g：pruner+image-offload（批 5）。**
+
+## 2026-11-03 — 17g 完成：pruner+image-offload 两件+消息投影机制全落地（批 5）
+
+- **fr-session**：message_projection.rs（MessageProjection trait+MESSAGE_PROJECTION_EVENT_TYPES+ImageOffloadProjection 全逐字 fail-closed 文案+built_in_projections 注册表）；surface.rs（projected_messages 字段+Project 计划臂+content_generation bump+fold_surface_with/fold_surface+缺解释器逐字抛）；session.rs（derive_event_message_with map 先查+写侧投影即验+derive 缓存随 content_generation 失效）。+11 钉测。
+- **fr-compaction**：pruner.rs（PRUNE_MARKER 逐字 39 码点+PruneConfig+prune_content 码点切片+prune_session 影子定价两件套）；image_offload.rs（offload_oldest_images 深度优先含已卸载计数）；config.rs（threshold-chars/head-chars/tail-chars kebab 键+ToolResultPruneConfig 逐字前缀校验+head+marker+tail≤threshold 门）；engine.rs（EngineDeps.prune Option+溢出臂 prune→remeasure→select+压力臂 prune→remeasure→复查+RecoverHook/PruneHook 类型别名）；region.rs（recover 签名增 view+build_summarization_input 投影感知+SessionView.projected_message 默认 None）；session_view.rs（projected_message 覆写+append 初容量纪律）；plugin_shell.rs（request-error offload 臂先行+RecoverHook in-process 臂+PruneHook+FailureMirror camelCase 修复）。+10 钉测。
+- **结构发现两件**（findings 详档）：容量协议非幂等重试撕裂（append 双执行）→ require_with_initial 调用方初容量纪律；summary-error 自监听 ln 强制 → 内建消费臂进程内直调+descriptor 保持四事件（19.2 条 38 形状偏差待 17h 呈裁）。
+- **事故**：Write/Edit 退化多发（占位垃圾串入 message_projection/config/plugin_shell 两处）——写后即验+小块写全部当轮捕获修复；probe 调试基建（HOST/PRUNE-PROBE）随修随清零残留。
+- **终门认证**：fmt ✓/clippy workspace --all-targets -D warnings 0/全测（FR_DSH_SOURCE）1828 passed 0 failed（基线 1807→1828，+21）/doc -D warnings ✓/三门禁 0 errors×3/bind-session+bind-config 幂等重放 exit 0 且 specs 零漂移。
+- **下一动作=17h：spill 三件+compactNow+maintenance 窗口消费+全链绑定（compaction spec pending 选择器绑定真实测试名）+lifecycle/guard/stamp 七步收口+19.2 条 38 形状偏差呈裁。**

@@ -7,8 +7,11 @@
 //! seam; the host supplies wall time).
 
 #![forbid(unsafe_code)]
+use std::collections::HashMap;
+
 use crate::admission::{is_plugin_record_type, validate_event_data};
 use crate::error::SessionError;
+use crate::message_projection::built_in_projections;
 use crate::surface::{SurfaceFoldResult, apply_plan, plan_event};
 use fr_wire::content::TrueOnly;
 use fr_wire::event::{EpochHeader, SessionEvent, SessionEventData, SurfaceOp, UnknownEventData};
@@ -160,7 +163,7 @@ impl Session {
     /// Folds one already-admitted event into the incremental surface state
     /// (validate-then-apply; a failed plan never mutates the fold).
     fn fold_in(&mut self, event: &SessionEvent) -> Result<(), SessionError> {
-        let plan = plan_event(&self.surface, event, &self.log)?;
+        let plan = plan_event(&self.surface, event, &self.log, built_in_projections())?;
         if let Some(replacement) = apply_plan(&mut self.surface, event, plan) {
             self.surface.replacements.push(replacement);
         }
@@ -344,7 +347,7 @@ impl Session {
                 let event = self
                     .log
                     .get(usize::try_from(node.get()).unwrap_or(usize::MAX))?;
-                derive_event_message(event)
+                derive_event_message_with(event, Some(&self.surface.projected_messages))
             })
             .collect()
     }
@@ -352,7 +355,9 @@ impl Session {
     fn projects_message(&self, seq_value: SessionSeq) -> bool {
         self.log
             .get(usize::try_from(seq_value.get()).unwrap_or(usize::MAX))
-            .and_then(derive_event_message)
+            .and_then(|event| {
+                derive_event_message_with(event, Some(&self.surface.projected_messages))
+            })
             .is_some()
     }
 
@@ -379,6 +384,27 @@ impl Session {
 /// price the exact derived messages cross-plugin.
 #[must_use]
 pub fn derive_event_message(event: &SessionEvent) -> Option<&Message> {
+    derive_event_message_with(
+        event,
+        None::<&std::collections::HashMap<SessionSeq, Message>>,
+    )
+}
+
+/// Projects one event with the committed message projections applied
+/// (the dsh `deriveEventMessage(event, projectedMessages)` shape).
+///
+/// A projected value for the event's seq wins, else the event's own
+/// derivation answers.
+#[must_use]
+pub fn derive_event_message_with<'a, S: std::hash::BuildHasher>(
+    event: &'a SessionEvent,
+    projected: Option<&'a HashMap<SessionSeq, Message, S>>,
+) -> Option<&'a Message> {
+    if let Some(projected) = projected
+        && let Some(message) = projected.get(&event.seq)
+    {
+        return Some(message);
+    }
     match &event.data {
         SessionEventData::UserMessage(message) => Some(message),
         SessionEventData::SystemMessage(data) => non_empty(&data.message),

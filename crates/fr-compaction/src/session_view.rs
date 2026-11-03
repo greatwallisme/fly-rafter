@@ -147,6 +147,10 @@ impl SessionView for RemoteSessionView {
         self.state.header.as_ref()
     }
 
+    fn projected_message(&self, seq: fr_wire::SessionSeq) -> Option<&fr_wire::message::Message> {
+        self.state.surface.projected_messages.get(&seq)
+    }
+
     fn append(&mut self, request: AppendRequest<'_>) -> Result<fr_wire::SessionEvent, String> {
         let mut body = serde_json::json!({
             "id": self.state.session_id,
@@ -161,10 +165,17 @@ impl SessionView for RemoteSessionView {
             body["sourceEventSeqs"] = serde_json::to_value(seqs)
                 .map_err(|error| format!("source seqs encode failed: {error}"))?;
         }
-        let reply = self.link.require(
+        let request = serde_json::to_vec(&body).map_err(|error| error.to_string())?;
+        // The append reply echoes the stored event (request-sized), and
+        // a STATUS_CAPACITY retry re-executes the mutation — so the
+        // first pass starts well above the request's own length (the
+        // require-side capacity discipline).
+        let initial = request.len().saturating_mul(2).saturating_add(4096);
+        let reply = self.link.require_with_initial(
             fr_wire::services::session_persistence::SERVICE_NAME,
             fr_wire::services::session_persistence::METHOD_SESSION_APPEND,
-            &serde_json::to_vec(&body).map_err(|error| error.to_string())?,
+            &request,
+            initial,
         )?;
         let reply: serde_json::Value = serde_json::from_slice(&reply)
             .map_err(|error| format!("append reply decode: {error}"))?;

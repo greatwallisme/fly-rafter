@@ -2,11 +2,15 @@
 //! hard constraints, and the dual generation counters (dsh surface.ts).
 
 #![forbid(unsafe_code)]
+use std::collections::HashMap;
+
 use crate::error::AdmissionError;
+use crate::message_projection::{MessageProjection, built_in_projections, plan_projection};
 use fr_wire::content::{ContentBlock, KnownContentBlock};
 use fr_wire::event::event_type;
 use fr_wire::event::{SessionEvent, SessionEventData, SurfaceOp, ToolResultData};
 use fr_wire::ids::SessionSeq;
+use fr_wire::message::Message;
 
 /// One replacement operation observed while folding a session surface.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,7 +26,11 @@ pub struct SurfaceReplacement {
 }
 
 /// Complete result of replaying the surface operations in a session log.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+///
+/// `Eq` is unavailable since the message-projection landing: the
+/// projected messages embed `Message`, whose `Other` fallback carries
+/// an f64-containing JSON map.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct SurfaceFoldResult {
     /// Current surface event sequences in model-visible order.
     pub nodes: Vec<SessionSeq>,
@@ -30,9 +38,14 @@ pub struct SurfaceFoldResult {
     pub replacements: Vec<SurfaceReplacement>,
     /// Monotonic count of committed positional replacements.
     pub replace_generation: u64,
-    /// Monotonic count of committed replacements (message projections are
-    /// not implemented; see PRD 19.2 item 14).
+    /// Monotonic count of committed replacements and committed message
+    /// projections (the dsh `contentGeneration`; the derived-message
+    /// cache keys on it).
     pub content_generation: u64,
+    /// Message projections keyed by their original event sequences
+    /// (the dsh `projectedMessages`; populated by the registered
+    /// interpreters).
+    pub projected_messages: HashMap<SessionSeq, Message>,
     /// The surface node holding the first `system/message`: established by
     /// the first append onto an empty surface, transferable only by a
     /// single-node system rewrite (PRD 19.2 item 18; mirrors the stored-side
@@ -191,6 +204,9 @@ pub(crate) enum SurfacePlan {
         end_idx: usize,
         shadowed: Vec<SessionSeq>,
     },
+    Project {
+        messages: Vec<(SessionSeq, Message)>,
+    },
 }
 
 /// Plans one event against the current fold state without mutating it.
@@ -198,9 +214,24 @@ pub(crate) fn plan_event(
     state: &SurfaceFoldResult,
     event: &SessionEvent,
     events: &[SessionEvent],
+    projections: &[&dyn MessageProjection],
 ) -> Result<Option<SurfacePlan>, AdmissionError> {
     assert_developer_header(event, events)?;
     let op = validate_surface_metadata(event)?;
+    // The projection intercept precedes surface-op handling (the dsh
+    // planSurfaceEvent order): a registered interpreter wins, a
+    // required type without one refuses, everything else folds on.
+    if let Some(messages) = plan_projection(
+        projections,
+        &state.nodes,
+        &state.projected_messages,
+        event,
+        events,
+    )
+    .map_err(AdmissionError::new)?
+    {
+        return Ok(Some(SurfacePlan::Project { messages }));
+    }
     if event.event_type() == event_type::SYSTEM_MESSAGE
         && !state.nodes.is_empty()
         && state.protected_head.is_none()
@@ -292,6 +323,15 @@ pub(crate) fn apply_plan(
                 end,
                 shadowed_seqs: shadowed,
             });
+        }
+        Some(SurfacePlan::Project { messages }) => {
+            // The dsh applySurfacePlan project arm: merge the projected
+            // values and bump the content generation so every derived
+            // view rebuilds (the derive cache keys on it).
+            for (seq, message) in messages {
+                state.projected_messages.insert(seq, message);
+            }
+            state.content_generation += 1;
         }
         None => {}
     }
@@ -427,14 +467,34 @@ fn assert_system_head_rewrite(
     Ok(())
 }
 
-/// Replays a complete session log through the canonical surface fold.
+/// Replays a complete session log through the canonical surface fold
+/// with the built-in message projections active.
 ///
 /// # Errors
 ///
 /// Returns the owning check's message when an event violates surface
-/// metadata, source attribution, replacement, developer-header, or
-/// message-admission rules.
+/// metadata, source attribution, replacement, developer-header,
+/// message-admission, or message-projection rules.
 pub fn fold_surface(events: &[SessionEvent]) -> Result<SurfaceFoldResult, AdmissionError> {
+    fold_surface_with(events, built_in_projections())
+}
+
+/// Replays a complete session log through the canonical surface fold
+/// over an explicit interpreter registry (the dsh `foldSurface`
+/// projection parameter).
+///
+/// An empty registry refuses a required type with the verbatim
+/// missing-interpreter text.
+///
+/// # Errors
+///
+/// Returns the owning check's message when an event violates surface
+/// metadata, source attribution, replacement, developer-header,
+/// message-admission, or message-projection rules.
+pub fn fold_surface_with(
+    events: &[SessionEvent],
+    projections: &[&dyn MessageProjection],
+) -> Result<SurfaceFoldResult, AdmissionError> {
     let mut state = SurfaceFoldResult::default();
     for (index, event) in events.iter().enumerate() {
         if event.seq.get() != index as u64 {
@@ -443,7 +503,7 @@ pub fn fold_surface(events: &[SessionEvent]) -> Result<SurfaceFoldResult, Admiss
                 event.seq.get()
             )));
         }
-        let plan = plan_event(&state, event, events)?;
+        let plan = plan_event(&state, event, events, projections)?;
         if let Some(replacement) = apply_plan(&mut state, event, plan) {
             state.replacements.push(replacement);
         }
@@ -461,7 +521,7 @@ mod tests {
         UnknownEventData,
     };
     use fr_wire::ids::{MessageId, ToolCallId};
-    use fr_wire::message::{KnownMessage, KnownMessageSource, Message, MessageSource};
+    use fr_wire::message::{KnownMessage, KnownMessageSource, MessageSource};
 
     fn seq(n: u64) -> SessionSeq {
         SessionSeq::new(n).unwrap_or_else(|e| panic!("seq {n} rejected: {e}"))
