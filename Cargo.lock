@@ -839,9 +839,12 @@ name = "fr-compaction"
 version = "0.1.0"
 dependencies = [
  "dougong-abi",
+ "fr-session",
+ "fr-token-meter",
  "fr-wire",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]

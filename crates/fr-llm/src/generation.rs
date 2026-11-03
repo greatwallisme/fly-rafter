@@ -1774,7 +1774,12 @@ mod tests {
     /// thread parks through).
     fn drain_until_done(service: &GenerationService, id: &str) -> DrainReply {
         let mut chunks = Vec::new();
-        for _ in 0..500 {
+        // A wall-clock deadline instead of a fixed poll count: the settle
+        // loop drives a background pump thread, so the budget must survive
+        // scheduler starvation when the whole workspace's test binaries run
+        // concurrently (a 1 s fixed budget flaked under that load).
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
             let batch = service.drain(id).expect("drain in settle loop");
             chunks.extend(batch.chunks);
             if batch.done {

@@ -15,8 +15,13 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 dougong-abi.workspace = true
 fr-wire.workspace = true
+fr-session.workspace = true
+uuid.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+fr-token-meter.workspace = true
 
 [lints]
 workspace = true

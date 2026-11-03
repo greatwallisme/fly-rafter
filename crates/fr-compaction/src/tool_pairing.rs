@@ -22,6 +22,18 @@ impl std::fmt::Display for ToolPairingError {
 
 impl std::error::Error for ToolPairingError {}
 
+impl From<ToolPairingError> for String {
+    // `Self` here names the target `String`, so the source type must stay
+    // spelled out.
+    #[expect(
+        clippy::use_self,
+        reason = "From<String>'s Self is the target, not the source"
+    )]
+    fn from(error: ToolPairingError) -> String {
+        error.0
+    }
+}
+
 /// Incremental balance state for one session surface generation.
 ///
 /// dsh keeps one cache per live session in a module-level `WeakMap`; fr
