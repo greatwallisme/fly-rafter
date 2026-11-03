@@ -518,6 +518,10 @@ mod tests {
     struct FakeMeter {
         per_node: u64,
         checkpoint_estimate: u64,
+        /// The per-node price activating after the first measure (the
+        /// prune's shrink probe).
+        reprice_after_first_measure: Option<u64>,
+        measures: std::cell::RefCell<usize>,
     }
 
     impl FakeMeter {
@@ -525,22 +529,34 @@ mod tests {
             Self {
                 per_node,
                 checkpoint_estimate: 20,
+                reprice_after_first_measure: None,
+                measures: std::cell::RefCell::new(0),
             }
         }
     }
 
     impl MeterView for FakeMeter {
         fn measure(&self, session: &dyn SessionView) -> Result<SurfaceMeasurement, String> {
+            let count = {
+                let mut measures = self.measures.borrow_mut();
+                let count = *measures;
+                *measures += 1;
+                count
+            };
+            let price = self
+                .reprice_after_first_measure
+                .filter(|_| count >= 1)
+                .unwrap_or(self.per_node);
             let nodes: Vec<MeterSurfaceNode> = session
                 .surface_nodes()
                 .iter()
                 .map(|seq| MeterSurfaceNode {
                     seq: seq.get(),
-                    tokens: self.per_node,
-                    heuristic_tokens: self.per_node,
+                    tokens: price,
+                    heuristic_tokens: price,
                 })
                 .collect();
-            let total = self.per_node * nodes.len() as u64;
+            let total = price * nodes.len() as u64;
             Ok(SurfaceMeasurement {
                 log_revision: session.events().len() as u64,
                 baseline: crate::meter::MeasurementBaseline::None { tokens: 0 },
@@ -702,6 +718,52 @@ mod tests {
             error.message(),
             "compaction-basic: no context capacity for deepseek/m1; configure \
              contextWindow on that adapter model"
+        );
+    }
+
+    /// Once pressure qualifies, the prune pass lands before the range
+    /// selection and the re-measurement re-checks the threshold: a
+    /// below-threshold post-prune total skips the compaction entirely
+    /// (the dsh pressure arm).
+    #[test]
+    fn prune_progress_below_threshold_skips_compaction() {
+        let mut session = FakeSession::new();
+        session.set_header("deepseek", "m1", 1_024);
+        session.seed_open_turn();
+        session.seed_messages(4);
+        let mut meter = FakeMeter::new(60_000);
+        meter.reprice_after_first_measure = Some(10);
+        let pruned = std::cell::Cell::new(false);
+        let summarize =
+            &mut |input: &SummarizationInput| Ok::<_, CompactionFailure>(ok_summarize(input));
+        let mut recover = no_recover();
+        let mut cap = capacity(262_144);
+        let mut prune = |_: &mut dyn crate::region::SessionView| {
+            pruned.set(true);
+            Ok(crate::pruner::PruneResult {
+                pruned: Vec::new(),
+                chars_removed: 0,
+            })
+        };
+        let mut engine = deps(&meter, summarize, &mut recover, &mut cap, Some(&mut prune));
+        let outcome = compact_if_needed(
+            &mut session,
+            &mut engine,
+            &config(),
+            CompactionTrigger::Pressure,
+        )
+        .expect("the prune progress settles the pressure");
+        assert_eq!(
+            outcome, None,
+            "the re-measured total is below the threshold"
+        );
+        assert!(pruned.get(), "the prune pass ran before the re-check");
+        assert!(
+            session
+                .events()
+                .iter()
+                .all(|event| !event.event_type().starts_with("compaction/")),
+            "the below-threshold re-check never opens a bracket"
         );
     }
 

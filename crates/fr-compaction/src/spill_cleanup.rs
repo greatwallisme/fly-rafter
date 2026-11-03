@@ -531,12 +531,36 @@ mod tests {
     }
 
     /// Old regular files under a session directory expire; fresh ones
-    /// survive; the emptied directory is pruned.
+    /// survive; the emptied directory is pruned. The expired file rides
+    /// the real save path, pinning the session-<sha256 12hex> layout and
+    /// the private 0600/0700 modes together with the sweep.
     #[test]
     fn expired_files_delete_and_empty_dirs_prune() {
+        use crate::spill_local::{save_text_file, session_dir};
         let root = temp_root("expire");
-        let dir = session_dir(&root, "aaaaaaaaaaaa");
-        write_file(&dir.join("old.txt"), 40 * 24 * 60 * 60 * 1000);
+        let saved = save_text_file(&root, "s1", "old.txt", "content").expect("save");
+        let dir = session_dir(&root, "s1");
+        assert_eq!(
+            saved.path.parent().expect("inside the session dir"),
+            dir,
+            "the artifact rides the session-<12hex> layout"
+        );
+        assert_eq!(
+            std::fs::metadata(&saved.path)
+                .expect("meta")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600,
+            "the artifact file is owner-only"
+        );
+        assert_eq!(
+            std::fs::metadata(&dir).expect("meta").permissions().mode() & 0o777,
+            0o700,
+            "the session directory is private"
+        );
+        // Backdate the artifact past the 30-day retention window.
+        write_file(&saved.path, 40 * 24 * 60 * 60 * 1000);
         write_file(&dir.join("fresh.txt"), 1_000);
         let (log, warn) = warnings();
         sweep_spill_roots(
@@ -547,7 +571,7 @@ mod tests {
             cutoff(),
             &warn,
         );
-        assert!(!dir.join("old.txt").exists(), "the expired file is deleted");
+        assert!(!saved.path.exists(), "the expired artifact is deleted");
         assert!(dir.join("fresh.txt").exists(), "the fresh file survives");
         assert!(dir.exists(), "the non-empty session directory stays");
         assert!(

@@ -542,6 +542,18 @@ mod tests {
             content_images(&projected_of(&events, 0)),
             vec![None, Some(true)]
         );
+        // A malformed decision fails closed on replay (the duplicate-seq
+        // refusal rides the same fold).
+        let mut malformed = vec![image_user(0, "u1", 2)];
+        malformed.push(offload_event(
+            1,
+            &serde_json::json!({ "targets": [
+                { "seq": 0, "imageIndexes": [0] },
+                { "seq": 0, "imageIndexes": [1] },
+            ] }),
+        ));
+        let error = fold_surface(&malformed).expect_err("duplicate seq");
+        assert_eq!(error.message, "image/offload: duplicate target seq 0");
     }
 
     #[test]

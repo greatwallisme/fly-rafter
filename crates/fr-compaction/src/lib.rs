@@ -57,3 +57,5 @@ pub mod spill_policy;
 pub mod summarizer;
 pub mod tool_pairing;
 pub mod types;
+#[cfg(test)]
+mod verify;

@@ -367,6 +367,13 @@ mod tests {
         let empty_pair = resolve_summarization_target("", "", Some("p"), Some(""), None, None)
             .expect_err("empty routed model counts unset");
         assert!(empty_pair.contains("no provider/model available"));
+        // The load-time arm: a half-set summarization pair refuses when
+        // the configuration resolves (the plugin load face).
+        let error = crate::config::resolve_config(&serde_json::json!({
+            "summarization-provider": "only",
+        }))
+        .expect_err("half pair");
+        assert!(error.contains("must be set together"), "{error}");
     }
 
     #[test]

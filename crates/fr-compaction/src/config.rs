@@ -1420,5 +1420,16 @@ mod tests {
             error.message()
         );
         assert_eq!(error.target_key, "mock-provider/mock-model");
+        // The load-time arm: a retain ratio at or past the resolved
+        // threshold refuses when the configuration resolves (the plugin
+        // load face).
+        let error = resolve_config(&json!({
+            "retain-ratio": 0.9,
+        }))
+        .expect_err("ratio past the threshold");
+        assert!(
+            error.contains("must be less than the resolved threshold-ratio"),
+            "{error}"
+        );
     }
 }

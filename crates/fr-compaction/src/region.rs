@@ -1303,6 +1303,54 @@ mod tests {
         assert_eq!(end, session.surface_nodes()[6]);
     }
 
+    /// A retained-tail boundary that would split an assistant
+    /// tool-call/result pair walks back to the balanced position, and
+    /// the range never includes the node-0 system head.
+    #[test]
+    fn selection_falls_back_to_the_balanced_pair_boundary() {
+        let mut session = FakeSession::new();
+        session.append_surface(
+            "system/message",
+            serde_json::json!({
+                "turn": 1, "step": 1,
+                "message": serde_json::to_value(user_message("SYSTEM HEAD")).expect("system"),
+            }),
+        );
+        session.seed_surface_only(1);
+        session.append_surface(
+            "assistant/message",
+            serde_json::json!({
+                "turn": 1, "step": 2,
+                "message": {"role": "assistant", "id": "a-call", "content": [
+                    {"type": "tool-call", "id": "c1", "name": "bash", "arguments": "{}"}
+                ], "source": {"kind": "model", "provider": "mock", "model": "mock"}},
+                "stream": [],
+            }),
+        );
+        session.append_surface(
+            "tool/result",
+            serde_json::json!({
+                "turn": 1, "step": 2,
+                "message": {"role": "tool", "id": "t", "content": [], "toolCallId": "c1",
+                            "source": {"kind": "tool", "callId": "c1"}},
+            }),
+        );
+        let meter = FakeMeter::new(100);
+        let measurement = meter.measure(&session).expect("measure");
+        let (start, end) = select_compactable_range(&session, &measurement, 100)
+            .expect("range")
+            .expect("some range");
+        let nodes = session.surface_nodes();
+        assert_eq!(
+            start, nodes[1],
+            "the range starts after the system head (node-0 never rides)"
+        );
+        assert_eq!(
+            end, nodes[2],
+            "the boundary fell back before the tool pair (the keep keeps it whole)"
+        );
+    }
+
     #[test]
     fn declines_when_only_the_system_head_precedes_the_retained_tail() {
         let mut session = FakeSession::new();
@@ -1513,6 +1561,15 @@ mod tests {
         assert_eq!(cited[0], result.start_seq);
         assert_eq!(cited[1], result.summary_seq);
         assert_eq!(cited.len(), 2 + result.shadowed_seqs.len());
+        // A start whose close never lands stays detectable (the busy
+        // guard refuses a fresh transaction over the orphan owner).
+        let mut orphan = FakeSession::new();
+        orphan.append_local(
+            "compaction/start",
+            serde_json::json!({"compactionId": "orphan", "turn": 1}),
+        );
+        let error = assert_no_active_compaction(&orphan, "compaction").expect_err("orphan start");
+        assert_eq!(error.code, ManualCompactionErrorCode::Busy);
     }
 
     #[test]

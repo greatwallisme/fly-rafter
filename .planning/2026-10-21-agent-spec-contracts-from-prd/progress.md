@@ -1810,3 +1810,13 @@
 - **环境注**：全测二跑计数聚合假象（185）重跑核实；spill_local mkdtemp 偶发（H1 家族）全量两连均绿。
 - **终门**：fmt ✓/clippy workspace -D warnings 0/全测（FR_DSH_SOURCE）1884 passed 0 failed 两连/doc ✓/三门禁 exit 0×3。基线 1871→1884（+13）。
 - **下一动作=17h-d：全链绑定（pending_req_fr_compaction_compact→真实测试）+lifecycle+guard+stamp 七步收口。**
+
+## 2026-11-04 — 17h-d 完成：全链绑定+七步收口（REQ-FR-COMPACTION liveness=Honored）
+
+- **绑定审计**：26 场景逐一核对候选测试的代码断言（绑定纪律第 1 条：Test 必须断言该场景 Then 全部子句）；8 个 pending 选择器 → 26 全真绑定，幂等脚本对替换（assert 当前选择器后替换，重放零漂移），pending 归零。
+- **复合场景加固**（Then 子句跨测试的 12 场景）：扩展 12 处断言（pre_step 钉 200000/8192→threshold 126272；bookkeeping 首溢出强制压缩事件；prune replace 事件 surfaceOp Replace+sourceEventSeqs 恰含原 seq；offload 臂后溢出仍跑强制压缩=不耗预算；非该码相位不落 decision；identity 后重备输入相位；spill footer 逐字+全文落盘+read/纯文本 PTC 豁免；全脸+success_text 计数+busy 逐字+无历史；sweep 接真实 save 路径钉 session-<12hex>/0600/0700；spec-time 加装载期比率臂；目标三级加装载期成对拒绝；括弧测试加孤儿 start busy 检测；投影测试加 duplicate-seq fail-closed 探针）；新增 7 测试：verify.rs（extract-compaction-prompts --check，fr-system-prompt 判例移植 `#[cfg(test)] mod verify`）、missing_capacity_warns_once_and_defers（TestHost no_context_window 旗标+ShellState warned 计数器）、summarize_request_composes_the_cacheable_prefix（system head+影子序+header tools+恰一条指令 user，begin_log 全检）、prune_progress_below_threshold_skips_compaction（engine FakeMeter reprice 探针）、selection_falls_back_to_the_balanced_pair_boundary、default_config_prunes_the_documented_span（10000 码点+默认 8192/4096/1024）、spill_refusal_keeps_the_inline_content。
+- **真语义两枚**（测试揭示）：spill notice 拒绝=先落盘后拒绝（dsh spill-policy index.ts:103 saveText→:113 notice throw，fr 1:1，断言改钉 dsh 顺序）；spill 警告 eprintln 不可观察→提取 spill_failure_notice 骨架函数钉 `spill-policy: {reason}; keeping the inline content`。
+- **七步收口**：lint quality 1.0 / lifecycle 26/26 pass（FR_DSH_SOURCE）/guard 14 失败=待实现 Phase pending spec 判例内（compaction 不在其中）/trace REQ-FR-COMPACTION liveness=Honored（无 FR_DSH_SOURCE 时 verify 测试按设计 fail → Violated 假象）/stamp --dry-run 26/26 Spec-Passing: true。
+- **工具错误两枚**（当回合修复）：Edit 误将草稿文本写入 plugin_shell harness 尾（当场发现当场修，git diff 核验零残留）；sed 行区间限定 GAP_TEXT 全路径避免误伤既有行。
+- **终门**：fmt ✓/clippy workspace --all-targets -D warnings 0（too_many_lines 107/100→提取 spill_post_execute_round 辅助+needless_pass_by_value 修）/全测（FR_DSH_SOURCE）1891 passed 0 failed 两连/doc ✓/三门禁 exit 0×3。基线 1884→1891（+7=新测试数）。
+- **下一动作=呈用户裁决：Phase 17 是否收口（fr-compaction 全链已闭环），Phase 18 入口装配（headless）启动。**

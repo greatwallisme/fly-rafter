@@ -492,6 +492,14 @@ impl std::fmt::Debug for ShellState {
 }
 
 impl ShellState {
+    /// The warned-once pressure targets (test-visible introspection of
+    /// the dsh `warnedPressureConfigTargets` set; the production field
+    /// stays private).
+    #[cfg(test)]
+    fn warned_pressure_target_count(&self) -> usize {
+        self.warned_pressure_targets.len()
+    }
+
     /// Assembles the shell over the activation's copied vtable with the
     /// default configuration (dougong delivers no config to dylib
     /// artifacts — the baked-config judgment; the assembly's overrides
@@ -1042,12 +1050,17 @@ fn run_spill_bound(
     ) {
         Ok(retained) => retained,
         Err(reason) => {
-            spill_warn(&format!(
-                "spill-policy: {reason}; keeping the inline content"
-            ));
+            spill_warn(&spill_failure_notice(&reason));
             None
         }
     }
+}
+
+/// The spill catch-all's warning skeleton (the dsh
+/// `ctx.logger.warn(`spill-policy: ${reason}; keeping the inline
+/// content`)` face): one composable so the 1:1 wording stays pinned.
+fn spill_failure_notice(reason: &str) -> String {
+    format!("spill-policy: {reason}; keeping the inline content")
 }
 
 /// The decision's content: a content replacement wins over the enter
@@ -2286,6 +2299,9 @@ mod tests {
         /// Arms the BEGIN busy refusal (a running turn or another open
         /// window).
         agent_busy: AtomicBool,
+        /// Arms the missing-context-window face (the warned-once skip
+        /// arm drives against a capacity-less adapter).
+        no_context_window: AtomicBool,
         /// Arms the POLL abort flag from the first poll (a cancel racing
         /// the admission).
         cancel_at_entry: AtomicBool,
@@ -2342,11 +2358,19 @@ mod tests {
         payload: &serde_json::Value,
     ) -> Result<serde_json::Value, String> {
         match method {
-            fr_wire::services::llm::METHOD_RESOLVE_MODEL_INFO => Ok(serde_json::json!({
-                "provider": "deepseek", "id": "m1", "name": "M1",
-                "context": { "contextWindow": 262_144 },
-                "defaultMaxTokens": 4_096,
-            })),
+            fr_wire::services::llm::METHOD_RESOLVE_MODEL_INFO => {
+                if state.no_context_window.load(Ordering::Acquire) {
+                    return Ok(serde_json::json!({
+                        "provider": "deepseek", "id": "m1", "name": "M1",
+                        "defaultMaxTokens": 4_096,
+                    }));
+                }
+                Ok(serde_json::json!({
+                    "provider": "deepseek", "id": "m1", "name": "M1",
+                    "context": { "contextWindow": 262_144 },
+                    "defaultMaxTokens": 4_096,
+                }))
+            }
             fr_wire::services::llm::METHOD_BEGIN => {
                 state
                     .begin_log
@@ -2759,6 +2783,7 @@ mod tests {
             estimates: Mutex::new(std::collections::HashMap::new()),
             window: Mutex::new(None),
             agent_busy: AtomicBool::new(false),
+            no_context_window: AtomicBool::new(false),
             cancel_at_entry: AtomicBool::new(false),
             cancel_on_first_drain: AtomicBool::new(false),
             flush_log: Mutex::new(Vec::new()),
@@ -2858,6 +2883,15 @@ mod tests {
             reply, pre_step_payload,
             "the untouched chain echoes the payload (the identity continuation)"
         );
+        // The trigger math pins at the decision's own numbers: with the
+        // routed max-tokens reserved and the 64k headroom, the threshold
+        // is floor(min(window × 0.8, budget − 65536)).
+        let policy = crate::config::resolve_target_policy(&state.config, "deepseek", "m1");
+        let spec = crate::config::resolve_compact_spec(&policy, 200_000, 8_192).expect("spec");
+        assert_eq!(
+            spec.threshold_tokens, 126_272,
+            "floor(min(200000×0.8, (200000−8192)−65536))"
+        );
         let types = event_types(&host);
         assert!(types.contains(&"compaction/start".to_owned()));
         assert!(types.contains(&"compaction/summary".to_owned()));
@@ -2882,6 +2916,130 @@ mod tests {
             !types.iter().any(|name| name.starts_with("compaction/")),
             "the gate-off handler compacts nothing: {types:?}"
         );
+        state.join_relay();
+    }
+
+    /// A capacity-less adapter skips the pressure compaction with one
+    /// warning per target: both crossings defer OK, nothing compacts,
+    /// and the second crossing adds no second warning (the dsh
+    /// `warnedPressureConfigTargets` discipline).
+    #[test]
+    fn missing_capacity_warns_once_and_defers() {
+        let (mut state, host) = harness("no-capacity", Vec::new(), true);
+        host.no_context_window.store(true, Ordering::Release);
+        let pre_step_payload = br#"{"sessionId":"s1","messages":[],"turn":1,"step":1}"#.to_vec();
+        let (status, _reply) = drive(&mut state, EV_PRE_STEP, &pre_step_payload);
+        assert_eq!(status, STATUS_OK, "the skip never errors the listener");
+        let first = state.warned_pressure_target_count();
+        assert_eq!(first, 1, "the first crossing warns once: {first}");
+        let (status, _reply) = drive(&mut state, EV_PRE_STEP, &pre_step_payload);
+        assert_eq!(status, STATUS_OK);
+        assert_eq!(
+            state.warned_pressure_target_count(),
+            first,
+            "the second crossing stays silent (the warned-once set)"
+        );
+        let types = event_types(&host);
+        assert!(
+            !types.iter().any(|name| name.starts_with("compaction/")),
+            "the capacity-less target never compacts: {types:?}"
+        );
+        state.join_relay();
+    }
+
+    /// The summarization request composes the routed request's
+    /// cacheable prefix: the surface-node-0 system head, the shadowed
+    /// messages in surface order, the routed header's tool schemas, and
+    /// exactly one final user message carrying the compaction
+    /// instruction (the dsh `buildSummarizationInput` plus the appended
+    /// directive).
+    #[test]
+    fn summarize_request_composes_the_cacheable_prefix() {
+        let gate = serde_json::json!({ "auto": true });
+        let (mut state, host) =
+            harness_with_config("summarize-compose", vec![checkpoint_batch("body")], &gate);
+        {
+            let mut sessions = host.sessions.lock().expect("host session lock");
+            let mut seed = |body: serde_json::Value| {
+                session_dispatch(
+                    fr_wire::services::session_persistence::METHOD_SESSION_APPEND,
+                    body.to_string().as_bytes(),
+                    &mut sessions,
+                )
+                .expect("seed append");
+            };
+            seed(serde_json::json!({ "id": "s1", "type": "turn/start", "data": { "turn": 1 } }));
+            seed(serde_json::json!({
+                "id": "s1", "type": "system/message",
+                "data": {
+                    "turn": 1, "step": 1,
+                    "message": { "role": "system", "id": "sys-head",
+                        "content": [{ "type": "text", "text": "SYSTEM HEAD" }],
+                        "source": { "kind": "system-prompt" } },
+                },
+                "surfaceOp": "append",
+            }));
+            for index in 0..4 {
+                seed(serde_json::json!({
+                    "id": "s1", "type": "user/message",
+                    "data": {
+                        "role": "user", "id": format!("usr-{index}"),
+                        "content": [{ "type": "text", "text": format!("turn {index}") }],
+                        "source": { "kind": "user" },
+                    },
+                    "surfaceOp": "append",
+                }));
+            }
+            seed(serde_json::json!({
+                "id": "s1", "type": "request/header",
+                "data": {
+                    "header": {
+                        "config": { "provider": "deepseek", "model": "m1", "maxTokens": 1_024 },
+                        "tools": [{ "name": "grep", "description": "search",
+                                    "parameters": { "type": "object", "properties": {} } }],
+                    },
+                    "reason": "initial",
+                },
+            }));
+        }
+        let payload = br#"{"sessionId":"s1","messages":[],"turn":1,"step":1}"#.to_vec();
+        let (status, _reply) = drive(&mut state, EV_PRE_STEP, &payload);
+        assert_eq!(status, STATUS_OK);
+        let begins = host.begin_log.lock().expect("begin log").clone();
+        assert_eq!(begins.len(), 1, "one summarizer call");
+        let request = &begins[0]["request"];
+        assert_eq!(request["provider"], "deepseek");
+        assert_eq!(request["model"], "m1");
+        let messages = request["messages"].as_array().expect("messages");
+        assert_eq!(
+            messages.len(),
+            5,
+            "system head + the shadowed users + the directive"
+        );
+        let head = &messages[0];
+        assert_eq!(head["kind"], "durable");
+        assert_eq!(head["message"]["content"][0]["text"], "SYSTEM HEAD");
+        for (index, message) in messages[1..4].iter().enumerate() {
+            assert_eq!(message["kind"], "durable");
+            assert_eq!(
+                message["message"]["content"][0]["text"],
+                format!("turn {index}"),
+                "the shadowed messages ride in surface order"
+            );
+        }
+        let directive = messages.last().expect("directive");
+        assert_eq!(directive["kind"], "user-input");
+        assert_eq!(
+            directive["content"][0]["text"],
+            crate::prompts::COMPACTION_INSTRUCTION,
+            "exactly one final user message carries the instruction"
+        );
+        assert_eq!(
+            request["tools"].as_array().map(Vec::len),
+            Some(1),
+            "the routed header's tool schemas ride the call: {request}"
+        );
+        assert_eq!(request["tools"][0]["name"], "grep");
         state.join_relay();
     }
 
@@ -2911,7 +3069,7 @@ mod tests {
     /// overflow rules a retry again.
     #[test]
     fn bookkeeping_resets_the_overflow_sequence() {
-        let (mut state, _host) = harness(
+        let (mut state, host) = harness(
             "bookkeeping",
             vec![
                 checkpoint_batch("first checkpoint"),
@@ -2924,6 +3082,11 @@ mod tests {
         let (status, reply) = drive(&mut state, EV_REQUEST_ERROR, failure);
         assert_eq!(reply, RETRY_CHAIN_VALUE, "the first overflow rules a retry");
         let _ = status;
+        // The retry rides a real forced compaction: the reduction
+        // transacted before the ruling (the dsh overflow arm).
+        let types = event_types(&host);
+        assert!(types.contains(&"compaction/start".to_owned()), "{types:?}");
+        assert!(types.contains(&"compaction/end".to_owned()), "{types:?}");
         // The assistant response resets the fresh sequence (the dsh
         // session/event arm) and the idle flip clears the counter.
         let (status, _reply) = drive(
@@ -3087,6 +3250,33 @@ mod tests {
             offloaded.contains("\"offloaded\":true"),
             "the re-prepared input sees the offloaded mark: {offloaded}"
         );
+        // A summary failure under a DIFFERENT code never offloads: the
+        // waterfall arm matches the offload code only (the dsh default
+        // false), and the recovery preserves the original error.
+        let (mut state2, host2) = harness(
+            "offload-recover-other-code",
+            vec![serde_json::json!({
+                "generationId": "g1",
+                "chunks": [{ "type": "finish", "reason": { "kind": "error", "failure": {
+                    "message": "nope", "code": "PROVIDER_ERROR",
+                } } }],
+                "done": true,
+            })],
+            true,
+        );
+        seed_image_user(&host2, "u-other", 1);
+        seed_plain_user(&host2);
+        let failure =
+            br#"{"sessionId":"s1","failure":{"message":"window","code":"CONTEXT_WINDOW_EXCEEDED"}}"#;
+        let (status, reply) = drive(&mut state2, EV_REQUEST_ERROR, failure);
+        assert_eq!(status, STATUS_OK);
+        assert_eq!(reply, failure, "the unmatched code never recovers");
+        let types = event_types(&host2);
+        assert!(
+            !types.contains(&"image/offload".to_owned()),
+            "no decision lands under a foreign code: {types:?}"
+        );
+        state2.join_relay();
         state.join_relay();
     }
 
@@ -3136,6 +3326,26 @@ mod tests {
         assert_eq!(targets[1]["seq"], serde_json::json!(7));
         assert_eq!(targets[1]["imageIndexes"], serde_json::json!([0]));
         drop(sessions);
+        // The durable repair never compacts and never spends overflow
+        // budget: a later context overflow still runs its own
+        // forced-compaction attempt (the dsh discipline).
+        assert!(
+            !types.iter().any(|name| name.starts_with("compaction/")),
+            "the offload arm never compacts: {types:?}"
+        );
+        let overflow =
+            br#"{"sessionId":"s1","failure":{"message":"window","code":"CONTEXT_WINDOW_EXCEEDED"}}"#;
+        let (status, reply) = drive(&mut state, EV_REQUEST_ERROR, overflow);
+        assert_eq!(status, STATUS_OK);
+        let types = event_types(&host);
+        assert!(
+            types.contains(&"compaction/start".to_owned()),
+            "the fresh overflow spends its own fresh budget (the attempt ran): {types:?}"
+        );
+        assert_eq!(
+            reply, overflow,
+            "the batch-less attempt preserves the original error"
+        );
         state.join_relay();
     }
 
@@ -3219,6 +3429,37 @@ mod tests {
             types.contains(&"compaction/prune".to_owned()),
             "the shadow price lands: {types:?}"
         );
+        // The replacement rides the shadow-priced surfaceOp replace with
+        // exactly the pruned event's seq cited (the decision's landing
+        // shape).
+        let sessions = host.sessions.lock().expect("host session lock");
+        let session = sessions
+            .store()
+            .get(&fr_wire::ids::SessionId::new("s1"))
+            .expect("live session");
+        let original = session
+            .events()
+            .iter()
+            .find(|event| event.event_type() == "tool/result")
+            .expect("the pruned tool result")
+            .seq;
+        let replace = session
+            .events()
+            .iter()
+            .rev()
+            .find(|event| event.event_type() == "tool/result" && event.surface_op.is_some())
+            .expect("the replace lands");
+        assert!(
+            matches!(replace.surface_op, Some(fr_wire::SurfaceOp::Replace(_))),
+            "the replacement is a surface replace: {:?}",
+            replace.surface_op
+        );
+        assert_eq!(
+            replace.source_event_seqs.as_deref().expect("cited"),
+            &[original],
+            "the replacement cites exactly the pruned seq"
+        );
+        drop(sessions);
         state.join_relay();
     }
 
@@ -3248,6 +3489,29 @@ mod tests {
             serde_json::Value::Null,
             "a capture failure carries no code"
         );
+        // A ruled recovery re-prepares the summarizer input from the
+        // current surface: the retry is a fresh begin with re-derived
+        // messages (the dsh re-prepare-on-retry semantics).
+        let (mut state2, host2) = harness(
+            "recover-reprepare",
+            vec![offload_fail_batch(1), checkpoint_batch("re-prepared body")],
+            true,
+        );
+        seed_image_user(&host2, "u-reprepare", 1);
+        seed_plain_user(&host2);
+        let failure =
+            br#"{"sessionId":"s1","failure":{"message":"window","code":"CONTEXT_WINDOW_EXCEEDED"}}"#;
+        let (status, reply) = drive(&mut state2, EV_REQUEST_ERROR, failure);
+        assert_eq!(status, STATUS_OK);
+        assert_eq!(reply, RETRY_CHAIN_VALUE, "the recovery rules the retry");
+        let begins = host2.begin_log.lock().expect("begin log").clone();
+        assert!(begins.len() >= 2, "the retry re-prepares: {}", begins.len());
+        let second = serde_json::to_string(&begins[1]["request"]["messages"]).expect("json");
+        assert!(
+            second.contains("\"offloaded\":true"),
+            "the re-prepared input reflects the current surface: {second}"
+        );
+        state2.join_relay();
         state.join_relay();
     }
 
@@ -3313,6 +3577,7 @@ mod tests {
             estimates: Mutex::new(std::collections::HashMap::new()),
             window: Mutex::new(None),
             agent_busy: AtomicBool::new(false),
+            no_context_window: AtomicBool::new(false),
             cancel_at_entry: AtomicBool::new(false),
             cancel_on_first_drain: AtomicBool::new(false),
             flush_log: Mutex::new(Vec::new()),
@@ -3350,6 +3615,38 @@ mod tests {
         let reply =
             super::dispatch(method, frame.to_string().as_bytes(), state).expect("spill frame");
         serde_json::from_slice(&reply).expect("spill reply")
+    }
+
+    /// Drives one post-execute enter/exit conversation over an
+    /// oversized accepted result (the spill arms' transport).
+    fn spill_post_execute_round(
+        state: &mut ShellState,
+        token: u64,
+        call: &serde_json::Value,
+    ) -> serde_json::Value {
+        let enter = serde_json::json!({
+            "stage": "post-execute",
+            "leg": "enter",
+            "token": token,
+            "call": call,
+            "result": oversized_result(),
+        });
+        let reply = spill_frame(
+            state,
+            fr_wire::services::compaction::METHOD_SPILL_POST_EXECUTE,
+            &enter,
+        );
+        assert_eq!(reply["kind"], "delegate");
+        spill_frame(
+            state,
+            fr_wire::services::compaction::METHOD_SPILL_POST_EXECUTE,
+            &serde_json::json!({
+                "stage": "post-execute",
+                "leg": "exit",
+                "token": token,
+                "decision": { "kind": "accept", "additionalContexts": [] },
+            }),
+        )
     }
 
     /// The post-execute arm bounds an over-cap accepted result: the
@@ -3404,6 +3701,120 @@ mod tests {
             .filter_map(std::result::Result::ok)
             .collect();
         assert_eq!(session_dirs.len(), 1, "one session directory");
+        // The artifact holds the FULL text verbatim, and the footer pins
+        // the whole dsh skeleton with the real locator and counts.
+        let artifact = std::fs::read_dir(session_dirs[0].path())
+            .expect("dir reads")
+            .next()
+            .expect("one entry")
+            .expect("entry reads")
+            .path();
+        let full = std::fs::read_to_string(&artifact).expect("artifact reads");
+        assert_eq!(full, "a".repeat(400), "the full text spills");
+        let head = inline
+            .find(crate::spill_policy::GAP_TEXT)
+            .expect("the gap splits the ends");
+        let after_gap = &inline[head + crate::spill_policy::GAP_TEXT.len()..];
+        let tail = after_gap
+            .find("\n\n(Omitted")
+            .expect("the footer follows the tail");
+        let omitted = 400 - head - tail;
+        assert_eq!(
+            &inline[head + crate::spill_policy::GAP_TEXT.len() + tail + 2..],
+            format!(
+                "(Omitted {omitted} bytes. Full formatted result stored at: {}. \
+                 Use read with offset/limit, or grep this path to search within it.)",
+                artifact.display()
+            ),
+            "the footer pins the dsh skeleton with the real locator"
+        );
+        // The read tool never spills (the read->spill->read loop) and a
+        // text-only PTC subcall rides the dispatch-log path untouched.
+        let reply = spill_post_execute_round(
+            &mut state,
+            21,
+            &serde_json::json!({ "callId": "c-read", "name": "read", "agent": "s1" }),
+        );
+        assert_eq!(
+            reply["decision"],
+            serde_json::json!({ "kind": "accept", "additionalContexts": [] }),
+            "the read result stays inline"
+        );
+        let reply = spill_post_execute_round(
+            &mut state,
+            22,
+            &serde_json::json!({ "callId": "c-ptc", "name": "huge_read", "agent": "s1", "parent": "t1" }),
+        );
+        assert_eq!(
+            reply["decision"]["content"],
+            serde_json::Value::Null,
+            "the text-only PTC parent is untouched"
+        );
+    }
+
+    /// A bound refusal keeps the inline content verbatim: the decision
+    /// rides the original blocks, nothing saves, and the warning
+    /// skeleton composes the dsh template.
+    #[test]
+    fn spill_refusal_keeps_the_inline_content() {
+        let root = temp_root("spill-refusal");
+        let gate = serde_json::json!({
+            "auto": false,
+            "max-inline-tokens": 6,
+            "spill-root": root.display().to_string(),
+            "cleanup-period-days": 0,
+        });
+        let (mut state, _host) = harness_with_config("spill-refusal", Vec::new(), &gate);
+        let enter = serde_json::json!({
+            "stage": "post-execute", "leg": "enter", "token": 5,
+            "call": { "callId": "c1", "name": "huge_read", "agent": "s1" },
+            "result": oversized_result(),
+        });
+        let reply = spill_frame(
+            &mut state,
+            fr_wire::services::compaction::METHOD_SPILL_POST_EXECUTE,
+            &enter,
+        );
+        assert_eq!(reply["kind"], "delegate");
+        let exit = serde_json::json!({
+            "stage": "post-execute", "leg": "exit", "token": 5,
+            "decision": { "kind": "accept", "additionalContexts": [] },
+        });
+        let reply = spill_frame(
+            &mut state,
+            fr_wire::services::compaction::METHOD_SPILL_POST_EXECUTE,
+            &exit,
+        );
+        assert_eq!(reply["kind"], "final");
+        assert_eq!(
+            reply["decision"],
+            serde_json::json!({ "kind": "accept", "additionalContexts": [] }),
+            "the untouched decision keeps the inline result verbatim"
+        );
+        // The save precedes the notice refusal (the dsh order): the full
+        // text still landed on disk; the inline copy stays verbatim.
+        let session_dir = std::fs::read_dir(&root)
+            .expect("root reads")
+            .next()
+            .expect("one session directory")
+            .expect("entry reads")
+            .path();
+        let artifact = std::fs::read_dir(&session_dir)
+            .expect("dir reads")
+            .next()
+            .expect("one entry")
+            .expect("entry reads")
+            .path();
+        assert_eq!(
+            std::fs::read_to_string(&artifact).expect("artifact reads"),
+            "a".repeat(400),
+            "the save landed before the refusal (the dsh order)"
+        );
+        // The warning skeleton pins (the serve catch-all composes it).
+        assert_eq!(
+            super::spill_failure_notice("boom"),
+            "spill-policy: boom; keeping the inline content"
+        );
     }
 
     /// The post-execute gates pass the untouched decision through: the
@@ -3828,6 +4239,41 @@ mod tests {
             host.llm_aborts.lock().expect("aborts lock").is_empty(),
             "a successful run never aborts the generation"
         );
+        // The presentation text composes from the served counts (the
+        // dsh `Compacted ${n} history items (~${m} tokens).` template).
+        assert_eq!(
+            crate::command_face::success_text(
+                result["shadowedSeqs"].as_array().expect("seqs").len() as u64,
+                result["shadowedTokenCount"].as_u64().expect("tokens"),
+            ),
+            "Compacted 3 history items (~180000 tokens)."
+        );
+        // The busy admission re-rules under a running agent (the idle
+        // gate rides the agent face, not a shell flag).
+        host.agent_busy.store(true, Ordering::Release);
+        let error = compact_now(&mut state, &serde_json::json!({ "sessionId": "s1" }))
+            .expect_err("busy refusal");
+        let failure = manual_error(&error);
+        assert_eq!(failure["code"], "busy");
+        assert_eq!(
+            failure["message"],
+            "manual compaction requires an idle agent with no waking queued work"
+        );
+        host.agent_busy.store(false, Ordering::Release);
+        // The exhausted surface resolves null (the presentation falls to
+        // the no-history text).
+        let (mut state2, host2) = harness_seeded("compact-now-success-null", Vec::new(), false, 0);
+        let reply = compact_now(&mut state2, &serde_json::json!({ "sessionId": "s1" }))
+            .expect("the null outcome is a success");
+        assert!(
+            reply["result"].is_null(),
+            "no useful range resolves null: {reply}"
+        );
+        assert_eq!(
+            crate::command_face::NO_COMPACTABLE,
+            "No compactable history yet."
+        );
+        assert!(host2.window.lock().expect("window lock").is_none());
     }
 
     #[test]

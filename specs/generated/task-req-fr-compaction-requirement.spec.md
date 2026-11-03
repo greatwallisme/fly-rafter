@@ -40,156 +40,156 @@ satisfies: [REQ-FR-COMPACTION]
 ## Completion Criteria
 
 Scenario: summarizer 提示词逐字一致
-  Test: pending_req_fr_compaction_summarizer
+  Test: compaction_constants_match_the_dsh_sources
   当 以脚本抽取 summarizer 提示词常量时
   那么 与 dsh summarizer.ts:32-147 逐字一致，含 9 个固定 ## 节名与合并非复制规则
 
 Scenario: 摘要请求消息组成
-  Test: pending_req_fr_compaction_requirement
+  Test: summarize_request_composes_the_cacheable_prefix
   假设 压缩启动且表面节点 0 为 system/message
   当 构造摘要请求时
   那么 消息含 system head、影子区消息按表面序、会话工具与恰一条全文为指令的 user 消息
 
 Scenario: 阈值计算与触发
-  Test: pending_req_fr_compaction_requirement
+  Test: pre_step_compacts_and_defers
   假设 上下文窗 200000、routed maxTokens 8192
   当 计算 thresholdTokens 时
   那么 取 floor(min(200000×0.8, (200000−8192)−65536)) 且 measured totalTokens 达阈值即在 pre-step 触发
 
 Scenario: 缺上下文窗跳过
-  Test: pending_req_fr_compaction_requirement
+  Test: missing_capacity_warns_once_and_defers
   假设 adapter 未声明上下文窗
   当 解析目标压力时
   那么 警告一次后跳过该 provider/model，不报错中断
 
 Scenario: 剪枝后复查
-  Test: pending_req_fr_compaction_requirement
+  Test: prune_progress_below_threshold_skips_compaction
   假设 触发时先执行工具结果剪枝
   当 剪枝结算后
   那么 复查 totalTokens，已低于阈值则不再压缩
 
 Scenario: 目标三级回退
-  Test: pending_req_fr_compaction_requirement
+  Test: target_resolution_walks_the_three_sources
   假设 依次配置摘要对、缺省摘要对两种部署
   当 选摘要目标时
   那么 配置对优先于最新 routed header 再优先于 agent options，缺配对拒绝装载，全无报 no provider/model available for summarization
 
 Scenario: max-tokens 截断拒绝
-  Test: pending_req_fr_compaction_max_tokens
+  Test: maps_finish_faces_to_fail_closed_errors
   假设 摘要流以 max-tokens 结束
   当 结算时
   那么 错误码 MAX_TOKENS 文案 summarization truncated at the token cap (incomplete checkpoint)
 
 Scenario: 空文本拒绝
-  Test: pending_req_fr_compaction_requirement
+  Test: empty_summary_fails_closed
   假设 摘要流成功但零文本
   当 结算时
   那么 报 summarization produced no text summary content
 
 Scenario: 替换消息形状
-  Test: pending_req_fr_compaction_requirement
+  Test: frames_the_checkpoint_with_the_extracted_brackets
   假设 摘要文本就绪
   当 构造替换 user 消息时
   那么 为 CHECKPOINT_PREAMBLE 加 <compacted-summary> 包裹与收尾标记
 
 Scenario: 收缩门拒绝
-  Test: pending_req_fr_compaction_requirement
+  Test: shrink_gate_rejection_closes_the_bracket_with_the_error
   假设 框架后估算不小于影子区 tokens
   当 结算替换时
   那么 拒绝并报 summary is not smaller than the shadowed content (N estimated framed tokens >= M)
 
 Scenario: summary-error waterfall 默认不恢复
-  Test: pending_req_fr_compaction_summary_error_waterfall
+  Test: summary_error_payload_pins_and_identity_means_no_recovery
   假设 摘要调用失败
   当 compaction/summary-error waterfall 裁决时
   那么 recover 默认 false；重试时重备输入
 
 Scenario: 保留边界与配平回退
-  Test: pending_req_fr_compaction_requirement
+  Test: selection_falls_back_to_the_balanced_pair_boundary
   假设 尾部累积越过 retainTokens 且下一节点是半个 tool 对
   当 选区结算时
   那么 边界回退到配平位置使 assistant tool-call/result 对不拆分，且永不含 node-0
 
 Scenario: 非法保留配置拒绝装载
-  Test: pending_req_fr_compaction_requirement
+  Test: pressure_invariants_reject_at_spec_time
   假设 retainRatio ≥ thresholdRatio 或 resolved retainTokens ≥ thresholdTokens
   当 插件装载时
   那么 拒绝并报明确错误
 
 Scenario: 上下文超限恢复重试
-  Test: pending_req_fr_compaction_requirement
+  Test: bookkeeping_resets_the_overflow_sequence
   假设 请求失败码 CONTEXT_WINDOW_EXCEEDED
   当 恢复结算时
   那么 剪枝并以 retainTokens 0 强制压缩，成功返回 retry 且计数器随后续 assistant/message 重置
 
 Scenario: 恢复耗尽透传
-  Test: pending_req_fr_compaction_requirement
+  Test: request_error_recovery_rules_retry_then_budget_exhausts
   假设 恢复重试次数耗尽仍失败
   当 结算时
   那么 透传原始请求错误
 
 Scenario: 括弧事件序列
-  Test: pending_req_fr_compaction_requirement
+  Test: commits_the_full_bracket_and_collapses_the_surface
   假设 一次压缩成功
   当 检查日志时
   那么 含 compaction/start 与 compaction/summary、replace-surface 与 compaction/end 的完整序列，失败 close 留可检测未配对 start
 
 Scenario: 全表面稳定性复查
-  Test: pending_req_fr_compaction_requirement
+  Test: manual_path_classifies_surface_changes_as_changed
   假设 摘要结算时表面已被并发修改
   当 复查时
   那么 检出变化并按稳定性规则处理（放弃或重试）
 
 Scenario: 剪枝度量与标记
-  Test: pending_req_fr_compaction_requirement
+  Test: default_config_prunes_the_documented_span
   假设 某工具结果含 10000 码点文本与非文本块
   当 剪枝结算时
   那么 仅按文本码点计总量，超 8192 才剪，移除 [4096, total−1024) 段，标记一次逐字 \n\n[... tool result middle pruned ...]\n\n，非文本块保序
 
 Scenario: 剪枝落盘形态
-  Test: pending_req_fr_compaction_requirement
+  Test: overflow_prune_lands_shadow_priced_replacements
   假设 一次剪枝生效
   当 检查日志时
   那么 append compaction/prune 影子事件与 surfaceOp replace 的 tool/result 且 sourceEventSeqs 恰含原 seq
 
 Scenario: spill 替换形状与 footer
-  Test: pending_req_fr_compaction_spill_footer
+  Test: spill_post_execute_bounds_the_accepted_result
   假设 某工具结果估算超 12500 tokens
   当 spill 结算时
   那么 全文落盘、内联替换为头加 [...] 加尾加逐字 footer (Omitted N bytes.[ Omitted M images.] Full formatted result stored at: <locator>. <retrievalHint>)，read 工具与纯文本 PTC 子调用豁免
 
 Scenario: spill 存储与清扫
-  Test: pending_req_fr_compaction_spill
+  Test: expired_files_delete_and_empty_dirs_prune
   假设 多会话产生 spill 文件且存在超 30 天旧文件
   当 启动清扫运行时
   那么 删除超期文件并剪空目录，路径为 session-<sha256 前 12hex> 布局、文件 0600 目录 0700
 
 Scenario: spill 失败保留内联
-  Test: pending_req_fr_compaction_spill
+  Test: spill_refusal_keeps_the_inline_content
   假设 spill 落盘或替换任一步失败
   当 结算时
   那么 警告 spill-policy: ...; keeping the inline content 并保留内联原文
 
 Scenario: 溢出卸载恢复重试
-  Test: pending_req_fr_compaction_requirement
+  Test: request_error_offload_arm_rules_retry
   假设 provider 以 IMAGE_OFFLOAD_REQUIRED 拒绝且 failure.offloadImages 为 2
   当 request-error 恢复结算时
   那么 记录 image/offload 决策选中保留面最旧的 2 个未卸载输入图并返回 retry，不耗重试预算不记 retry 事件；无可卸载则透传 next()
 
 Scenario: 摘要失败卸载恢复臂
-  Test: pending_req_fr_compaction_requirement
+  Test: overflow_offload_recovery_completes_with_marks
   假设 摘要调用失败码为 IMAGE_OFFLOAD_REQUIRED
   当 compaction/summary-error waterfall 裁决时
   那么 影子区按序卸载最旧未卸载输入图返回 recover=true；非该码默认 false
 
 Scenario: 卸载投影 fail-closed
-  Test: pending_req_fr_compaction_fail_closed
+  Test: offload_decision_projects_selected_marks
   假设 image/offload 事件 targets 含重复 seq 或越界索引或重复卸载
   当 投影重放时
   那么 报错拒绝；合法 targets 将选中图置 offloaded:true 且消息身份与节点不变
 
 Scenario: /compact 空闲限定与文案
-  Test: pending_req_fr_compaction_compact
+  Test: manual_compaction_lands_the_full_face
   假设 agent 忙碌时执行 /compact
   当 结算时
   那么 报 manual compaction requires an idle agent with no waking queued work；空闲成功时回 Compacted N history items (~M tokens).，无历史回 No compactable history yet.

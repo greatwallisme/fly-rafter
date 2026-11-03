@@ -330,6 +330,53 @@ mod tests {
         assert_eq!(text.as_str(), format!("aa{PRUNE_MARKER}aaa"));
     }
 
+    /// The default configuration prunes the documented span: text code
+    /// points price alone, the 8192 threshold gates, the removal spans
+    /// [4096, total−1024), the marker lands once verbatim, and the
+    /// non-text block keeps its order.
+    #[test]
+    fn default_config_prunes_the_documented_span() {
+        let config = config(8_192, 4_096, 1_024);
+        let image = ContentBlock::Known(KnownContentBlock::Image {
+            attachment: fr_wire::content::ImageAttachmentRef {
+                attachment_id: fr_wire::ids::AttachmentId::new("a-1".to_owned()),
+                media_type: fr_wire::content::ImageMediaType::Png,
+                bytes: 10,
+                width: 1,
+                height: 1,
+                name: None,
+                original_dimensions: None,
+            },
+            offloaded: None,
+        });
+        // 10,000 code points of text plus a non-text block.
+        let blocks = vec![text("x".repeat(10_000).as_str()), image.clone()];
+        assert_eq!(
+            measure_content(&blocks),
+            10_000,
+            "only the text code points price"
+        );
+        let pruned = prune_content(&blocks, &config)
+            .expect("prune")
+            .expect("over budget prunes");
+        assert_eq!(pruned.len(), 2);
+        let ContentBlock::Known(KnownContentBlock::Text { text: head_text }) = &pruned[0] else {
+            panic!("the pruned head is a text block");
+        };
+        assert_eq!(
+            head_text.as_str(),
+            format!("{}{PRUNE_MARKER}{}", "x".repeat(4_096), "x".repeat(1_024)),
+            "the removal span is [4096, total−1024) with the marker once"
+        );
+        assert_eq!(head_text.matches(PRUNE_MARKER).count(), 1);
+        assert_eq!(pruned[1], image, "the non-text block keeps its order");
+        assert_eq!(measure_content(&pruned), 4_096 + 39 + 1_024);
+        // At exactly the threshold the content stays inline (total >
+        // threshold prunes).
+        let boundary = vec![text("x".repeat(8_192).as_str())];
+        assert_eq!(prune_content(&boundary, &config).expect("prune"), None);
+    }
+
     #[test]
     fn non_text_blocks_keep_order_and_cost_zero() {
         let image = ContentBlock::Known(KnownContentBlock::Image {
