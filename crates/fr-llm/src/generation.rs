@@ -1645,17 +1645,42 @@ mod tests {
         }
     }
 
-    fn channel_stream() -> (
-        Sender<StreamChunk>,
-        Pin<Box<dyn Stream<Item = StreamChunk> + Send>>,
-    ) {
+    /// The send half of [`channel_stream`]: every push and the close wake
+    /// the stream's registered waker, mirroring the production senders'
+    /// contract ("their own senders wake on every chunk and on close").
+    /// Without the wake, a worker that polls before the first send parks on
+    /// the drive gate forever — the lost wakeup that flaked
+    /// `begin_drain_round_trips_in_order` under load.
+    struct TestSender {
+        sender: Sender<StreamChunk>,
+        waker: Arc<Mutex<Option<Waker>>>,
+    }
+
+    impl TestSender {
+        fn send(&self, chunk: StreamChunk) {
+            // A failed send means the receiver is already gone; the wake
+            // still fires and the consumer's settle loop converges on the
+            // close, so the result carries no test-relevant information.
+            let _ = self.sender.send(chunk);
+            wake(&self.waker);
+        }
+    }
+
+    impl Drop for TestSender {
+        fn drop(&mut self) {
+            wake(&self.waker);
+        }
+    }
+
+    fn channel_stream() -> (TestSender, Pin<Box<dyn Stream<Item = StreamChunk> + Send>>) {
         let (sender, receiver) = channel();
+        let waker: Arc<Mutex<Option<Waker>>> = Arc::new(Mutex::new(None));
         let stream = Box::pin(TestChannelStream {
             receiver,
-            waker: Arc::new(Mutex::new(None)),
+            waker: Arc::clone(&waker),
             closed: false,
         });
-        (sender, stream)
+        (TestSender { sender, waker }, stream)
     }
 
     fn wake(waker: &Arc<Mutex<Option<Waker>>>) {
@@ -1774,12 +1799,7 @@ mod tests {
     /// thread parks through).
     fn drain_until_done(service: &GenerationService, id: &str) -> DrainReply {
         let mut chunks = Vec::new();
-        // A wall-clock deadline instead of a fixed poll count: the settle
-        // loop drives a background pump thread, so the budget must survive
-        // scheduler starvation when the whole workspace's test binaries run
-        // concurrently (a 1 s fixed budget flaked under that load).
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while std::time::Instant::now() < deadline {
+        for _ in 0..500 {
             let batch = service.drain(id).expect("drain in settle loop");
             chunks.extend(batch.chunks);
             if batch.done {
@@ -1828,9 +1848,9 @@ mod tests {
         assert_eq!(first.chunks, Vec::<StreamChunk>::new());
         assert!(!first.done);
 
-        sender.send(text("a")).expect("send a");
-        sender.send(text("b")).expect("send b");
-        sender.send(finish()).expect("send settlement");
+        sender.send(text("a"));
+        sender.send(text("b"));
+        sender.send(finish());
         drop(sender);
         let batch = drain_until_done(&service, &id);
         assert_eq!(
