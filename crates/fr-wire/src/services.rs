@@ -666,6 +666,13 @@ pub mod compaction {
     pub const METHOD_DESCRIBE: u32 = 0;
     /// The idle-session manual compaction (the dsh `compactNow`; the
     /// `/compact` command's behavior face).
+    ///
+    /// Request `{sessionId, sourceCommandId?}` → reply
+    /// `{result: <CompactionResult> | null}`; a classified manual-compaction
+    /// failure rides the failed-status document
+    /// `{"manualCompactionError": {code, message}}` (the dsh thrown
+    /// `ManualCompactionError`, the llmError face precedent). Any other
+    /// failure is a transport diagnostic.
     pub const METHOD_COMPACT_NOW: u32 = 1;
     /// Spill-policy `tools/post-execute` callback endpoint (the Q101′A
     /// post-execute two-leg frame the spill arm speaks).

@@ -5,9 +5,17 @@
 //! the only `dougong-abi` consumers; the rest of the crate stays a plain
 //! rlib.
 //!
-//! The shell provides the `'compaction'` service (the 17h compact-now
-//! arm pins its selector today; the describe face serves now) and
-//! mounts the four automatic-compaction listeners as kernel listeners
+//! The shell provides the `'compaction'` service: the compact-now arm
+//! (the dsh `compactNow` / `/compact` behavior face) and the two spill
+//! callback endpoints, plus the describe echo. The compact-now job runs
+//! inside the caller's frame over the agent service's remote maintenance
+//! window (the dsh `runMaintenance` admission split across the
+//! BEGIN/POLL/END faces; the Q2=2 cancellation ruling): a `require`
+//! frame re-entering the loop's own job callback would deterministically
+//! refuse (`STATUS_REENTRANCY`), and a push-style abort would arrive
+//! only after the job finished.
+//!
+//! The four automatic-compaction listeners mount as kernel listeners
 //! (the dsh `ctx.on` faces; the 2026-11-02 ruling: each plugin
 //! self-registers, the loop stays lean). Both waterfall listeners pass
 //! through the CPS protocol: the dsh pre-step listener always calls
@@ -47,20 +55,21 @@ use serde_json::Value;
 
 use crate::config::{ResolvedConfig, resolve_config, resolve_target_policy};
 use crate::engine::{
-    EngineDeps, EngineError, ModelCapacity, compact_if_needed, conversation_target, routed_target,
+    EngineDeps, EngineError, ModelCapacity, compact_if_needed, compact_now, conversation_target,
+    routed_target,
 };
 use crate::llm_face::{
     SummarizeStream, SummarizeTarget, resolve_summarization_target, summarize_with_llm,
 };
 use crate::meter::SurfaceMeasurement;
-use crate::region::MeterView;
-use crate::region::SessionView;
+use crate::region::{CompactionError, MeterView, RegionDeps, SessionView};
 use crate::session_view::RemoteSessionView;
 use crate::spill::SaveTextSpill;
 use crate::spill_cleanup::{gather_sweep_roots, sweep_spill_roots};
 use crate::spill_local::LocalSpillStore;
 use crate::spill_policy::{ImagePrice, SpillSeams, bound as spill_bound, is_image};
 use crate::summarizer::{CompactionFailure, SummarizationInput, SummaryResult};
+use crate::types::{ManualCompactionError, ManualCompactionErrorCode};
 
 /// The dylib artifact's plugin name.
 pub const PLUGIN_NAME: &str = "fr-compaction";
@@ -596,9 +605,233 @@ impl ShellState {
     }
 }
 
+/// The open maintenance window facts one compact-now job works under
+/// (the dsh `runMaintenance` job's `agentSignal`; the capability token
+/// the loop minted at BEGIN).
+#[derive(Debug, Clone)]
+struct MaintenanceWindow {
+    session_id: String,
+    token: String,
+}
+
+/// Opens the remote maintenance window (the dsh `runMaintenance`
+/// admission): the loop face's refusal is the busy class by construction
+/// (a running turn or another open window), so the caller maps every
+/// rejection onto the dsh busy error verbatim.
+fn maintenance_begin(link: &HostLink, session_id: &str) -> Result<String, String> {
+    let request = serde_json::json!({ "sessionId": session_id });
+    let reply = link.require(
+        fr_wire::services::agent::SERVICE_NAME,
+        fr_wire::services::agent::METHOD_MAINTENANCE_BEGIN,
+        &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
+    )?;
+    let reply: Value = serde_json::from_slice(&reply).map_err(|error| error.to_string())?;
+    reply
+        .get("token")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| "maintenance begin reply is invalid: no token".to_owned())
+}
+
+/// Reads the window's abort flag (the dsh `agentSignal.aborted` wire
+/// face).
+fn maintenance_poll(link: &HostLink, session_id: &str, token: &str) -> Result<bool, String> {
+    let request = serde_json::json!({ "sessionId": session_id, "token": token });
+    let reply = link.require(
+        fr_wire::services::agent::SERVICE_NAME,
+        fr_wire::services::agent::METHOD_MAINTENANCE_POLL,
+        &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
+    )?;
+    let reply: Value = serde_json::from_slice(&reply).map_err(|error| error.to_string())?;
+    reply
+        .get("aborted")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "maintenance poll reply is invalid: no aborted flag".to_owned())
+}
+
+/// Closes the window (the dsh `finally` admission release; the loop
+/// converges idle and replays a latched wake on its own side).
+fn maintenance_end(link: &HostLink, session_id: &str, token: &str) -> Result<(), String> {
+    let request = serde_json::json!({ "sessionId": session_id, "token": token });
+    link.require(
+        fr_wire::services::agent::SERVICE_NAME,
+        fr_wire::services::agent::METHOD_MAINTENANCE_END,
+        &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
+    )?;
+    Ok(())
+}
+
+/// The summarize hook's abort probe (the dsh `AbortSignal.any` leg): an
+/// open window polls the loop face; the automatic paths carry no window
+/// and never abort mid-summarization.
+struct WindowAbortProbe {
+    link: HostLink,
+    window: Option<MaintenanceWindow>,
+}
+
+impl WindowAbortProbe {
+    fn poll(&self) -> bool {
+        let Some(window) = &self.window else {
+            return false;
+        };
+        // A poll refusal means the window no longer matches (an fr bug,
+        // not a cancellation): the probe stays unraised and the failure
+        // surfaces at the window close.
+        maintenance_poll(&self.link, &window.session_id, &window.token).unwrap_or(false)
+    }
+}
+
+/// The compact-now request mirror (the dsh
+/// `compactNow(agent, signal, sourceCommandId?)` wire face: the signal
+/// rides the caller's maintenance window, not the payload).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CompactNowRequest {
+    session_id: String,
+    #[serde(default)]
+    source_command_id: Option<String>,
+}
+
+/// Encodes one classified manual-compaction failure over the wire (the
+/// dsh thrown `ManualCompactionError`; the llmError document precedent —
+/// the caller parses the document out of the failed-status detail).
+fn manual_error_document(error: &ManualCompactionError) -> String {
+    serde_json::json!({
+        "manualCompactionError": {
+            "code": error.code.as_str(),
+            "message": error.message(),
+        }
+    })
+    .to_string()
+}
+
+/// Serves the compact-now face (the dsh `compactNow`): opens the remote
+/// maintenance window, transacts one useful standalone reduction, and
+/// closes the window in a `finally` discipline. The classified failures
+/// ride the [`manual_error_document`] face; any other diagnostic is a
+/// transport failure.
+///
+/// # Errors
+///
+/// The busy document on admission refusal, the classified document for
+/// the in-transaction manual failures, the raw diagnostic for
+/// unclassified failures, and the window-close refusal (an fr bug that
+/// would strand the idle admission).
+fn serve_compact_now(state: &ShellState, payload: &[u8]) -> Result<Vec<u8>, String> {
+    let request: CompactNowRequest = serde_json::from_slice(payload)
+        .map_err(|error| format!("compact-now payload is invalid: {error}"))?;
+    // The dsh admission: `runMaintenance` refuses synchronously off-idle,
+    // and `compactNow` wraps every admission refusal in the busy error
+    // verbatim (the loop face's rejection is the busy class by
+    // construction; the raw diagnostic lands in the warn sink).
+    let token = match maintenance_begin(&state.link, &request.session_id) {
+        Ok(token) => token,
+        Err(error) => {
+            log_warn(
+                state,
+                &format!("manual compaction admission refused: {error}"),
+            );
+            return Err(manual_error_document(&ManualCompactionError::new(
+                ManualCompactionErrorCode::Busy,
+                "manual compaction requires an idle agent with no waking queued work",
+            )));
+        }
+    };
+    let window = MaintenanceWindow {
+        session_id: request.session_id.clone(),
+        token: token.clone(),
+    };
+    // The dsh job's entry `throwIfAborted`: a cancel racing the
+    // admission classifies cancelled before any work starts.
+    let mut outcome = if maintenance_poll(&state.link, &request.session_id, &token).unwrap_or(false)
+    {
+        Err(CompactionError::Manual(ManualCompactionError::new(
+            ManualCompactionErrorCode::Cancelled,
+            "manual compaction was cancelled",
+        )))
+    } else {
+        run_manual_compaction(state, &request, &window)
+    };
+    // The dsh catch's arbitration: an agent-side abort classifies
+    // cancelled ahead of the raw failure (the poll is the wire face of
+    // `agentSignal.aborted`; there is no separate caller signal to
+    // disambiguate).
+    if outcome.is_err()
+        && maintenance_poll(&state.link, &request.session_id, &token).unwrap_or(false)
+    {
+        outcome = Err(CompactionError::Manual(ManualCompactionError::new(
+            ManualCompactionErrorCode::Cancelled,
+            "manual compaction was cancelled",
+        )));
+    }
+    // The dsh `finally`: the window closes and the loop converges idle
+    // regardless of the outcome; a close refusal would strand the idle
+    // admission (an fr bug) and fails loudly.
+    maintenance_end(&state.link, &request.session_id, &token)
+        .map_err(|error| format!("maintenance window close failed: {error}"))?;
+    match outcome {
+        Ok(result) => serde_json::to_vec(&serde_json::json!({ "result": result }))
+            .map_err(|error| format!("compact-now reply encode failed: {error}")),
+        Err(CompactionError::Manual(manual)) => Err(manual_error_document(&manual)),
+        Err(CompactionError::Failure(failure)) => Err(failure.message().to_owned()),
+    }
+}
+
+/// Runs the manual transaction (the dsh `compactNow` job body): one
+/// useful standalone reduction over the wire seams — no threshold math,
+/// no prune pass, no capacity lookup (the dsh job body's exact seam set:
+/// meter, summarize with the window's abort poll, recover).
+fn run_manual_compaction(
+    state: &ShellState,
+    request: &CompactNowRequest,
+    window: &MaintenanceWindow,
+) -> Result<Option<crate::types::CompactionResult>, CompactionError> {
+    let mut view = state
+        .open_session(&request.session_id)
+        .map_err(|error| CompactionError::Failure(CompactionFailure::Other(error)))?;
+    let meter = RemoteMeter {
+        link: state.link,
+        session_id: request.session_id.clone(),
+    };
+    let summarize = SummarizeHook::capture(
+        state.link,
+        &state.config,
+        &view,
+        &request.session_id,
+        Some(window.clone()),
+    );
+    let recover = RecoverHook {
+        session_id: request.session_id.clone(),
+        relay: &state.relay,
+    };
+    let flush_session = request.session_id.clone();
+    let link = state.link;
+    let mut deps = RegionDeps {
+        meter: &meter,
+        summarize: &mut |input| summarize.run(input),
+        recover: &mut |failure, seqs, view| recover.run(failure, seqs, view),
+    };
+    let mut flush = move || {
+        let payload = serde_json::json!({ "id": flush_session });
+        let reply = link.require(
+            fr_wire::services::session_persistence::SERVICE_NAME,
+            fr_wire::services::session_persistence::METHOD_SESSION_FLUSH,
+            &serde_json::to_vec(&payload).map_err(|error| error.to_string())?,
+        )?;
+        serde_json::from_slice::<Value>(&reply)
+            .map(|_| ())
+            .map_err(|error| format!("flush reply decode: {error}"))
+    };
+    compact_now(
+        &mut view,
+        &mut deps,
+        request.source_command_id.clone(),
+        Some(&mut flush),
+    )
+}
+
 /// Serves one `'compaction'` service method invocation (the pure JSON
-/// face so the shell surface stays testable). The compact-now arm lands
-/// with the 17h batch.
+/// face so the shell surface stays testable).
 ///
 /// # Errors
 ///
@@ -611,7 +844,7 @@ pub fn dispatch(method: u32, payload: &[u8], state: &mut ShellState) -> Result<V
             "abiVersion": ABI_VERSION,
         }))
         .unwrap_or_default()),
-        METHOD_COMPACT_NOW => Err(format!("unknown compaction method {METHOD_COMPACT_NOW}")),
+        METHOD_COMPACT_NOW => serve_compact_now(state, payload),
         fr_wire::services::compaction::METHOD_SPILL_POST_EXECUTE => {
             serve_spill_endpoint(state, payload, SpillArm::PostExecute)
         }
@@ -1012,7 +1245,7 @@ fn run_pressure_compaction(
         link: state.link,
         session_id: session_id.to_owned(),
     };
-    let summarize = SummarizeHook::capture(state.link, &state.config, &view, session_id);
+    let summarize = SummarizeHook::capture(state.link, &state.config, &view, session_id, None);
     let recover = RecoverHook {
         session_id: session_id.to_owned(),
         relay: &state.relay,
@@ -1137,7 +1370,8 @@ pub fn handle_request_error(state: &mut ShellState, payload: &[u8]) -> Result<bo
         session_id: event.session_id.clone(),
     };
     let generation_before = view.replace_generation();
-    let summarize = SummarizeHook::capture(state.link, &state.config, &view, &event.session_id);
+    let summarize =
+        SummarizeHook::capture(state.link, &state.config, &view, &event.session_id, None);
     let recover = RecoverHook {
         session_id: event.session_id.clone(),
         relay: &state.relay,
@@ -1222,6 +1456,9 @@ struct SummarizeHook {
     /// the transaction, so the failed close leaves the paired end event
     /// — the frozen-facts capture preserves that trace).
     facts: Result<HookTargetFacts, CompactionFailure>,
+    /// The maintenance window the manual arm runs under (`None` on the
+    /// automatic paths): the abort poll polls it between drains.
+    window: Option<MaintenanceWindow>,
 }
 
 /// The captured target facts one summarize hook carries.
@@ -1242,6 +1479,7 @@ impl SummarizeHook {
         config: &ResolvedConfig,
         view: &dyn SessionView,
         session_id: &str,
+        window: Option<MaintenanceWindow>,
     ) -> Self {
         let agent = agent_route(&link, session_id).map_err(|error| {
             CompactionFailure::Other(format!("agent route lookup failed: {error}"))
@@ -1297,7 +1535,11 @@ impl SummarizeHook {
                 session_id: session_id.to_owned(),
             })
         });
-        Self { link, facts }
+        Self {
+            link,
+            facts,
+            window,
+        }
     }
 
     fn run(&self, input: &SummarizationInput) -> Result<SummaryResult, CompactionFailure> {
@@ -1306,11 +1548,15 @@ impl SummarizeHook {
             Err(failure) => return Err(failure.clone()),
         };
         let mut stream = LlmStream { link: self.link };
-        // The maintenance window's abort poll rides the token the 17h
-        // compact-now wiring captures; the automatic paths have no
-        // window and never abort mid-summarization.
+        // The maintenance window's abort poll rides the token the
+        // compact-now arm captured; the automatic paths have no window
+        // and never abort mid-summarization.
         // The large-Err face boxes internally; the region seam keeps the
         // 17e-established plain failure type.
+        let probe = WindowAbortProbe {
+            link: self.link,
+            window: self.window.clone(),
+        };
         summarize_with_llm(
             &mut stream,
             &SummarizeTarget {
@@ -1321,7 +1567,7 @@ impl SummarizeHook {
             input,
             &facts.session_id,
             facts.tool_history.clone(),
-            &mut || false,
+            &mut || probe.poll(),
         )
         .map_err(|error| *error)
     }
@@ -2016,7 +2262,8 @@ mod tests {
     /// One full-fidelity host: `'session-persistence'` routes to a real
     /// [`SessionService`] over a temp root; `'token-meter'` answers the
     /// scripted measurement; `'llm'` answers the scripted model info and
-    /// generation batches; `'agent'` answers the scripted route facts.
+    /// generation batches; `'agent'` answers the scripted route facts and
+    /// serves the real maintenance-window state machine.
     struct TestHost {
         sessions: Mutex<SessionService>,
         llm_batches: Mutex<Vec<serde_json::Value>>,
@@ -2033,6 +2280,46 @@ mod tests {
         /// Scripted estimate-content prices (unscripted texts price at
         /// the fixed density the real estimator pins).
         estimates: Mutex<HashMap<String, u64>>,
+        /// The agent-side maintenance window: `(token, aborted)` (the
+        /// loop shell's window state machine, scripted).
+        window: Mutex<Option<(String, bool)>>,
+        /// Arms the BEGIN busy refusal (a running turn or another open
+        /// window).
+        agent_busy: AtomicBool,
+        /// Arms the POLL abort flag from the first poll (a cancel racing
+        /// the admission).
+        cancel_at_entry: AtomicBool,
+        /// Raises the window abort when the llm DRAIN arm serves a
+        /// non-final batch (a cancel landing mid-summarization).
+        cancel_on_first_drain: AtomicBool,
+        /// Every flush request id, in call order (the durability pin).
+        flush_log: Mutex<Vec<String>>,
+        /// Arms a scripted flush refusal (the persistence face).
+        flush_fails: AtomicBool,
+        /// Every `'llm'` ABORT request body, in call order (the
+        /// cancellation forwarding pin).
+        llm_aborts: Mutex<Vec<serde_json::Value>>,
+    }
+
+    /// Routes one `'session-persistence'` require to the real service,
+    /// recording (or refusing, when scripted) the flush face on the way
+    /// through.
+    fn serve_persistence(
+        state: &TestHost,
+        method: u32,
+        payload: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        if method == fr_wire::services::session_persistence::METHOD_SESSION_FLUSH {
+            state
+                .flush_log
+                .lock()
+                .expect("host flush lock")
+                .push(payload["id"].as_str().unwrap_or_default().to_owned());
+            if state.flush_fails.load(Ordering::Acquire) {
+                return Err("disk full".to_owned());
+            }
+        }
+        serve_sessions(state, method, payload)
     }
 
     /// Routes one `'session-persistence'` require to the real service.
@@ -2075,9 +2362,22 @@ mod tests {
                 } else {
                     batches.remove(0)
                 };
+                if state.cancel_on_first_drain.load(Ordering::Acquire)
+                    && batch["done"] != serde_json::Value::Bool(true)
+                    && let Some(entry) = state.window.lock().expect("host window lock").as_mut()
+                {
+                    entry.1 = true;
+                }
                 Ok(batch)
             }
-            fr_wire::services::llm::METHOD_ABORT => Ok(serde_json::json!({})),
+            fr_wire::services::llm::METHOD_ABORT => {
+                state
+                    .llm_aborts
+                    .lock()
+                    .expect("host aborts lock")
+                    .push(payload.clone());
+                Ok(serde_json::json!({}))
+            }
             fr_wire::services::llm::METHOD_IMAGE_REQUEST_PRICING => Ok(
                 serde_json::json!({ "prices": [{ "visualTokens": 900, "text": "image handle text" }] }),
             ),
@@ -2098,6 +2398,52 @@ mod tests {
             }
         }
         reply
+    }
+
+    /// The agent-side window state machine (the loop shell's
+    /// BEGIN/POLL/END face, scripted): the busy refusal carries the
+    /// verbatim loop rejection, the abort flag arms through the two
+    /// cancel scripts.
+    fn serve_agent_method(state: &TestHost, method: u32) -> Result<serde_json::Value, String> {
+        const BUSY: &str = "agent \"s1\" already has active work";
+        match method {
+            fr_wire::services::agent::METHOD_STATUS => Ok(serve_agent(state)),
+            fr_wire::services::agent::METHOD_MAINTENANCE_BEGIN => {
+                {
+                    let mut window = state.window.lock().expect("host window lock");
+                    if state.agent_busy.load(Ordering::Acquire) || window.is_some() {
+                        return Err(BUSY.to_owned());
+                    }
+                    *window = Some((
+                        "test-token".to_owned(),
+                        state.cancel_at_entry.load(Ordering::Acquire),
+                    ));
+                }
+                Ok(serde_json::json!({ "token": "test-token" }))
+            }
+            fr_wire::services::agent::METHOD_MAINTENANCE_POLL => {
+                let window = state.window.lock().expect("host window lock");
+                match window.as_ref() {
+                    Some((token, aborted)) => {
+                        Ok(serde_json::json!({ "aborted": aborted, "token": token }))
+                    }
+                    None => Err("no matching maintenance window".to_owned()),
+                }
+            }
+            fr_wire::services::agent::METHOD_MAINTENANCE_END => {
+                let owned = {
+                    let window = state.window.lock().expect("host window lock");
+                    matches!(window.as_ref(), Some((token, _)) if token == "test-token")
+                };
+                if owned {
+                    *state.window.lock().expect("host window lock") = None;
+                    Ok(serde_json::json!({ "queued": true }))
+                } else {
+                    Err("no matching maintenance window".to_owned())
+                }
+            }
+            _ => Err(format!("unknown agent method {method}")),
+        }
     }
 
     /// Prices the live session dynamically (every surface node at 60000)
@@ -2170,7 +2516,7 @@ mod tests {
         };
         let answer: Result<serde_json::Value, String> = match service.as_ref() {
             fr_wire::services::session_persistence::SERVICE_NAME => {
-                serve_sessions(state, method, &payload)
+                serve_persistence(state, method, &payload)
             }
             fr_wire::services::token_meter::SERVICE_NAME => match method {
                 fr_wire::services::token_meter::METHOD_MEASURE => {
@@ -2215,7 +2561,7 @@ mod tests {
                 if state.agent_fails.load(Ordering::Acquire) {
                     return STATUS_FAILED;
                 }
-                Ok(serve_agent(state))
+                serve_agent_method(state, method)
             }
             fr_wire::services::attachments::SERVICE_NAME => Ok(serde_json::json!({
                 "path": "/host/shot.png",
@@ -2332,6 +2678,17 @@ mod tests {
         llm_batches: Vec<serde_json::Value>,
         auto: bool,
     ) -> (Box<ShellState>, Arc<TestHost>) {
+        harness_seeded(name, llm_batches, auto, 4)
+    }
+
+    /// The harness over an explicit user-message seed count (the
+    /// compact-now null-range fixture seeds none).
+    fn harness_seeded(
+        name: &str,
+        llm_batches: Vec<serde_json::Value>,
+        auto: bool,
+        user_messages: usize,
+    ) -> (Box<ShellState>, Arc<TestHost>) {
         let mut vocabulary = EventVocabulary::core();
         vocabulary
             .declare(&[
@@ -2364,7 +2721,7 @@ mod tests {
         seed(serde_json::json!({
             "id": "s1", "type": "turn/start", "data": { "turn": 1 }
         }));
-        for index in 0..4 {
+        for index in 0..user_messages {
             seed(serde_json::json!({
                 "id": "s1", "type": "user/message",
                 "data": {
@@ -2400,6 +2757,13 @@ mod tests {
             grants: Mutex::new(Vec::new()),
             tools_calls: Mutex::new(Vec::new()),
             estimates: Mutex::new(std::collections::HashMap::new()),
+            window: Mutex::new(None),
+            agent_busy: AtomicBool::new(false),
+            cancel_at_entry: AtomicBool::new(false),
+            cancel_on_first_drain: AtomicBool::new(false),
+            flush_log: Mutex::new(Vec::new()),
+            flush_fails: AtomicBool::new(false),
+            llm_aborts: Mutex::new(Vec::new()),
         });
         let exports = HostExports {
             grant: host_grant,
@@ -2947,6 +3311,13 @@ mod tests {
             grants: Mutex::new(Vec::new()),
             tools_calls: Mutex::new(Vec::new()),
             estimates: Mutex::new(std::collections::HashMap::new()),
+            window: Mutex::new(None),
+            agent_busy: AtomicBool::new(false),
+            cancel_at_entry: AtomicBool::new(false),
+            cancel_on_first_drain: AtomicBool::new(false),
+            flush_log: Mutex::new(Vec::new()),
+            flush_fails: AtomicBool::new(false),
+            llm_aborts: Mutex::new(Vec::new()),
         });
         let exports = HostExports {
             grant: host_grant,
@@ -3356,6 +3727,279 @@ mod tests {
         assert!(
             inline.contains("Omitted 1 images."),
             "the whole image is omitted: {inline}"
+        );
+    }
+
+    const MANUAL_COMPACT_NOW: u32 = fr_wire::services::compaction::METHOD_COMPACT_NOW;
+
+    /// Closes the fixture's open turn (the dsh manual face runs between
+    /// turns; the open-turn entry assertion is the busy class).
+    fn close_turn(host: &TestHost) {
+        let mut sessions = host.sessions.lock().expect("host session lock");
+        session_dispatch(
+            fr_wire::services::session_persistence::METHOD_SESSION_APPEND,
+            serde_json::json!({
+                "id": "s1", "type": "turn/end",
+                "data": { "turn": 1, "reason": { "kind": "completed" } },
+            })
+            .to_string()
+            .as_bytes(),
+            &mut sessions,
+        )
+        .expect("close turn");
+    }
+
+    fn compact_now(
+        state: &mut ShellState,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        super::dispatch(MANUAL_COMPACT_NOW, body.to_string().as_bytes(), state)
+            .map(|bytes| serde_json::from_slice(&bytes).expect("compact-now reply decodes"))
+    }
+
+    /// Parses the classified failure document out of the failed-status
+    /// detail (the llmError face precedent).
+    fn manual_error(detail: &str) -> serde_json::Value {
+        let value: serde_json::Value =
+            serde_json::from_str(detail).expect("the failure detail is the document");
+        value["manualCompactionError"].clone()
+    }
+
+    /// The successful arm pins the full wire shape (the dsh
+    /// `CompactionResult`, field for field), the standalone bracket, the
+    /// durability flush, and the window convergence.
+    #[test]
+    fn manual_compaction_lands_the_full_face() {
+        let (mut state, host) = harness(
+            "compact-now-success",
+            vec![checkpoint_batch("a summary that frames small")],
+            false,
+        );
+        close_turn(&host);
+        let reply = compact_now(
+            &mut state,
+            &serde_json::json!({ "sessionId": "s1", "sourceCommandId": "cmd-1" }),
+        )
+        .expect("manual compaction lands");
+        let result = &reply["result"];
+        assert!(result["compactionId"].is_string());
+        assert_eq!(result["sourceCommandId"], "cmd-1");
+        assert!(result["startSeq"].is_u64());
+        assert!(result["summarySeq"].is_u64());
+        assert!(result["endSeq"].is_u64());
+        assert_eq!(
+            result["shadowedSeqs"].as_array().expect("seqs").len(),
+            3,
+            "the selection keeps the newest surface node (the dsh retain-0 walk)"
+        );
+        assert_eq!(result["shadowedTokenCount"], 180_000);
+        assert!(result["shadowedRange"]["start"].is_u64());
+        assert!(result["shadowedRange"]["end"].is_u64());
+        let summary = result["summary"].as_array().expect("summary blocks");
+        assert!(
+            summary
+                .iter()
+                .any(|block| block["text"].as_str().is_some_and(|text| !text.is_empty()))
+        );
+        // The standalone bracket rode the log: start → summary → the
+        // replacement user/message → end, in one contiguous run.
+        let types = event_types(&host);
+        let start_idx = types
+            .iter()
+            .position(|kind| kind == "compaction/start")
+            .expect("start event");
+        assert_eq!(
+            &types[start_idx..start_idx + 4],
+            [
+                "compaction/start",
+                "compaction/summary",
+                "user/message",
+                "compaction/end"
+            ]
+        );
+        // The durability flush ran inside the transaction; the window
+        // converged (closed and ended) before the reply resolved.
+        assert_eq!(
+            host.flush_log.lock().expect("flush lock").as_slice(),
+            ["s1"]
+        );
+        assert!(host.window.lock().expect("window lock").is_none());
+        assert!(
+            host.llm_aborts.lock().expect("aborts lock").is_empty(),
+            "a successful run never aborts the generation"
+        );
+    }
+
+    #[test]
+    fn manual_compaction_reports_busy_verbatim() {
+        let (mut state, host) = harness("compact-now-busy", Vec::new(), false);
+        host.agent_busy.store(true, Ordering::Release);
+        let error = compact_now(&mut state, &serde_json::json!({ "sessionId": "s1" }))
+            .expect_err("busy refusal");
+        let failure = manual_error(&error);
+        assert_eq!(failure["code"], "busy");
+        assert_eq!(
+            failure["message"],
+            "manual compaction requires an idle agent with no waking queued work"
+        );
+        assert!(host.window.lock().expect("window lock").is_none());
+        assert!(host.flush_log.lock().expect("flush lock").is_empty());
+    }
+
+    #[test]
+    fn manual_compaction_reports_no_compactable_history() {
+        let (mut state, host) = harness_seeded("compact-now-null", Vec::new(), false, 0);
+        let reply = compact_now(&mut state, &serde_json::json!({ "sessionId": "s1" }))
+            .expect("the null outcome is a success");
+        assert!(
+            reply["result"].is_null(),
+            "no useful range resolves null: {reply}"
+        );
+        assert!(
+            host.flush_log.lock().expect("flush lock").is_empty(),
+            "the null outcome never flushes"
+        );
+        assert!(host.window.lock().expect("window lock").is_none());
+    }
+
+    /// A cancel landing mid-summarization aborts the generation, the
+    /// aborted finish closes the bracket as a failure, and the final
+    /// poll classifies the whole attempt cancelled (the dsh catch's
+    /// `agentSignal.aborted` arbitration).
+    #[test]
+    fn manual_compaction_cancelled_mid_summary_maps_to_cancelled() {
+        let (mut state, host) = harness(
+            "compact-now-cancel-mid",
+            vec![
+                serde_json::json!({
+                    "generationId": "g1",
+                    "chunks": [{ "type": "text-delta", "index": 0, "text": "half" }],
+                    "done": false,
+                }),
+                serde_json::json!({
+                    "generationId": "g1",
+                    "chunks": [{ "type": "finish", "reason": { "kind": "aborted",
+                        "failure": { "message": "cancelled by caller", "code": "ABORTED" } } }],
+                    "done": true,
+                }),
+            ],
+            false,
+        );
+        host.cancel_on_first_drain.store(true, Ordering::Release);
+        close_turn(&host);
+        let replacements_before = event_types(&host)
+            .iter()
+            .filter(|kind| kind.as_str() == "user/message")
+            .count();
+        let error = compact_now(&mut state, &serde_json::json!({ "sessionId": "s1" }))
+            .expect_err("the cancelled attempt");
+        let failure = manual_error(&error);
+        assert_eq!(failure["code"], "cancelled");
+        assert_eq!(failure["message"], "manual compaction was cancelled");
+        // The abort face fired exactly once; the failed close left the
+        // paired bracket without a replacement.
+        assert_eq!(host.llm_aborts.lock().expect("aborts lock").len(), 1);
+        let types = event_types(&host);
+        assert!(types.contains(&"compaction/start".to_owned()));
+        assert!(types.contains(&"compaction/end".to_owned()));
+        let replacements_after = types
+            .iter()
+            .filter(|kind| kind.as_str() == "user/message")
+            .count();
+        assert_eq!(
+            replacements_after, replacements_before,
+            "no replacement checkpoint landed: {types:?}"
+        );
+        assert_eq!(
+            host.flush_log.lock().expect("flush lock").as_slice(),
+            ["s1"],
+            "every closed bracket flushes (the dsh `closed && flush` ordering); \
+             the flush outcome stays shadowed by the failure classification"
+        );
+        assert!(host.window.lock().expect("window lock").is_none());
+    }
+
+    #[test]
+    fn manual_compaction_cancelled_before_work_skips_the_transaction() {
+        let (mut state, host) = harness("compact-now-cancel-entry", Vec::new(), false);
+        host.cancel_at_entry.store(true, Ordering::Release);
+        let error = compact_now(&mut state, &serde_json::json!({ "sessionId": "s1" }))
+            .expect_err("the entry-cancelled attempt");
+        let failure = manual_error(&error);
+        assert_eq!(failure["code"], "cancelled");
+        assert_eq!(failure["message"], "manual compaction was cancelled");
+        let types = event_types(&host);
+        assert!(
+            !types.contains(&"compaction/start".to_owned()),
+            "no transaction started: {types:?}"
+        );
+        assert!(
+            host.begin_log.lock().expect("begin lock").is_empty(),
+            "no summarization ran"
+        );
+        assert!(host.window.lock().expect("window lock").is_none());
+    }
+
+    #[test]
+    fn manual_compaction_persistence_failure_classifies() {
+        let (mut state, host) = harness(
+            "compact-now-persistence",
+            vec![checkpoint_batch("a summary that frames small")],
+            false,
+        );
+        host.flush_fails.store(true, Ordering::Release);
+        close_turn(&host);
+        let error = compact_now(&mut state, &serde_json::json!({ "sessionId": "s1" }))
+            .expect_err("the flush refusal");
+        let failure = manual_error(&error);
+        assert_eq!(failure["code"], "persistence");
+        assert_eq!(
+            failure["message"],
+            "manual compaction durability checkpoint failed"
+        );
+        // The bracket itself committed durably; only the checkpoint
+        // failed (the dsh persistence classification).
+        let types = event_types(&host);
+        assert!(types.contains(&"compaction/end".to_owned()));
+        assert!(types.contains(&"user/message".to_owned()));
+    }
+
+    #[test]
+    fn manual_compaction_summary_failure_classifies() {
+        let (mut state, host) =
+            harness("compact-now-summary", vec![checkpoint_batch("   ")], false);
+        close_turn(&host);
+        let replacements_before = event_types(&host)
+            .iter()
+            .filter(|kind| kind.as_str() == "user/message")
+            .count();
+        let error = compact_now(&mut state, &serde_json::json!({ "sessionId": "s1" }))
+            .expect_err("the empty summary");
+        let failure = manual_error(&error);
+        assert_eq!(failure["code"], "summary");
+        assert_eq!(
+            failure["message"],
+            "manual compaction could not produce a smaller summary"
+        );
+        let types = event_types(&host);
+        let replacements_after = types
+            .iter()
+            .filter(|kind| kind.as_str() == "user/message")
+            .count();
+        assert_eq!(
+            replacements_after, replacements_before,
+            "no replacement checkpoint landed: {types:?}"
+        );
+    }
+
+    #[test]
+    fn compact_now_rejects_malformed_payload() {
+        let (mut state, _host) = harness("compact-now-bad", Vec::new(), false);
+        let error = super::dispatch(MANUAL_COMPACT_NOW, br#"{"session_id": 42}"#, &mut state)
+            .expect_err("malformed payload");
+        assert!(
+            error.contains("compact-now payload is invalid"),
+            "the transport refusal names the face: {error}"
         );
     }
 }

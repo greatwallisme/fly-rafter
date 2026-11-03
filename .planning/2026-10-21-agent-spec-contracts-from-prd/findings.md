@@ -3067,3 +3067,12 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - **环境事故簿**：(1) **沙箱 mtime 怪癖**：shell 侧写文件（python/echo/heredoc）mtime 不更新→cargo 指纹判定 fresh 跳编译=假绿；tail/grep 看新内容而 cargo 编译旧内容。教训=仓库文件只准 Write/Edit 工具；验证必 `cargo clean -p <crate>` 铁锤+认 "Checking" 行。(2) rg -r 陷阱三犯（-r=--replace）。(3) summarizer.rs "ln" 显示假象（源文件完好）。
 - **终门**：fmt ✓/clippy workspace --all-targets -D warnings 0/全测 1871 passed 0 failed 两连（基线 1840→1871，+31）/doc ✓/三门禁 0×3/bind 双脚本幂等+specs 零漂移。
 - **剪切点**：spill 子系统完备态（两监听+存储+清扫+配置+服务面）。**下一动作=17h-c：METHOD_COMPACT_NOW=1 服臂（/compact 命令行为面：busy 逐字拒/选区 retainTokens 0/Compacted N 文案/No compactable history/cancelled/flush 纪律）+maintenance 窗口消费接线（17f 已建 BEGIN/POLL/END 面）。**
+
+## 2026-11-03 — 17h-c 钉存（compact-now 全链事实）
+
+- **dsh compactNow 错误传播结构**（agent-loop/src/agent.ts:183-204）：runMaintenance 准入 busy 同步 throw（被 compactNow 外层 try 捕获→ManualCompactionError('busy')）；job 体错误经 Promise 拒绝传播**不**被外层 try 捕获→原样出 compactNow。fr 映射：BEGIN require 拒（唯一 busy 类）→busy 文档；job 体错误按 region 分类出+终 poll aborted→cancelled 覆写（dsh catch 的 agentSignal.aborted 仲裁，operationSignal.reason===agentSignal.reason 的 caller-signal 消歧在 fr 无对应=单取消源）。
+- **窗口三法语义**（fr-agent-loop plugin_shell.rs:245-304）：BEGIN=Running 状态或窗口已开均拒（'agent "{id}" already has active work' 逐字）+uuid v4 token；POLL={aborted}（token 失配→Err）；END=关窗+入队 MaintenanceEnd 命令（driver converge idle+唤醒重放）。cancel→mark_window_aborted 即置旗标（镜像前也生效）。
+- **COMPACT_NOW 线形**：请求 {sessionId, sourceCommandId?}；回复 {result: CompactionResult|null}（CompactionResult camelCase 全形：compactionId/sourceCommandId?/startSeq/summarySeq/endSeq/summary/shadowedRange{start,end}/shadowedSeqs/shadowedTokenCount）；分类失败=失败态文档 {"manualCompactionError":{code,message}}（llmError 判例）；其余=传输 Err。selection retain-0 保留最新节点（region.rs keep_from_idx 逆行首拍即 break）→4 节点表面影子 3。
+- **closed-bracket flush 纪律**（dsh region.ts:253-257 / region.rs:603）：`closed && flush`——失败 close 也 flush，flush 失败仅成功臂归 Persistence（失败臂遮蔽）。取消中途：llm abort 单发→finish aborted→Llm failure→Summary 分类→终 poll→Cancelled 覆写。
+- **SummarizeHook 接线**：capture 增 window 参数（Option<MaintenanceWindow>），run 的 abort_poll=WindowAbortProbe.poll（POLL require；poll Err→false 视为未中止，失败浮出于窗口关闭）。region.rs 文档行 11-15 的"四处 throwIfAborted 落 summarize 钩子"兑现。
+- **17h-d 绑定锚**：spec 场景 '/compact 空闲限定与文案' selector=pending_req_fr_compaction_compact；真实测试名候选=plugin_shell::tests::manual_compaction_*（8）+command_face::tests（3）+engine compact_now（2）。

@@ -39,6 +39,7 @@
 
 pub mod brand;
 pub mod checkpoint;
+pub mod command_face;
 pub mod config;
 pub mod engine;
 pub mod image_offload;

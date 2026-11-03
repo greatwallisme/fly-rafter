@@ -11,6 +11,12 @@
 //! absent pruner skips the pass, and the fr probe rides the same shape
 //! (the pruner's own face lands with its batch).
 //!
+//! The manual face ([`compact_now`], the dsh `compactNow` job body)
+//! skips the threshold math entirely: it selects one useful range with
+//! `retainTokens 0` and transacts standalone (the dsh `owner: null`,
+//! `selected-span` stability), so the region layer classifies every
+//! in-transaction failure into the manual codes.
+//!
 //! The transaction itself is [`crate::region::compact_surface_region`]
 //! with the auto-path options (`current-turn` owner, whole-surface
 //! stability); every pricing decision rides the injected meter.
@@ -325,6 +331,48 @@ fn compact_region(
         source_command_id: None,
     };
     compact_surface_region(&mut region_deps, view, start, end, &mut options).map_err(Box::new)
+}
+
+/// Forces one useful idle-session compaction below the pressure
+/// threshold (dsh `compactNow`'s job body).
+///
+/// Selects with `retainTokens 0` — `Ok(None)` when no safe useful range
+/// exists — and transacts standalone with the selected-span stability
+/// rule and the caller's durability flush, so the result resolves only
+/// after the replacement checkpoint is durable. The admission refusal
+/// (the dsh `runMaintenance` busy throw) and the abort checks live at
+/// the shell's window face; every in-transaction failure arrives
+/// already classified through the standalone owner (the region layer's
+/// manual path).
+///
+/// # Errors
+///
+/// Returns the transaction's classified face (the manual codes on the
+/// standalone owner) or the unclassified pre-transaction diagnostics
+/// (measurement, range validation).
+pub fn compact_now(
+    view: &mut dyn SessionView,
+    deps: &mut RegionDeps<'_>,
+    source_command_id: Option<String>,
+    flush: Option<&mut dyn FnMut() -> Result<(), String>>,
+) -> Result<Option<CompactionResult>, CompactionError> {
+    let measurement = deps
+        .meter
+        .measure(view)
+        .map_err(CompactionFailure::Other)
+        .map_err(CompactionError::Failure)?;
+    let Some((start, end)) = select_compactable_range(view, &measurement, 0)
+        .map_err(|message| CompactionError::Failure(CompactionFailure::Other(message)))?
+    else {
+        return Ok(None);
+    };
+    let mut options = TransactionOptions {
+        owner: crate::region::BracketOwner::Standalone,
+        stability: crate::region::StabilityRule::SelectedSpan,
+        flush,
+        source_command_id,
+    };
+    compact_surface_region(deps, view, start, end, &mut options).map(Some)
 }
 
 #[cfg(test)]
@@ -731,5 +779,74 @@ mod tests {
         }))
         .expect("configured retention resolves");
         assert_eq!(resolved.retention, ResolvedRetention::Tokens(50));
+    }
+
+    /// The manual face transacts standalone (`turn: null`, selected-span
+    /// stability) and runs the durability flush before the result
+    /// resolves (the dsh `compactNow` options shape).
+    #[test]
+    fn compact_now_transacts_standalone_and_flushes() {
+        let mut session = FakeSession::new();
+        session.seed_messages(4);
+        let meter = FakeMeter::new(10_000);
+        let summarize =
+            &mut |input: &SummarizationInput| Ok::<_, CompactionFailure>(ok_summarize(input));
+        let mut recover = no_recover();
+        let flushed = std::cell::Cell::new(false);
+        let mut flush = || -> Result<(), String> {
+            flushed.set(true);
+            Ok(())
+        };
+        let mut region_deps = super::RegionDeps {
+            meter: &meter,
+            summarize,
+            recover: &mut recover,
+        };
+        let outcome = super::compact_now(
+            &mut session,
+            &mut region_deps,
+            Some("cmd-1".to_owned()),
+            Some(&mut flush),
+        )
+        .expect("manual compaction lands");
+        let result: CompactionResult = outcome.expect("one compaction ran");
+        assert_eq!(result.source_command_id.as_deref(), Some("cmd-1"));
+        assert!(flushed.get(), "the flush ran inside the transaction");
+        let start = session
+            .events()
+            .iter()
+            .find(|event| event.event_type() == "compaction/start")
+            .expect("start event");
+        let start_data = serde_json::to_value(&start.data).expect("start data encodes");
+        assert_eq!(
+            start_data.get("turn"),
+            Some(&serde_json::Value::Null),
+            "the standalone bracket carries the wire-null owner"
+        );
+        assert_eq!(
+            start_data.get("sourceCommandId"),
+            Some(&serde_json::json!("cmd-1"))
+        );
+    }
+
+    /// The no-range arm returns `Ok(None)` without touching the log or
+    /// the flush (the dsh `compactNow` `null` outcome).
+    #[test]
+    fn compact_now_without_a_range_returns_null() {
+        let mut session = FakeSession::new();
+        let meter = FakeMeter::new(10_000);
+        let summarize =
+            &mut |input: &SummarizationInput| Ok::<_, CompactionFailure>(ok_summarize(input));
+        let mut recover = no_recover();
+        let mut flush = || -> Result<(), String> { Ok(()) };
+        let mut region_deps = super::RegionDeps {
+            meter: &meter,
+            summarize,
+            recover: &mut recover,
+        };
+        let outcome = super::compact_now(&mut session, &mut region_deps, None, Some(&mut flush))
+            .expect("no range is not a failure");
+        assert_eq!(outcome, None);
+        assert!(session.events().is_empty(), "the log stayed untouched");
     }
 }

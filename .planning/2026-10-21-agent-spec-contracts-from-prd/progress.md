@@ -1800,3 +1800,13 @@
 - **环境事故**：沙箱 mtime 怪癖（shell 写文件→cargo 假绿）——仓库文件一律 Write/Edit 工具+clean 铁锤验证；rg -r 三犯。
 - **终门认证**：fmt ✓/clippy workspace --all-targets -D warnings 0/全测（FR_DSH_SOURCE）1871 passed 0 failed 两连/doc ✓/三门禁 0×3/bind 幂等零漂移。基线 1840→1871（+31）。
 - **下一动作=17h-c：compactNow 服臂+maintenance 窗口消费。**
+
+## 2026-11-03 — 17h-c 完成：COMPACT_NOW 服臂+maintenance 窗口消费接线
+
+- **交付**：fr-compaction plugin_shell COMPACT_NOW 真臂（BEGIN→入口 poll→事务→终 poll→finally END，fail-loud 窗口关闭）；engine.rs compact_now（measure+select 0+Standalone/SelectedSpan+flush，dsh job 体直译）；SummarizeHook 接窗口 token（WindowAbortProbe poll 闭包，自动路径 None 恒 false）；command_face.rs（/compact 六错误+两成功+USAGE 逐字）；fr-wire COMPACT_NOW 线形文档；types CompactionResult 补 Serialize（17d"wire 面随服务缝定"裁决的完成）。+13 钉测。
+- **协议裁决落定**：分类失败=STATUS_FAILED+`{"manualCompactionError":{code,message}}` 文档（llmError 判例同法）；dsh runMaintenance 只同步抛 busy 准入、job 体错误原样传播（agent.ts:183 Promise 拒不被外层 try 捕获）→ fr 映射=BEGIN 拒→Busy、体错误按 manual 分类+终 poll aborted→Cancelled。
+- **测试揭示真语义三枚**：select retain-0 walk 保留最新表面节点（dsh 同构，4 节点影子 3）；dsh region.ts:253 `closed && flush`——失败 close 也 flush（结果被失败分类遮蔽）；manual 路径 open-turn 入口断言=busy 类，文案 'manual compaction: the session already has an open turn' 逐字（夹具须 close_turn）。
+- **夹具扩展**：TestHost 窗口状态机三法+busy 旗标+两取消脚本（入口/首 drain 后）+flush 日志/拒+abort 日志。
+- **环境注**：全测二跑计数聚合假象（185）重跑核实；spill_local mkdtemp 偶发（H1 家族）全量两连均绿。
+- **终门**：fmt ✓/clippy workspace -D warnings 0/全测（FR_DSH_SOURCE）1884 passed 0 failed 两连/doc ✓/三门禁 exit 0×3。基线 1871→1884（+13）。
+- **下一动作=17h-d：全链绑定（pending_req_fr_compaction_compact→真实测试）+lifecycle+guard+stamp 七步收口。**

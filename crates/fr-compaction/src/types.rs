@@ -238,14 +238,19 @@ pub struct CompactionPruneData {
     pub shadowed_token_count: u64,
 }
 
-/// Result of a successful compaction operation. An in-process value (never
-/// serialized; the durable record is the event sequence itself).
-#[derive(Debug, Clone, PartialEq)]
+/// Result of a successful compaction operation.
+///
+/// The durable record is the event sequence itself; the derive serves
+/// the `compaction` service's compact-now wire face only (the dsh
+/// interface, field for field).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CompactionResult {
     /// Stable identity shared by this compaction's complete durable
     /// lifecycle.
     pub compaction_id: CompactionId,
     /// Human command that initiated this compaction, when it was manual.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source_command_id: Option<String>,
     /// The seq of the appended `compaction/start` event.
     pub start_seq: SessionSeq,
