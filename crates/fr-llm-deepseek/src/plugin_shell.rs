@@ -30,15 +30,134 @@ pub const METHOD_DESCRIBE: u32 = 1;
 pub use fr_llm::generation::{METHOD_ABORT, METHOD_BEGIN, METHOD_DRAIN, METHOD_PREPARE_CALL};
 
 /// The descriptor the loader consumes: no provided service, the `llm`
-/// service injected over the dynamic channel, no listeners in this slice.
-/// The version is sourced from crate metadata so it cannot drift from the
-/// artifact.
+/// service injected over the dynamic channel plus the two providers the
+/// access resolver reads (the dsh `resolveAttachments` pair), no
+/// listeners in this slice. The version is sourced from crate metadata
+/// so it cannot drift from the artifact.
 const DESCRIPTOR: &[u8] = concat!(
     "{\"name\":\"fr-llm-deepseek\",\"version\":\"",
     env!("CARGO_PKG_VERSION"),
-    "\",\"provide\":[],\"inject\":[\"llm\"],\"listen\":{}}"
+    "\",\"provide\":[],\"inject\":[\"llm\",\"attachments\",\"fs\"],\"listen\":{}}"
 )
 .as_bytes();
+
+/// Upper bound for one access-resolution round trip (the shared ceiling).
+const MAX_REPLY_CAPACITY: usize = 16 * 1024 * 1024;
+
+/// One copied host vtable with the synchronous require the access
+/// resolver needs (callable from any adapter thread until `teardown`
+/// returns; the same copied-vtable contract as the emit seam).
+#[derive(Debug, Clone, Copy)]
+struct AccessLink {
+    host: HostExports,
+}
+
+// SAFETY: the ABI vtable contract states every entry is callable from any
+// plugin thread, concurrently, with host-side panic containment; the copy
+// stays valid until this activation's `teardown` returns.
+unsafe impl Send for AccessLink {}
+// SAFETY: sharing one copy only issues concurrent vtable calls, which the
+// same contract explicitly allows.
+unsafe impl Sync for AccessLink {}
+
+impl AccessLink {
+    /// Performs one synchronous cross-plugin call (growable buffer
+    /// protocol; `STATUS_CAPACITY` doubles up to the shared ceiling).
+    fn require(&self, service: &str, method: u32, payload: &[u8]) -> Result<Vec<u8>, String> {
+        let mut cap = 4096_usize;
+        loop {
+            let mut buf = vec![0_u8; cap];
+            let mut len = 0_usize;
+            // SAFETY: the copied vtable is live until this activation's
+            // `teardown` returns; buffers are caller-owned per the
+            // export-table contract.
+            let status = unsafe {
+                (self.host.require)(
+                    self.host.host_handle,
+                    service.as_ptr(),
+                    service.len(),
+                    method,
+                    payload.as_ptr(),
+                    payload.len(),
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    &raw mut len,
+                )
+            };
+            if status == STATUS_CAPACITY {
+                if cap >= MAX_REPLY_CAPACITY {
+                    return Err(format!("reply still exceeds {MAX_REPLY_CAPACITY} bytes"));
+                }
+                cap = cap.saturating_mul(2);
+                continue;
+            }
+            buf.truncate(len);
+            if status == STATUS_OK {
+                return Ok(buf);
+            }
+            return Err(format!(
+                "require {service}.{method} failed with host status {status}: {}",
+                String::from_utf8_lossy(&buf)
+            ));
+        }
+    }
+
+    /// Resolves the provider path of one durable image reference through
+    /// the `attachments` face; `None` when the backend declines (the dsh
+    /// `imageHostPath` `undefined`).
+    fn image_host_path(&self, reference: &fr_wire::ImageAttachmentRef) -> Option<String> {
+        let payload = serde_json::json!({ "ref": reference });
+        let bytes = serde_json::to_vec(&payload).ok()?;
+        let reply = self
+            .require(
+                fr_wire::services::attachments::SERVICE_NAME,
+                fr_wire::services::attachments::METHOD_IMAGE_HOST_PATH,
+                &bytes,
+            )
+            .ok()?;
+        let parsed: serde_json::Value = serde_json::from_slice(&reply).ok()?;
+        parsed.get("path")?.as_str().map(str::to_owned)
+    }
+
+    /// Maps one host path into the execution world through the `fs`
+    /// face (the dsh `processPathFromHostPath`); `None` when unresolvable.
+    fn process_path_from_host_path(&self, host_path: &str) -> Option<String> {
+        let payload = serde_json::json!({ "hostPath": host_path });
+        let bytes = serde_json::to_vec(&payload).ok()?;
+        let reply = self
+            .require(
+                fr_wire::services::fs::SERVICE_NAME,
+                fr_wire::services::fs::METHOD_PROCESS_PATH_FROM_HOST_PATH,
+                &bytes,
+            )
+            .ok()?;
+        let parsed: serde_json::Value = serde_json::from_slice(&reply).ok()?;
+        parsed.get("path")?.as_str().map(str::to_owned)
+    }
+}
+
+/// Builds the wire-backed execution-world access resolver (the dsh
+/// adapter `imageAccess` closure: `resolveAttachments` + the runtime's
+/// `resolveImageAccess`).
+///
+/// The runtime-registry slice installs the returned callback on the
+/// adapter's [`crate::types::Dependencies`].
+///
+/// A failed lookup answers `None` — the dsh closure's `undefined` when a
+/// provider is absent — keeping the no-path arm of the handle text and
+/// the pricing text. The store-side invalid-reference refusal also lands
+/// here (the callback type has no error channel), the one bounded
+/// divergence from the dsh throw: the request still fails later at the
+/// attachment read, with a different message.
+#[must_use]
+pub fn wire_image_access(host: HostExports) -> crate::types::ImageAccessCallback {
+    let link = AccessLink { host };
+    std::sync::Arc::new(move |reference: &fr_wire::ImageAttachmentRef| {
+        let host_path = link.image_host_path(reference)?;
+        let readonly_path = link.process_path_from_host_path(&host_path)?;
+        Some(fr_llm::projection::ImageAttachmentAccess { readonly_path })
+    })
+}
 
 /// Serves one method invocation against the shell state: a pure
 /// (JSON-in, JSON-out) function so the shell surface stays testable.
@@ -262,6 +381,136 @@ pub static DOUGONG_PLUGIN_EXPORTS: PluginExports = PluginExports {
 #[cfg(test)]
 mod tests {
     use super::{METHOD_BEGIN, METHOD_DESCRIBE, PLUGIN_NAME, ShellState, dispatch};
+    use dougong_abi::{HostExports, STATUS_CAPACITY, STATUS_OK, write_out};
+    use std::sync::Mutex;
+
+    /// A fake host whose require face routes scripted replies per service
+    /// (the access resolver's two faces answer differently).
+    struct AccessHost {
+        replies: Mutex<std::collections::HashMap<String, Vec<u8>>>,
+    }
+
+    impl AccessHost {
+        fn handle(&self) -> *mut std::os::raw::c_void {
+            std::ptr::from_ref(self)
+                .cast::<std::ffi::c_void>()
+                .cast_mut()
+        }
+    }
+
+    /// Builds an access host answering every require for `service` with
+    /// the given JSON body.
+    fn access_host(attachments_reply: String, fs_reply: String) -> HostExports {
+        let mut replies = std::collections::HashMap::new();
+        replies.insert(
+            fr_wire::services::attachments::SERVICE_NAME.to_owned(),
+            attachments_reply.into_bytes(),
+        );
+        replies.insert(
+            fr_wire::services::fs::SERVICE_NAME.to_owned(),
+            fs_reply.into_bytes(),
+        );
+        let host = Box::leak(Box::new(AccessHost {
+            replies: Mutex::new(replies),
+        }));
+        HostExports {
+            host_handle: host.handle(),
+            require: routed_require,
+            grant: failed_grant,
+            emit: failed_emit,
+            dispatch: failed_dispatch,
+        }
+    }
+
+    /// A host whose every require fails (the absent-provider degrade).
+    fn dead_host() -> HostExports {
+        let host = Box::leak(Box::new(AccessHost {
+            replies: Mutex::new(std::collections::HashMap::new()),
+        }));
+        HostExports {
+            host_handle: host.handle(),
+            require: routed_require,
+            grant: failed_grant,
+            emit: failed_emit,
+            dispatch: failed_dispatch,
+        }
+    }
+
+    /// The require double: routes to the scripted per-service reply with
+    /// the buffer protocol.
+    ///
+    /// # Safety
+    ///
+    /// The fake vtable's own contract — the handle is the leaked
+    /// `AccessHost` the test set, name buffers are valid for their
+    /// lengths, and the out buffer is caller-owned per the export-table
+    /// contract.
+    unsafe extern "C" fn routed_require(
+        host: *mut std::os::raw::c_void,
+        service: *const u8,
+        service_len: usize,
+        _method: u32,
+        _in_data: *const u8,
+        _in_len: usize,
+        out: *mut u8,
+        cap: usize,
+        out_len: *mut usize,
+    ) -> i32 {
+        // SAFETY: the handle is the leaked `AccessHost` the test set.
+        let host = unsafe { &*host.cast::<AccessHost>() };
+        // SAFETY: the name buffer is valid for `service_len` per the
+        // vtable contract.
+        let service = unsafe {
+            String::from_utf8_lossy(std::slice::from_raw_parts(service, service_len)).into_owned()
+        };
+        let reply = host
+            .replies
+            .lock()
+            .expect("lock")
+            .get(&service)
+            .cloned()
+            .unwrap_or_default();
+        // SAFETY: caller-owned out-buffer contract.
+        if unsafe { write_out(&reply, out, cap, out_len) } {
+            STATUS_OK
+        } else {
+            STATUS_CAPACITY
+        }
+    }
+
+    unsafe extern "C" fn failed_grant(
+        _host: *mut std::os::raw::c_void,
+        _target: *const u8,
+        _target_len: usize,
+        _granted: *const u8,
+        _granted_len: usize,
+    ) -> i32 {
+        dougong_abi::STATUS_FAILED
+    }
+
+    unsafe extern "C" fn failed_emit(
+        _host: *mut std::ffi::c_void,
+        _event: *const u8,
+        _event_len: usize,
+        _payload: *const u8,
+        _payload_len: usize,
+    ) -> i32 {
+        dougong_abi::STATUS_FAILED
+    }
+
+    unsafe extern "C" fn failed_dispatch(
+        _host: *mut std::ffi::c_void,
+        _event: *const u8,
+        _event_len: usize,
+        _mode: u32,
+        _payload: *const u8,
+        _payload_len: usize,
+        _out_buf: *mut u8,
+        _cap: usize,
+        _out_len: *mut usize,
+    ) -> i32 {
+        dougong_abi::STATUS_FAILED
+    }
 
     #[test]
     fn describe_reports_the_shell_metadata() {
@@ -305,8 +554,47 @@ mod tests {
         assert_eq!(parsed["name"], PLUGIN_NAME);
         assert_eq!(parsed["version"], env!("CARGO_PKG_VERSION"));
         assert_eq!(parsed["provide"], serde_json::json!([]));
-        assert_eq!(parsed["inject"][0], "llm");
+        assert_eq!(
+            parsed["inject"],
+            serde_json::json!(["llm", "attachments", "fs"])
+        );
         assert_eq!(parsed["listen"], serde_json::json!({}));
+    }
+
+    /// The access resolver walks attachments → fs and answers `None` on
+    /// each absent arm (the dsh closure's `undefined` pair).
+    #[test]
+    fn wire_image_access_resolves_through_the_two_faces() {
+        let reference: fr_wire::ImageAttachmentRef = serde_json::from_value(serde_json::json!({
+            "attachmentId": "sha256:abc",
+            "mediaType": "image/png",
+            "bytes": 128,
+            "width": 2,
+            "height": 2,
+        }))
+        .expect("reference");
+        let host = super::tests::access_host(
+            // The attachments face answers the stored host path.
+            serde_json::json!({ "path": "/host/objects/ab/abc.png" }).to_string(),
+            // The fs face maps it into the execution world.
+            serde_json::json!({ "path": "/exec/objects/ab/abc.png" }).to_string(),
+        );
+        let access = super::wire_image_access(host);
+        let resolved = access(&reference).expect("resolves");
+        assert_eq!(resolved.readonly_path, "/exec/objects/ab/abc.png");
+
+        // Either face answering null keeps the no-path arm.
+        let host = super::tests::access_host(
+            serde_json::json!({ "path": null }).to_string(),
+            serde_json::json!({ "path": null }).to_string(),
+        );
+        let access = super::wire_image_access(host);
+        assert!(access(&reference).is_none(), "null path is the absent arm");
+
+        // A transport failure keeps the no-path arm too (the vtable-free
+        // link fails every require).
+        let access = super::wire_image_access(super::tests::dead_host());
+        assert!(access(&reference).is_none(), "transport failure is absent");
     }
 }
 

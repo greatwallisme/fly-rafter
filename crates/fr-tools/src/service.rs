@@ -26,12 +26,12 @@ use std::time::Duration;
 
 use dougong_abi::{HostExports, STATUS_CAPACITY, STATUS_OK};
 use fr_timeout::{AbortKind, DeadlineSignal};
+use fr_wire::content::ContentBlock;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::registry::{
-    ApprovalOutcome, ApprovalSeam, ExecuteListener, ListenerRegistration, PostExecuteListener,
-    PreExecuteListener, ToolRegistry, ToolsEmitter,
+    ApprovalOutcome, ApprovalSeam, ListenerRegistration, ToolRegistry, ToolsEmitter,
 };
 use crate::signal::ToolSignal;
 use crate::types::{
@@ -245,6 +245,12 @@ pub enum WireStage {
     Execute,
     /// The post-dispatch accept/replace/block gate.
     PostExecute,
+    /// The durable PTC dispatch-log copy reshape (the dsh
+    /// `tools/ptc-dispatch-log`; the Q101′A fourth segment, 2026-11-03
+    /// ruling). The invocation point is the `run_code` bridge (Phase
+    /// 18, Q96-A) — registration and the chain live here in the
+    /// meantime.
+    DispatchLog,
 }
 
 impl WireStage {
@@ -255,6 +261,7 @@ impl WireStage {
             Self::PreExecute => "pre-execute",
             Self::Execute => "execute",
             Self::PostExecute => "post-execute",
+            Self::DispatchLog => "dispatch-log",
         }
     }
 }
@@ -746,6 +753,74 @@ pub enum PostReply {
     },
 }
 
+/// The `tools/ptc-dispatch-log` wire view (the dsh `PtcDispatchLog`):
+/// one settled `run_code` sub-dispatch about to be logged.
+///
+/// The session owner travels in the execution's `agent` (the dsh log
+/// repeats it as the scope routing key; the fr execution already
+/// carries it).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WireDispatchLog {
+    /// The outer `run_code` execution.
+    pub exec: WireExecution,
+    /// Opaque sub-call id (new calls use `<parent>:ptc:<n>`).
+    pub sub_call_id: String,
+    /// The dispatched sub-tool name.
+    pub name: String,
+    /// Whether the sub-call settled as an error.
+    pub is_error: bool,
+    /// The sub-call's complete model-facing content (the rendered
+    /// projection; the program itself received the structured value).
+    pub content: Vec<ContentBlock>,
+}
+
+/// One dispatch-log endpoint listener: reshapes the durable log copy.
+pub type DispatchLogListener = Arc<
+    dyn Fn(&WireDispatchLog, &mut dyn FnMut() -> Vec<ContentBlock>) -> Vec<ContentBlock>
+        + Send
+        + Sync,
+>;
+
+/// The dispatch-log enter leg.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LogEnter {
+    /// The stage (always `dispatch-log`).
+    pub stage: WireStage,
+    /// The leg (always `enter`).
+    pub leg: WireLeg,
+    /// The continue token pairing this conversation.
+    pub token: u64,
+    /// The settled sub-dispatch whose log copy is under judgment.
+    pub dispatch: WireDispatchLog,
+}
+
+/// The dispatch-log exit leg.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LogExit {
+    /// The stage (always `dispatch-log`).
+    pub stage: WireStage,
+    /// The leg (always `exit`).
+    pub leg: WireLeg,
+    /// The continue token pairing this conversation.
+    pub token: u64,
+    /// The remaining chain's content (the settled default when
+    /// innermost).
+    pub content: Vec<ContentBlock>,
+}
+
+/// The dispatch-log reply.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum LogReply {
+    /// Run the remaining chain, then report back on the exit leg.
+    Delegate,
+    /// Reshape here; the remaining listeners are skipped.
+    Final {
+        /// This listener's log content.
+        content: Vec<ContentBlock>,
+    },
+}
+
 /// Decodes one typed payload, mapping shape errors to the service
 /// failure text.
 fn decode<T: serde::de::DeserializeOwned>(payload: &[u8], entry: &str) -> Result<T, ServiceError> {
@@ -1021,11 +1096,73 @@ fn mount_post_execute(
     }
 }
 
+/// Mounts one dispatch-log endpoint adapter (the Q101′A fourth segment).
+/// A dead endpoint is the dsh containment (`shapeDispatchLog` catch):
+/// the listener falls away and the original settled content is what gets
+/// logged — never a pipeline failure.
+fn mount_dispatch_log(
+    seam: HostSeam,
+    endpoint: WireEndpoint,
+) -> impl Fn(&WireDispatchLog, &mut dyn FnMut() -> Vec<ContentBlock>) -> Vec<ContentBlock> + Send + Sync
+{
+    let tokens = AtomicU64::new(1);
+    move |dispatch, next| {
+        let token = tokens.fetch_add(1, Ordering::Relaxed);
+        let enter = LogEnter {
+            stage: WireStage::DispatchLog,
+            leg: WireLeg::Enter,
+            token,
+            dispatch: dispatch.clone(),
+        };
+        let reply: LogReply = match call_endpoint(&seam, &endpoint, &enter) {
+            Ok(reply) => reply,
+            Err(_) => return next(),
+        };
+        match reply {
+            LogReply::Final { content } => content,
+            LogReply::Delegate => {
+                let downstream = next();
+                let exit = LogExit {
+                    stage: WireStage::DispatchLog,
+                    leg: WireLeg::Exit,
+                    token,
+                    content: downstream.clone(),
+                };
+                match call_endpoint(&seam, &endpoint, &exit) {
+                    Ok(LogReply::Final { content }) => content,
+                    // The exit leg must answer final; both refusals keep
+                    // the settled content (the dsh containment).
+                    _ => downstream,
+                }
+            }
+        }
+    }
+}
+
+/// Runs the dispatch-log chain: the default tail is the settled
+/// content; each listener wraps the rest of the chain (the dsh
+/// waterfall over `next()`).
+fn run_dispatch_log_chain(
+    listeners: &[DispatchLogListener],
+    dispatch: &WireDispatchLog,
+) -> Vec<ContentBlock> {
+    match listeners.split_first() {
+        None => dispatch.content.clone(),
+        Some((listener, rest)) => {
+            listener(dispatch, &mut || run_dispatch_log_chain(rest, dispatch))
+        }
+    }
+}
+
 /// One mounted registration (dropping it deregisters).
 struct ListenerSlot {
     id: u64,
     /// Kept alive for its `Drop` (the deregistration disposer).
-    _registration: ListenerRegistration,
+    _registration: Option<ListenerRegistration>,
+    /// The dispatch-log segment stores its listener here instead of the
+    /// registry (the bridge accesses the chain through the service; the
+    /// dsh shapeDispatchLog stays runtime-private to the tools face too).
+    dispatch_log: Option<DispatchLogListener>,
 }
 
 /// The service state behind the `'tools'` dynamic-channel face.
@@ -1277,6 +1414,24 @@ impl ToolsService {
         encode(&wired)
     }
 
+    /// Runs the `tools/ptc-dispatch-log` chain over one settled
+    /// sub-dispatch and returns the content the durable log carries.
+    ///
+    /// The dsh `shapeDispatchLog` face: the `run_code` bridge's private
+    /// invoker — the registration waterfall is the public extension
+    /// point. The default tail is the settled content; a dead endpoint
+    /// falls away (the mounter's containment), so the chain always
+    /// answers.
+    #[must_use]
+    pub fn shape_dispatch_log(&self, dispatch: &WireDispatchLog) -> Vec<ContentBlock> {
+        let listeners: Vec<DispatchLogListener> = self
+            .listeners
+            .iter()
+            .filter_map(|slot| slot.dispatch_log.clone())
+            .collect();
+        run_dispatch_log_chain(&listeners, dispatch)
+    }
+
     fn serve_register_listener(&mut self, payload: &[u8]) -> Result<Vec<u8>, ServiceError> {
         let request: RegisterListenerRequest = decode(payload, "register-listener")?;
         let Some(seam) = self.seam else {
@@ -1284,32 +1439,41 @@ impl ToolsService {
                 "tools register-listener: no host seam attached".to_owned(),
             ));
         };
-        let registration = match request.stage {
-            WireStage::PreExecute => {
-                let listener: PreExecuteListener =
-                    Arc::new(mount_pre_execute(seam, request.endpoint));
-                self.registry.on_pre_execute(listener)
-            }
-            WireStage::Execute => {
-                let listener: ExecuteListener = Arc::new(mount_execute(
+        let (registration, dispatch_log) = match request.stage {
+            WireStage::PreExecute => (
+                Some(
+                    self.registry
+                        .on_pre_execute(Arc::new(mount_pre_execute(seam, request.endpoint))),
+                ),
+                None,
+            ),
+            WireStage::Execute => (
+                Some(self.registry.on_execute(Arc::new(mount_execute(
                     Arc::clone(&self.registry),
                     Arc::clone(&self.interner),
                     seam,
                     request.endpoint,
-                ));
-                self.registry.on_execute(listener)
-            }
-            WireStage::PostExecute => {
-                let listener: PostExecuteListener =
-                    Arc::new(mount_post_execute(seam, request.endpoint));
-                self.registry.on_post_execute(listener)
-            }
+                )))),
+                None,
+            ),
+            WireStage::PostExecute => (
+                Some(
+                    self.registry
+                        .on_post_execute(Arc::new(mount_post_execute(seam, request.endpoint))),
+                ),
+                None,
+            ),
+            WireStage::DispatchLog => (
+                None,
+                Some(Arc::new(mount_dispatch_log(seam, request.endpoint)) as DispatchLogListener),
+            ),
         };
         let id = self.next_listener_id;
         self.next_listener_id += 1;
         self.listeners.push(ListenerSlot {
             id,
             _registration: registration,
+            dispatch_log,
         });
         encode(&RegisterListenerReply { id })
     }

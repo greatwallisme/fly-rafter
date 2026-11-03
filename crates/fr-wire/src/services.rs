@@ -477,8 +477,8 @@ pub mod spill_store {
     /// The provided service name consumers require.
     pub const SERVICE_NAME: &str = "spill-store";
     /// Persist one complete formatted result (`SaveTextSpill`) → the
-    /// reference (`{locator, retrievalHint, ...}`).
-    pub const METHOD_SAVE_TEXT: u32 = 0;
+    /// reference (`{locator, bytes, retrievalHint}`).
+    pub const METHOD_SAVE_TEXT: u32 = 4;
 }
 
 /// The `'attachments'` service face (the Q16b-1A durable-store seam).
@@ -494,8 +494,12 @@ pub mod attachments {
     /// `{data: base64, mediaType, name?}` → the durable reference
     /// (`ImageAttachmentRef` wire form; the dsh `saveImage`).
     pub const METHOD_SAVE_IMAGE: u32 = 2;
-    /// `{}` → the admission limits snapshot (the dsh `imageLimits`).
+    /// `{}` → the admission limits snapshot (the dsh imageLimits).
     pub const METHOD_IMAGE_LIMITS: u32 = 3;
+    /// `{ref}` → `{path: string | null}` — the provider-owned normalized
+    /// object's host path (the dsh `imageHostPath`; `null` when this
+    /// backend is not host-file-backed).
+    pub const METHOD_IMAGE_HOST_PATH: u32 = 4;
 }
 
 /// The `'storage-domain'` service face (the Q16c-3B fr-storage seam).
@@ -602,6 +606,9 @@ pub mod token_meter {
     /// Full log → `{state}`: the `contextBreakdown` projection unit (dsh
     /// stateVersion 6).
     pub const METHOD_FOLD_CONTEXT_BREAKDOWN: u32 = 5;
+    /// `{blocks: [ContentBlock]}` → `{tokens}` (the dsh instance face
+    /// `estimateContent`).
+    pub const METHOD_ESTIMATE_CONTENT: u32 = 6;
 }
 
 /// The `'terminals'` service face (the fr-shell PTY registry band; PRD
@@ -660,6 +667,12 @@ pub mod compaction {
     /// The idle-session manual compaction (the dsh `compactNow`; the
     /// `/compact` command's behavior face).
     pub const METHOD_COMPACT_NOW: u32 = 1;
+    /// Spill-policy `tools/post-execute` callback endpoint (the Q101′A
+    /// post-execute two-leg frame the spill arm speaks).
+    pub const METHOD_SPILL_POST_EXECUTE: u32 = 2;
+    /// Spill-policy `tools/ptc-dispatch-log` callback endpoint (the Q101′A
+    /// dispatch-log segment; its invocation point is the Phase 18 bridge).
+    pub const METHOD_SPILL_DISPATCH_LOG: u32 = 3;
 }
 
 /// The shared kernel-event name table.

@@ -384,7 +384,7 @@ tool/call 在 prepare（pre-execute）之前追加，tool/result 由 contiguous 
 
 `exclusive` 组成串行屏障；`parallel` 有界滚动池。concludeTurn 语义调用终结 turn；abort 为未开始调用补合成错误结果。
 调度细则：isConcurrencySafe 仅严格返回 true 才归 parallel，未声明/异常/非 true 一律 exclusive（fail-closed）；exclusive 组 = 仅首个调用（屏障），其余 parallel 排队；parallel 池上限 = agentLoop.config.maxParallelToolCalls（默认 10，volatile 可调）；每次启动前重读 executionMode（lazy 重分类，registry 变化可形成新屏障）；concludeTurn 仅成功结果可携带（failure 类型不可）。PTC 侧镜像调度：单驱动 lane——先提交队首 settled（含 post-execute）再按容量启动，仅 body 阶段并发、策略阶段全序（dsh tool-calls.ts:86-213、ptc.ts:447-522）。
-管线监听注册面（2026-10-28 Q101′A）：`tools` 服务提供 pre-execute/execute/post-execute 决策段的插件监听注册（回调端点 service+method，注册序=装配行序=触发序，dsh 事件总线语义等价）；repeat-tool-reminder 与 timeout-policy 两 guard 为独立插件 crate（fr-guard-repeat-reminder/fr-guard-timeout，base 恒装对齐 dsh base patch ：408/:448）经此接入，通知面（tools/result、tools/change、repeat 链重置）走 dougong 原生事件（listen+emit 镜像）。
+管线监听注册面（2026-10-28 Q101′A）：`tools` 服务提供 pre-execute/execute/post-execute 决策段的插件监听注册（回调端点 service+method，注册序=装配行序=触发序，dsh 事件总线语义等价）；repeat-tool-reminder 与 timeout-policy 两 guard 为独立插件 crate（fr-guard-repeat-reminder/fr-guard-timeout，base 恒装对齐 dsh base patch ：408/:448）经此接入，通知面（tools/result、tools/change、repeat 链重置）走 dougong 原生事件（listen+emit 镜像）。**2026-11-03 增补（17h-b Q1=2 用户裁决）**：决策段增第四段 `dispatch-log`（dsh `tools/ptc-dispatch-log` waterfall 的 Q101′A 载体，spill-policy 限界 PTC dispatch 日志消费臂）——注册/存储/两腿帧同三段判例；其调用点属 run_code bridge（Phase 18，Q96-A），M1 生产态注册存而未调（生产态死码已裁决接受）；spill-policy 端点经 compaction 服务承载（grant tools→compaction 判例同 guard）。
 
 ### 9.4 run_code / PTC（保留，执行基底 = node 子进程，全链路 1:1）
 

@@ -32,6 +32,8 @@ pub const METHOD_DESCRIBE: u32 = fr_wire::services::token_meter::METHOD_DESCRIBE
 pub const METHOD_MEASURE: u32 = fr_wire::services::token_meter::METHOD_MEASURE;
 /// Method selector: price one message under the fixed estimator.
 pub const METHOD_ESTIMATE_MESSAGE: u32 = fr_wire::services::token_meter::METHOD_ESTIMATE_MESSAGE;
+/// Method selector: price one content-block list under the fixed estimator.
+pub const METHOD_ESTIMATE_CONTENT: u32 = fr_wire::services::token_meter::METHOD_ESTIMATE_CONTENT;
 /// Method selector: fold the `tokenUsage` unit (stateVersion 2).
 pub const METHOD_FOLD_TOKEN_USAGE: u32 = fr_wire::services::token_meter::METHOD_FOLD_TOKEN_USAGE;
 /// Method selector: fold the `contextPressure` unit (stateVersion 5).
@@ -262,6 +264,7 @@ impl ShellState {
             }
             METHOD_MEASURE => self.serve_measure(payload),
             METHOD_ESTIMATE_MESSAGE => serve_estimate_message(payload),
+            METHOD_ESTIMATE_CONTENT => serve_estimate_content(payload),
             METHOD_FOLD_TOKEN_USAGE => serve_fold(payload, |events| {
                 Ok(
                     serde_json::to_value(crate::usage_projection::fold_token_usage(events))
@@ -427,6 +430,22 @@ fn serve_estimate_message(payload: &[u8]) -> Result<Vec<u8>, String> {
     )
     .map_err(|error| format!("message decode: {error}"))?;
     let tokens = crate::estimate::estimate_message(&message);
+    Ok(serde_json::to_vec(&json!({ "tokens": tokens })).unwrap_or_default())
+}
+
+/// The `estimate-content` face (the dsh instance `estimateContent`):
+/// `{blocks}` → `{tokens}`.
+fn serve_estimate_content(payload: &[u8]) -> Result<Vec<u8>, String> {
+    let request: Value = serde_json::from_slice(payload)
+        .map_err(|error| format!("estimate payload must be JSON: {error}"))?;
+    let blocks: Vec<fr_wire::content::ContentBlock> = serde_json::from_value(
+        request
+            .get("blocks")
+            .cloned()
+            .ok_or_else(|| "estimate requires blocks".to_owned())?,
+    )
+    .map_err(|error| format!("blocks decode: {error}"))?;
+    let tokens = crate::estimate::estimate_content(&blocks);
     Ok(serde_json::to_vec(&json!({ "tokens": tokens })).unwrap_or_default())
 }
 
@@ -968,6 +987,35 @@ mod tests {
             reply["tokens"],
             json!(8_u64.div_ceil(4) + 4 + crate::estimate::ROLE_OVERHEAD)
         );
+    }
+
+    /// The estimate-content face prices one block list without role
+    /// framing (the dsh `estimateContent` export).
+    #[test]
+    fn estimate_content_face_prices_blocks() {
+        let (mut state, _host) = linked_state(&[]);
+        let payload = json!({
+            "blocks": [
+                {"type": "text", "text": "abcdefgh"},
+                {"type": "image", "attachment": {"attachmentId": "a", "mediaType": "image/png", "width": 4, "height": 4}},
+            ],
+        })
+        .to_string();
+        let reply = state
+            .serve(METHOD_ESTIMATE_CONTENT, payload.as_bytes())
+            .expect("estimate content");
+        let reply: Value = serde_json::from_slice(&reply).expect("json");
+        let expected = crate::estimate::estimate_content(&{
+            let blocks: Vec<fr_wire::content::ContentBlock> =
+                serde_json::from_value(json!([
+                    {"type": "text", "text": "abcdefgh"},
+                    {"type": "image", "attachment": {"attachmentId": "a", "mediaType": "image/png", "width": 4, "height": 4}},
+                ]))
+                .expect("blocks");
+            blocks
+        });
+        assert_eq!(reply["tokens"], json!(expected));
+        assert!(expected > 0);
     }
 
     #[test]

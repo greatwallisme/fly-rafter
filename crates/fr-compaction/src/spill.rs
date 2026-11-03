@@ -15,7 +15,8 @@ pub type SpillLocator = String;
 /// Save-time storage namespace for a spilled artifact (the dsh
 /// `SpillOwner`): forked sessions inherit locators already in the
 /// seeded log without re-owning them.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SpillOwner {
     /// The producing session id.
     pub session_id: String,
@@ -23,7 +24,9 @@ pub struct SpillOwner {
 
 /// Producer of a spilled artifact (the dsh `SpillSource`); descriptive
 /// only, never access control.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+#[serde(rename_all_fields = "camelCase")]
 pub enum SpillSource {
     /// A tool result, with its model-issued call id.
     Tool {
@@ -45,7 +48,8 @@ pub enum SpillSource {
 
 /// One request to persist text to a spill artifact (the dsh
 /// `SaveTextSpill`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SaveTextSpill {
     /// The save-time storage namespace.
     pub owner: SpillOwner,
@@ -60,7 +64,8 @@ pub struct SaveTextSpill {
 
 /// A saved spill artifact: locator, exact byte length, and retrieval
 /// guidance (the dsh `SpillRef`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SpillRef {
     /// The opaque model-facing handle.
     pub locator: SpillLocator,

@@ -25,11 +25,12 @@
 //! `STATUS_REENTRANCY`), so the recovery wait blocks on the relay's
 //! reply while the dispatch runs on the relay's clean stack.
 //!
-//! Thread discipline: the relay thread is the only plugin-owned thread;
-//! `teardown` joins it before returning (vtable calls after `teardown`
-//! are documented undefined behavior).
+//! Thread discipline: the relay and the startup sweep are the only
+//! plugin-owned threads; `teardown` joins them before returning (vtable
+//! calls after `teardown` are documented undefined behavior).
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Mutex;
 use std::sync::mpsc;
 
 use dougong_abi::{
@@ -55,6 +56,10 @@ use crate::meter::SurfaceMeasurement;
 use crate::region::MeterView;
 use crate::region::SessionView;
 use crate::session_view::RemoteSessionView;
+use crate::spill::SaveTextSpill;
+use crate::spill_cleanup::{gather_sweep_roots, sweep_spill_roots};
+use crate::spill_local::LocalSpillStore;
+use crate::spill_policy::{ImagePrice, SpillSeams, bound as spill_bound, is_image};
 use crate::summarizer::{CompactionFailure, SummarizationInput, SummaryResult};
 
 /// The dylib artifact's plugin name.
@@ -73,16 +78,20 @@ pub const EV_SESSION_EVENT: u32 = 3;
 /// The listened event ids the descriptor's listen map binds.
 pub const EV_REQUEST_ERROR: u32 = 4;
 
-/// The descriptor the loader consumes: provides the `'compaction'`
-/// service, injects the four consumed services, and listens for the four
-/// automatic-compaction events. The version is sourced from crate
-/// metadata so it cannot drift from the artifact.
+/// The descriptor the loader consumes: provides the `'compaction'` and
+/// `'spill-store'` services (the fr-sandbox two-service precedent), injects
+/// the consumed services (plus the `tools` face the spill endpoints
+/// register into; the attachments and fs reads stay soft — the dsh
+/// `ctx.get` absence arms), and listens for the four automatic-compaction
+/// events. The version is sourced from crate metadata so it cannot drift
+/// from the artifact.
 const DESCRIPTOR: &[u8] = concat!(
     "{\"name\":\"fr-compaction\",\"version\":\"",
     env!("CARGO_PKG_VERSION"),
-    "\",\"provide\":[\"compaction\"],\"inject\":[\"llm\",\"token-meter\",",
-    "\"session-persistence\",\"agent\"],\"listen\":{\"agent/pre-step\":1,",
-    "\"agent/status\":2,\"session/event\":3,\"agent/request-error\":4}}"
+    "\",\"provide\":[\"compaction\",\"spill-store\"],\"inject\":[\"llm\",",
+    "\"token-meter\",\"session-persistence\",\"agent\",\"tools\"],",
+    "\"listen\":{\"agent/pre-step\":1,\"agent/status\":2,\"session/event\":3,",
+    "\"agent/request-error\":4}}"
 )
 .as_bytes();
 
@@ -178,6 +187,33 @@ impl HostLink {
     #[must_use]
     pub const fn new(host: dougong_abi::HostExports) -> Self {
         Self { host }
+    }
+
+    /// Grants `target`'s provider the right to require `granted` (D31;
+    /// the callback-endpoint authorization the spill registration uses).
+    ///
+    /// # Errors
+    ///
+    /// The host refusal status.
+    pub fn grant(&self, target: &str, granted: &str) -> Result<(), String> {
+        // SAFETY: the copied vtable is live until this activation's
+        // `teardown` returns; both name buffers live for the call.
+        let status = unsafe {
+            (self.host.grant)(
+                self.host.host_handle,
+                target.as_ptr(),
+                target.len(),
+                granted.as_ptr(),
+                granted.len(),
+            )
+        };
+        if status == STATUS_OK {
+            Ok(())
+        } else {
+            Err(format!(
+                "grant {granted} to {target} failed with host status {status}"
+            ))
+        }
     }
 
     /// Performs one synchronous, blocking cross-plugin service call
@@ -405,6 +441,35 @@ pub struct ShellState {
     overflow_sessions: HashSet<String>,
     /// The dispatch relay (the B6 ruling's plugin-owned thread).
     relay: Relay,
+    /// The local spill backend (the dsh `spill-local` plugin folded into
+    /// the one crate; the spill endpoints read it in-process — a
+    /// self-instance require is the deterministic reentrancy refusal).
+    spill: LocalSpillStore,
+    /// The startup sweep thread (the dsh activation effect; joined at
+    /// teardown). `None` when cleanup is disabled (`0` days).
+    sweep: Option<std::thread::JoinHandle<()>>,
+    /// The spill conversations awaiting their exit legs, keyed by the
+    /// continue token (the enter facts the compose step reads).
+    pending_spill: Mutex<HashMap<u64, SpillEnterFacts>>,
+}
+
+/// The enter-leg facts one spill conversation composes against (the dsh
+/// listener closure's captured `exec` and `result`).
+#[derive(Debug, Clone)]
+struct SpillEnterFacts {
+    /// The finished call's session owner (`agent`).
+    agent: Option<String>,
+    /// The tool name as requested.
+    name: String,
+    /// The model-issued call identity.
+    call_id: String,
+    /// Token of the enclosing transport execution, when nested.
+    parent: Option<String>,
+    /// Whether the dispatch-stage result failed.
+    is_error: bool,
+    /// The dispatch-stage result content (the `decision.content ??
+    /// result.content` fallback).
+    content: Vec<fr_wire::ContentBlock>,
 }
 
 impl std::fmt::Debug for ShellState {
@@ -436,9 +501,31 @@ impl ShellState {
     }
 
     /// Assembles the shell over explicit pieces (the tests drive the
-    /// handlers without the loader).
+    /// handlers without the loader). The spill backend roots at the
+    /// configured root or the per-process private default; the startup
+    /// sweep launches off-thread (the dsh activation effect: service
+    /// availability is never delayed) when cleanup is enabled.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the sweep thread cannot spawn (thread-exhaustion is
+    /// an activation-host failure, not a policy state).
     #[must_use]
     pub fn assembled(link: HostLink, config: ResolvedConfig) -> Self {
+        let spill = config
+            .spill_root
+            .as_ref()
+            .map_or_else(LocalSpillStore::private, |root| {
+                LocalSpillStore::rooted(std::path::PathBuf::from(root))
+            });
+        let sweep = (config.spill_cleanup_period_days > 0).then(|| {
+            let root = spill.root().to_path_buf();
+            let days = config.spill_cleanup_period_days;
+            std::thread::Builder::new()
+                .name("spill-sweep".to_owned())
+                .spawn(move || run_startup_sweep(&root, days))
+                .expect("spill sweep thread spawns")
+        });
         Self {
             link,
             config,
@@ -446,12 +533,59 @@ impl ShellState {
             overflow_retries: HashMap::new(),
             overflow_sessions: HashSet::new(),
             relay: Relay::spawn(link),
+            spill,
+            sweep,
+            pending_spill: Mutex::new(HashMap::new()),
         }
     }
 
     /// Joins the relay thread (the teardown discipline).
     pub fn join_relay(&mut self) {
         self.relay.join();
+    }
+
+    /// Joins every plugin-owned thread (the teardown discipline).
+    pub fn join_threads(&mut self) {
+        self.relay.join();
+        if let Some(sweep) = self.sweep.take() {
+            let _joined = sweep.join();
+        }
+    }
+
+    /// Registers the spill endpoints into the `tools` decision stages
+    /// (the dsh `ctx.on(..., {prepend: true})` pair; the Q101′A
+    /// endpoint registration). The grant authorizes the tools face to
+    /// call back into the `compaction` service; registration declining
+    /// leaves the spill policy inert while the rest of the plugin stays
+    /// alive (the dsh unmounted-plugin equivalence). No-op when the
+    /// policy is disabled (`max-inline-tokens` omitted).
+    ///
+    /// # Errors
+    ///
+    /// The grant or registration transport refusal (the caller decides
+    /// between activation abort and the inert degrade).
+    pub fn register_spill_endpoints(&mut self) -> Result<(), String> {
+        if self.config.spill_max_inline_tokens.is_none() {
+            return Ok(());
+        }
+        self.link.grant("tools", "compaction")?;
+        for stage in ["post-execute", "dispatch-log"] {
+            let registration = serde_json::json!({
+                "stage": stage,
+                "endpoint": {
+                    "service": "compaction",
+                    "method": if stage == "post-execute" {
+                        fr_wire::services::compaction::METHOD_SPILL_POST_EXECUTE
+                    } else {
+                        fr_wire::services::compaction::METHOD_SPILL_DISPATCH_LOG
+                    },
+                },
+            });
+            let payload = serde_json::to_vec(&registration)
+                .map_err(|error| format!("spill registration encode failed: {error}"))?;
+            self.link.require("tools", 1, &payload)?;
+        }
+        Ok(())
     }
 
     /// Opens the session view over the wire face (a full read per
@@ -469,7 +603,7 @@ impl ShellState {
 /// # Errors
 ///
 /// Returns the failure text the host surfaces as `STATUS_FAILED`.
-pub fn dispatch(method: u32, payload: &[u8], _state: &mut ShellState) -> Result<Vec<u8>, String> {
+pub fn dispatch(method: u32, payload: &[u8], state: &mut ShellState) -> Result<Vec<u8>, String> {
     match method {
         METHOD_DESCRIBE => Ok(serde_json::to_vec(&serde_json::json!({
             "name": PLUGIN_NAME,
@@ -478,11 +612,338 @@ pub fn dispatch(method: u32, payload: &[u8], _state: &mut ShellState) -> Result<
         }))
         .unwrap_or_default()),
         METHOD_COMPACT_NOW => Err(format!("unknown compaction method {METHOD_COMPACT_NOW}")),
+        fr_wire::services::compaction::METHOD_SPILL_POST_EXECUTE => {
+            serve_spill_endpoint(state, payload, SpillArm::PostExecute)
+        }
+        fr_wire::services::compaction::METHOD_SPILL_DISPATCH_LOG => {
+            serve_spill_endpoint(state, payload, SpillArm::DispatchLog)
+        }
+        fr_wire::services::spill_store::METHOD_SAVE_TEXT => {
+            let save: SaveTextSpill = serde_json::from_slice(payload)
+                .map_err(|error| format!("save-text payload is invalid: {error}"))?;
+            let reference = crate::spill::SpillStore::save_text(&state.spill, &save)?;
+            serde_json::to_vec(&reference)
+                .map_err(|error| format!("save-text reply encode failed: {error}"))
+        }
         _ => {
             let _ = payload;
             Err(format!("unknown compaction method {method}"))
         }
     }
+}
+
+/// The spill endpoint arm a frame belongs to (the Q101′A segment).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SpillArm {
+    /// The `tools/post-execute` callback.
+    PostExecute,
+    /// The `tools/ptc-dispatch-log` callback.
+    DispatchLog,
+}
+
+/// Serves one spill two-leg frame (the dsh listener bodies): the enter
+/// leg always defers (the dsh listener calls `next()` first); the exit
+/// leg composes the listener's answer over the downstream decision.
+///
+/// # Errors
+///
+/// The malformed-frame refusal (the caller's wire shape, so a decode
+/// failure is a tools-shell bug, not listener work).
+fn serve_spill_endpoint(
+    state: &ShellState,
+    payload: &[u8],
+    arm: SpillArm,
+) -> Result<Vec<u8>, String> {
+    let frame: Value = serde_json::from_slice(payload)
+        .map_err(|error| format!("spill frame is invalid: {error}"))?;
+    match frame.get("leg").and_then(Value::as_str) {
+        Some("enter") => {
+            let enter: SpillEnterMirror = serde_json::from_value(frame)
+                .map_err(|error| format!("spill enter frame is invalid: {error}"))?;
+            let facts = SpillEnterFacts {
+                agent: enter.call.agent,
+                name: enter.call.name,
+                call_id: enter.call.call_id,
+                parent: enter.call.parent,
+                is_error: enter.result.is_error(),
+                content: enter.result.content(),
+            };
+            state
+                .pending_spill
+                .lock()
+                .expect("pending spill lock")
+                .insert(enter.token, facts);
+            serde_json::to_vec(&serde_json::json!({ "kind": "delegate" }))
+                .map_err(|error| format!("spill reply encode failed: {error}"))
+        }
+        Some("exit") => match arm {
+            SpillArm::PostExecute => serve_spill_post_execute_exit(state, &frame),
+            SpillArm::DispatchLog => serve_spill_dispatch_log_exit(state, &frame),
+        },
+        other => Err(format!("spill frame leg is invalid: {other:?}")),
+    }
+}
+
+/// The `tools/post-execute` exit leg (the dsh post-execute listener
+/// body): the gate skips non-accept decisions, value replacements, and
+/// the read tool; the PTC-parent text-only arm rides the dispatch-log
+/// path; everything else bounds and composes the replacement.
+fn serve_spill_post_execute_exit(state: &ShellState, frame: &Value) -> Result<Vec<u8>, String> {
+    let exit: SpillExitMirror = serde_json::from_value(frame.clone())
+        .map_err(|error| format!("spill exit frame is invalid: {error}"))?;
+    let facts = state
+        .pending_spill
+        .lock()
+        .expect("pending spill lock")
+        .remove(&exit.token);
+    let Some(facts) = facts else {
+        return Err(format!(
+            "spill conversation {} has no enter leg (state bug)",
+            exit.token
+        ));
+    };
+    let Some(decision) = exit.decision else {
+        return Err("spill exit frame lacks decision".to_owned());
+    };
+    // The dsh gate: `decision.kind !== 'accept' || Object.hasOwn(decision,
+    // 'value') || exec.name === 'read'` — the decision passes untouched.
+    let untouched = |decision: &Value| -> Result<Vec<u8>, String> {
+        serde_json::to_vec(&serde_json::json!({
+            "kind": "final",
+            "decision": decision,
+        }))
+        .map_err(|error| format!("spill reply encode failed: {error}"))
+    };
+    if decision.get("kind").and_then(Value::as_str) != Some("accept")
+        || decision.get("value").is_some_and(|value| !value.is_null())
+        || facts.name == "read"
+    {
+        return untouched(&decision);
+    }
+    let has_images = decision_content(&decision, &facts).iter().any(is_image);
+    if facts.parent.is_some() && !has_images {
+        // Text-only PTC bindings retain their asynchronous log-only
+        // spill path.
+        return untouched(&decision);
+    }
+    let content = decision_content(&decision, &facts);
+    let retained = run_spill_bound(
+        state,
+        facts.agent.as_deref(),
+        &content,
+        &facts.name,
+        &facts.call_id,
+        if facts.parent.is_some() {
+            "dispatch"
+        } else {
+            "result"
+        },
+    );
+    let Some(retained) = retained else {
+        return untouched(&decision);
+    };
+    // The PTC outer-result capture: an error-free image dispatch whose
+    // replacement lost its images ferries the retained blocks as a
+    // ptc-mode context message.
+    let ptc_context =
+        (facts.parent.is_some() && !facts.is_error && has_images && !retained.iter().any(is_image))
+            .then(|| ptc_mode_message(&retained));
+    let decision = compose_accept(&decision, &retained, ptc_context);
+    serde_json::to_vec(&serde_json::json!({
+        "kind": "final",
+        "decision": decision,
+    }))
+    .map_err(|error| format!("spill reply encode failed: {error}"))
+}
+
+/// The `tools/ptc-dispatch-log` exit leg (the dsh dispatch-log listener
+/// body): the bounded log copy replaces the settled content when the
+/// bound reshapes it.
+fn serve_spill_dispatch_log_exit(state: &ShellState, frame: &Value) -> Result<Vec<u8>, String> {
+    let exit: SpillLogExitMirror = serde_json::from_value(frame.clone())
+        .map_err(|error| format!("spill exit frame is invalid: {error}"))?;
+    let facts = state
+        .pending_spill
+        .lock()
+        .expect("pending spill lock")
+        .remove(&exit.token);
+    let Some(facts) = facts else {
+        return Err(format!(
+            "spill conversation {} has no enter leg (state bug)",
+            exit.token
+        ));
+    };
+    let retained = run_spill_bound(
+        state,
+        facts.agent.as_deref(),
+        &exit.content,
+        &facts.name,
+        &facts.call_id,
+        "dispatch",
+    );
+    let content = retained.unwrap_or(exit.content);
+    serde_json::to_vec(&serde_json::json!({
+        "kind": "final",
+        "content": content,
+    }))
+    .map_err(|error| format!("spill reply encode failed: {error}"))
+}
+
+/// Runs the bound over the shell's seams, rendering the dsh catch-all
+/// as the warn-plus-keep-inline outcome.
+fn run_spill_bound(
+    state: &ShellState,
+    session_id: Option<&str>,
+    content: &[fr_wire::ContentBlock],
+    tool_name: &str,
+    call_id: &str,
+    label: &str,
+) -> Option<Vec<fr_wire::ContentBlock>> {
+    let max_tokens = state.config.spill_max_inline_tokens?;
+    let seams = WireSpillSeams {
+        link: &state.link,
+        store: &state.spill,
+    };
+    match spill_bound(
+        &seams, max_tokens, session_id, content, tool_name, call_id, label,
+    ) {
+        Ok(retained) => retained,
+        Err(reason) => {
+            spill_warn(&format!(
+                "spill-policy: {reason}; keeping the inline content"
+            ));
+            None
+        }
+    }
+}
+
+/// The decision's content: a content replacement wins over the enter
+/// leg's dispatch-stage content (the dsh
+/// `decision.content ?? result.content`).
+fn decision_content(decision: &Value, facts: &SpillEnterFacts) -> Vec<fr_wire::ContentBlock> {
+    let replaced = decision
+        .get("content")
+        .and_then(Value::as_array)
+        .map(|blocks| {
+            blocks
+                .iter()
+                .cloned()
+                .map(|block| {
+                    serde_json::from_value::<fr_wire::ContentBlock>(block)
+                        .unwrap_or_else(|_| crate::spill_policy::text_block(""))
+                })
+                .collect::<Vec<_>>()
+        });
+    let Some(replaced) = replaced else {
+        return facts.content.clone();
+    };
+    replaced
+}
+
+/// Composes the accept decision over the replacement (the dsh
+/// `{kind:'accept', content: retained, ...additionalContexts}` spread).
+fn compose_accept(
+    decision: &Value,
+    retained: &[fr_wire::ContentBlock],
+    ptc_context: Option<Value>,
+) -> Value {
+    let mut composed = serde_json::json!({
+        "kind": "accept",
+        "content": retained,
+    });
+    let mut contexts = decision
+        .get("additionalContexts")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if let Some(context) = ptc_context {
+        contexts.push(context);
+    }
+    if !contexts.is_empty() {
+        composed["additionalContexts"] = Value::Array(contexts);
+    }
+    composed
+}
+
+/// Builds the ptc-mode context message (the dsh
+/// `createUserMessage({content, source: {kind: 'ptc-mode'}})`; the
+/// message id mints a fresh uuid v4 like every producer-side id).
+fn ptc_mode_message(content: &[fr_wire::ContentBlock]) -> Value {
+    serde_json::json!({
+        "role": "user",
+        "id": uuid::Uuid::new_v4().to_string(),
+        "content": content,
+        "source": { "kind": "ptc-mode" },
+    })
+}
+
+/// The consumer-side mirror of the spill enter frame (the fr-tools
+/// `PostEnter` wire shape; only the fields the listener composes
+/// against ride the mirror).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SpillEnterMirror {
+    token: u64,
+    call: SpillCallMirror,
+    result: SpillResultMirror,
+}
+
+/// The execution view the spill listener reads (the dsh `exec`:
+/// owner, tool name, call identity, and the PTC parent token).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SpillCallMirror {
+    #[serde(default)]
+    call_id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    agent: Option<String>,
+    #[serde(default)]
+    parent: Option<String>,
+}
+
+/// The result view the spill listener reads (the dsh `result`:
+/// model-facing content and the failure flag).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SpillResultMirror {
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    content: Vec<fr_wire::ContentBlock>,
+}
+
+impl SpillResultMirror {
+    /// Whether the dispatch-stage result failed.
+    fn is_error(&self) -> bool {
+        self.kind == "failure"
+    }
+
+    /// The model-facing content of either outcome.
+    fn content(&self) -> Vec<fr_wire::ContentBlock> {
+        self.content.clone()
+    }
+}
+
+/// The consumer-side mirror of the post-execute exit frame (the
+/// fr-tools `PostExit` shape; the decision stays a raw wire value the
+/// gate reads field-wise).
+#[derive(Deserialize)]
+struct SpillExitMirror {
+    token: u64,
+    #[serde(default)]
+    decision: Option<Value>,
+}
+
+/// The consumer-side mirror of the dispatch-log exit frame (the
+/// fr-tools `LogExit` shape).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SpillLogExitMirror {
+    token: u64,
+    #[serde(default)]
+    content: Vec<fr_wire::ContentBlock>,
 }
 
 /// Handles one `agent/pre-step` crossing (waterfall).
@@ -1144,6 +1605,195 @@ fn log_warn_global(message: &str) {
     eprintln!("{message}");
 }
 
+/// The spill warning sink (the dsh `ctx.logger.warn` in the spill
+/// catch-all template).
+fn spill_warn(message: &str) {
+    eprintln!("{message}");
+}
+
+/// Runs the one-shot startup sweep (the dsh `runCleanup`): discover the
+/// prior default roots plus the active root, sweep at the age cutoff.
+/// Best-effort — every filesystem failure lands in the warn sink.
+fn run_startup_sweep(root: &std::path::Path, days: u64) {
+    const MS_PER_DAY: u64 = 24 * 60 * 60 * 1000;
+    let cutoff = now_ms().saturating_sub(days.saturating_mul(MS_PER_DAY));
+    let warn = |message: &str| log_warn_global(message);
+    let roots = gather_sweep_roots(root, &std::env::temp_dir(), &warn);
+    sweep_spill_roots(&roots, signed_cutoff(cutoff), &warn);
+}
+
+/// The JS-Number-parity millisecond clock (the dsh `Date.now()`).
+#[must_use]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "millisecond wall clocks fit the u64 window exactly"
+)]
+fn now_ms() -> u64 {
+    let elapsed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    elapsed.as_millis() as u64
+}
+
+/// The sweep cutoff at the signed width the cleanup walk prices.
+#[must_use]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "the millisecond cutoff stays far below i64::MAX"
+)]
+const fn signed_cutoff(cutoff: u64) -> i64 {
+    cutoff as i64
+}
+
+/// The spill-policy wire seams: the require clients the endpoints read
+/// (the dsh `ctx` faces; the attachments and fs reads stay soft — an
+/// undeclared or uncommitted provider is the absent arm). The local
+/// backend rides the struct (the one-crate fold).
+struct WireSpillSeams<'a> {
+    link: &'a HostLink,
+    store: &'a LocalSpillStore,
+}
+
+impl SpillSeams for WireSpillSeams<'_> {
+    fn estimate(&self, blocks: &[fr_wire::ContentBlock]) -> Result<u64, String> {
+        let payload = serde_json::json!({ "blocks": blocks });
+        let bytes = serde_json::to_vec(&payload)
+            .map_err(|error| format!("estimate encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::token_meter::SERVICE_NAME,
+            fr_wire::services::token_meter::METHOD_ESTIMATE_CONTENT,
+            &bytes,
+        )?;
+        let parsed: Value = serde_json::from_slice(&reply)
+            .map_err(|error| format!("estimate decode failed: {error}"))?;
+        parsed
+            .get("tokens")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "estimate reply lacks tokens".to_owned())
+    }
+
+    fn price_images(
+        &self,
+        provider: &str,
+        model: &str,
+        images: &[fr_wire::ContentBlock],
+    ) -> Result<Vec<ImagePrice>, String> {
+        let payload = serde_json::json!({ "provider": provider, "model": model, "images": images });
+        let bytes = serde_json::to_vec(&payload)
+            .map_err(|error| format!("pricing encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::llm::SERVICE_NAME,
+            fr_wire::services::llm::METHOD_IMAGE_REQUEST_PRICING,
+            &bytes,
+        )?;
+        let parsed: Value = serde_json::from_slice(&reply)
+            .map_err(|error| format!("pricing decode failed: {error}"))?;
+        let prices = parsed
+            .get("prices")
+            .ok_or_else(|| "pricing reply lacks prices".to_owned())?;
+        if prices.is_null() {
+            // A route without declared pricing keeps the estimator (the
+            // dsh soft-get `undefined` folds into the same refusal as a
+            // missing route).
+            return Err(crate::spill_policy::no_image_calculator());
+        }
+        let prices = prices
+            .as_array()
+            .ok_or_else(|| "pricing reply is not a list".to_owned())?;
+        prices
+            .iter()
+            .map(|price| {
+                Ok(ImagePrice {
+                    visual_tokens: price
+                        .get("visualTokens")
+                        .and_then(Value::as_u64)
+                        .ok_or_else(|| "price lacks visualTokens".to_owned())?,
+                    text: price
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| "price lacks text".to_owned())?
+                        .to_owned(),
+                })
+            })
+            .collect()
+    }
+
+    fn image_access(&self, reference: &fr_wire::ImageAttachmentRef) -> Option<String> {
+        let payload = serde_json::json!({ "ref": reference });
+        let bytes = serde_json::to_vec(&payload).ok()?;
+        // The attachments and fs reads stay soft: a refused require is
+        // the absent provider (the dsh `ctx.get` undefined pair).
+        let reply = self
+            .link
+            .require(
+                fr_wire::services::attachments::SERVICE_NAME,
+                fr_wire::services::attachments::METHOD_IMAGE_HOST_PATH,
+                &bytes,
+            )
+            .ok()?;
+        let parsed: Value = serde_json::from_slice(&reply).ok()?;
+        let host_path = parsed.get("path")?.as_str()?.to_owned();
+        let map = serde_json::json!({ "hostPath": host_path });
+        let bytes = serde_json::to_vec(&map).ok()?;
+        let reply = self
+            .link
+            .require(
+                fr_wire::services::fs::SERVICE_NAME,
+                fr_wire::services::fs::METHOD_PROCESS_PATH_FROM_HOST_PATH,
+                &bytes,
+            )
+            .ok()?;
+        let parsed: Value = serde_json::from_slice(&reply).ok()?;
+        parsed.get("path")?.as_str().map(str::to_owned)
+    }
+
+    fn request_header_route(&self, session_id: &str) -> Result<Option<(String, String)>, String> {
+        let payload = serde_json::json!({ "id": session_id });
+        let bytes = serde_json::to_vec(&payload)
+            .map_err(|error| format!("request-header encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::session_persistence::SERVICE_NAME,
+            fr_wire::services::session_persistence::METHOD_REQUEST_HEADER,
+            &bytes,
+        )?;
+        let parsed: Value = serde_json::from_slice(&reply)
+            .map_err(|error| format!("request-header decode failed: {error}"))?;
+        // The `{header: {config}, reason}` envelope (the session-view
+        // precedent); the config carries the routed provider/model.
+        let config = parsed.get("header").and_then(|header| header.get("config"));
+        Ok(route_of(config))
+    }
+
+    fn agent_route(&self, session_id: &str) -> Result<Option<(String, String)>, String> {
+        let payload = serde_json::json!({ "sessionId": session_id });
+        let bytes = serde_json::to_vec(&payload)
+            .map_err(|error| format!("agent status encode failed: {error}"))?;
+        let reply = self.link.require(
+            fr_wire::services::agent::SERVICE_NAME,
+            fr_wire::services::agent::METHOD_STATUS,
+            &bytes,
+        )?;
+        let parsed: Value = serde_json::from_slice(&reply)
+            .map_err(|error| format!("agent status decode failed: {error}"))?;
+        Ok(route_of(Some(&parsed)))
+    }
+
+    fn save_text(&self, save: &SaveTextSpill) -> Result<crate::spill::SpillRef, String> {
+        // The one-crate fold: the spill endpoints read the local backend
+        // in-process (a self-instance require is the deterministic
+        // reentrancy refusal).
+        crate::spill::SpillStore::save_text(self.store, save)
+    }
+}
+
+/// Extracts the provider/model pair from one wire route object.
+fn route_of(value: Option<&Value>) -> Option<(String, String)> {
+    let value = value?;
+    let provider = value.get("provider")?.as_str()?.to_owned();
+    let model = value.get("model")?.as_str()?.to_owned();
+    Some((provider, model))
+}
+
 unsafe extern "C" fn plugin_name(out: *mut u8, cap: usize, len: *mut usize) -> i32 {
     // SAFETY: the host guarantees a `cap`-sized out-buffer and a writable
     // `len` slot (export-table contract).
@@ -1319,7 +1969,7 @@ unsafe extern "C" fn teardown(handle: *mut std::os::raw::c_void) {
     }
     // SAFETY: the handle was produced by `setup` and torn down exactly once.
     let mut state = unsafe { Box::from_raw(handle.cast::<ShellState>()) };
-    state.join_relay();
+    state.join_threads();
 }
 
 /// Export table for the fr-compaction dylib artifact; the host resolves
@@ -1345,6 +1995,7 @@ mod tests {
     use dougong_abi::{HostExports, STATUS_CAPACITY, STATUS_DEFERRED, STATUS_FAILED, STATUS_OK};
     use fr_session::EventVocabulary;
     use fr_session::service::{SessionService, dispatch as session_dispatch};
+    use std::collections::HashMap;
     use std::ffi::c_void;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
@@ -1375,6 +2026,13 @@ mod tests {
         /// Every `'llm'` BEGIN request body, in call order (the
         /// summarizer-input pin point).
         begin_log: Mutex<Vec<serde_json::Value>>,
+        /// The grants the shell issued, in call order.
+        grants: Mutex<Vec<(String, String)>>,
+        /// Every `'tools'` registration body, in call order.
+        tools_calls: Mutex<Vec<serde_json::Value>>,
+        /// Scripted estimate-content prices (unscripted texts price at
+        /// the fixed density the real estimator pins).
+        estimates: Mutex<HashMap<String, u64>>,
     }
 
     /// Routes one `'session-persistence'` require to the real service.
@@ -1420,6 +2078,9 @@ mod tests {
                 Ok(batch)
             }
             fr_wire::services::llm::METHOD_ABORT => Ok(serde_json::json!({})),
+            fr_wire::services::llm::METHOD_IMAGE_REQUEST_PRICING => Ok(
+                serde_json::json!({ "prices": [{ "visualTokens": 900, "text": "image handle text" }] }),
+            ),
             _ => Err(format!("unknown llm method {method}")),
         }
     }
@@ -1522,8 +2183,33 @@ mod tests {
                 fr_wire::services::token_meter::METHOD_ESTIMATE_MESSAGE => {
                     Ok(serde_json::json!({ "tokens": 20 }))
                 }
+                fr_wire::services::token_meter::METHOD_ESTIMATE_CONTENT => {
+                    let text = payload
+                        .get("blocks")
+                        .and_then(serde_json::Value::as_array)
+                        .and_then(|blocks| blocks.first())
+                        .and_then(|block| block.get("text"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default();
+                    let scripted = state
+                        .estimates
+                        .lock()
+                        .expect("host estimates lock")
+                        .get(text)
+                        .copied()
+                        .unwrap_or_else(|| (text.chars().count() as u64).div_ceil(4) + 4);
+                    Ok(serde_json::json!({ "tokens": scripted }))
+                }
                 _ => Err(format!("unknown token-meter method {method}")),
             },
+            fr_wire::services::tools::SERVICE_NAME => {
+                state
+                    .tools_calls
+                    .lock()
+                    .expect("host tools lock")
+                    .push(payload);
+                Ok(serde_json::json!({ "id": 1 }))
+            }
             fr_wire::services::llm::SERVICE_NAME => serve_llm(state, method, &payload),
             fr_wire::services::agent::SERVICE_NAME => {
                 if state.agent_fails.load(Ordering::Acquire) {
@@ -1531,6 +2217,12 @@ mod tests {
                 }
                 Ok(serve_agent(state))
             }
+            fr_wire::services::attachments::SERVICE_NAME => Ok(serde_json::json!({
+                "path": "/host/shot.png",
+            })),
+            fr_wire::services::fs::SERVICE_NAME => Ok(serde_json::json!({
+                "path": "/exec/shot.png",
+            })),
             _ => Err(format!("unknown service {service}")),
         };
         match answer {
@@ -1588,12 +2280,25 @@ mod tests {
     }
 
     unsafe extern "C" fn host_grant(
-        _host: *mut c_void,
-        _target: *const u8,
-        _target_len: usize,
-        _granted: *const u8,
-        _granted_len: usize,
+        host: *mut c_void,
+        target: *const u8,
+        target_len: usize,
+        granted: *const u8,
+        granted_len: usize,
     ) -> i32 {
+        // SAFETY: `host` is the `TestHost` the harness installed.
+        let state = unsafe { &*host.cast::<TestHost>() };
+        // SAFETY: name buffers valid for their lengths per the contract.
+        let target =
+            unsafe { String::from_utf8_lossy(std::slice::from_raw_parts(target, target_len)) };
+        // SAFETY: name buffer valid for its length per the contract.
+        let granted =
+            unsafe { String::from_utf8_lossy(std::slice::from_raw_parts(granted, granted_len)) };
+        state
+            .grants
+            .lock()
+            .expect("host grants lock")
+            .push((target.into_owned(), granted.into_owned()));
         STATUS_OK
     }
 
@@ -1692,6 +2397,9 @@ mod tests {
             agent_fails: AtomicBool::new(false),
             dispatch_log: Mutex::new(Vec::new()),
             begin_log: Mutex::new(Vec::new()),
+            grants: Mutex::new(Vec::new()),
+            tools_calls: Mutex::new(Vec::new()),
+            estimates: Mutex::new(std::collections::HashMap::new()),
         });
         let exports = HostExports {
             grant: host_grant,
@@ -2177,5 +2885,477 @@ mod tests {
             "a capture failure carries no code"
         );
         state.join_relay();
+    }
+
+    /// The spill harness: the standard seed plus the cap, the temp
+    /// spill root, and a disabled sweep (the sweep runs on its own
+    /// tests).
+    fn spill_harness(name: &str) -> (Box<ShellState>, Arc<TestHost>, std::path::PathBuf) {
+        let root = temp_root(name);
+        let gate = serde_json::json!({
+                "auto": false,
+                // The cap sits between the reserved notice (the temp
+                // locator lengthens it) and the 104-token content.
+                "max-inline-tokens": 90,
+                "spill-root": root.display().to_string(),
+                "cleanup-period-days": 0,
+        });
+        let host_pairs = harness_with_config(name, Vec::new(), &gate);
+        (host_pairs.0, host_pairs.1, root)
+    }
+
+    /// Builds the harness over an explicit config gate.
+    fn harness_with_config(
+        name: &str,
+        llm_batches: Vec<serde_json::Value>,
+        gate: &serde_json::Value,
+    ) -> (Box<ShellState>, Arc<TestHost>) {
+        let mut vocabulary = EventVocabulary::core();
+        vocabulary
+            .declare(&[
+                "compaction/start".to_owned(),
+                "compaction/summary".to_owned(),
+                "compaction/end".to_owned(),
+                "compaction/prune".to_owned(),
+                "image/offload".to_owned(),
+            ])
+            .expect("compaction vocabulary declares");
+        let mut sessions = {
+            let clock: Arc<dyn Fn() -> i64 + Send + Sync> = Arc::new(|| 1_000);
+            let warn: Arc<dyn Fn(String) + Send + Sync> = Arc::new(|_| {});
+            SessionService::new(&temp_root(name), vocabulary, clock, warn).expect("service")
+        };
+        session_dispatch(
+            fr_wire::services::session_persistence::METHOD_SESSION_CREATE,
+            br#"{"id":"s1","meta":{"cwd":"/repo"}}"#,
+            &mut sessions,
+        )
+        .expect("create");
+        session_dispatch(
+            fr_wire::services::session_persistence::METHOD_SESSION_APPEND,
+            br#"{"id":"s1","type":"request/header","data":{"header":{"config":{"provider":"deepseek","model":"m1","maxTokens":1024}},"reason":"initial"}}"#,
+            &mut sessions,
+        )
+        .expect("seed header");
+        let host = Arc::new(TestHost {
+            sessions: Mutex::new(sessions),
+            llm_batches: Mutex::new(llm_batches),
+            agent_route: Mutex::new(Some((Some("deepseek".to_owned()), Some("m1".to_owned())))),
+            agent_fails: AtomicBool::new(false),
+            dispatch_log: Mutex::new(Vec::new()),
+            begin_log: Mutex::new(Vec::new()),
+            grants: Mutex::new(Vec::new()),
+            tools_calls: Mutex::new(Vec::new()),
+            estimates: Mutex::new(std::collections::HashMap::new()),
+        });
+        let exports = HostExports {
+            grant: host_grant,
+            dispatch: host_dispatch,
+            host_handle: Arc::into_raw(Arc::clone(&host)).cast::<c_void>().cast_mut(),
+            require: host_require,
+            emit: host_emit,
+        };
+        let config = resolve_config(gate).expect("harness config resolves");
+        let state = Box::new(ShellState::assembled(super::HostLink::new(exports), config));
+        (state, host)
+    }
+
+    /// The oversized plain-text dispatch-stage result the spill arms
+    /// consume.
+    fn oversized_result() -> serde_json::Value {
+        serde_json::json!({
+            "kind": "success",
+            "content": [{ "type": "text", "text": "a".repeat(400) }],
+            "additionalContexts": [],
+        })
+    }
+
+    /// Serves the two spill legs through the public dispatch face.
+    fn spill_frame(
+        state: &mut ShellState,
+        method: u32,
+        frame: &serde_json::Value,
+    ) -> serde_json::Value {
+        let reply =
+            super::dispatch(method, frame.to_string().as_bytes(), state).expect("spill frame");
+        serde_json::from_slice(&reply).expect("spill reply")
+    }
+
+    /// The post-execute arm bounds an over-cap accepted result: the
+    /// decision composes the bounded copy and the artifact lands in the
+    /// configured root.
+    #[test]
+    fn spill_post_execute_bounds_the_accepted_result() {
+        let (mut state, _host, root) = spill_harness("spill-post");
+        let enter = serde_json::json!({
+            "stage": "post-execute",
+            "leg": "enter",
+            "token": 5,
+            "call": { "callId": "c1", "name": "huge_read", "agent": "s1" },
+            "result": oversized_result(),
+        });
+        let reply = spill_frame(
+            &mut state,
+            fr_wire::services::compaction::METHOD_SPILL_POST_EXECUTE,
+            &enter,
+        );
+        assert_eq!(reply["kind"], "delegate", "the listener calls next first");
+
+        let exit = serde_json::json!({
+            "stage": "post-execute",
+            "leg": "exit",
+            "token": 5,
+            "decision": { "kind": "accept", "additionalContexts": [] },
+        });
+        let reply = spill_frame(
+            &mut state,
+            fr_wire::services::compaction::METHOD_SPILL_POST_EXECUTE,
+            &exit,
+        );
+        assert_eq!(reply["kind"], "final");
+        let decision = &reply["decision"];
+        assert_eq!(decision["kind"], "accept");
+        let content = decision["content"].as_array().expect("content");
+        let inline = content
+            .iter()
+            .filter_map(|block| block.get("text").and_then(serde_json::Value::as_str))
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(inline.contains(crate::spill_policy::GAP_TEXT), "{inline}");
+        assert!(
+            inline.contains("Full formatted result stored at: "),
+            "the locator rides the footer: {inline}"
+        );
+        // The artifact landed under the configured root with the full
+        // text and the dsh retrieval hint.
+        let session_dirs: Vec<_> = std::fs::read_dir(&root)
+            .expect("root reads")
+            .filter_map(std::result::Result::ok)
+            .collect();
+        assert_eq!(session_dirs.len(), 1, "one session directory");
+    }
+
+    /// The post-execute gates pass the untouched decision through: the
+    /// read tool, value replacements, blocks, and text-only PTC parents.
+    #[test]
+    fn spill_post_execute_gates_pass_through() {
+        let (mut state, _host, _root) = spill_harness("spill-gates");
+        let run = |state: &mut ShellState,
+                   token: u64,
+                   call: serde_json::Value,
+                   decision: serde_json::Value| {
+            let enter = serde_json::json!({
+                "stage": "post-execute",
+                "leg": "enter",
+                "token": token,
+                "call": call,
+                "result": oversized_result(),
+            });
+            let reply = spill_frame(
+                state,
+                fr_wire::services::compaction::METHOD_SPILL_POST_EXECUTE,
+                &enter,
+            );
+            assert_eq!(reply["kind"], "delegate");
+            spill_frame(
+                state,
+                fr_wire::services::compaction::METHOD_SPILL_POST_EXECUTE,
+                &serde_json::json!({
+                    "stage": "post-execute",
+                    "leg": "exit",
+                    "token": token,
+                    "decision": decision,
+                }),
+            )
+        };
+        // The read tool never spills (the read->spill->read loop).
+        let reply = run(
+            &mut state,
+            1,
+            serde_json::json!({ "callId": "c1", "name": "read", "agent": "s1" }),
+            serde_json::json!({ "kind": "accept", "additionalContexts": [] }),
+        );
+        assert_eq!(
+            reply["decision"],
+            serde_json::json!({ "kind": "accept", "additionalContexts": [] })
+        );
+        // A block decision passes untouched.
+        let reply = run(
+            &mut state,
+            2,
+            serde_json::json!({ "callId": "c1", "name": "huge_read", "agent": "s1" }),
+            serde_json::json!({ "kind": "block", "feedback": [{ "type": "text", "text": "no" }], "additionalContexts": [] }),
+        );
+        assert_eq!(reply["decision"]["kind"], "block");
+        // A value replacement passes untouched.
+        let reply = run(
+            &mut state,
+            3,
+            serde_json::json!({ "callId": "c1", "name": "huge_read", "agent": "s1" }),
+            serde_json::json!({ "kind": "accept", "value": "replaced", "additionalContexts": [] }),
+        );
+        assert_eq!(reply["decision"]["value"], "replaced");
+        // A text-only PTC parent rides the dispatch-log path.
+        let reply = run(
+            &mut state,
+            4,
+            serde_json::json!({ "callId": "c1", "name": "huge_read", "agent": "s1", "parent": "t1" }),
+            serde_json::json!({ "kind": "accept", "additionalContexts": [] }),
+        );
+        assert_eq!(reply["decision"]["content"], serde_json::Value::Null);
+    }
+
+    /// The dispatch-log arm bounds only the logged copy: text bounds,
+    /// non-text declines, and within-cap logs stay untouched.
+    #[test]
+    fn spill_dispatch_log_bounds_only_the_log_copy() {
+        let (mut state, _host, _root) = spill_harness("spill-log");
+        let enter = serde_json::json!({
+            "stage": "dispatch-log",
+            "leg": "enter",
+            "token": 7,
+            "call": { "callId": "parent-1:ptc:1", "name": "huge_read", "agent": "s1" },
+            "result": oversized_result(),
+        });
+        let reply = spill_frame(
+            &mut state,
+            fr_wire::services::compaction::METHOD_SPILL_DISPATCH_LOG,
+            &enter,
+        );
+        assert_eq!(reply["kind"], "delegate");
+        let exit = serde_json::json!({
+            "stage": "dispatch-log",
+            "leg": "exit",
+            "token": 7,
+            "content": [{ "type": "text", "text": "a".repeat(400) }],
+        });
+        let reply = spill_frame(
+            &mut state,
+            fr_wire::services::compaction::METHOD_SPILL_DISPATCH_LOG,
+            &exit,
+        );
+        assert_eq!(reply["kind"], "final");
+        let logged = reply["content"].as_array().expect("content");
+        let text = logged
+            .iter()
+            .filter_map(|block| block.get("text").and_then(serde_json::Value::as_str))
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(
+            text.contains("Full formatted result stored at: "),
+            "the logged copy carries the locator: {text}"
+        );
+        assert!(text.chars().count() < 400, "the copy is bounded: {text}");
+
+        // Non-text content declines and rides through verbatim.
+        let enter = serde_json::json!({
+            "stage": "dispatch-log",
+            "leg": "enter",
+            "token": 8,
+            "call": { "callId": "parent-1:ptc:2", "name": "mixed", "agent": "s1" },
+            "result": { "kind": "success", "content": [{ "type": "reasoning", "text": "why" }] },
+        });
+        let reply = spill_frame(
+            &mut state,
+            fr_wire::services::compaction::METHOD_SPILL_DISPATCH_LOG,
+            &enter,
+        );
+        assert_eq!(reply["kind"], "delegate");
+        let exit = serde_json::json!({
+            "stage": "dispatch-log",
+            "leg": "exit",
+            "token": 8,
+            "content": [{ "type": "reasoning", "text": "why" }],
+        });
+        let reply = spill_frame(
+            &mut state,
+            fr_wire::services::compaction::METHOD_SPILL_DISPATCH_LOG,
+            &exit,
+        );
+        assert_eq!(
+            reply["content"],
+            serde_json::json!([{ "type": "reasoning", "text": "why" }]),
+            "the flatten declines"
+        );
+    }
+
+    /// The spill-store face persists through the local backend and
+    /// answers the dsh `SpillRef` wire shape.
+    #[test]
+    fn spill_store_face_saves_and_answers_the_reference() {
+        let (mut state, _host, root) = spill_harness("spill-store-face");
+        let reply = super::dispatch(
+            fr_wire::services::spill_store::METHOD_SAVE_TEXT,
+            br#"{"owner":{"sessionId":"s1"},"source":{"kind":"tool","toolName":"grep","callId":"c9","label":"result"},"suggestedName":"grep.txt","content":"hello spill"}"#,
+            &mut state,
+        )
+        .expect("saves");
+        let reference: serde_json::Value = serde_json::from_slice(&reply).expect("json");
+        assert_eq!(reference["bytes"], 11);
+        assert_eq!(
+            reference["retrievalHint"],
+            "Use read with offset/limit, or grep this path to search within it."
+        );
+        let locator = reference["locator"].as_str().expect("locator");
+        assert!(
+            locator.starts_with(root.display().to_string().as_str()),
+            "{locator}"
+        );
+        let saved = std::fs::read_to_string(locator).expect("the artifact reads back");
+        assert_eq!(saved, "hello spill");
+    }
+
+    /// The endpoint registration: the grant plus the two tools calls in
+    /// the dsh order, gated on the configured cap.
+    #[test]
+    fn spill_endpoints_register_into_the_tools_face() {
+        let (mut state, host, _root) = spill_harness("spill-register");
+        state.register_spill_endpoints().expect("registers");
+        let grants = host.grants.lock().expect("grants").clone();
+        assert_eq!(grants, vec![("tools".to_owned(), "compaction".to_owned())]);
+        let calls = host.tools_calls.lock().expect("tools").clone();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0]["stage"], "post-execute");
+        assert_eq!(calls[0]["endpoint"]["service"], "compaction");
+        assert_eq!(
+            calls[0]["endpoint"]["method"],
+            fr_wire::services::compaction::METHOD_SPILL_POST_EXECUTE
+        );
+        assert_eq!(calls[1]["stage"], "dispatch-log");
+        assert_eq!(
+            calls[1]["endpoint"]["method"],
+            fr_wire::services::compaction::METHOD_SPILL_DISPATCH_LOG
+        );
+
+        // The policy omitted: registration is a no-op (the dsh apply's
+        // early return).
+        let inert_gate = serde_json::json!({ "auto": false, "cleanup-period-days": 0 });
+        let (mut inert, inert_host) = harness_with_config("spill-inert", Vec::new(), &inert_gate);
+        inert.register_spill_endpoints().expect("no-op");
+        assert!(inert_host.tools_calls.lock().expect("tools").is_empty());
+        assert!(inert_host.grants.lock().expect("grants").is_empty());
+    }
+
+    /// The shipped descriptor pins the two provided services, the five
+    /// injected faces, and the four listened events.
+    #[test]
+    fn descriptor_pins_provide_inject_and_listen() {
+        let parsed: serde_json::Value = serde_json::from_slice(super::DESCRIPTOR).expect("json");
+        assert_eq!(parsed["name"], super::PLUGIN_NAME);
+        assert_eq!(parsed["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(
+            parsed["provide"],
+            serde_json::json!(["compaction", "spill-store"])
+        );
+        assert_eq!(
+            parsed["inject"],
+            serde_json::json!([
+                "llm",
+                "token-meter",
+                "session-persistence",
+                "agent",
+                "tools"
+            ])
+        );
+        assert_eq!(
+            parsed["listen"],
+            serde_json::json!({
+                "agent/pre-step": 1,
+                "agent/status": 2,
+                "session/event": 3,
+                "agent/request-error": 4,
+            })
+        );
+    }
+
+    /// The startup sweep thread joins at teardown and the disabled
+    /// sweep spawns nothing (the join discipline).
+    #[test]
+    fn the_startup_sweep_joins_at_teardown() {
+        let root = temp_root("spill-sweep");
+        let sweep_gate = serde_json::json!({
+            "auto": false,
+            "spill-root": root.display().to_string(),
+            "cleanup-period-days": 1,
+        });
+        let (mut state, _host) = harness_with_config("spill-sweep", Vec::new(), &sweep_gate);
+        state.join_threads();
+        // A second join is a no-op (the handle is taken).
+        state.join_threads();
+        // The disabled sweep: nothing to join, the call still converges.
+        let off_gate = serde_json::json!({ "auto": false, "cleanup-period-days": 0 });
+        let (mut inert, _host) = harness_with_config("spill-sweep-off", Vec::new(), &off_gate);
+        inert.join_threads();
+    }
+
+    /// The full multimodal path rides the wire: the routed header picks
+    /// the pricing face, the access pair renders the readonly path into
+    /// the artifact, and the footer counts the omitted image.
+    #[test]
+    fn spill_images_price_and_render_through_the_wire() {
+        let (mut state, _host, root) = spill_harness("spill-image-wire");
+        let image = serde_json::json!({
+            "type": "image",
+            "attachment": {
+                "attachmentId": "sha256:shot",
+                "mediaType": "image/png",
+                "bytes": 8,
+                "width": 4,
+                "height": 3,
+            },
+        });
+        let enter = serde_json::json!({
+            "stage": "post-execute",
+            "leg": "enter",
+            "token": 9,
+            "call": { "callId": "c-img", "name": "shot", "agent": "s1" },
+            "result": { "kind": "success", "content": [image], "additionalContexts": [] },
+        });
+        let reply = spill_frame(
+            &mut state,
+            fr_wire::services::compaction::METHOD_SPILL_POST_EXECUTE,
+            &enter,
+        );
+        assert_eq!(reply["kind"], "delegate", "the listener defers first");
+        let exit = serde_json::json!({
+            "stage": "post-execute",
+            "leg": "exit",
+            "token": 9,
+            "decision": { "kind": "accept", "additionalContexts": [] },
+        });
+        let reply = spill_frame(
+            &mut state,
+            fr_wire::services::compaction::METHOD_SPILL_POST_EXECUTE,
+            &exit,
+        );
+        assert_eq!(reply["kind"], "final");
+        let decision = &reply["decision"];
+        let content = decision["content"].as_array().expect("content");
+        let inline = content
+            .iter()
+            .filter_map(|block| block.get("text").and_then(serde_json::Value::as_str))
+            .collect::<Vec<_>>()
+            .join("");
+        // The rendered image line rides the artifact (the full text),
+        // not the inline copy.
+        let first_entry = |dir: &std::path::Path| -> std::path::PathBuf {
+            dir.read_dir()
+                .expect("dir reads")
+                .next()
+                .expect("one entry")
+                .expect("entry reads")
+                .path()
+        };
+        let artifact = first_entry(&first_entry(&root));
+        let full = std::fs::read_to_string(artifact).expect("artifact reads");
+        let expected = "[Image: \"/exec/shot.png\"; \"image/png\"; 4x3.";
+        assert!(
+            full.contains(expected),
+            "the artifact renders the execution-world path: {full}"
+        );
+        assert!(
+            inline.contains("Omitted 1 images."),
+            "the whole image is omitted: {inline}"
+        );
     }
 }

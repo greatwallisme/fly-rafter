@@ -1786,3 +1786,17 @@
 - **环境教训**：umask 002 使 create_dir_all 产 0775——信任门合法拒绝；夹具显式 chmod。PTY 全量偶发（H1 已披露）隔离重跑绿。
 - **终门**：fmt ✓/clippy 0/全测 1840/0/doc ✓/三门禁 0×3。
 - **下一动作=17h-b spill-policy。**
+
+## 2026-11-03 — 17h-b 开工：真源全读+fr 缝勘察完毕（findings 钉存）
+
+- dsh spill-policy 三源文件全读（index/retention/notice 319 行）+派发日志臂异步语义实证（ptc bridge 单序车道）；fr 机制定位=Q101′A 两腿端点（fr-tools 零改动判例）；四缝现状：token-meter estimate 纯件已移植缺 face、llm 定价 face 已 serve 缺 access 接线（影响 meter 压力数学）、attachments store 已有缺 face、spill 本地库已落缺装配。
+- 裁决四问呈用户：Q1 派发日志臂形态 / Q2 estimateContent 通道 / Q3 定价 access 接线 / Q4 spill-store provide。
+
+## 2026-11-03 — 17h-b 完成：spill-policy 全链（两监听+存储装配+服务面+access 接线）
+
+- **四裁决**（用户）：Q1=2 连 fr-tools 注册面全落（PRD Q101′A 第四段增补落档）；Q2=1 token-meter ESTIMATE_CONTENT=6 新面；Q3=1 fr-llm-deepseek image_access 接线（inject += attachments/fs）；Q4=1 spill-store provide+SAVE_TEXT 重编号 0→4。
+- **交付**：fr-wire 四面扩展；fr-token-meter estimate-content 服臂；fr-attachment IMAGE_HOST_PATH 服臂；fr-llm-deepseek wire_image_access 工厂+descriptor 扩；fr-tools WireStage::DispatchLog+WireDispatchLog/LogEnter/LogExit/LogReply+mount_dispatch_log+shape_dispatch_log（containment=死端点回落 settled content）+四钉测；fr-compaction spill_policy.rs（retention/notice/bound 全 1:1）+ShellState 装配（store/sweep/两腿会话表）+注册例程+两 spill 端点+SAVE_TEXT 服臂+三配置键+16 新钉测。
+- **真 bug 两枚**（测试揭示）：merge_adjacent_text 首版漏查 prev 是否 text（图像块被覆写）；retain_content 共享块衔接切按 chars 计（应为 UTF-16 码元）。
+- **环境事故**：沙箱 mtime 怪癖（shell 写文件→cargo 假绿）——仓库文件一律 Write/Edit 工具+clean 铁锤验证；rg -r 三犯。
+- **终门认证**：fmt ✓/clippy workspace --all-targets -D warnings 0/全测（FR_DSH_SOURCE）1871 passed 0 failed 两连/doc ✓/三门禁 0×3/bind 幂等零漂移。基线 1840→1871（+31）。
+- **下一动作=17h-c：compactNow 服臂+maintenance 窗口消费。**

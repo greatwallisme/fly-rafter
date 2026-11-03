@@ -52,6 +52,7 @@ pub mod session_view;
 pub mod spill;
 pub mod spill_cleanup;
 pub mod spill_local;
+pub mod spill_policy;
 pub mod summarizer;
 pub mod tool_pairing;
 pub mod types;

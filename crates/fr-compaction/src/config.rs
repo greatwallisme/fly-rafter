@@ -34,9 +34,9 @@ const DEFAULT_MAX_OVERFLOW_RETRIES: i64 = 1;
 
 /// Complete public top-level configuration key set (the dsh
 /// `POLICY_CONFIG_KEYS` fields plus the table-level keys; the exact-target
-/// key set reuses the same policy fields, and the three pruner keys join
-/// the one-crate namespace per PRD 4.5).
-const BASIC_COMPACT_CONFIG_KEYS: [&str; 14] = [
+/// key set reuses the same policy fields, and the three pruner keys plus
+/// the three spill keys join the one-crate namespace per PRD 4.5).
+const BASIC_COMPACT_CONFIG_KEYS: [&str; 17] = [
     "threshold-ratio",
     "headroom-tokens",
     "retain-ratio",
@@ -51,6 +51,9 @@ const BASIC_COMPACT_CONFIG_KEYS: [&str; 14] = [
     "threshold-chars",
     "head-chars",
     "tail-chars",
+    "max-inline-tokens",
+    "spill-root",
+    "cleanup-period-days",
 ];
 
 /// Complete exact-target override key set.
@@ -175,6 +178,16 @@ pub struct ResolvedConfig {
     /// Validated pruner budgets (the dsh `ToolResultPruneConfig`; the
     /// keys join the one-crate namespace per PRD 4.5).
     pub prune: crate::pruner::PruneConfig,
+    /// The spill-policy cap (`max-inline-tokens`); `None` leaves the
+    /// spill-policy inert (the dsh apply's omitted-config early return).
+    pub spill_max_inline_tokens: Option<u64>,
+    /// The spill root (`spill-root`); `None` uses the private default
+    /// under the OS temp dir (the dsh `root`).
+    pub spill_root: Option<String>,
+    /// Days after which a spill file is sweep-eligible (`cleanup-period-days`,
+    /// default 30; `0` disables the sweep entirely — the dsh
+    /// `cleanupPeriodDays`).
+    pub spill_cleanup_period_days: u64,
 }
 
 /// Fully merged policy for one routed conversation target, before capacity
@@ -297,6 +310,7 @@ pub fn resolve_config(config: &Value) -> Result<ResolvedConfig, String> {
     }
 
     let prune = resolve_prune_config(map)?;
+    let spill = resolve_spill_config(map)?;
     Ok(ResolvedConfig {
         threshold_ratio,
         headroom_tokens,
@@ -313,7 +327,47 @@ pub fn resolve_config(config: &Value) -> Result<ResolvedConfig, String> {
         model_policies: resolved_policies,
         auto: map.get("auto").and_then(Value::as_bool).unwrap_or(true),
         prune,
+        spill_max_inline_tokens: spill.0,
+        spill_root: spill.1,
+        spill_cleanup_period_days: spill.2,
     })
+}
+
+/// Resolves the spill keys (the dsh `spill-policy` cap and the dsh
+/// `spill-local` backend config in the one-crate namespace; the dsh
+/// verbatim refusal text keeps its plugin prefix). Defaults: the policy
+/// stays inert when the cap is omitted; the sweep defaults to 30 days,
+/// `0` disables it.
+fn resolve_spill_config(
+    map: &serde_json::Map<String, Value>,
+) -> Result<(Option<u64>, Option<String>, u64), String> {
+    let max_inline_tokens = match map.get("max-inline-tokens") {
+        Some(value) => {
+            // The dsh verbatim refusal keeps its skeleton (the kebab key
+            // and the trailing `(got N)` clause included).
+            let number = value.as_u64().ok_or_else(|| {
+                format!(
+                    "spill-policy: max-inline-tokens must be a non-negative integer (got {value})"
+                )
+            })?;
+            Some(number)
+        }
+        None => None,
+    };
+    let root = match map.get("spill-root") {
+        Some(value) => {
+            let text = value
+                .as_str()
+                .ok_or_else(|| "spill-local: spill-root must be a string".to_owned())?;
+            Some(text.to_owned())
+        }
+        None => None,
+    };
+    let cleanup_days = match map.get("cleanup-period-days") {
+        Some(value) => non_negative_integer("spill-local: cleanup-period-days", value)?,
+        None => 30,
+    };
+    Ok((max_inline_tokens, root, cleanup_days))
 }
 
 /// Resolves and validates the pruner budgets (the dsh
@@ -814,6 +868,61 @@ mod tests {
         );
     }
 
+    /// The spill keys join the one-crate namespace: the cap, the root,
+    /// and the sweep period resolve with their dsh refusal texts.
+    #[test]
+    fn spill_keys_resolve_with_their_refusals() {
+        let resolved = resolve_config(&json!({
+            "max-inline-tokens": 12_500,
+            "spill-root": "/var/spill",
+            "cleanup-period-days": 0,
+        }))
+        .expect("spill config");
+        assert_eq!(resolved.spill_max_inline_tokens, Some(12_500));
+        assert_eq!(resolved.spill_root.as_deref(), Some("/var/spill"));
+        assert_eq!(resolved.spill_cleanup_period_days, 0);
+        // The dsh defaults: the cap omitted keeps the policy inert and
+        // the sweep defaults to 30 days.
+        let defaults = resolve_config(&json!({})).expect("defaults");
+        assert_eq!(defaults.spill_max_inline_tokens, None);
+        assert_eq!(defaults.spill_root, None);
+        assert_eq!(defaults.spill_cleanup_period_days, 30);
+    }
+
+    /// The cap refusal keeps the dsh verbatim skeleton (the plugin
+    /// prefix and the trailing `(got N)` clause included).
+    #[test]
+    fn the_cap_refusal_is_verbatim() {
+        let negative =
+            resolve_config(&json!({ "max-inline-tokens": -5 })).expect_err("negative cap");
+        assert_eq!(
+            negative,
+            "spill-policy: max-inline-tokens must be a non-negative integer (got -5)"
+        );
+        let fractional =
+            resolve_config(&json!({ "max-inline-tokens": 5.5 })).expect_err("fractional cap");
+        assert_eq!(
+            fractional,
+            "spill-policy: max-inline-tokens must be a non-negative integer (got 5.5)"
+        );
+    }
+
+    /// The spill-local keys validate their shapes.
+    #[test]
+    fn the_spill_local_keys_validate() {
+        let error = resolve_config(&json!({ "spill-root": 5 })).expect_err("root shape");
+        assert_eq!(error, "spill-local: spill-root must be a string");
+        let error =
+            resolve_config(&json!({ "cleanup-period-days": -1 })).expect_err("negative period");
+        assert_eq!(
+            error,
+            "spill-local: cleanup-period-days (-1) must be a non-negative integer"
+        );
+        // An unknown spill key still rides the vocabulary gate.
+        let error = resolve_config(&json!({ "spill-cleanup-days": 5 })).expect_err("unknown key");
+        assert!(error.contains("spill-cleanup-days"), "{error}");
+    }
+
     #[test]
     fn uses_low_friction_service_wide_defaults() {
         let resolved = resolve_config(&json!({})).expect("defaults");
@@ -835,6 +944,9 @@ mod tests {
                     head_chars: 4_096,
                     tail_chars: 1_024,
                 },
+                spill_max_inline_tokens: None,
+                spill_root: None,
+                spill_cleanup_period_days: 30,
             }
         );
         // A null config maps to the dsh default-parameter face.

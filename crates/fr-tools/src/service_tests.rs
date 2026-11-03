@@ -10,11 +10,12 @@ use dougong_abi::{HostExports, STATUS_FAILED, STATUS_INVALID_PAYLOAD, STATUS_OK,
 use serde_json::{Value, json};
 
 use super::service::{
-    DeadlineState, ExecEnter, ExecExit, ExecReply, HostSeam, METHOD_CANCEL, METHOD_DESCRIBE,
-    METHOD_DISPATCH, METHOD_EXECUTE, METHOD_EXECUTION_MODE, METHOD_FINALIZE, METHOD_PREPARE,
-    METHOD_REGISTER_LISTENER, METHOD_SET_APPROVAL, METHOD_SETTLED, METHOD_UNREGISTER_LISTENER,
-    METHOD_WIRE_SCHEMAS, PLUGIN_NAME, PostEnter, PostExit, PostReply, PreEnter, PreExit, PreReply,
-    RegisterListenerRequest, ToolEvents, ToolsService, WireEndpoint, WireOutcome, WireStage,
+    DeadlineState, ExecEnter, ExecExit, ExecReply, HostSeam, LogEnter, LogExit, LogReply,
+    METHOD_CANCEL, METHOD_DESCRIBE, METHOD_DISPATCH, METHOD_EXECUTE, METHOD_EXECUTION_MODE,
+    METHOD_FINALIZE, METHOD_PREPARE, METHOD_REGISTER_LISTENER, METHOD_SET_APPROVAL, METHOD_SETTLED,
+    METHOD_UNREGISTER_LISTENER, METHOD_WIRE_SCHEMAS, PLUGIN_NAME, PostEnter, PostExit, PostReply,
+    PreEnter, PreExit, PreReply, RegisterListenerRequest, ToolEvents, ToolsService,
+    WireDispatchLog, WireEndpoint, WireExecution, WireOutcome, WireStage,
 };
 use crate::definition::{DefineTool, ToolDefinition};
 use crate::registry::ToolRegistry;
@@ -1286,5 +1287,168 @@ fn wire_content_endpoints_install_prepared_content() {
             .iter()
             .any(|block| block["text"].as_str() == Some("projected")),
         "{result}"
+    );
+}
+
+/// Builds the settled sub-dispatch view the dispatch-log chain consumes.
+fn dispatch_log_fixture() -> WireDispatchLog {
+    WireDispatchLog {
+        exec: WireExecution {
+            token: 1,
+            root_call_id: None,
+            call_id: "parent-1".to_owned(),
+            name: "run_code".to_owned(),
+            schema: None,
+            arguments: json!({}),
+            agent: Some("session-1".to_owned()),
+            parent: None,
+        },
+        sub_call_id: "parent-1:ptc:1".to_owned(),
+        name: "huge_read".to_owned(),
+        is_error: false,
+        content: text_content("original"),
+    }
+}
+
+#[test]
+fn dispatch_log_final_answer_short_circuits_the_chain() {
+    // A final answer on the enter leg IS the logged copy; the exit leg
+    // never arrives.
+    let (_vtable, mut service) = service_with_host(Box::new(|_method, payload| {
+        let frame: LogEnter = serde_json::from_slice(payload).expect("enter frame");
+        assert_eq!(frame.stage.as_str(), "dispatch-log");
+        assert_eq!(frame.dispatch.sub_call_id, "parent-1:ptc:1");
+        Ok(serde_json::to_vec(&LogReply::Final {
+            content: text_content("short-circuit"),
+        })
+        .unwrap())
+    }));
+    let request = RegisterListenerRequest {
+        stage: WireStage::DispatchLog,
+        endpoint: WireEndpoint {
+            service: "spill".to_owned(),
+            method: 1,
+        },
+    };
+    service
+        .serve(
+            METHOD_REGISTER_LISTENER,
+            serde_json::to_vec(&request).unwrap().as_slice(),
+        )
+        .expect("register");
+    let logged = service.shape_dispatch_log(&dispatch_log_fixture());
+    assert_eq!(logged.len(), 1);
+    assert!(
+        matches!(&logged[0], fr_wire::content::ContentBlock::Known(block) if matches!(block, fr_wire::KnownContentBlock::Text { text } if text == "short-circuit")),
+        "the final content is the logged copy: {logged:?}"
+    );
+}
+
+#[test]
+fn dispatch_log_delegate_reports_the_downstream_content() {
+    // Delegate on enter runs the remaining chain (the settled default
+    // here); the exit leg receives the settled content and its final
+    // answer becomes the logged copy.
+    let (_vtable, mut service) = service_with_host(Box::new(|_method, payload| {
+        let text = String::from_utf8_lossy(payload).into_owned();
+        if text.contains("\"enter\"") {
+            let frame: LogEnter = serde_json::from_slice(text.as_bytes()).expect("enter frame");
+            assert_eq!(frame.dispatch.name, "huge_read");
+            Ok(serde_json::to_vec(&LogReply::Delegate).unwrap())
+        } else {
+            let frame: LogExit = serde_json::from_slice(text.as_bytes()).expect("exit frame");
+            assert_eq!(
+                frame.content.len(),
+                1,
+                "the settled content rode the exit leg"
+            );
+            Ok(serde_json::to_vec(&LogReply::Final {
+                content: text_content("bounded preview"),
+            })
+            .unwrap())
+        }
+    }));
+    let request = RegisterListenerRequest {
+        stage: WireStage::DispatchLog,
+        endpoint: WireEndpoint {
+            service: "spill".to_owned(),
+            method: 1,
+        },
+    };
+    service
+        .serve(
+            METHOD_REGISTER_LISTENER,
+            serde_json::to_vec(&request).unwrap().as_slice(),
+        )
+        .expect("register");
+    let logged = service.shape_dispatch_log(&dispatch_log_fixture());
+    assert!(
+        matches!(&logged[0], fr_wire::content::ContentBlock::Known(block) if matches!(block, fr_wire::KnownContentBlock::Text { text } if text == "bounded preview")),
+        "the exit-leg answer is the logged copy: {logged:?}"
+    );
+}
+
+#[test]
+fn dispatch_log_dead_endpoint_logs_the_settled_content() {
+    // The dsh containment: a dead listener falls away and the original
+    // settled content is what gets logged, on both the enter and the
+    // exit leg.
+    let (_vtable, mut service) = service_with_host(Box::new(|_method, _payload| {
+        Err("endpoint exploded".to_owned())
+    }));
+    let request = RegisterListenerRequest {
+        stage: WireStage::DispatchLog,
+        endpoint: WireEndpoint {
+            service: "spill".to_owned(),
+            method: 1,
+        },
+    };
+    service
+        .serve(
+            METHOD_REGISTER_LISTENER,
+            serde_json::to_vec(&request).unwrap().as_slice(),
+        )
+        .expect("register");
+    let logged = service.shape_dispatch_log(&dispatch_log_fixture());
+    assert!(
+        matches!(&logged[0], fr_wire::content::ContentBlock::Known(block) if matches!(block, fr_wire::KnownContentBlock::Text { text } if text == "original")),
+        "the settled content survives a dead endpoint: {logged:?}"
+    );
+}
+
+#[test]
+fn dispatch_log_unregistration_drops_the_listener() {
+    let (_vtable, mut service) = service_with_host(Box::new(|_method, _payload| {
+        Ok(serde_json::to_vec(&LogReply::Final {
+            content: text_content("short-circuit"),
+        })
+        .unwrap())
+    }));
+    let request = RegisterListenerRequest {
+        stage: WireStage::DispatchLog,
+        endpoint: WireEndpoint {
+            service: "spill".to_owned(),
+            method: 1,
+        },
+    };
+    let reply = service
+        .serve(
+            METHOD_REGISTER_LISTENER,
+            serde_json::to_vec(&request).unwrap().as_slice(),
+        )
+        .expect("register");
+    let parsed: Value = serde_json::from_slice(&reply).expect("json");
+    let id = parsed["id"].as_u64().expect("registration id");
+    let unregister = json!({ "id": id });
+    service
+        .serve(
+            METHOD_UNREGISTER_LISTENER,
+            serde_json::to_vec(&unregister).unwrap().as_slice(),
+        )
+        .expect("unregister");
+    let logged = service.shape_dispatch_log(&dispatch_log_fixture());
+    assert!(
+        matches!(&logged[0], fr_wire::content::ContentBlock::Known(block) if matches!(block, fr_wire::KnownContentBlock::Text { text } if text == "original")),
+        "the unregistered listener no longer reshapes: {logged:?}"
     );
 }

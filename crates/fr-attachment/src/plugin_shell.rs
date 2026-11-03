@@ -102,6 +102,35 @@ pub fn dispatch(state: &ShellState, method: u32, payload: &[u8]) -> Result<Vec<u
             Ok(serde_json::to_vec(&reference)
                 .map_err(|error| format!("save-image reply encode failed: {error}"))?)
         }
+        face::METHOD_IMAGE_HOST_PATH => {
+            let request: serde_json::Value = serde_json::from_slice(payload)
+                .map_err(|error| format!("attachments payload must be JSON: {error}"))?;
+            let reference: fr_wire::ImageAttachmentRef = serde_json::from_value(
+                request
+                    .get("ref")
+                    .cloned()
+                    .ok_or_else(|| "image-host-path payload requires ref".to_owned())?,
+            )
+            .map_err(|error| {
+                serde_json::json!({
+                    "attachmentError": {
+                        "message": format!("durable reference decode failed: {error}"),
+                        "code": "ATTACHMENT_INVALID_REFERENCE",
+                    },
+                })
+                .to_string()
+            })?;
+            let path = state.store.image_host_path(&reference).map_err(|error| {
+                serde_json::json!({
+                    "attachmentError": { "message": error.message(), "code": error.code() },
+                })
+                .to_string()
+            })?;
+            Ok(serde_json::to_vec(&serde_json::json!({
+                "path": path,
+            }))
+            .map_err(|error| format!("image-host-path reply encode failed: {error}"))?)
+        }
         _ => Err(format!("unknown fr-attachment method {method}")),
     }
 }
@@ -363,6 +392,72 @@ mod tests {
         .expect_err("refuses");
         let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
         assert_eq!(parsed["attachmentError"]["code"], "INVALID_IMAGE");
+    }
+
+    /// The host-path face resolves the stored normalized object path for
+    /// one saved reference and refuses an invalid one (the dsh
+    /// `imageHostPath` pair).
+    #[test]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the test raster is 4x3, far below one byte per channel"
+    )]
+    fn image_host_path_resolves_and_refuses() {
+        let pixels = image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(4, 3, |x, y| {
+            image::Rgb([x as u8, y as u8, 9])
+        }));
+        let mut bytes = Vec::new();
+        pixels
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
+            .expect("encodes");
+        let saved = dispatch(
+            &state(),
+            face::METHOD_SAVE_IMAGE,
+            serde_json::to_vec(&serde_json::json!({
+                "data": fr_wire::base64::encode_base64(&bytes),
+                "mediaType": "image/png",
+            }))
+            .expect("encodes")
+            .as_slice(),
+        )
+        .expect("saves");
+        let saved: serde_json::Value = serde_json::from_slice(&saved).expect("json");
+
+        let reply = dispatch(
+            &state(),
+            face::METHOD_IMAGE_HOST_PATH,
+            serde_json::to_vec(&serde_json::json!({ "ref": saved }))
+                .expect("encodes")
+                .as_slice(),
+        )
+        .expect("resolves");
+        let reply: serde_json::Value = serde_json::from_slice(&reply).expect("json");
+        let path = reply["path"].as_str().expect("path");
+        let id = saved["attachmentId"].as_str().expect("id");
+        let hash = id.strip_prefix("sha256:").expect("sha256 id");
+        assert!(
+            path.ends_with(&format!("objects/{}/{}", &hash[..2], hash)),
+            "content-addressed layout: {path}"
+        );
+
+        let body = dispatch(
+            &state(),
+            face::METHOD_IMAGE_HOST_PATH,
+            serde_json::to_vec(&serde_json::json!({
+                "ref": {"attachmentId": "sha256:nope", "mediaType": "image/png", "width": 1, "height": 1},
+            }))
+            .expect("encodes")
+            .as_slice(),
+        )
+        .expect_err("refuses");
+        let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(
+            parsed["attachmentError"]["code"],
+            "ATTACHMENT_INVALID_REFERENCE"
+        );
     }
 
     #[test]
