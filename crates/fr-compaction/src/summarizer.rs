@@ -82,6 +82,7 @@ pub fn finish_error(finish: &FinishReason) -> Option<CompactionFailure> {
                 message: "summarization truncated at the token cap (incomplete checkpoint)"
                     .to_owned(),
                 code: Some("MAX_TOKENS".to_owned()),
+                failure: None,
             })
         }
         FinishReason::Known(
@@ -90,6 +91,7 @@ pub fn finish_error(finish: &FinishReason) -> Option<CompactionFailure> {
         ) => Some(CompactionFailure::Llm {
             message: failure.message.clone(),
             code: Some(failure.code.clone()),
+            failure: Some(Box::new(failure.clone())),
         }),
         _ => None,
     }
@@ -109,6 +111,7 @@ pub fn summary_text(blocks: &[ContentBlock]) -> Result<Vec<ContentBlock>, Compac
         return Err(CompactionFailure::Llm {
             message: "compaction summary cannot contain image output".to_owned(),
             code: Some("UNSUPPORTED_CONTENT".to_owned()),
+            failure: None,
         });
     }
     Ok(blocks
@@ -134,12 +137,21 @@ pub enum CompactionFailure {
     SurfaceChanged(String),
     /// An LLM-seam or other coded failure: the message plus the provider
     /// error code when one applies (`MAX_TOKENS`, `UNSUPPORTED_CONTENT`,
-    /// `CONTEXT_WINDOW_EXCEEDED`, `IMAGE_OFFLOAD_REQUIRED`, ...).
+    /// `CONTEXT_WINDOW_EXCEEDED`, `IMAGE_OFFLOAD_REQUIRED`, ...). A
+    /// provider failure carries the full wire failure facts (the dsh
+    /// `LlmError` keeps the failure object; the summary-error recovery
+    /// consumer reads `offloadImages` off it).
     Llm {
         /// The verbatim failure message.
         message: String,
         /// The provider error code, when one applies.
         code: Option<String>,
+        /// The full provider failure facts, when the failure came from a
+        /// provider finish (absent for the synthesized `MAX_TOKENS` and
+        /// `UNSUPPORTED_CONTENT` diagnostics, mirroring the dsh arms that
+        /// build a bare coded error). Boxed so the enum stays small —
+        /// the failure rides hot closures.
+        failure: Option<Box<fr_wire::Failure>>,
     },
     /// Any other backend diagnostic, carried verbatim.
     Other(String),
@@ -207,6 +219,7 @@ mod tests {
                 message: "summarization truncated at the token cap (incomplete checkpoint)"
                     .to_owned(),
                 code: Some("MAX_TOKENS".to_owned()),
+                failure: None,
             }
         );
         let aborted = FinishReason::Known(FinishReasonKind::Aborted {
@@ -224,6 +237,14 @@ mod tests {
             CompactionFailure::Llm {
                 message: "cancelled".to_owned(),
                 code: Some("ABORTED".to_owned()),
+                failure: Some(Box::new(fr_wire::call_config::Failure {
+                    message: "cancelled".to_owned(),
+                    code: "ABORTED".to_owned(),
+                    status: None,
+                    provider_retry_after_ms: None,
+                    request_id: None,
+                    offload_images: None,
+                })),
             }
         );
         let stop = FinishReason::Known(FinishReasonKind::Stop);
@@ -250,6 +271,7 @@ mod tests {
             CompactionFailure::Llm {
                 message: "compaction summary cannot contain image output".to_owned(),
                 code: Some("UNSUPPORTED_CONTENT".to_owned()),
+                failure: None,
             }
         );
         let reasoning = ContentBlock::Known(KnownContentBlock::Reasoning {

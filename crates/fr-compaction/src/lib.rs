@@ -40,9 +40,13 @@
 pub mod brand;
 pub mod checkpoint;
 pub mod config;
+pub mod engine;
+pub mod llm_face;
 pub mod meter;
+pub mod plugin_shell;
 pub mod prompts;
 pub mod region;
+pub mod session_view;
 pub mod summarizer;
 pub mod tool_pairing;
 pub mod types;

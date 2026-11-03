@@ -38,8 +38,18 @@ use crate::assistant_stream::AssistantStreamFrame;
 use crate::outbound::Outbound;
 use crate::phase::AgentStatus;
 
-/// Observer event: the loop's status flipped (decision 46 face).
-pub const EVENT_STATUS: &str = "agent/status";
+/// Waterfall middleware event: one proposed step boundary (the dsh
+/// `agent/pre-step`; fr-agent-loop dispatches it to the kernel bus on
+/// every step proposal — the 17f outbound wiring).
+pub use fr_wire::services::events::EVENT_PRE_STEP;
+/// Waterfall middleware event: one failed attempt's retry ruling (the
+/// dsh `agent/request-error`; fr-agent-loop dispatches it to the kernel
+/// bus on every failed attempt — the 17f outbound wiring).
+pub use fr_wire::services::events::EVENT_REQUEST_ERROR;
+/// Observer event: the loop's status flipped (decision 46 face). The
+/// name rides the shared protocol table (`fr_wire::events`); the other
+/// plugins listen by the same constant.
+pub use fr_wire::services::events::EVENT_STATUS;
 /// Observer event: the loop reported one failure at its live boundary.
 pub const EVENT_ERROR: &str = "agent/error";
 /// Observer event: one assistant attempt frame.
@@ -50,12 +60,8 @@ pub const EVENT_INBOX_CLAIMED: &str = "agent/inbox/claimed";
 pub const EVENT_INBOX_INSERTED: &str = "agent/inbox/inserted";
 /// Observer event: one pending inbox message was dropped.
 pub const EVENT_INBOX_DISCARDED: &str = "agent/inbox/discarded";
-/// Middleware event (waterfall): the pre-step decision.
-pub const EVENT_PRE_STEP: &str = "agent/pre-step";
 /// Middleware event (waterfall): the request config proposal.
 pub const EVENT_REQUEST: &str = "agent/request";
-/// Middleware event (waterfall): the failed-attempt retry ruling.
-pub const EVENT_REQUEST_ERROR: &str = "agent/request-error";
 /// Middleware event (serial): a turn is about to end.
 pub const EVENT_TURN_STOPPING: &str = "agent/turn-stopping";
 
@@ -72,12 +78,50 @@ pub type ListenerError = Box<dyn Error + Send + Sync>;
 /// Where contained listener failures go.
 pub type WarnSink = Arc<dyn Fn(&str) + Send + Sync>;
 
-/// The `agent/status` payload.
+/// The `agent/status` payload (the dsh payload carries the agent subject
+/// itself; the honest wire serialization names the session).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusPayload {
+    /// The session whose status flipped.
+    pub session_id: String,
     /// The loop's status.
     pub status: AgentStatus,
+}
+
+/// The `agent/pre-step` wire payload: the claimed batch proposed for one
+/// step, named by session (the dsh payload injects the agent object).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreStepEventPayload {
+    /// The session whose step is proposed.
+    pub session_id: String,
+    /// The claimed input batch.
+    pub messages: Vec<Message>,
+    /// The turn the step belongs to.
+    pub turn: u64,
+    /// The step's number within the turn.
+    pub step: u64,
+}
+
+/// The `agent/request-error` wire payload: one failed attempt's facts,
+/// named by session (the dsh payload injects the agent object).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestErrorEventPayload {
+    /// The session whose attempt failed.
+    pub session_id: String,
+    /// The turn the attempt belonged to.
+    pub turn: u64,
+    /// The step the attempt belonged to.
+    pub step: u64,
+    /// The provider route that failed.
+    pub provider: String,
+    /// The structured failure facts.
+    pub failure: Failure,
+    /// The prepared call's declared retry policy in its wire form, when
+    /// one was bound.
+    pub retry_policy: Option<fr_llm::generation::WireRetryPolicy>,
 }
 
 /// The batched `agent/assistant-stream` mirror payload: every bus
@@ -371,9 +415,12 @@ impl AgentEvents {
         self.request_error.push(listener);
     }
 
-    /// Publishes one status flip.
-    pub fn emit_status(&self, status: AgentStatus) {
-        let payload = StatusPayload { status };
+    /// Publishes one status flip for the named session.
+    pub fn emit_status(&self, session_id: &str, status: AgentStatus) {
+        let payload = StatusPayload {
+            session_id: session_id.to_owned(),
+            status,
+        };
         for listener in &self.status {
             if let Err(error) = listener(payload.status) {
                 self.warn_listener_failure(EVENT_STATUS, &error);
@@ -607,7 +654,7 @@ mod tests {
         }
         Outbound::new(HostExports {
             grant: crate::outbound::quiet_grant,
-            dispatch: crate::outbound::noop_dispatch,
+            dispatch: crate::outbound::identity_dispatch,
             host_handle: std::ptr::null_mut(),
             require: quiet_require,
             emit: quiet_emit,
@@ -638,7 +685,7 @@ mod tests {
             seen_second.lock().expect("test lock").push("second");
             Ok(())
         }));
-        events.emit_status(AgentStatus::Running);
+        events.emit_status("session-1", AgentStatus::Running);
         assert_eq!(*seen.lock().expect("test lock"), ["first", "second"]);
         assert_eq!(
             log.0.lock().expect("test lock").as_slice(),
@@ -689,13 +736,13 @@ mod tests {
         let bus: *mut Bus = Box::into_raw(Box::new(Bus::default()));
         let outbound = Outbound::new(HostExports {
             grant: crate::outbound::quiet_grant,
-            dispatch: crate::outbound::noop_dispatch,
+            dispatch: crate::outbound::identity_dispatch,
             host_handle: bus.cast::<c_void>(),
             require: quiet_require,
             emit: recording_emit,
         });
         let (events, _log) = face_with(outbound);
-        events.emit_status(AgentStatus::Running);
+        events.emit_status("s1", AgentStatus::Running);
         events.emit_inbox_claimed(&InboxClaimedPayload {
             session_id: "s1".to_owned(),
             message: user_message("task"),
@@ -711,7 +758,10 @@ mod tests {
             names,
             ["agent/status".to_owned(), "agent/inbox/claimed".to_owned()]
         );
-        assert_eq!(recorded[0].1, serde_json::json!({ "status": "running" }));
+        assert_eq!(
+            recorded[0].1,
+            serde_json::json!({ "sessionId": "s1", "status": "running" })
+        );
         assert_eq!(recorded[1].1["turn"], 4);
         assert_eq!(recorded[1].1["message"]["id"], "msg-task");
     }
@@ -977,7 +1027,7 @@ mod tests {
         let events = AgentEvents::new(
             crate::outbound::Outbound::new(HostExports {
                 grant: crate::outbound::quiet_grant,
-                dispatch: crate::outbound::noop_dispatch,
+                dispatch: crate::outbound::identity_dispatch,
                 host_handle: handle.cast_mut().cast::<std::ffi::c_void>(),
                 require: recording_require,
                 emit: recording_emit,

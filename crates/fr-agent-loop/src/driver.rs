@@ -56,14 +56,16 @@ use fr_wire::stream::StreamChunk;
 use fr_wire::{ContentBlock, KnownContentBlock, RawObject, SessionSeq, TrueOnly};
 
 use crate::agent_events::{
-    AgentEvents, AssistantStreamPayload, ErrorPayload, PreStepDecision, PreStepPayload,
-    RequestErrorAction, RequestErrorPayload, RequestPayload, TurnStoppingPayload,
+    AgentEvents, AssistantStreamPayload, EVENT_PRE_STEP, EVENT_REQUEST_ERROR, ErrorPayload,
+    PreStepDecision, PreStepEventPayload, PreStepPayload, RequestErrorAction,
+    RequestErrorEventPayload, RequestErrorPayload, RequestPayload, TurnStoppingPayload,
 };
 use crate::assistant_stream::{
     AssistantStreamAttempt, FrameSink, RevisionAllocator, SettlementType,
 };
 use crate::inbox::InboxTarget;
 use crate::loop_inbox::{InboxError, LoopInbox};
+use crate::outbound::WATERFALL_MODE;
 use crate::phase::{AbortLatch, Phase, PhaseMachine};
 use crate::plugin_shell::{InboundCommand, SessionMailbox};
 use crate::runtime_context::{
@@ -425,6 +427,10 @@ pub enum DriverError {
         /// The recovery-append failure.
         recovery: Box<Self>,
     },
+    /// A kernel event dispatch failed (the dsh waterfall listener-throw
+    /// face: a chain listener's rejection propagates to the dispatcher,
+    /// which the dsh step body surfaces as its thrown error).
+    Dispatch(String),
     /// Any other failure (verbatim dsh error texts live here).
     Text(String),
 }
@@ -436,9 +442,11 @@ impl fmt::Display for DriverError {
             Self::Session(error) => write!(f, "{error}"),
             Self::Inbox(error) => write!(f, "{error}"),
             Self::Llm(error) => write!(f, "{error}"),
-            Self::Prompt(text) | Self::Skills(text) | Self::Tool(text) | Self::Text(text) => {
-                f.write_str(text)
-            }
+            Self::Prompt(text)
+            | Self::Skills(text)
+            | Self::Tool(text)
+            | Self::Dispatch(text)
+            | Self::Text(text) => f.write_str(text),
             Self::Listener(error) => write!(f, "{error}"),
             Self::Settlement { .. } => {
                 f.write_str("Assistant stream failed and its durable settlement was rejected")
@@ -464,6 +472,7 @@ impl Error for DriverError {
             | Self::Prompt(_)
             | Self::Skills(_)
             | Self::Tool(_)
+            | Self::Dispatch(_)
             | Self::Text(_) => None,
         }
     }
@@ -776,12 +785,16 @@ impl LoopDriver {
             boundary = fold_turn_boundary(boundary, event);
         }
         let session_id = SessionId::new(session_id.to_owned());
+        // Publish the declared route (the dsh `agent.options` face; the
+        // query route fields are the summarizer's third target fallback).
+        mailbox.set_route(options.provider.clone(), options.model.clone());
         let client = SessionClient::new(mailbox.outbound(), session_id.as_str());
         let inbox = LoopInbox::restored(client.clone(), Arc::clone(&events), &view.events)?;
         let runtime_context =
             RuntimeContextProjection::restore(view.events.iter().rev(), &view.surface);
         let request_surface_generation = deps.reads.surface_generation();
         let machine = PhaseMachine::new(
+            session_id.as_str(),
             Phase::Idle {
                 last_turn: boundary.last_turn,
             },
@@ -847,6 +860,7 @@ impl LoopDriver {
             // An idle driver consumes no notifications; dropping them here
             // keeps the queue bounded (Q84-B2 loss is harmless).
             drop(self.mailbox.drain_notifications());
+            self.sync_window();
             self.apply_commands();
             while self.kick_pending {
                 self.kick_pending = false;
@@ -870,6 +884,10 @@ impl LoopDriver {
     ///
     /// Returns the job's failure, or the active-work rejection when the
     /// loop is not idle.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mailbox lock is poisoned (a holder panicked).
     pub fn run_maintenance<T>(
         &mut self,
         job: impl FnOnce(&AbortLatch) -> Result<T, DriverError>,
@@ -880,9 +898,25 @@ impl LoopDriver {
                 self.session_id
             )));
         }
+        // The window marker is the single maintenance fact both forms
+        // share: an open remote window means a remote job owns the loop,
+        // and this in-process form must refuse just like the wire face.
+        if self.mailbox.window_active() {
+            return Err(DriverError::Text(format!(
+                "agent \"{}\" already has active work",
+                self.session_id
+            )));
+        }
         let Phase::Idle { last_turn } = *self.machine.phase() else {
             unreachable!("the idle check above holds");
         };
+        // Register a local window so a concurrent wire `begin` (and the
+        // poll/end faces) sees this job as the active maintenance; the
+        // token is never observed outside this call.
+        let token = self
+            .mailbox
+            .maintenance_begin(self.session_id.as_str())
+            .expect("the idle checks above hold");
         self.machine.commit(Phase::Maintenance {
             abort: AbortLatch::new(),
             last_turn,
@@ -907,6 +941,9 @@ impl LoopDriver {
             _ => unreachable!("the job cannot leave the maintenance phase"),
         };
         self.machine.commit(Phase::Idle { last_turn });
+        // Drop the local window; the phase is already converged, so the
+        // convergence rider is not needed.
+        let _ = self.mailbox.maintenance_end(&token);
         let disposed = matches!(cause, Some(CancelCause::Disposed));
         if !disposed && wake_requested && self.inbox.has_pending() {
             self.wake_driver(false);
@@ -921,17 +958,68 @@ impl LoopDriver {
     /// already returned "queued").
     fn apply_commands(&mut self) {
         for command in self.mailbox.drain_commands() {
-            let result = match command {
+            match command {
                 InboundCommand::Input {
                     target,
                     message,
                     wakeup,
-                } => self.send(target, message, wakeup),
-                InboundCommand::Cancel { cause, keep_inbox } => self.cancel(cause, keep_inbox),
-            };
-            if let Err(error) = result {
-                drop(self.throw_error(error));
+                } => {
+                    let result = self.send(target, message, wakeup);
+                    if let Err(error) = result {
+                        drop(self.throw_error(error));
+                    }
+                }
+                InboundCommand::Cancel { cause, keep_inbox } => {
+                    let result = self.cancel(cause, keep_inbox);
+                    if let Err(error) = result {
+                        drop(self.throw_error(error));
+                    }
+                }
+                // The remote window's convergence rider: the window is
+                // already closed shell-side; commit the idle phase and
+                // replay a latched wake (the dsh `runMaintenance`
+                // `finally`). A no-op when the phase never mirrored the
+                // window (it closed before the driver parked again).
+                InboundCommand::MaintenanceEnd => self.converge_maintenance(),
             }
+        }
+    }
+
+    /// Mirrors an open remote maintenance window into the driver's phase
+    /// machine (the idle arm only): the window and the `Running` commit
+    /// serialize on the shell's window marker, so a window opened during
+    /// the begin/running race still lands the maintenance phase before
+    /// any queued command applies.
+    fn sync_window(&mut self) {
+        if !self.mailbox.window_active() {
+            return;
+        }
+        if let Phase::Idle { last_turn } = *self.machine.phase() {
+            self.machine.commit(Phase::Maintenance {
+                abort: AbortLatch::new(),
+                last_turn,
+                wake_requested: false,
+            });
+        }
+    }
+
+    /// Converges the maintenance phase (the dsh `runMaintenance`
+    /// `finally`): commit idle, then replay a latched wake unless the
+    /// window was disposed.
+    fn converge_maintenance(&mut self) {
+        let Phase::Maintenance {
+            abort: ref latch,
+            last_turn,
+            wake_requested,
+        } = *self.machine.phase()
+        else {
+            return;
+        };
+        let cause = latch.aborted_cause().cloned();
+        self.machine.commit(Phase::Idle { last_turn });
+        let disposed = matches!(cause, Some(CancelCause::Disposed));
+        if !disposed && wake_requested && self.inbox.has_pending() {
+            self.wake_driver(false);
         }
     }
 
@@ -969,6 +1057,14 @@ impl LoopDriver {
             self.set_wake_requested(false);
         }
         self.arm_latch(cause);
+        // A cancel during a maintenance window arms the window's shared
+        // abort flag (the dsh job signal's wire face): the remote job's
+        // poll observes it and aborts its in-flight summarization. The
+        // flag arms whether or not the driver has mirrored the window
+        // into the phase machine yet.
+        if self.mailbox.window_active() {
+            self.mailbox.mark_window_aborted();
+        }
         Ok(())
     }
 
@@ -977,6 +1073,10 @@ impl LoopDriver {
     /// teardown waits on no model turn. The idle arm opens the running
     /// phase and marks the kick the run loop then executes.
     fn wake_driver(&mut self, wake_after_abort: bool) {
+        // Mirror a fresh remote window before the idle arm runs, so a
+        // send racing the window latches behind maintenance instead of
+        // opening a running phase beside it.
+        self.sync_window();
         if !matches!(self.machine.phase(), Phase::Idle { .. }) {
             let disposed = matches!(self.abort_cause(), Some(CancelCause::Disposed));
             let latching = matches!(self.machine.phase(), Phase::Maintenance { .. });
@@ -1320,6 +1420,44 @@ impl LoopDriver {
         Ok(())
     }
 
+    /// Decodes a short-circuited `agent/pre-step` chain value (the dsh
+    /// `PreStepDecision` wire form: `{"kind":"reject"}` or
+    /// `{"kind":"enter","messages":[...],"startsRequestSeries"?}`).
+    fn decode_pre_step_decision(bytes: &[u8]) -> Result<PreStepDecision, DriverError> {
+        #[derive(serde::Deserialize)]
+        #[serde(tag = "kind", rename_all = "kebab-case")]
+        enum WireDecision {
+            Reject,
+            Enter {
+                messages: Vec<Message>,
+                #[serde(default)]
+                starts_request_series: bool,
+            },
+        }
+        let decision: WireDecision = serde_json::from_slice(bytes).map_err(|error| {
+            DriverError::Dispatch(format!("pre-step chain value is not a decision: {error}"))
+        })?;
+        Ok(match decision {
+            WireDecision::Reject => PreStepDecision::Reject,
+            WireDecision::Enter {
+                messages,
+                starts_request_series,
+            } => PreStepDecision::Enter {
+                messages,
+                starts_request_series,
+            },
+        })
+    }
+
+    /// Decodes a short-circuited `agent/request-error` chain value (the
+    /// dsh ruling wire form: `{"kind":"retry"}` rules a retry, any other
+    /// JSON value keeps the no-retry default).
+    fn decode_request_error_action(bytes: &[u8]) -> Option<RequestErrorAction> {
+        let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+        let kind = value.get("kind").and_then(serde_json::Value::as_str)?;
+        (kind == "retry").then_some(RequestErrorAction::Retry)
+    }
+
     /// Proposes one step boundary (dsh `preStep`): claim, assemble,
     /// waterfall, with abort checks around the assembled prompt.
     fn pre_step(
@@ -1332,31 +1470,55 @@ impl LoopDriver {
         let claimed = self.inbox.claim(target, turn).map_err(DriverError::Inbox)?;
         let assembly = self.prompt.assemble().map_err(DriverError::Prompt)?;
         self.poll()?;
+        // The kernel chain runs the bus listeners first (dsh: one kernel
+        // waterfall wraps every listener and the default tail; the fr port
+        // keeps the in-process registry as the middle layer and the
+        // runtime-context tail as the innermost). An untouched chain
+        // reports the original payload bytes (the identity continuation);
+        // a short-circuiting listener's chain value is the decision JSON.
+        let wire = PreStepEventPayload {
+            session_id: self.session_id.as_str().to_owned(),
+            messages: claimed,
+            turn,
+            step,
+        };
+        let bytes = serde_json::to_vec(&wire).map_err(|error| {
+            DriverError::Dispatch(format!("pre-step payload encode failed: {error}"))
+        })?;
         // The instructions fold needs the claimed batch after the
         // waterfall consumed it (dsh's listener closes over `messages`).
-        let claimed_copy = self.instructions.is_some().then(|| claimed.clone());
-        let runtime_context = &self.runtime_context;
-        let next_id = &self.next_id;
-        let joined = assembly.joined_sections.clone();
-        let sections = assembly.context_sections.clone();
-        let decision = self.events.waterfall_pre_step(
-            PreStepPayload {
-                messages: claimed,
-                turn,
-                step,
-            },
-            Box::new(move |payload| {
-                let context = runtime_context.project(&joined, &sections, next_id);
-                let mut messages = payload.messages;
-                if let Some(context) = context {
-                    messages.push(context);
-                }
-                PreStepDecision::Enter {
-                    messages,
-                    starts_request_series: false,
-                }
-            }),
-        );
+        let claimed_copy = self.instructions.is_some().then(|| wire.messages.clone());
+        let reply = self
+            .events
+            .outbound()
+            .dispatch(EVENT_PRE_STEP, WATERFALL_MODE, &bytes)
+            .map_err(|error| DriverError::Dispatch(error.to_string()))?;
+        let decision = if reply == bytes {
+            let runtime_context = &self.runtime_context;
+            let next_id = &self.next_id;
+            let joined = assembly.joined_sections.clone();
+            let sections = assembly.context_sections.clone();
+            self.events.waterfall_pre_step(
+                PreStepPayload {
+                    messages: wire.messages,
+                    turn,
+                    step,
+                },
+                Box::new(move |payload| {
+                    let context = runtime_context.project(&joined, &sections, next_id);
+                    let mut messages = payload.messages;
+                    if let Some(context) = context {
+                        messages.push(context);
+                    }
+                    PreStepDecision::Enter {
+                        messages,
+                        starts_request_series: false,
+                    }
+                }),
+            )
+        } else {
+            Self::decode_pre_step_decision(&reply)?
+        };
         self.poll()?;
         // The skills pre-step transform (the 16f batch-2 service band):
         // called only on an `Enter` decision (dsh both pre-step
@@ -2090,6 +2252,52 @@ impl LoopDriver {
         Ok(())
     }
 
+    /// Rules one failed attempt's retry through the kernel chain first
+    /// (the 17f outbound wiring): bus listeners rule before the
+    /// in-process registry; an untouched chain keeps the no-retry
+    /// default, and a listener's chain value decodes as the dsh
+    /// `RequestErrorAction`.
+    fn retry_ruling(
+        &self,
+        turn: u64,
+        step: u64,
+        request: &GenerateOptions,
+        prepared: Option<&PreparedCall>,
+        failure: &fr_wire::Failure,
+    ) -> Result<Option<RequestErrorAction>, DriverError> {
+        let wire = RequestErrorEventPayload {
+            session_id: self.session_id.as_str().to_owned(),
+            turn,
+            step,
+            provider: request.provider.clone(),
+            failure: failure.clone(),
+            retry_policy: prepared
+                .and_then(|p| p.retry_policy.as_ref())
+                .map(fr_llm::generation::WireRetryPolicy::from),
+        };
+        let bytes = serde_json::to_vec(&wire).map_err(|error| {
+            DriverError::Dispatch(format!("request-error payload encode failed: {error}"))
+        })?;
+        let reply = self
+            .events
+            .outbound()
+            .dispatch(EVENT_REQUEST_ERROR, WATERFALL_MODE, &bytes)
+            .map_err(|error| DriverError::Dispatch(error.to_string()))?;
+        if reply == bytes {
+            return Ok(self.events.waterfall_request_error(
+                RequestErrorPayload {
+                    turn,
+                    step,
+                    provider: request.provider.clone(),
+                    failure: failure.clone(),
+                    retry_policy: prepared.and_then(|p| p.retry_policy.clone()),
+                },
+                Box::new(|_| None),
+            ));
+        }
+        Ok(Self::decode_request_error_action(&reply))
+    }
+
     /// Settles one completed stream (dsh the post-stream block): failed
     /// finishes settle an attempt and consult the retry waterfall;
     /// successful ones commit the message and continue into tools.
@@ -2123,16 +2331,7 @@ impl LoopDriver {
                         .map(|event| event.seq)
                 })?;
             }
-            let action = self.events.waterfall_request_error(
-                RequestErrorPayload {
-                    turn,
-                    step,
-                    provider: request.provider.clone(),
-                    failure: failure.clone(),
-                    retry_policy: prepared.and_then(|p| p.retry_policy.clone()),
-                },
-                Box::new(|_| None),
-            );
+            let action = self.retry_ruling(turn, step, request, prepared, &failure)?;
             self.poll()?;
             if action != Some(RequestErrorAction::Retry) {
                 return Err(DriverError::Llm(llm_error(&failure)));
@@ -2707,7 +2906,7 @@ mod tests {
     use crate::outbound::Outbound;
     use crate::plugin_shell::{InboundCommand, SessionMap, session_mailbox};
     use dougong_abi::{HostExports, STATUS_OK};
-    use fr_llm::adapter::{GenerateOptions, LlmCallConfig, ResolvedModelInfo};
+    use fr_llm::adapter::{GenerateOptions, LlmCallConfig, RequestMessage, ResolvedModelInfo};
     use fr_llm::error::LlmError;
     use fr_wire::ContentBlock;
     use fr_wire::KnownContentBlock;
@@ -3034,6 +3233,9 @@ mod tests {
         scripts: std::collections::VecDeque<Script>,
         prepared: Vec<LlmCallConfig>,
         in_history: bool,
+        /// The model-visible batch each `begin` received, in request
+        /// order (the pre-step decision consumption probe).
+        requests: Vec<Vec<RequestMessage>>,
     }
 
     impl ScriptedLlm {
@@ -3147,10 +3349,11 @@ mod tests {
 
         fn begin(
             &mut self,
-            _request: &GenerateOptions,
+            request: &GenerateOptions,
             _prepared: Option<&PreparedCall>,
         ) -> Result<String, LlmError> {
             self.session.lock().expect("test session lock").begins += 1;
+            self.requests.push(request.messages.clone());
             let id = format!(
                 "g{}",
                 self.session.lock().expect("test session lock").begins
@@ -3405,6 +3608,8 @@ mod tests {
         mailbox: Arc<crate::plugin_shell::SessionMailbox>,
         driver: LoopDriver,
         tools: Arc<Mutex<ScriptedTools>>,
+        /// The scripted LLM double handle (the request-consumption probe).
+        llm: Arc<Mutex<ScriptedLlm>>,
         /// The recorded `agent/user-admitted` emissions (Q102′A).
         admitted: Arc<Mutex<Vec<String>>>,
     }
@@ -3445,7 +3650,7 @@ mod tests {
         let session_handle = Box::into_raw(Box::new(Arc::clone(&session)));
         let outbound = Outbound::new(HostExports {
             grant: crate::outbound::quiet_grant,
-            dispatch: crate::outbound::noop_dispatch,
+            dispatch: crate::outbound::identity_dispatch,
             host_handle: session_handle.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,
@@ -3482,6 +3687,7 @@ mod tests {
             mailbox: Some(Arc::clone(&mailbox)),
             scripts: scripts.into(),
             prepared: Vec::new(),
+            requests: Vec::new(),
             in_history,
         }));
         let driver = LoopDriver::new(
@@ -3521,6 +3727,7 @@ mod tests {
             mailbox,
             driver,
             tools,
+            llm,
             admitted,
         }
     }
@@ -5047,5 +5254,480 @@ mod tests {
             "the failed boundary spends no model call"
         );
         drop(session);
+    }
+
+    /// One dispatch-controlled harness host: the require face serves the
+    /// session double while the dispatch face replays the scripted reply
+    /// (the identity echo when none is set) and records every crossing.
+    struct DispatchHost {
+        session: Arc<Mutex<TestSession>>,
+        calls: Mutex<Vec<(String, Vec<u8>)>>,
+        /// The scripted chain value per event name; an unlisted event
+        /// keeps the identity echo (an untouched chain).
+        replies: Mutex<std::collections::HashMap<String, Vec<u8>>>,
+    }
+
+    /// The dispatch double over [`DispatchHost`]: replies with the
+    /// scripted bytes (an untouched chain echoes the payload), after
+    /// recording `(event, payload)`.
+    unsafe extern "C" fn dispatch_host_dispatch(
+        host: *mut c_void,
+        event: *const u8,
+        event_len: usize,
+        _mode: u32,
+        payload: *const u8,
+        payload_len: usize,
+        out_buf: *mut u8,
+        cap: usize,
+        out_len: *mut usize,
+    ) -> i32 {
+        // SAFETY: `host` is the `DispatchHost` the helper installed.
+        let state = unsafe { &*host.cast::<DispatchHost>() };
+        // SAFETY: slice-validity per the vtable contract.
+        let payload_bytes = unsafe { std::slice::from_raw_parts(payload, payload_len) }.to_vec();
+        // SAFETY: same slice-validity contract for the event name.
+        let event_name =
+            unsafe { String::from_utf8_lossy(std::slice::from_raw_parts(event, event_len)) }
+                .into_owned();
+        state
+            .calls
+            .lock()
+            .expect("dispatch log lock")
+            .push((event_name.clone(), payload_bytes.clone()));
+        let reply = state
+            .replies
+            .lock()
+            .expect("dispatch replies lock")
+            .get(&event_name)
+            .cloned()
+            .unwrap_or_else(|| payload_bytes.clone());
+        // SAFETY: the caller-owned out-buffer per the buffer protocol.
+        let written = unsafe { dougong_abi::write_out(&reply, out_buf, cap, out_len) };
+        if written {
+            STATUS_OK
+        } else {
+            dougong_abi::STATUS_CAPACITY
+        }
+    }
+
+    /// The require double over [`DispatchHost`]: the serving behavior of
+    /// [`serving_require`] with the host unwrapped one level.
+    ///
+    /// # Safety
+    ///
+    /// The vtable contract: `host` aliases a live [`DispatchHost`]; the
+    /// payload slice and out-buffer follow the caller-owned protocol.
+    unsafe extern "C" fn dispatch_host_require(
+        host: *mut c_void,
+        _service: *const u8,
+        _service_len: usize,
+        _method: u32,
+        in_data: *const u8,
+        in_len: usize,
+        out_buf: *mut u8,
+        cap: usize,
+        out_len: *mut usize,
+    ) -> i32 {
+        // SAFETY: the host box lives as long as the harness (the test
+        // holds the `Arc` through the driver thread's join).
+        let state = unsafe { &*host.cast::<DispatchHost>() };
+        // SAFETY: `in_len` nonzero with `in_data` non-null per the
+        // vtable contract, valid for `in_len` readable bytes.
+        let payload: serde_json::Value = unsafe {
+            serde_json::from_slice(std::slice::from_raw_parts(in_data, in_len))
+                .expect("append request is JSON")
+        };
+        let event = state
+            .session
+            .lock()
+            .expect("test session lock")
+            .append(&payload);
+        let reply = serde_json::json!({
+            "event": {
+                "type": payload["type"],
+                "seq": event.seq.get(),
+                "time": event.time,
+                "data": payload["data"],
+            }
+        });
+        let bytes = serde_json::to_vec(&reply).expect("reply serializes");
+        // SAFETY: the caller-owned buffer per the buffer protocol.
+        let written = unsafe { dougong_abi::write_out(&bytes, out_buf, cap, out_len) };
+        if written {
+            STATUS_OK
+        } else {
+            dougong_abi::STATUS_CAPACITY
+        }
+    }
+
+    /// Builds the harness over a dispatch-controlled outbound: the reply
+    /// starts unset (the identity echo) and the test scripts it through
+    /// the returned host.
+    fn harness_with_dispatch(
+        scripts: Vec<Script>,
+        session: Arc<Mutex<TestSession>>,
+        host: Arc<DispatchHost>,
+    ) -> (Harness, Arc<DispatchHost>) {
+        // The vtable handle gives up one refcount; the test's own `host`
+        // binding keeps the pointee alive through the harness lifetime.
+        let raw = Arc::into_raw(Arc::clone(&host));
+        let outbound = Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
+            dispatch: dispatch_host_dispatch,
+            host_handle: raw.cast::<c_void>().cast_mut(),
+            require: dispatch_host_require,
+            emit: quiet_emit,
+        });
+        let events = Arc::new(AgentEvents::new(outbound, Arc::new(|_warning: &str| {})));
+        let map = SessionMap::new(outbound);
+        let mailbox = session_mailbox(&map, "s1");
+        let reads = TestReads {
+            session: Arc::clone(&session),
+        };
+        let next_counter = Arc::new(AtomicU64::new(0));
+        let next_id = Box::new(move || {
+            fr_wire::MessageId::new(format!(
+                "id-{}",
+                next_counter.fetch_add(1, Ordering::Relaxed)
+            ))
+        });
+        let tools = Arc::new(Mutex::new(ScriptedTools {
+            mailbox: Some(Arc::clone(&mailbox)),
+            mode: ToolExecutionMode::Parallel,
+            mode_overrides: std::collections::HashMap::new(),
+            flip_on_dispatch: None,
+            results: Vec::new().into(),
+            settled: Vec::new(),
+            dispatches: Vec::new(),
+            cancel_on_dispatch: false,
+            in_flight_now: Vec::new(),
+            timeline: Vec::new(),
+        }));
+        let llm = Arc::new(Mutex::new(ScriptedLlm {
+            session: Arc::clone(&session),
+            mailbox: Some(Arc::clone(&mailbox)),
+            scripts: scripts.into(),
+            prepared: Vec::new(),
+            requests: Vec::new(),
+            in_history: false,
+        }));
+        let driver = LoopDriver::new(
+            "s1",
+            AgentOptions {
+                provider: Some("p".to_owned()),
+                model: Some("m".to_owned()),
+                reasoning_effort: None,
+                max_tokens: None,
+            },
+            Arc::clone(&mailbox),
+            Arc::clone(&events),
+            DriverDeps {
+                reads: Box::new(reads),
+                prompt: Box::new(FixedPrompt { text: "system" }),
+                llm: Box::new(SharedLlm(Arc::clone(&llm))),
+                tools: Box::new(SharedTools(Arc::clone(&tools))),
+                instructions: None,
+                skills: None,
+                clock: Box::new(|| 1_700_000_000_000),
+                next_id,
+                max_parallel_tool_calls: Box::new(|| 10),
+                emit_user_admitted: Box::new(|_id: &str| {}),
+            },
+        )
+        .expect("harness driver constructs");
+        let harness = Harness {
+            driver,
+            session,
+            mailbox,
+            llm,
+            tools,
+            admitted: Arc::new(Mutex::new(Vec::new())),
+        };
+        (harness, host)
+    }
+
+    /// The untouched chain keeps the default tail: the reply echoes the
+    /// payload, so the runtime-context tail runs, and the dispatched
+    /// payload shape pins (session, messages, turn, step).
+    #[test]
+    fn pre_step_kernel_dispatch_identity_keeps_the_default_tail() {
+        let session = Arc::new(Mutex::new(TestSession::new()));
+        let host = Arc::new(DispatchHost {
+            session: Arc::clone(&session),
+            calls: Mutex::new(Vec::new()),
+            replies: Mutex::new(std::collections::HashMap::new()),
+        });
+        let (harness, host) =
+            harness_with_dispatch(vec![ScriptedLlm::text_generation("hello")], session, host);
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the turn ends",
+        );
+        drop(thread);
+        let calls = host.calls.lock().expect("dispatch log lock");
+        assert_eq!(
+            calls.first().map(|(event, _)| event.as_str()),
+            Some(super::EVENT_PRE_STEP)
+        );
+        let payload: serde_json::Value =
+            serde_json::from_slice(&calls.first().expect("pre-step crossing").1)
+                .expect("payload json");
+        assert_eq!(payload["sessionId"], "s1");
+        assert_eq!(payload["turn"], 1);
+        assert_eq!(payload["step"], 1);
+        assert_eq!(payload["messages"][0]["content"][0]["text"], "task");
+        drop(calls);
+        let count = {
+            let session = harness.session.lock().expect("test session lock");
+            session.typed("assistant/message").len()
+        };
+        assert!(count > 0);
+    }
+
+    /// A short-circuited pre-step chain value replaces the default: the
+    /// decoded `enter` decision's messages are the model-visible batch
+    /// the request carries.
+    #[test]
+    fn pre_step_kernel_dispatch_short_circuit_decodes_the_enter_decision() {
+        let session = Arc::new(Mutex::new(TestSession::new()));
+        let host = Arc::new(DispatchHost {
+            session: Arc::clone(&session),
+            calls: Mutex::new(Vec::new()),
+            replies: Mutex::new(
+                std::iter::once((
+                    super::EVENT_PRE_STEP.to_owned(),
+                    serde_json::json!({
+                        "kind": "enter",
+                    "messages": [{
+                        "role": "user",
+                        "id": "rewritten",
+                        "content": [{ "type": "text", "text": "rewritten batch" }],
+                        "source": { "kind": "user" },
+                    }],
+                    })
+                    .to_string()
+                    .into_bytes(),
+                ))
+                .collect(),
+            ),
+        });
+        let (harness, _host) = harness_with_dispatch(
+            vec![ScriptedLlm::text_generation("hello")],
+            Arc::clone(&session),
+            host,
+        );
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("assistant/message").is_empty(),
+            "the step runs",
+        );
+        drop(thread);
+        let requests = harness
+            .llm
+            .lock()
+            .expect("llm double lock")
+            .requests
+            .clone();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].len(), 1);
+        let fr_llm::adapter::RequestMessage::Durable(message) = &requests[0][0] else {
+            panic!("the durable claimed batch reaches the request");
+        };
+        let message = serde_json::to_value(message).expect("message serializes");
+        assert_eq!(message["id"], "rewritten");
+    }
+
+    /// A `reject` chain value ends the turn blocked without a model call
+    /// (the dsh pre-step veto through the kernel chain).
+    #[test]
+    fn pre_step_kernel_dispatch_reject_ends_the_turn_blocked() {
+        let session = Arc::new(Mutex::new(TestSession::new()));
+        let host = Arc::new(DispatchHost {
+            session: Arc::clone(&session),
+            calls: Mutex::new(Vec::new()),
+            replies: Mutex::new(
+                std::iter::once((
+                    super::EVENT_PRE_STEP.to_owned(),
+                    br#"{"kind":"reject"}"#.to_vec(),
+                ))
+                .collect(),
+            ),
+        });
+        let (harness, _host) =
+            harness_with_dispatch(vec![ScriptedLlm::text_generation("hello")], session, host);
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the turn ends",
+        );
+        drop(thread);
+        assert_eq!(
+            turn_end_reason(&harness.session, 0)["reason"]["kind"],
+            "blocked"
+        );
+        let count = {
+            let session = harness.session.lock().expect("test session lock");
+            session.typed("assistant/message").len()
+        };
+        assert_eq!(count, 0);
+    }
+
+    /// The request-error chain's `{"kind":"retry"}` value rules a retry
+    /// through the kernel dispatch (the dsh overflow arm's
+    /// `{ kind: 'retry' }` ruling); the turn then completes, and the
+    /// dispatched payload shape pins (session, provider, failure code).
+    #[test]
+    fn request_error_kernel_dispatch_retry_rules_a_retry() {
+        let session = Arc::new(Mutex::new(TestSession::new()));
+        let host = Arc::new(DispatchHost {
+            session: Arc::clone(&session),
+            calls: Mutex::new(Vec::new()),
+            replies: Mutex::new(
+                std::iter::once((
+                    super::EVENT_REQUEST_ERROR.to_owned(),
+                    br#"{"kind":"retry"}"#.to_vec(),
+                ))
+                .collect(),
+            ),
+        });
+        let (harness, host) = harness_with_dispatch(
+            vec![
+                Script {
+                    chunks: vec![finish_error("transport down")],
+                    cancel_after_first_batch: false,
+                    followup_after_cancel: false,
+                    prepare_no_adapter: false,
+                },
+                ScriptedLlm::text_generation("recovered"),
+            ],
+            session,
+            host,
+        );
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("assistant/message").is_empty(),
+            "the retried step lands",
+        );
+        drop(thread);
+        let calls = host.calls.lock().expect("dispatch log lock");
+        let retry_payload = calls
+            .iter()
+            .find(|(event, _)| event == super::EVENT_REQUEST_ERROR)
+            .map(|(_, payload)| payload)
+            .expect("one request-error crossing");
+        let payload: serde_json::Value =
+            serde_json::from_slice(retry_payload).expect("payload json");
+        assert_eq!(payload["sessionId"], "s1");
+        assert_eq!(payload["failure"]["code"], "SERVER");
+        drop(calls);
+        let count = {
+            let session = harness.session.lock().expect("test session lock");
+            session.typed("assistant/attempt").len()
+        };
+        assert!(count > 0);
+    }
+    /// A send racing the remote maintenance window latches behind it and
+    /// replays when the window converges (the dsh `wakeRequested` replay
+    /// through the wire maintenance face).
+    #[test]
+    fn send_during_the_maintenance_window_latches_and_replays() {
+        let harness = harness(vec![
+            ScriptedLlm::text_generation("first"),
+            ScriptedLlm::text_generation("replayed"),
+        ]);
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "first"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the first turn ends",
+        );
+        let token = harness
+            .mailbox
+            .maintenance_begin("s1")
+            .expect("the window opens on an idle loop");
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m2", "latched"),
+            wakeup: true,
+        });
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        let ended = harness
+            .session
+            .lock()
+            .expect("test session lock")
+            .typed("turn/end")
+            .len();
+        assert_eq!(ended, 1, "the latched send opens no turn during the window");
+        harness
+            .mailbox
+            .maintenance_end(&token)
+            .expect("the window closes");
+        harness.mailbox.enqueue(InboundCommand::MaintenanceEnd);
+        wait_for(
+            &harness.session,
+            |session| session.typed("turn/end").len() >= 2,
+            "the replayed turn ends",
+        );
+        drop(thread);
+    }
+
+    /// A cancel during the window arms the window's abort flag the remote
+    /// job polls (the dsh mid-flight signal face; phase mirror or not).
+    #[test]
+    fn cancel_during_the_window_arms_the_abort_flag() {
+        let harness = harness(vec![ScriptedLlm::text_generation("hello")]);
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        let token = harness
+            .mailbox
+            .maintenance_begin("s1")
+            .expect("the window opens");
+        harness.mailbox.enqueue(InboundCommand::Cancel {
+            cause: CancelCause::User,
+            keep_inbox: false,
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut aborted = false;
+        while std::time::Instant::now() < deadline {
+            aborted = harness
+                .mailbox
+                .maintenance_poll(&token)
+                .expect("the window still answers");
+            if aborted {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        drop(thread);
+        assert!(aborted, "the driver's cancel arm set the window flag");
     }
 }

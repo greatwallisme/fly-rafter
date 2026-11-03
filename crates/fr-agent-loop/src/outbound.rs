@@ -17,6 +17,11 @@
 
 use dougong_abi::{HostExports, STATUS_CAPACITY, STATUS_OK};
 
+/// The waterfall dispatch mode (the kernel bus's compose-around-a-
+/// continuation semantics; re-exported so the driver's kernel-family
+/// edge stays this module).
+pub use dougong_abi::MODE_WATERFALL as WATERFALL_MODE;
+
 /// The host protocol's documented out-buffer ceiling (16 MiB); a reply
 /// that still reports `STATUS_CAPACITY` at this size is a protocol
 /// failure, not a reason to grow further.
@@ -63,6 +68,35 @@ impl std::fmt::Display for EmitError {
 }
 
 impl std::error::Error for EmitError {}
+
+/// A failed outbound `dispatch`: the raw host status plus the JSON detail
+/// document the host delivered in the out buffer.
+///
+/// A listener failure's detail is the `{"code","class","message"}`
+/// triple, empty when the host sent none.
+#[derive(Debug)]
+pub struct DispatchError {
+    /// The ABI status code (`STATUS_FAILED`, `STATUS_REENTRANCY`, ...).
+    pub status: i32,
+    /// The host's JSON detail document, when present.
+    pub detail: Vec<u8>,
+}
+
+impl std::fmt::Display for DispatchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "outbound dispatch failed with host status {}",
+            self.status
+        )?;
+        if !self.detail.is_empty() {
+            write!(f, ": {}", String::from_utf8_lossy(&self.detail))?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for DispatchError {}
 
 /// One copied vtable: handed to each loop thread, which then performs its
 /// own outbound calls (PRD decision 46, Q79-A).
@@ -172,6 +206,73 @@ impl Outbound {
         }
     }
 
+    /// Performs one synchronous five-mode kernel dispatch and returns
+    /// the settled chain value (ABI v5, D32; the `agent/pre-step` and
+    /// `agent/request-error` waterfalls' outbound face).
+    ///
+    /// Await modes block the calling thread until the chain settles and
+    /// follow the same growable `out_buf` protocol as [`Self::require`]:
+    /// an untouched waterfall chain reports the original payload bytes
+    /// (the identity continuation), and a listener failure is
+    /// `STATUS_FAILED` with the JSON `{"code","class","message"}` detail.
+    /// The call must originate on a plugin-owned thread — the loop's
+    /// driver thread is exactly that (the shell spawns it), so every
+    /// driver-side dispatch is legal and any foreign-entry call fails
+    /// loudly instead of hanging.
+    ///
+    /// # Errors
+    ///
+    /// Returns the host status and any JSON detail document on any
+    /// non-OK terminal status.
+    pub fn dispatch(
+        &self,
+        event: &str,
+        mode: u32,
+        payload: &[u8],
+    ) -> Result<Vec<u8>, DispatchError> {
+        let mut cap = 4096_usize;
+        loop {
+            let mut buf = vec![0_u8; cap];
+            let mut len = 0_usize;
+            // SAFETY: the copied vtable is live until this activation's
+            // `teardown` returns; every caller (a driver thread) is joined
+            // before `teardown` (shell thread discipline). Buffers are
+            // caller-owned per the export-table contract.
+            let status = unsafe {
+                (self.host.dispatch)(
+                    self.host.host_handle,
+                    event.as_ptr(),
+                    event.len(),
+                    mode,
+                    payload.as_ptr(),
+                    payload.len(),
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    &raw mut len,
+                )
+            };
+            if status == STATUS_CAPACITY {
+                if cap >= MAX_REPLY_CAPACITY {
+                    return Err(DispatchError {
+                        status,
+                        detail: format!("reply still exceeds {MAX_REPLY_CAPACITY} bytes")
+                            .into_bytes(),
+                    });
+                }
+                cap = cap.saturating_mul(2);
+                continue;
+            }
+            buf.truncate(len);
+            if status == STATUS_OK {
+                return Ok(buf);
+            }
+            return Err(DispatchError {
+                status,
+                detail: buf,
+            });
+        }
+    }
+
     /// Grants one committed target activation runtime access to the
     /// `'agent'`-class provided service (the D31 registration primitive;
     /// the fr-shell `HostLink::grant` judgment shape).
@@ -220,8 +321,35 @@ pub(crate) const unsafe extern "C" fn quiet_grant(
     dougong_abi::STATUS_OK
 }
 
-/// Test double for the host side of `dispatch` (D32): no fr test drives an
-/// outbound dispatch, so any surprise call fails loudly.
+/// Test double for the host side of `dispatch` (D32): the untouched
+/// chain's identity continuation — the reply echoes the payload bytes —
+/// so the default double dispatch behaves like a bus with no listeners.
+#[cfg(test)]
+pub(crate) const unsafe extern "C" fn identity_dispatch(
+    _host: *mut std::ffi::c_void,
+    _event: *const u8,
+    _event_len: usize,
+    _mode: u32,
+    payload: *const u8,
+    payload_len: usize,
+    out_buf: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
+) -> i32 {
+    if payload_len > cap {
+        return dougong_abi::STATUS_CAPACITY;
+    }
+    // SAFETY: the vtable contract passes one valid readable payload and a
+    // `cap`-sized out-buffer with a writable `len` slot.
+    unsafe {
+        std::ptr::copy_nonoverlapping(payload, out_buf, payload_len);
+        *out_len = payload_len;
+    }
+    dougong_abi::STATUS_OK
+}
+
+/// Test double for the host side of `dispatch` (D32): every call fails
+/// loudly, for tests that must observe no outbound dispatch at all.
 #[cfg(test)]
 pub(crate) const unsafe extern "C" fn noop_dispatch(
     _host: *mut std::ffi::c_void,

@@ -25,6 +25,9 @@ fr-system-prompt = { workspace = true }
 futures-core = "0.3"
 fr-session = { workspace = true }
 fr-wire = { workspace = true }
+# The maintenance window's capability token (the dsh window has no wire
+# form; fr mints one per window so stale enders fail closed).
+uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

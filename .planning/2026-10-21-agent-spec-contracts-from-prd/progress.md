@@ -1741,3 +1741,31 @@
 - **事故**：Write 退化 5 起（lib.rs 两次/CheckpointTag 截断/skip_serial_if 错名/types.rs prune:: 碎片）全部写后即验当轮修复；SessionSeq 无 Display→错误文案 .get()；测试助手 seq()/seq_list() 构造判例。
 - **终门认证**：fmt ✓/clippy workspace -D warnings 0/全测（FR_DSH_SOURCE）1759 passed 0 failed（+30）/doc -D warnings ✓/三门禁 0 errors（exit 0×3）。
 - **下一动作=17e：选区+压缩管线+括弧+summary-error waterfall（dsh compaction-basic/src/region.ts 600 行+index.ts 压力触发/溢出恢复管线核心）。**
+
+## 2026-11-03 — 17e 完成：选区+压缩管线+括弧+summary-error 钩子全落地（含门异常根因闭环）
+
+- **region.rs**（TransactionView/LineView 之外全 1:1）：SessionView/MeterView 两 seam trait+RegionDeps{meter,summarize,recover 三钩子}+SurfaceSelection/PreparedCompaction/SummarizedCompaction/BracketOwner/StabilityRule/TransactionOptions/CompactionEntryState+CompactionError{Manual,Failure} 双脸+select_compactable_range（表面对齐守卫/firstIdx/尾累积/配平回退）/validate_surface_region 四 verbatim 错/assert_compaction_inactive+assert_no_active_compaction/inspect_compaction_entry_state 倒序三态早停/compact_surface_region 全事务（entry 校验→owner 判定→CompactionId mint→append start→prepare→summarize 重试环(recover 臂重备输入)→frame_summary 括弧+checkpoint source→shrink 门→stability 两策略→commit 三事件序+sourceEventSeqs=[start,summary,...shadowed]→恰一次 close 尝试失败留未配对 start→flush 臂→throw_manual_failure 分类）+resolve_owner/close_bracket_with_failure/commit_compaction_body/prepare_compaction/summarize_compaction/assert_stable/build_summarization_input（derive_event_message 消费 fr-session rlib）。
+- **summarizer.rs 纯件**：SummarizationInput/SummaryResult/CompactionFailure 四臂错误分类+frame_summary+finish_error（MAX_TOKENS 文案/aborted+error 臂 failure 事实携带）+summary_text（UNSUPPORTED_CONTENT 图拒+text 过滤）。
+- **scripts/extract-compaction-prompts**（extract-prompts 判例：FR_DSH_SOURCE+--check）→ src/prompts.rs 四常量（OPEN/CLOSE_TAG+CHECKPOINT_PREAMBLE+COMPACTION_INSTRUCTION，末行 ${SUMMARY_OPEN_TAG} 模板插值已解析为字面值）；summarizer 纯件消费。
+- **meter.rs 本地镜像**+**tests/wire_shapes.rs 三钉测**+**fr-token-meter 降 dev-dep**——门异常根因闭环（详见 findings「17e 门异常根因闭环」节：二分定界/状态污染证伪/-j1 归因修正/incremental=false 证伪/修复=运行时依赖降级+线形镜像+兼容钉测；修复前三连全红→修复后三连全绿）。
+- **fr-llm drain flake 真因与修复（2026-11-03 勘误，取代本条早前"deadline 化"的错误处置）**：根因=测试夹具 `TestChannelStream` send 侧从不唤醒已注册 waker（违反其注释声称镜像的生产契约 "senders wake on every chunk and on close"）→ worker 先轮询后 main 再 send 的次序下 WakeGate condvar 永久停车=丢失唤醒死锁；平时能过纯靠线程启动延迟让首轮 poll 晚于全部 send。修复=`channel_stream()` 返回 `TestSender`（send 后唤醒+Drop 唤醒=close 观测），并**回退 deadline 放宽恢复原始 500×2ms 预算**（放宽=误诊产物，用户裁决驳回）。验证：fr-llm 全二进制 60/60 全绿（用户指定次数）+40 连绿在前。教训已入记忆（concurrency-flake-first-suspect-my-code）：flake 第一假设=自己的代码缺陷，禁放宽预算掩盖。
+- **终门认证**：fmt ✓/clippy workspace -D warnings 0/全测（FR_DSH_SOURCE）1778 passed 0 failed 多轮（F1-F3+E2/E3+G1+H2 全 exit 0，H1 偶发 fr-shell PTY 负载敏感披露在案）/doc -D warnings ✓/三门禁 0 errors（exit 0×3）/extract --check ✓。
+- **下一动作=17f：summarizer LLM 主面（summarizeWithLllm 经 llm 服务缝）+四监听 kernel 接线+agent 服务 maintenance 法+recover 接 kernel waterfall 'compaction/summary-error'。**
+
+## 2026-11-03 — 17f 进行中：fr-wire+fr-agent-loop 侧全落地（110/110）
+
+- **fr-wire**：agent 服务三维护面（BEGIN=7/POLL=8/END=9，窗口语义 doc 全注）+compaction 服务模块（DESCRIBE=0/COMPACT_NOW=1，17h 接臂）+events 事件名共享表（pre-step/request-error/status/session/event/summary-error）。事故 1 起：Edit 退化把 METHOD_COMPACT_NOW 写进 terminals 模块+EVENT_REQUEST_ERROR 值成了垃圾字面量+terminals METHOD_SEND_BACKGROUND 被吞——写后即验当轮修复（u0 笔误同批捕获）。
+- **fr-agent-loop**：outbound.rs 增 dispatch（require 同款缓冲协议+DispatchError+MODE_WATERFALL re-export 保持 kernel-family edge）；agent_events.rs 常量改 fr_wire::services::events re-export+StatusPayload 增 sessionId（PhaseMachine 携 session_id）+PreStepEventPayload/RequestErrorEventPayload wire 载荷（camelCase）；driver.rs pre_step/finish_attempt 内核派发先行（恒等=进程内瀑布+默认尾；非恒等=决策 JSON 解码 decode_pre_step_decision{reject|enter{messages,startsRequestSeries?}}/decode_request_error_action{kind=retry}）+DriverError::Dispatch 变体；维护窗口=mailbox WindowState{token,aborted}（uuid v4 token）+RouteFacts（set_route 首写胜出，driver::new 发布 options）+三 dispatch 臂+driver sync_window（run 顶+wake_driver 入口镜像）+converge_maintenance（Idle 提交+wake 重放）+InboundCommand::MaintenanceEnd（enqueue 唤醒清单补 MaintenanceEnd——**漏唤醒=重放测试超时真因**）+run_maintenance 本地窗口注册（窗口=两形态唯一维护标记）+cancel 臂 window_active 即置 aborted（镜像前也生效）。
+- **测试双载**：noop_dispatch→identity_dispatch（恒等续体=诚实宿主契约）；DispatchHost{session,calls,replies per-event}（reply 按事件名路由——全局 reply 会毒化 pre-step 派发）；ScriptedLlm 增 requests 记录；harness 增 llm 字段。
+- **新钉测 10**：pre-step 恒等默认尾+载荷形状/enter 短路重写批/reject 断 turn/request-error retry 裁定+载荷形状/维护窗口三面线级语义+busy verbatim/STATUS route 字段（有/无）/窗口期 send latch+END 重放/cancel 置 aborted 旗/agent 面常量对 fr-wire 表钉。
+- **session/event 生产方裁决**：fr-session dylib shell 无 store（持久化面=Phase 18 Q44-B fabric-INIT）——feed→内核镜像随 Phase 18 store 接线落；17f 落监听侧+形状钉测（消费方完整），生产方缺口透明披露。
+- **下一动作=fr-compaction plugin_shell+engine+summarize_with_llm+中继线程。**
+
+## 2026-11-03 — 17f 完成：summarizer LLM 缝+四监听 kernel 接线+agent 维护窗口+loop 出站派发全落地
+
+- **交付面**：fr-wire（agent 维护三面 BEGIN/POLL/END=7/8/9+compaction 服务面+events 共享事件名表）；fr-agent-loop（outbound dispatch v5 面+pre-step/request-error 内核链先行恒等续体消费+决策解码+DriverError::Dispatch+维护窗口全机制+STATUS route 字段 Q1=1+StatusPayload sessionId+事件名表 re-export+agent 面对表钉测）；fr-compaction（plugin_shell 四监听 CPS+engine 管线+llm_face summarize+session_view 线视图+Relay 中继线程+summary-error 派发经中继+describe 面）。
+- **两裁决落地**：Q1=1（STATUS {provider,model} additive；dsh agent.options 第三臂 1:1）；Q2=2（窗口 poll 拉式中止=push 不可达的执法强制形态，语义=中途取消保真：poll→llm ABORT→aborted finish→失败收尾）。
+- **结构发现**（裁决后补充披露，执法事实强制非新分叉）：job 回调端点跨缝=结构性不可能（同线程重入/跨线程环均确定性拒绝；实例忙时推式通知排队无效）→maintenance 窗口三面+compaction 拉式 poll。已在 findings 落档。
+- **测试**：+29（loop 内核派发消费 4+窗口 2+route/窗口面 3+agent 面钉 1+engine 7+llm_face 5+壳集成 7 含 FFI 直驱 on_event/on_next 全链+wire_shapes 字面量钉 3）；新钉=恒等续体消费/决策解码/窗口 latch+重放/cancel 置旗/压力压缩全事务/溢出恢复 retry+预算耗尽/bookkeeping 重置/auto 门/capture 失败失败收尾迹/summary-error 载荷形状。
+- **终门认证**：fmt ✓/clippy workspace -D warnings 0/全测（FR_DSH_SOURCE）1807 passed 0 failed 两连/doc -D warnings ✓/三门禁 0 errors/extract --check ✓。
+- **下一动作=17g：pruner+image-offload（批 5）。**

@@ -31,7 +31,59 @@ pub const METHOD_CANCEL: u32 = 4;
 pub const METHOD_DESCRIBE: u32 = 5;
 
 /// Method selector: query the session's loop status
-/// (`{sessionId}` → `{status}`).
+/// (`{sessionId}` → `{status, provider?, model?}` — the additive route
+/// fields are the dsh summarizer's `agent.options` fallback).
 pub const METHOD_STATUS: u32 = 6;
+
+/// Method selector: open the remote maintenance window
+/// (`{sessionId}` → `{token}`; the dsh `runMaintenance` busy check and
+/// phase admission).
+///
+/// The window splits across three faces because the dsh job closure
+/// cannot cross the wire and a callback endpoint would re-enter the
+/// caller's instance.
+pub const METHOD_MAINTENANCE_BEGIN: u32 = 7;
+
+/// Method selector: read the window's abort flag
+/// (`{sessionId, token}` → `{aborted}`; the dsh job's `AbortSignal`).
+pub const METHOD_MAINTENANCE_POLL: u32 = 8;
+
+/// Method selector: close the window and converge
+/// (`{sessionId, token}` → `{}`; the dsh `finally` idle commit plus the
+/// wake replay).
+pub const METHOD_MAINTENANCE_END: u32 = 9;
+
+#[cfg(test)]
+mod tests {
+    /// The local face pins the shared protocol table selector-for-selector
+    /// (the batch-2a placement judgment: dependent artifacts share the
+    /// constants through fr-wire; the owner pins its own spellings).
+    #[test]
+    fn face_matches_the_shared_protocol_table() {
+        use super::{
+            METHOD_CANCEL, METHOD_DESCRIBE, METHOD_FOLLOWUP, METHOD_INJECT,
+            METHOD_MAINTENANCE_BEGIN, METHOD_MAINTENANCE_END, METHOD_MAINTENANCE_POLL, METHOD_SEND,
+            METHOD_STATUS, METHOD_STEER, SERVICE_NAME,
+        };
+        use fr_wire::services::agent::{
+            METHOD_CANCEL as W_CANCEL, METHOD_DESCRIBE as W_DESCRIBE,
+            METHOD_FOLLOWUP as W_FOLLOWUP, METHOD_INJECT as W_INJECT,
+            METHOD_MAINTENANCE_BEGIN as W_BEGIN, METHOD_MAINTENANCE_END as W_END,
+            METHOD_MAINTENANCE_POLL as W_POLL, METHOD_SEND as W_SEND, METHOD_STATUS as W_STATUS,
+            METHOD_STEER as W_STEER, SERVICE_NAME as W_SERVICE,
+        };
+        assert_eq!(SERVICE_NAME, W_SERVICE);
+        assert_eq!(METHOD_SEND, W_SEND);
+        assert_eq!(METHOD_STEER, W_STEER);
+        assert_eq!(METHOD_INJECT, W_INJECT);
+        assert_eq!(METHOD_FOLLOWUP, W_FOLLOWUP);
+        assert_eq!(METHOD_CANCEL, W_CANCEL);
+        assert_eq!(METHOD_DESCRIBE, W_DESCRIBE);
+        assert_eq!(METHOD_STATUS, W_STATUS);
+        assert_eq!(METHOD_MAINTENANCE_BEGIN, W_BEGIN);
+        assert_eq!(METHOD_MAINTENANCE_POLL, W_POLL);
+        assert_eq!(METHOD_MAINTENANCE_END, W_END);
+    }
+}
 
 // Rust guideline compliant 2026-10-29

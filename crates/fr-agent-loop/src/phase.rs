@@ -149,6 +149,8 @@ impl Phase {
 /// service's query face reads.
 #[derive(Debug)]
 pub struct PhaseMachine {
+    /// The session whose status flips this machine publishes.
+    session_id: String,
     phase: Phase,
     events: Arc<AgentEvents>,
     cell: Arc<StatusCell>,
@@ -157,9 +159,15 @@ pub struct PhaseMachine {
 impl PhaseMachine {
     /// Builds the machine over an initial phase.
     #[must_use]
-    pub fn new(phase: Phase, events: Arc<AgentEvents>, cell: Arc<StatusCell>) -> Self {
+    pub fn new(
+        session_id: &str,
+        phase: Phase,
+        events: Arc<AgentEvents>,
+        cell: Arc<StatusCell>,
+    ) -> Self {
         cell.store(phase.status());
         Self {
+            session_id: session_id.to_owned(),
             phase,
             events,
             cell,
@@ -194,7 +202,7 @@ impl PhaseMachine {
         let status = self.phase.status();
         self.cell.store(status);
         if status != previous {
-            self.events.emit_status(status);
+            self.events.emit_status(&self.session_id, status);
         }
     }
 }
@@ -285,6 +293,7 @@ mod tests {
         let events = recorded_events(&seen);
         let cell = Arc::new(StatusCell::new());
         let mut machine = PhaseMachine::new(
+            "session-1",
             Phase::Idle { last_turn: 2 },
             Arc::clone(&events),
             Arc::clone(&cell),
@@ -331,6 +340,7 @@ mod tests {
     fn phase_mut_updates_fields_in_place() {
         let events = quiet_events().into();
         let mut machine = PhaseMachine::new(
+            "session-1",
             Phase::Running {
                 abort: AbortLatch::new(),
                 turn: 1,

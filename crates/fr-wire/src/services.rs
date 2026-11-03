@@ -29,8 +29,26 @@ pub mod agent {
     pub const METHOD_CANCEL: u32 = 4;
     /// Shell metadata echo.
     pub const METHOD_DESCRIBE: u32 = 5;
-    /// Query the session's loop status.
+    /// Query the session's loop status (reply carries the declared route).
     pub const METHOD_STATUS: u32 = 6;
+    /// Open the remote maintenance window (`{sessionId}` → `{token}`).
+    ///
+    /// The dsh `runMaintenance(job)` closure cannot cross the wire, and a
+    /// callback endpoint would re-enter the caller's instance
+    /// (deterministic `STATUS_REENTRANCY`), so the window splits into
+    /// begin/poll/end faces the remote job drives itself: begin performs
+    /// the synchronous busy check (verbatim `already has active work`
+    /// rejection) and commits the maintenance phase at the next driver
+    /// park point, poll answers the window's abort flag, and end
+    /// converges (idle + the dsh wake replay). A cancel during the
+    /// window arms the abort flag the poll face answers — the dsh
+    /// mid-flight signal with the one-drain-cycle notification latency
+    /// the pull form costs.
+    pub const METHOD_MAINTENANCE_BEGIN: u32 = 7;
+    /// `{sessionId, token}` → `{aborted}` — the window's abort flag.
+    pub const METHOD_MAINTENANCE_POLL: u32 = 8;
+    /// `{sessionId, token}` → `{}` — close the window and converge.
+    pub const METHOD_MAINTENANCE_END: u32 = 9;
 }
 
 /// The `'session-persistence'` service face (owner crate `fr-session`).
@@ -628,4 +646,45 @@ pub mod terminals {
     pub const METHOD_SEND_BACKGROUND: u32 = 3010;
 }
 
-// Rust guideline compliant 2026-11-01
+/// The `'compaction'` service face (owner crate `fr-compaction`).
+///
+/// The face exists now so the maintenance window's remote job and the
+/// 17h `/compact` command can pin their consumption; the compact-now
+/// arm lands with its batch. Method numbering is per-service (the
+/// permission-presets precedent).
+pub mod compaction {
+    /// The provided service name consumers require.
+    pub const SERVICE_NAME: &str = "compaction";
+    /// Face metadata echo.
+    pub const METHOD_DESCRIBE: u32 = 0;
+    /// The idle-session manual compaction (the dsh `compactNow`; the
+    /// `/compact` command's behavior face).
+    pub const METHOD_COMPACT_NOW: u32 = 1;
+}
+
+/// The shared kernel-event name table.
+///
+/// Event names are protocol vocabulary every listener-side artifact
+/// decodes against, so the names live beside the service faces (the
+/// batch-2a placement judgment) instead of inside the producing crates.
+/// Payload shapes stay producer-side (the loop's `agent_events` module
+/// and fr-session's shell mirror); consumers pin the same wire shapes
+/// with their own mirror structs and tests.
+pub mod events {
+    /// Waterfall: one proposed step boundary (the dsh `agent/pre-step`).
+    pub const EVENT_PRE_STEP: &str = "agent/pre-step";
+    /// Waterfall: one failed attempt's retry ruling (the dsh
+    /// `agent/request-error`).
+    pub const EVENT_REQUEST_ERROR: &str = "agent/request-error";
+    /// Emit: the loop's status flipped (decision 46 face).
+    pub const EVENT_STATUS: &str = "agent/status";
+    /// Emit: one session event landed (the dsh `session/event`; the
+    /// fr-session store feed's kernel mirror).
+    pub const EVENT_SESSION: &str = "session/event";
+    /// Waterfall: a summary failed and recovery may durably repair it
+    /// (the dsh `compaction/summary-error`; the compaction plugin
+    /// dispatches it, the image-offload plugin answers it).
+    pub const EVENT_SUMMARY_ERROR: &str = "compaction/summary-error";
+}
+
+// Rust guideline compliant 2026-11-03

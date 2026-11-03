@@ -43,8 +43,9 @@ use crate::outbound::Outbound;
 /// them without pulling this shell's FFI export object into their
 /// link); the re-exports keep this path stable.
 pub use crate::agent_service::{
-    METHOD_CANCEL, METHOD_DESCRIBE, METHOD_FOLLOWUP, METHOD_INJECT, METHOD_SEND, METHOD_STATUS,
-    METHOD_STEER, SERVICE_NAME,
+    METHOD_CANCEL, METHOD_DESCRIBE, METHOD_FOLLOWUP, METHOD_INJECT, METHOD_MAINTENANCE_BEGIN,
+    METHOD_MAINTENANCE_END, METHOD_MAINTENANCE_POLL, METHOD_SEND, METHOD_STATUS, METHOD_STEER,
+    SERVICE_NAME,
 };
 
 /// The dylib artifact's plugin name.
@@ -109,6 +110,12 @@ pub enum InboundCommand {
         /// Whether pending inbox work survives the cancel.
         keep_inbox: bool,
     },
+    /// The remote maintenance window's convergence rider (the wire face
+    /// of dsh `runMaintenance`'s `finally`): the window is already closed
+    /// shell-side; the driver commits the idle phase and replays a
+    /// latched wake. A no-op when the window closed before the driver
+    /// ever mirrored it.
+    MaintenanceEnd,
 }
 
 /// The per-session mailbox shared between the host-facing shell and the
@@ -125,8 +132,35 @@ pub struct SessionMailbox {
     /// driver's phase machine commits through this same shared cell, so
     /// the query face and the driver can never disagree.
     status: std::sync::Arc<crate::phase::StatusCell>,
+    /// The declared agent route (dsh `AgentOptions.provider`/`.model`,
+    /// fixed at construction): the query face's additive route fields
+    /// (the 17f Q1 ruling). First write wins.
+    route: Mutex<Option<RouteFacts>>,
+    /// The remote maintenance window (the wire face of dsh
+    /// `runMaintenance`): the shell's begin/poll/end faces and the
+    /// driver's cancel arm share this one marker, and the driver mirrors
+    /// it into its phase machine at its park points.
+    window: Mutex<Option<WindowState>>,
     inner: Mutex<MailboxInner>,
     wake: Condvar,
+}
+
+/// The declared route facts (dsh `agent.options`; both `None`-able —
+/// empty means "not declared").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouteFacts {
+    /// The provider route key.
+    pub provider: Option<String>,
+    /// The model id.
+    pub model: Option<String>,
+}
+
+/// One open maintenance window: the capability token the remote job
+/// echoes back, plus the abort flag the driver's cancel arm sets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WindowState {
+    token: String,
+    aborted: bool,
 }
 
 #[derive(Debug)]
@@ -141,6 +175,8 @@ impl SessionMailbox {
         Self {
             outbound,
             status: std::sync::Arc::new(crate::phase::StatusCell::new()),
+            route: Mutex::new(None),
+            window: Mutex::new(None),
             inner: Mutex::new(MailboxInner {
                 commands: VecDeque::new(),
                 notifications: VecDeque::new(),
@@ -169,6 +205,126 @@ impl SessionMailbox {
         self.status.load()
     }
 
+    /// Publishes the declared agent route (dsh `AgentOptions`, fixed at
+    /// construction): the first write wins and later writes are ignored,
+    /// so a re-creation cannot reconfigure a live agent.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a shared lock is poisoned (a holder panicked).
+    pub fn set_route(&self, provider: Option<String>, model: Option<String>) {
+        let mut route = self.route.lock().expect("route lock poisoned");
+        if route.is_none() {
+            *route = Some(RouteFacts { provider, model });
+        }
+    }
+
+    /// Reads the declared route (the query face's additive fields).
+    #[must_use]
+    ///
+    /// # Panics
+    ///
+    /// Panics if a shared lock is poisoned (a holder panicked).
+    pub fn route(&self) -> Option<RouteFacts> {
+        self.route.lock().expect("route lock poisoned").clone()
+    }
+
+    /// Opens the remote maintenance window (the dsh `runMaintenance`
+    /// busy check): refuses while a turn runs (the shared status cell)
+    /// or another window (in-process or remote) is open, then mints the
+    /// capability token the remote job echoes back. The driver mirrors
+    /// the window into its phase machine at its next park point.
+    ///
+    /// # Errors
+    ///
+    /// Returns the verbatim dsh busy rejection when work is active.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a shared lock is poisoned (a holder panicked).
+    pub fn maintenance_begin(&self, session_id: &str) -> Result<String, String> {
+        if self.status() == crate::phase::AgentStatus::Running {
+            return Err(format!("agent \"{session_id}\" already has active work"));
+        }
+        let mut window = self.window.lock().expect("window lock poisoned");
+        if window.is_some() {
+            return Err(format!("agent \"{session_id}\" already has active work"));
+        }
+        let token = uuid::Uuid::new_v4().to_string();
+        *window = Some(WindowState {
+            token: token.clone(),
+            aborted: false,
+        });
+        drop(window);
+        Ok(token)
+    }
+
+    /// Answers the window's abort flag (the wire face of the dsh job's
+    /// `AbortSignal`): the driver's cancel arm sets it mid-window.
+    ///
+    /// # Errors
+    ///
+    /// Returns a rejection for an unknown or stale token.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a shared lock is poisoned (a holder panicked).
+    pub fn maintenance_poll(&self, token: &str) -> Result<bool, String> {
+        let window = self.window.lock().expect("window lock poisoned");
+        match window.as_ref() {
+            Some(state) if state.token == token => Ok(state.aborted),
+            _ => Err("no matching maintenance window".to_owned()),
+        }
+    }
+
+    /// Closes the window shell-side and reports whether the closer owns
+    /// it (the convergence command still follows: the driver commits the
+    /// idle phase and replays a latched wake).
+    ///
+    /// # Errors
+    ///
+    /// Returns a rejection for an unknown or stale token.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a shared lock is poisoned (a holder panicked).
+    pub fn maintenance_end(&self, token: &str) -> Result<(), String> {
+        let mut window = self.window.lock().expect("window lock poisoned");
+        match window.as_ref() {
+            Some(state) if state.token == token => {
+                *window = None;
+                drop(window);
+                Ok(())
+            }
+            _ => {
+                drop(window);
+                Err("no matching maintenance window".to_owned())
+            }
+        }
+    }
+
+    /// Whether a maintenance window is open (the driver's mirror guard).
+    #[must_use]
+    ///
+    /// # Panics
+    ///
+    /// Panics if a shared lock is poisoned (a holder panicked).
+    pub fn window_active(&self) -> bool {
+        self.window.lock().expect("window lock poisoned").is_some()
+    }
+
+    /// Arms the window's abort flag (the driver's cancel arm; the dsh
+    /// signal's mid-flight face — the remote job's poll observes it).
+    ///
+    /// # Panics
+    ///
+    /// Panics if a shared lock is poisoned (a holder panicked).
+    pub fn mark_window_aborted(&self) {
+        if let Some(state) = self.window.lock().expect("window lock poisoned").as_mut() {
+            state.aborted = true;
+        }
+    }
+
     /// Queues one inbound command and wakes the driver when the command
     /// calls for it: waking inputs (`wakeup: true`) and cancels notify;
     /// a non-waking injection stays quiet (dsh `inject` never initiates
@@ -182,7 +338,9 @@ impl SessionMailbox {
     pub fn enqueue(&self, command: InboundCommand) {
         let wakes = matches!(
             &command,
-            InboundCommand::Input { wakeup: true, .. } | InboundCommand::Cancel { .. }
+            InboundCommand::Input { wakeup: true, .. }
+                | InboundCommand::Cancel { .. }
+                | InboundCommand::MaintenanceEnd
         );
         {
             let mut inner = self.inner.lock().expect("mailbox lock poisoned");
@@ -380,6 +538,22 @@ struct StatusRequest {
     session_id: String,
 }
 
+/// `maintenance-begin` payload (the remote job's window admission).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionRequest {
+    session_id: String,
+}
+
+/// `maintenance-poll` / `maintenance-end` payload: the window's
+/// capability token echo.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WindowRequest {
+    session_id: String,
+    token: String,
+}
+
 fn parse<T: serde::de::DeserializeOwned>(payload: &[u8], entry: &str) -> Result<T, String> {
     serde_json::from_slice(payload).map_err(|error| format!("{entry} payload is invalid: {error}"))
 }
@@ -444,10 +618,44 @@ pub fn dispatch(method: u32, payload: &[u8], sessions: &SessionMap) -> Result<Ve
         }
         METHOD_STATUS => {
             let request: StatusRequest = parse(payload, "status")?;
-            let status = session_mailbox(sessions, &request.session_id).status();
+            let mailbox = session_mailbox(sessions, &request.session_id);
+            let status = mailbox.status();
+            let route = mailbox.route();
+            let mut reply = serde_json::json!({ "status": status });
+            if let Some(route) = route {
+                // Additive route fields (the 17f Q1 ruling): the dsh
+                // summarizer reads `agent.options` as its third target
+                // fallback; `None` stays absent (the dsh `undefined`).
+                if let Some(provider) = route.provider {
+                    reply["provider"] = serde_json::Value::String(provider);
+                }
+                if let Some(model) = route.model {
+                    reply["model"] = serde_json::Value::String(model);
+                }
+            }
+            return Ok(serde_json::to_vec(&reply).unwrap_or_default());
+        }
+        METHOD_MAINTENANCE_BEGIN => {
+            let request: SessionRequest = parse(payload, "maintenance-begin")?;
+            let token = session_mailbox(sessions, &request.session_id)
+                .maintenance_begin(&request.session_id)?;
             return Ok(
-                serde_json::to_vec(&serde_json::json!({ "status": status })).unwrap_or_default()
+                serde_json::to_vec(&serde_json::json!({ "token": token })).unwrap_or_default()
             );
+        }
+        METHOD_MAINTENANCE_POLL => {
+            let request: WindowRequest = parse(payload, "maintenance-poll")?;
+            let aborted =
+                session_mailbox(sessions, &request.session_id).maintenance_poll(&request.token)?;
+            return Ok(
+                serde_json::to_vec(&serde_json::json!({ "aborted": aborted })).unwrap_or_default(),
+            );
+        }
+        METHOD_MAINTENANCE_END => {
+            let request: WindowRequest = parse(payload, "maintenance-end")?;
+            let mailbox = session_mailbox(sessions, &request.session_id);
+            mailbox.maintenance_end(&request.token)?;
+            mailbox.enqueue(InboundCommand::MaintenanceEnd);
         }
         _ => return Err(format!("unknown agent method {method}")),
     }
@@ -696,7 +904,8 @@ pub static DOUGONG_PLUGIN_EXPORTS: PluginExports = PluginExports {
 mod tests {
     use super::{
         CancelCause, InboundCommand, METHOD_CANCEL, METHOD_DESCRIBE, METHOD_FOLLOWUP,
-        METHOD_INJECT, METHOD_SEND, METHOD_STATUS, METHOD_STEER, PLUGIN_NAME, SessionMap, dispatch,
+        METHOD_INJECT, METHOD_MAINTENANCE_BEGIN, METHOD_MAINTENANCE_END, METHOD_MAINTENANCE_POLL,
+        METHOD_SEND, METHOD_STATUS, METHOD_STEER, PLUGIN_NAME, SessionMap, dispatch,
         handle_chunk_ready, session_mailbox, shutdown_and_join,
     };
     use crate::inbox::InboxTarget;
@@ -864,9 +1073,9 @@ mod tests {
         assert_eq!(reply["abiVersion"], dougong_abi::ABI_VERSION);
 
         assert!(
-            dispatch(9, b"{}", &map)
+            dispatch(999, b"{}", &map)
                 .expect_err("unknown method")
-                .contains("unknown agent method 9")
+                .contains("unknown agent method 999")
         );
         let broken = input_payload("x");
         drop(broken);
@@ -979,5 +1188,129 @@ mod tests {
         assert_eq!(METHOD_CANCEL, wire::METHOD_CANCEL);
         assert_eq!(METHOD_DESCRIBE, wire::METHOD_DESCRIBE);
         assert_eq!(METHOD_STATUS, wire::METHOD_STATUS);
+    }
+
+    /// The query face carries the declared route as additive fields, and
+    /// omits them while unset (the dsh `agent.options` fallback facts).
+    #[test]
+    fn status_reply_carries_the_declared_route() {
+        let map = empty_map();
+        let mailbox = session_mailbox(&map, "s1");
+        mailbox.set_route(Some("deepseek".to_owned()), Some("m1".to_owned()));
+        let reply = dispatch(METHOD_STATUS, br#"{"sessionId":"s1"}"#, &map).expect("status");
+        let reply: serde_json::Value = serde_json::from_slice(&reply).expect("json");
+        assert_eq!(reply["status"], "idle");
+        assert_eq!(reply["provider"], "deepseek");
+        assert_eq!(reply["model"], "m1");
+
+        let unset = session_mailbox(&map, "s2");
+        unset.set_route(None, None);
+        let reply = dispatch(METHOD_STATUS, br#"{"sessionId":"s2"}"#, &map).expect("status");
+        let reply: serde_json::Value = serde_json::from_slice(&reply).expect("json");
+        assert_eq!(reply["status"], "idle");
+        assert!(reply.get("provider").is_none());
+        assert!(reply.get("model").is_none());
+    }
+
+    /// The remote maintenance window: begin mints the capability token,
+    /// poll answers the abort flag the cancel arm sets, end closes and
+    /// rides the convergence command, and stale tokens fail closed.
+    #[test]
+    fn maintenance_window_faces_pin_the_wire_semantics() {
+        let map = empty_map();
+        let mailbox = session_mailbox(&map, "s1");
+
+        let reply =
+            dispatch(METHOD_MAINTENANCE_BEGIN, br#"{"sessionId":"s1"}"#, &map).expect("begin");
+        let reply: serde_json::Value = serde_json::from_slice(&reply).expect("json");
+        let token = reply["token"].as_str().expect("token").to_owned();
+
+        let reply = dispatch(
+            METHOD_MAINTENANCE_POLL,
+            format!(r#"{{"sessionId":"s1","token":"{token}"}}"#)
+                .into_bytes()
+                .as_slice(),
+            &map,
+        )
+        .expect("poll");
+        let reply: serde_json::Value = serde_json::from_slice(&reply).expect("json");
+        assert_eq!(reply["aborted"], false);
+
+        mailbox.mark_window_aborted();
+        let reply = dispatch(
+            METHOD_MAINTENANCE_POLL,
+            format!(r#"{{"sessionId":"s1","token":"{token}"}}"#)
+                .into_bytes()
+                .as_slice(),
+            &map,
+        )
+        .expect("poll after cancel");
+        let reply: serde_json::Value = serde_json::from_slice(&reply).expect("json");
+        assert_eq!(reply["aborted"], true);
+
+        dispatch(
+            METHOD_MAINTENANCE_END,
+            format!(r#"{{"sessionId":"s1","token":"{token}"}}"#)
+                .into_bytes()
+                .as_slice(),
+            &map,
+        )
+        .expect("end");
+        let drained = mailbox.drain_commands();
+        assert_eq!(drained.len(), 1, "the convergence command rides the queue");
+        assert!(matches!(drained[0], InboundCommand::MaintenanceEnd));
+
+        let error = dispatch(
+            METHOD_MAINTENANCE_END,
+            format!(r#"{{"sessionId":"s1","token":"{token}"}}"#)
+                .into_bytes()
+                .as_slice(),
+            &map,
+        )
+        .expect_err("stale end");
+        assert_eq!(error, "no matching maintenance window");
+        let error = dispatch(
+            METHOD_MAINTENANCE_POLL,
+            format!(r#"{{"sessionId":"s1","token":"{token}"}}"#)
+                .into_bytes()
+                .as_slice(),
+            &map,
+        )
+        .expect_err("stale poll");
+        assert_eq!(error, "no matching maintenance window");
+    }
+
+    /// The busy rejection is verbatim while a turn runs (the dsh
+    /// `runMaintenance` throw).
+    #[test]
+    fn maintenance_begin_refuses_while_a_turn_runs() {
+        let map = empty_map();
+        let mailbox = session_mailbox(&map, "s1");
+        let outbound = Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
+            dispatch: crate::outbound::identity_dispatch,
+            host_handle: std::ptr::null_mut(),
+            require: quiet_require,
+            emit: quiet_emit,
+        });
+        let events = crate::agent_events::AgentEvents::new(
+            outbound,
+            std::sync::Arc::new(|_warning: &str| {}),
+        );
+        let cell = mailbox.status_cell();
+        let _machine = crate::phase::PhaseMachine::new(
+            "s1",
+            crate::phase::Phase::Running {
+                abort: crate::phase::AbortLatch::new(),
+                turn: 1,
+                step: 0,
+                wake_requested: false,
+            },
+            std::sync::Arc::new(events),
+            std::sync::Arc::clone(&cell),
+        );
+        let error =
+            dispatch(METHOD_MAINTENANCE_BEGIN, br#"{"sessionId":"s1"}"#, &map).expect_err("busy");
+        assert_eq!(error, "agent \"s1\" already has active work");
     }
 }

@@ -808,6 +808,7 @@ dependencies = [
  "futures-core",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -839,8 +840,8 @@ name = "fr-compaction"
 version = "0.1.0"
 dependencies = [
  "dougong-abi",
+ "fr-llm",
  "fr-session",
- "fr-token-meter",
  "fr-wire",
  "serde",
  "serde_json",

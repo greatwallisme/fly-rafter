@@ -14,14 +14,15 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 dougong-abi.workspace = true
+# rlib face only: the assembler, error codes, and generation wire types the
+# summarizer's LLM seam consumes (dsh compaction-basic imports its stream
+# vocabulary from the dsh-llm package; linked-copy rule).
+fr-llm.workspace = true
 fr-wire.workspace = true
 fr-session.workspace = true
 uuid.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-
-[dev-dependencies]
-fr-token-meter.workspace = true
 
 [lints]
 workspace = true

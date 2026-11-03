@@ -1557,6 +1557,7 @@ mod tests {
                 Err(CompactionFailure::Llm {
                     message: "provider hiccup".to_owned(),
                     code: Some("PROVIDER_ERROR".to_owned()),
+                    failure: None,
                 })
             } else {
                 Ok(summary_of("recovered summary"))
@@ -1635,6 +1636,7 @@ mod tests {
             Err(CompactionFailure::Llm {
                 message: "provider down".to_owned(),
                 code: None,
+                failure: None,
             })
         };
         let mut recover = no_recover();
