@@ -1778,3 +1778,11 @@
 - **事故**：Write/Edit 退化多发（占位垃圾串入 message_projection/config/plugin_shell 两处）——写后即验+小块写全部当轮捕获修复；probe 调试基建（HOST/PRUNE-PROBE）随修随清零残留。
 - **终门认证**：fmt ✓/clippy workspace --all-targets -D warnings 0/全测（FR_DSH_SOURCE）1828 passed 0 failed（基线 1807→1828，+21）/doc -D warnings ✓/三门禁 0 errors×3/bind-session+bind-config 幂等重放 exit 0 且 specs 零漂移。
 - **下一动作=17h：spill 三件+compactNow+maintenance 窗口消费+全链绑定（compaction spec pending 选择器绑定真实测试名）+lifecycle/guard/stamp 七步收口+19.2 条 38 形状偏差呈裁。**
+
+## 2026-11-03 — 19.2 条 38 裁决落地 + 17h-a 完成：spill storage seam+local backend+cleanup sweep
+
+- **PRD**：19.2 条 38 修正落档（选项 1，commit 3363b0c）；三门禁复绿。
+- **交付**：fr-compaction spill.rs（seam+四 wire 形状类型）+spill_local.rs（encode_segment UTF-16 码元转义逐字+session_dir sha256+save_text_file 私有独占写+private_root mkdtemp 形状+LocalSpillStore）+spill_cleanup.rs（信任/祖先/符号链接三重 POSIX 门+精确形状清扫+先验默认根回收）。+12 钉测全绿。
+- **环境教训**：umask 002 使 create_dir_all 产 0775——信任门合法拒绝；夹具显式 chmod。PTY 全量偶发（H1 已披露）隔离重跑绿。
+- **终门**：fmt ✓/clippy 0/全测 1840/0/doc ✓/三门禁 0×3。
+- **下一动作=17h-b spill-policy。**

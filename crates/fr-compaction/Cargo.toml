@@ -23,6 +23,10 @@ fr-session.workspace = true
 uuid.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# The spill backend's session-directory hash (dsh spill-local createHash sha256).
+sha2.workspace = true
+# The sweep's POSIX trust checks (geteuid; the M1 platform gate pins Linux).
+libc.workspace = true
 
 [lints]
 workspace = true

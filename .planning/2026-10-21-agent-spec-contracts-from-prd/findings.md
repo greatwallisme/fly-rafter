@@ -3039,3 +3039,11 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - **消息投影机制（19.2 条 14 落地形态）**：fr-session `message_projection.rs`（trait+内建注册表+image/offload 解释器+offload_message_images 全逐字文案）；`SurfaceFoldResult.projected_messages`+SurfacePlan::Project 臂（content_generation+=1=dsh applySurfacePlan 同构）；`fold_surface_with`（空注册表=缺解释器逐字抛，测试可达）+`fold_surface`=内建注册表；`derive_event_message_with`（map 先查）；Session::append 写侧即验（投影臂在 plan_event 首位）。dsh 组装边语义（缺解释器抛）=fr 读路径词表门免费复得（未声明非可忽略行开门即拒）。
 - **17g 测试**：fr-session +11（投影 fail-closed 逐字文案族/投影回放/derive 消费/空注册表逐字抛/安全整数界/注册表短路序）；fr-compaction +10（剪枝度量与标记/越界块/标记首相交块/头跨界/事件落盘两件/offload 恢复全链带 offloaded:true 重准备钉测/request-error 双臂/无可卸载透传/溢出剪枝 shadow-priced 替换）。workspace 1828 passed 0 failed（FR_DSH_SOURCE），基线 1807→1828。
 - **测试基建教训**：harness 已种 4 plain users（seqs 1-4）+header(5)，追加种子自 seq 6 起；选择保留最新表面节点——需影子区覆盖的目标种子后必须再补尾随节点。
+
+## 2026-11-03 — 19.2 条 38 裁决落地 + 17h-a（spill storage+local backend）
+
+- **19.2 条 38 修正已落 PRD（用户裁决 2026-11-03 选项 1，commit 3363b0c）**：descriptor listen 实载四事件；summary-error 消费臂进程内直调（ln 结构性原因+M1 行为等价性论证入档）。
+- **17h-a 交付**：fr-compaction `spill.rs`（SpillStore seam+SaveTextSpill/SpillRef/SpillSource 全形状）；`spill_local.rs`（DEFAULT_ROOT_PREFIX "dsh-spill-" 契约逐字+encode_segment UTF-16 码元注入式转义（非 BMP=代理对两转义，dsh charCodeAt 同构）+session_dir sha256 前 12hex+save_text_file 0700/0600+ENOENT/碰撞重试+private_root mkdtemp 形状+LocalSpillStore 本地 hint 逐字）；`spill_cleanup.rs`（信任目录 uid+0o022 门/保护祖先走查 sticky 语义/resolveRoot 符号链接策略/identity 去重/会话目录清扫+空剪/先验默认根回收+活动根不剪/DEFAULT_ROOT_RE+SESSION_DIR_RE 精确形状）。+12 钉测（转义逐字/注入性/哈希形状/0600·0700/唯一名/verbatim 回读/过期删·新鲜留/空剪/无关项阻挡/符号链接不跟随/不安全目录逐字警告/发现根剪·活动根不剪/形状匹配）。
+- **环境事实**：本机 umask 002（组写默认）——信任检查合法拒绝 0775 目录；测试夹具显式 chmod 0700 对齐后端自建形状。fr-shell PTY cancel 测试全量跑偶发（已裁决 H1 披露在案），隔离重跑 89/0。
+- **剪切点**：storage+backend 模块完备态；ShellState 装配接线（sweep 启动线程+teardown join）随 spill-policy 消费方批落地（消费方到场纪律）。
+- **下一动作=17h-b：spill-policy（tools/post-execute+ptc-dispatch-log 两监听；依赖摸底：output-retention describeOmitted 端口+token-meter estimateContent 线面+llm imageRequestPricing 新增 face+attachments/fs 两缝读取）→17h-c compactNow+maintenance 窗口消费→17h-d 全链绑定+lifecycle+stamp 收口。**

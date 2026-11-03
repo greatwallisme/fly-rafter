@@ -843,8 +843,10 @@ dependencies = [
  "fr-llm",
  "fr-session",
  "fr-wire",
+ "libc",
  "serde",
  "serde_json",
+ "sha2",
  "uuid",
 ]
 
