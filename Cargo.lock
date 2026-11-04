@@ -808,6 +808,7 @@ dependencies = [
  "fr-llm",
  "fr-session",
  "fr-system-prompt",
+ "fr-tools",
  "fr-wire",
  "futures-core",
  "serde",

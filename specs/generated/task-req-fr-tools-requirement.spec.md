@@ -14,6 +14,7 @@ satisfies: [REQ-FR-TOOLS]
 - ToolRegistry MUST 支持 register（名称、JSON Schema、executionMode（exclusive/parallel）、presentation 元数据、说明 section order 1000-3000）；MCP 工具以 raw JSON Schema 动态注册。
 - 执行管线 MUST 按序：createExecution（参数 JSON 快照/冻结）→ tools/pre-execute waterfall（allow / deny / {kind:'ask'} 交 ApprovalService）→ guards（单调串，防重复调用风暴）→ tools/execute waterfall → 工具体 → tools/post-execute → append tool/call（模型序）+ tool/result（模型序提交）；guards 仅 pre-execute allow 时求值、跨 waterfall 单调不放宽（无 allow 回退）；guard 拒绝的调用仍 MUST 过 tools/post-execute；post-execute block → isError 结果附 feedback 文本、value/content 双替换抛 TypeError；finalize 冻结执行记录后才提交 tool/result（dsh tools/src/index.ts:1153-1162,724-732,1501-1547,1789-1828,1677-1722）。
 - 调度 MUST：exclusive 调用为单调用屏障（组=该调用本身）；parallel 有界滚动池上限=agentLoop.config.maxParallelToolCalls 默认 10；批次启动前 lazy 重分类（注册表变更可产生新屏障，并行组在首个非 parallel 调用处断开）；concludeTurn 仅成功结果终结 turn、错误结果 turn 继续；abort 为未开始调用补合成错误结果（dsh agent-loop/src/tool-calls.ts:85-105,200-213、tools/src/index.ts:593）。
+- settle 拉取作用域 MUST（2026-11-04 Q8A 裁决）：`'tools'` 服务 SETTLED 臂接受可选 `{agent}` 过滤器，按 in_flight 执行的 agent 分区 drain（drain 匹配、保留其余，settle 序不变）；`null`/`{}`/空载荷仍全量 drain（既有调用方兼容）。dsh 调度器为 ToolRuntime 实例私有（core/tools/src/index.ts:817），全局单队列无过滤会让先 drain 会话吞掉他会 settle（对方驱动悬挂）；loop 侧客户端每调用携带 agent=会话发起者身份（dsh requireInitiator 1:1，agent-loop/src/tool-calls.ts:68）并按其拉取。
 - schema 类型推断与呈现元模型 MUST 对齐 dsh schema.ts / presentation.ts。
 - schema 子集白名单 MUST（type/oneOf/properties/required/additionalProperties/items/enum/const 加注释词，其余键拒绝）；object 类的 additionalProperties MUST 显式 boolean（缺省或非布尔拒绝）；推断规则（dsh TS 类型层，2026-10-29 Q-B 勘误：const 优先于 enum 优先于宽类型、integer 归 number、oneOf 并集、深度 16 上限回退 JsonValue 均为 dsh 编译期类型推断 InferValueAt 非运行时行为；fr 运行时等值=author 子集校验+迭代编译，无递归且不设运行时深度上限）；isConcurrencySafe 仅严格 true 才 parallel（否则 fail-closed exclusive）（dsh schema.ts:97-166,153-170,367-369、json-schema.ts:6-10）。
 
@@ -67,6 +68,12 @@ Scenario: concludeTurn 调用终结 turn
   假设 模型请求 concludeTurn 类调用
   当 其 tool/result 提交后
   那么 turn 终结且不再开启下一 step
+
+Scenario: settle 拉取按请求方 agent 作用域化
+  Test: settled_drain_scopes_by_requesting_agent
+  假设 两个 agent 的调用先后 prepare 并 dispatch，两笔 settle 均已入队
+  当 一方按其 agent 过滤器拉取 settled 时
+  那么 只 drain 该 agent 的 settle，另一方的 settle 留队可被其自身拉取；无过滤载荷仍全量 drain
 
 Scenario: schema 类型推断与 dsh 一致
   Test: compiles_nested_containers_with_wire_key_order

@@ -58,6 +58,11 @@ pub const METHOD_PREPARE: u32 = 4;
 /// Stage 2 (fast-path enqueue; the outcome settles asynchronously).
 pub const METHOD_DISPATCH: u32 = 5;
 /// Pulls the settlements that have arrived, in settle order.
+///
+/// The optional `{agent}` filter scopes the drain to the calls minted
+/// for that agent (Q8A, 2026-11-04); `null`, `{}`, or an empty payload
+/// drains everything (the single-agent callers and the earlier wire
+/// shape).
 pub const METHOD_SETTLED: u32 = 6;
 /// Stage 3 for a post-result settlement.
 pub const METHOD_FINALIZE: u32 = 7;
@@ -834,6 +839,22 @@ fn encode<T: Serialize>(reply: &T) -> Result<Vec<u8>, ServiceError> {
         .map_err(|error| ServiceError(format!("tools reply encoding failed: {error}")))
 }
 
+/// Reads the requester's optional agent filter of one `settled` pull
+/// (Q8A, 2026-11-04): decodes leniently so the earlier wire shapes
+/// (`null`, `{}`, an empty payload) keep draining everything, and a
+/// missing `agent` key maps to no filter.
+fn settled_agent_filter(payload: &[u8]) -> Result<Option<String>, ServiceError> {
+    if payload.is_empty() {
+        return Ok(None);
+    }
+    let value: serde_json::Value = decode(payload, "settled")?;
+    let agent = value
+        .get("agent")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    Ok(agent)
+}
+
 /// The fail-closed denial of a dead pre-execute endpoint.
 fn endpoint_denial(stage: &str, service: &str, method: u32, text: &str) -> PreToolDecision {
     PreToolDecision::Deny {
@@ -1278,12 +1299,8 @@ impl ToolsService {
                 encode(&serde_json::json!({}))
             }
             METHOD_SETTLED => {
-                let drained: Vec<WireSettle> = self
-                    .settles
-                    .lock()
-                    .expect("settle lock")
-                    .drain(..)
-                    .collect();
+                let agent = settled_agent_filter(payload)?;
+                let drained = self.drain_settles(agent.as_deref());
                 encode(&drained)
             }
             METHOD_FINALIZE => {
@@ -1539,6 +1556,32 @@ impl ToolsService {
         }
     }
 
+    /// Drains the settle queue. With a filter, only the settles whose
+    /// minted execution carries this agent leave the queue (Q8A: the
+    /// dsh scheduler is per-loop private, so one session's pull must
+    /// never consume another session's settle); the rest keep their
+    /// order for their own pull. An execution already gone from the
+    /// in-flight map never matches a filter (fail closed: its settle
+    /// stays for the unfiltered drain).
+    fn drain_settles(&self, agent: Option<&str>) -> Vec<WireSettle> {
+        let mut settles = self.settles.lock().expect("settle lock");
+        let Some(agent) = agent else {
+            return settles.drain(..).collect();
+        };
+        let owners: std::collections::HashSet<u64> = self
+            .in_flight
+            .lock()
+            .expect("in-flight lock")
+            .iter()
+            .filter(|(_, exec)| exec.agent.as_deref() == Some(agent))
+            .map(|(token, _)| *token)
+            .collect();
+        let (drained, leftover): (Vec<_>, Vec<_>) = settles
+            .drain(..)
+            .partition(|settle| owners.contains(&settle.token));
+        *settles = leftover.into();
+        drained
+    }
     fn take_in_flight(
         &self,
         token: ToolExecutionToken,

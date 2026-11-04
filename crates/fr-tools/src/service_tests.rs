@@ -281,6 +281,22 @@ fn wait_settled(service: &mut ToolsService) -> super::service::WireSettle {
     settle.expect("no settle arrived within the bounded wait")
 }
 
+/// Polls `settled` scoped to one agent until one settle arrives
+/// (bounded wait).
+fn wait_settled_for(service: &mut ToolsService, agent: &str) -> super::service::WireSettle {
+    let body = json!({ "agent": agent }).to_string().into_bytes();
+    let settle = (0..2000).find_map(|_| {
+        let reply = service.serve(METHOD_SETTLED, &body).expect("settled call");
+        let settles: Vec<super::service::WireSettle> =
+            serde_json::from_slice(&reply).expect("settles decode");
+        settles.into_iter().next().or_else(|| {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            None
+        })
+    });
+    settle.expect("no scoped settle arrived within the bounded wait")
+}
+
 #[test]
 fn describe_reports_metadata() {
     let (_vtable, mut service) = service_with_host(Box::new(|_, _| Err("unused".to_owned())));
@@ -655,6 +671,64 @@ fn segmented_flow_settles_and_finalizes() {
     let names: Vec<&str> = emits.iter().map(|(name, _)| name.as_str()).collect();
     assert!(names.contains(&"tools/settled"), "{names:?}");
     assert!(names.contains(&"tools/result"), "{names:?}");
+}
+
+#[test]
+fn settled_drain_scopes_by_requesting_agent() {
+    // Q8A, 2026-11-04: one agent's scoped pull drains only its own
+    // settles — the dsh scheduler is per-loop private, so a concurrent
+    // other agent's settle must stay queued and reachable.
+    let (_vtable, mut service) = service_with_host(Box::new(|_, _| Err("unused".to_owned())));
+    register(&service, echo_tool("echo"));
+    let body_for = |call_id: &str, agent: &str| {
+        json!({
+            "call_id": call_id,
+            "name": "echo",
+            "arguments": { "value": "x" },
+            "agent": agent,
+        })
+        .to_string()
+        .into_bytes()
+    };
+    let token_of = |reply: Vec<u8>| -> u64 {
+        let parsed: Value = serde_json::from_slice(&reply).expect("json");
+        parsed["exec"]["token"].as_u64().expect("token")
+    };
+    let token_a = token_of(
+        service
+            .serve(METHOD_PREPARE, &body_for("call-a", "agent-a"))
+            .expect("prepare a"),
+    );
+    let token_b = token_of(
+        service
+            .serve(METHOD_PREPARE, &body_for("call-b", "agent-b"))
+            .expect("prepare b"),
+    );
+    for token in [token_a, token_b] {
+        service
+            .serve(
+                METHOD_DISPATCH,
+                json!({ "token": token }).to_string().as_bytes(),
+            )
+            .expect("dispatch enqueue");
+    }
+    let settle_a = wait_settled_for(&mut service, "agent-a");
+    assert_eq!(settle_a.token, token_a);
+    // The concurrent other-agent settle survived the scoped pull.
+    let settle_b = wait_settled_for(&mut service, "agent-b");
+    assert_eq!(settle_b.token, token_b);
+    // The unfiltered drain and the empty payload both see the empty queue.
+    let rest = service.serve(METHOD_SETTLED, b"null").expect("drained");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&rest).expect("json"),
+        json!([])
+    );
+    let rest = service.serve(METHOD_SETTLED, b"").expect("drained");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&rest).expect("json"),
+        json!([])
+    );
+    service.join_workers();
 }
 
 #[test]

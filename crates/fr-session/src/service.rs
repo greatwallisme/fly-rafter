@@ -99,8 +99,7 @@ pub const METHOD_REQUEST_HEADER: u32 = 10;
 /// `{id}` → `{"history": ToolHistory}` — the folded tool declaration
 /// history (the dsh `session.toolHistory()` in-process read; fr-own
 /// wire arm).
-pub const METHOD_TOOL_HISTORY: u32 =
-    fr_wire::services::session_persistence::METHOD_TOOL_HISTORY;
+pub const METHOD_TOOL_HISTORY: u32 = fr_wire::services::session_persistence::METHOD_TOOL_HISTORY;
 /// `{id}` → `{"generation": u64}` — the surface content generation (the
 /// dsh `session.surfaceGeneration` in-process read; fr-own wire arm).
 pub const METHOD_SURFACE_GENERATION: u32 =
@@ -795,8 +794,7 @@ fn service_read(
         .surface_nodes()
         .iter()
         .map(|seq| {
-            serde_json::to_value(seq)
-                .map_err(|error| format!("surface seq encode failed: {error}"))
+            serde_json::to_value(seq).map_err(|error| format!("surface seq encode failed: {error}"))
         })
         .collect::<Result<_, _>>()?;
     Ok(serde_json::json!({

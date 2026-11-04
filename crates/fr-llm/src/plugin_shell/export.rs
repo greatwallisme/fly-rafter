@@ -8,9 +8,7 @@
 
 use dougong_abi::PluginExports;
 
-use super::{
-    ABI_VERSION, call, descriptor, on_event, on_next, plugin_name, setup, teardown,
-};
+use super::{ABI_VERSION, call, descriptor, on_event, on_next, plugin_name, setup, teardown};
 
 /// Export table for the fr-llm dylib artifact; the host resolves this
 /// symbol by name at load time.

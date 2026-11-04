@@ -24,6 +24,10 @@ fr-llm = { workspace = true }
 fr-system-prompt = { workspace = true }
 futures-core = "0.3"
 fr-session = { workspace = true }
+# Wire DTOs of the consumed 'tools' service stay single-sourced in the
+# provider crate (the same judgment; PRD 8.1 injects tools into this
+# plugin). rlib face only: no service state crosses artifacts.
+fr-tools = { workspace = true }
 fr-wire = { workspace = true }
 # The maintenance window's capability token (the dsh window has no wire
 # form; fr mints one per window so stale enders fail closed).

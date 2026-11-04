@@ -17,10 +17,10 @@ use fr_wire::message::Message;
 use fr_wire::services::session_persistence as wire;
 
 use crate::driver::{RestoreView, SessionReads};
-use fr_wire::event::EpochHeader;
 use crate::outbound::Outbound;
 use crate::runtime_context::system_prompt_nodes;
 use crate::session_client::SessionClientError;
+use fr_wire::event::EpochHeader;
 use fr_wire::event::SessionEvent;
 
 /// Reads one session through the `session-persistence` service.
@@ -46,8 +46,8 @@ impl SessionReadsClient {
         method: u32,
         payload: &serde_json::Value,
     ) -> Result<serde_json::Value, SessionClientError> {
-        let body =
-            serde_json::to_vec(payload).map_err(|error| SessionClientError::Reply(error.to_string()))?;
+        let body = serde_json::to_vec(payload)
+            .map_err(|error| SessionClientError::Reply(error.to_string()))?;
         let reply = self
             .outbound
             .require(wire::SERVICE_NAME, method, &body)
@@ -62,11 +62,17 @@ impl SessionReadsClient {
             &serde_json::json!({ "id": self.session_id }),
         )?;
         let events: Vec<SessionEvent> = serde_json::from_value(
-            reply.get("events").cloned().unwrap_or(serde_json::Value::Null),
+            reply
+                .get("events")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
         )
         .map_err(|error| SessionClientError::Reply(format!("log events decode: {error}")))?;
         let seqs: Vec<u64> = serde_json::from_value(
-            reply.get("surface").cloned().unwrap_or(serde_json::Value::Null),
+            reply
+                .get("surface")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
         )
         .map_err(|error| SessionClientError::Reply(format!("log surface decode: {error}")))?;
         let surface = seqs
@@ -97,12 +103,24 @@ impl SessionReads for SessionReadsClient {
                 &serde_json::json!({ "id": self.session_id }),
             )
             .unwrap_or_else(|error| fail_read("request-header", &error));
-        serde_json::from_value(reply.get("header").cloned().unwrap_or(serde_json::Value::Null))
-            .unwrap_or_else(|error| fail_read("request-header decode", &SessionClientError::Reply(error.to_string())))
+        serde_json::from_value(
+            reply
+                .get("header")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        )
+        .unwrap_or_else(|error| {
+            fail_read(
+                "request-header decode",
+                &SessionClientError::Reply(error.to_string()),
+            )
+        })
     }
 
     fn request_context(&mut self) -> Option<RequestContextData> {
-        let (events, _) = self.read_log().unwrap_or_else(|error| fail_read("request-context", &error));
+        let (events, _) = self
+            .read_log()
+            .unwrap_or_else(|error| fail_read("request-context", &error));
         events.iter().rev().find_map(|event| match &event.data {
             fr_wire::event::SessionEventData::RequestContext(holder) => {
                 Some(holder.context.clone())
@@ -118,8 +136,18 @@ impl SessionReads for SessionReadsClient {
                 &serde_json::json!({ "id": self.session_id }),
             )
             .unwrap_or_else(|error| fail_read("derive-messages", &error));
-        serde_json::from_value(reply.get("messages").cloned().unwrap_or(serde_json::Value::Null))
-            .unwrap_or_else(|error| fail_read("derive-messages decode", &SessionClientError::Reply(error.to_string())))
+        serde_json::from_value(
+            reply
+                .get("messages")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        )
+        .unwrap_or_else(|error| {
+            fail_read(
+                "derive-messages decode",
+                &SessionClientError::Reply(error.to_string()),
+            )
+        })
     }
 
     fn tool_history(&mut self) -> ToolHistory {
@@ -129,8 +157,18 @@ impl SessionReads for SessionReadsClient {
                 &serde_json::json!({ "id": self.session_id }),
             )
             .unwrap_or_else(|error| fail_read("tool-history", &error));
-        serde_json::from_value(reply.get("history").cloned().unwrap_or(serde_json::Value::Null))
-            .unwrap_or_else(|error| fail_read("tool-history decode", &SessionClientError::Reply(error.to_string())))
+        serde_json::from_value(
+            reply
+                .get("history")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        )
+        .unwrap_or_else(|error| {
+            fail_read(
+                "tool-history decode",
+                &SessionClientError::Reply(error.to_string()),
+            )
+        })
     }
 
     fn surface_generation(&mut self) -> u64 {
@@ -180,4 +218,3 @@ impl SessionReads for SessionReadsClient {
 fn fail_read(what: &str, error: &SessionClientError) -> ! {
     panic!("session read {what} failed: {error}");
 }
-

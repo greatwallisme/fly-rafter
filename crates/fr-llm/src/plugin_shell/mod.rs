@@ -15,13 +15,10 @@
 //! the `channel` module's proxies onto the provider plugins' own
 //! generation faces.
 
-
 mod channel;
 mod export;
 
-use dougong_abi::{
-    ABI_VERSION, HostExports, STATUS_CAPACITY, STATUS_FAILED, STATUS_OK, write_out,
-};
+use dougong_abi::{ABI_VERSION, HostExports, STATUS_CAPACITY, STATUS_FAILED, STATUS_OK, write_out};
 use serde_json::Value;
 
 /// The provided-service name consumers inject (PRD :336 `inject llm`).

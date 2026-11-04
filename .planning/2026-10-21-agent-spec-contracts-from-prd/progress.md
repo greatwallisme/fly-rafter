@@ -1886,3 +1886,19 @@
 - **b2 勘察（未动工）**：fr-tools 调度面已是 token 基模型（prepare 铸 ToolExecutionToken、dispatch/finalize/finish 按 token 取 in-flight、SETTLED 返回 WireSettle 带序）——driver ToolsFace trait 是早期形状（无 token；settled 按 (ToolCallId, Settlement)）。桥接=协议适配工作：WireExecution/wire_execution 形状（fr-tools service.rs:297 已有）+token 生命周期管理+settle 路由回 callId。**这是 b2 的真实工作量，非简单六臂配对。**
 - **续作地图（新会话按此续）**：b2=ToolsFace 生产客户端（token 桥接+WireExecution/wire_execution 复用+settle→callId 路由+descriptor tools/settled 唤醒已有）；b3=生命周期臂 CREATE=10/RESUME=11/LIVE=12（CREATE 组 DriverDeps{reads=SessionReadsClient, prompt=SystemPromptClient, llm=LlmClient, tools=ToolsClient}+AgentEvents+mailbox attach+DriverThread spawn 判例+teardown join；RESUME=persistence 6/7 组合+驱动构造；LIVE=no-create 探测）+driver.rs agent/error 发射（throwError 1:1 容器边界）；c=fr-schema json-stream schema 模块+fr-headless 参数/投影/采纳纯件；d=runner 集成+fr 宿主退出守望（in-process 监听插件听 headless/exit）+mock e2e+25 场景绑定+四关+lifecycle/guard/stamp 收口。
 - **下一动作=新会话按续作地图推进 b2。**
+
+## 2026-11-04 — 18b 前段提交（91e3cf2）
+
+- **提交内容**：三 spec 扩边+fr-wire 常量五组+fr-llm 注册协议/通道代理/导出表隔离+fr-llm-deepseek 生成面+fr-session 三读臂+fr-agent-loop SessionReadsClient+计划续作地图。19 文件 +2369/−417。
+- **提交时补门**：cargo doc 捕获两枚 private-intra-doc-links（mod.rs 文档引 [channel]/[channel::ChannelSource]）→ 改纯文本后 doc -D warnings ✓——四关（fmt/clippy/test 1911/0/doc）提交时全绿复验。
+- **guard 判例执行**：pre-commit agent-spec guard 全量扫描结构性不可过（待实现 Phase pending spec），按 precommit-guard-no-verify 既裁决 --no-verify，提交信息如实记载判例与四关凭证。
+- **下一动作=新会话按续作地图推进 b2（fr-tools token 基调度面桥接）。
+## 2026-11-04 — 18b b2 完成会话（SETTLED 过滤裁决+ToolsClient 全链真）
+
+- **勘察→裁决**：b2 开工深勘钉全两侧形状+映射面（findings「18b b2 开工深勘」）；发现结构性缺口=fr-tools settles 全局单队列与唤醒注释自相矛盾、多会话并发在飞先 drain 者吞他会 settle（dsh 调度器实例私有无此问题）→呈裁 Q8A，用户选「SETTLED 增 agent 过滤（推荐）」。
+- **fr-tools**：METHOD_SETTLED 文档+臂改 `settled_agent_filter`（宽容解码 null/{}/空=全量）+`drain_settles`（owners 集预收+partition，锁收紧）；钉测 `settled_drain_scopes_by_requesting_agent`+`wait_settled_for`。95/95。
+- **fr-agent-loop**：Cargo.toml += fr-tools（provider 判例注释）；tools_client.rs=ToolsFace 生产实现（token 桥接+存储回传+agent 携带+fail-loud 分轨）；3 测试（segmented round trip/Q8A 双客户端作用域/失败映射+finish 臂）。116/116。对勘实证：未知工具 prepare 不失败（PostResult settle 落 dispatch 阶段）。
+- **spec**：fr-tools spec 增 Q8A Decision+场景（Test 绑真测）；lint Quality 100%。
+- **门**：workspace fmt/clippy -D warnings/test 1915-0（FR_DSH_SOURCE 必带）/doc -D warnings 全绿；cdylib fr-agent-loop+fr-tools 双工件链接实证（新 rlib 边零碰撞）。
+- **退化 6 枚当场修复**（Edit/Write 随机尾部损坏）；对策=小片段+写后即验+python 拼接。code-quality hook panic 标记=fail_read 已裁决误报类。
+- **下一动作=b3（生命周期臂+agent/error 发射）**。

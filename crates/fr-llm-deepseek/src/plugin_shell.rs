@@ -664,10 +664,7 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_slice(super::DESCRIPTOR).expect("json");
         assert_eq!(parsed["name"], PLUGIN_NAME);
         assert_eq!(parsed["version"], env!("CARGO_PKG_VERSION"));
-        assert_eq!(
-            parsed["provide"],
-            serde_json::json!(["llm-deepseek"])
-        );
+        assert_eq!(parsed["provide"], serde_json::json!(["llm-deepseek"]));
         assert_eq!(
             parsed["inject"],
             serde_json::json!(["llm", "attachments", "fs"])
