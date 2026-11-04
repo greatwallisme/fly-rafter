@@ -696,7 +696,26 @@ impl crate::tools::TerminalSeams for WireSeams {
 /// One activation-sequence step: one require, `None` on any refusal
 /// (the fail-closed decline).
 fn step(link: &HostLink, service: &str, method: u32, payload: &[u8]) -> Option<()> {
-    link.require(service, method, payload).ok().map(|_| ())
+    let payload = normalize_register_payload(service, method, payload)?;
+    link.require(service, method, &payload).ok().map(|_| ())
+}
+
+/// Normalizes one registration payload onto the standard JSON Schema
+/// dialect before it crosses the wire (the 2026-11-04 first-co-load
+/// ruling: the crate's authoring dialect carries `required: true` inside
+/// property definitions — compact for pinned tables — while the tools
+/// registry validates the standard object-level `required` array form
+/// the dsh catalog emits; the boundary conversion is the single point
+/// where the two dialects meet).
+fn normalize_register_payload(service: &str, method: u32, payload: &[u8]) -> Option<Vec<u8>> {
+    if service != fr_wire::services::tools::SERVICE_NAME
+        || method != fr_wire::services::tools::METHOD_REGISTER
+    {
+        return Some(payload.to_vec());
+    }
+    let mut value: serde_json::Value = serde_json::from_slice(payload).ok()?;
+    crate::schema::standardize_required(&mut value);
+    serde_json::to_vec(&value).ok()
 }
 
 /// The escalation modes the registration advertises, resolved from the
@@ -728,8 +747,11 @@ pub struct BuiltinState {
     /// The notice worker's join handle (joined before the state drops).
     worker: Option<std::thread::JoinHandle<()>>,
     /// The schedule runtime's join handle (joined before the state
-    /// drops).
+    /// drops; the paired signal shut it down first).
     schedule_worker: Option<std::thread::JoinHandle<()>>,
+    /// The schedule runtime's wake signal (shutdown arm for the teardown
+    /// quiescence).
+    schedule_signal: Arc<crate::schedule::RuntimeSignal>,
 }
 
 impl std::fmt::Debug for BuiltinState {
@@ -2631,6 +2653,15 @@ impl BuiltinState {
         // endpoints; the projection relay consumes the fold endpoint.
         link.grant("tools", "builtin-tools").ok()?;
         link.grant("session-projections", "builtin-tools").ok()?;
+        // The 2026-11-04 cycle-cut ruling: the loop reads the skill
+        // catalog lazily (the dsh soft read), so the capability rides a
+        // grant instead of a descriptor inject — a declared inject would
+        // gate the loop's activation on this crate while this crate gates
+        // on shell, which gates on the loop (the first true co-load caught
+        // the declared cycle). The timing holds: the loop's remaining
+        // injects are acyclic, so it commits before shell, shell before
+        // this crate, and the grant's target is committed here.
+        link.grant("agent", "skills").ok()?;
         let escalation = read_default_mode(&link)?;
         // The composition gate (the dsh `ctx.inject(['attachments'], …)`
         // conditional registration): without a committed durable store
@@ -2702,6 +2733,7 @@ impl BuiltinState {
         )));
         open_schedule_domain(&link)?;
         let signal = crate::schedule::runtime_handle();
+        let state_signal = Arc::clone(&signal);
         schedules.bind_signal(Arc::clone(&signal));
         let schedule_worker = crate::schedule::spawn_runtime(Arc::clone(&schedules), signal);
 
@@ -2813,6 +2845,7 @@ impl BuiltinState {
             tasks: Some(tasks),
             worker: Some(worker),
             schedule_worker: Some(schedule_worker),
+            schedule_signal: state_signal,
         })
     }
 
@@ -3350,9 +3383,17 @@ unsafe extern "C" fn teardown(handle: *mut c_void) {
     // the in-flight delivery to contain).
     let mut state = unsafe { Box::from_raw(handle.cast::<BuiltinState>()) };
     drop(state.tasks.take());
+    // Close the shared-arc sender copy too: the worker holds an arc of the
+    // notice state, so only an explicit close lets its `recv` return before
+    // this join (the 2026-11-04 in-process shutdown hang).
+    state.tools().notices().close_tasks();
     if let Some(worker) = state.worker.take() {
         let _ignored = worker.join();
     }
+    // Shut the schedule runtime BEFORE its join: the worker parks on the
+    // signal condvar, which only an explicit shutdown wakes (the
+    // 2026-11-04 shutdown hang).
+    state.schedule_signal.shutdown();
     if let Some(worker) = state.schedule_worker.take() {
         let _ignored = worker.join();
     }

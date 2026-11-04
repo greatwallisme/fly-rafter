@@ -148,7 +148,10 @@ struct DomainShared {
     memory: Mutex<MemoryState>,
     unit: SingleJsonUnit,
     emit: EmitFace,
-    job_tx: Mutex<Sender<Job>>,
+    /// `None` after close: dropping the last sender ends the worker's
+    /// `recv`, or the teardown join parks forever (the worker's own mpmc
+    /// hold cannot close the channel — the 2026-11-04 shutdown hang).
+    job_tx: Mutex<Option<Sender<Job>>>,
     worker: Mutex<Option<JoinHandle<()>>>,
     /// Set synchronously by `close` before the close job is queued: new
     /// writes reject while the drain proceeds.
@@ -346,7 +349,7 @@ impl Domain {
             memory: Mutex::new(memory),
             unit,
             emit,
-            job_tx: Mutex::new(tx),
+            job_tx: Mutex::new(Some(tx)),
             worker: Mutex::new(None),
             disposing: AtomicBool::new(false),
             closed: AtomicBool::new(false),
@@ -528,21 +531,42 @@ impl Domain {
         let (tx, rx) = mpsc::channel::<()>();
         if self.send_job(Job::Close { reply: tx }).is_err() {
             self.shared.closed.store(true, Ordering::SeqCst);
+            self.drop_job_tx();
             self.wait_worker_exit();
             return;
         }
         let _ = rx.recv();
+        // Close the queue: the worker loops back into `recv` after the
+        // close job; with the last sender dropped its `recv` returns and
+        // the join converges.
+        self.drop_job_tx();
         self.wait_worker_exit();
     }
 
     /// Sends one job to the worker (the write-chain enqueue).
     fn send_job(&self, job: Job) -> Result<(), FrStorageError> {
-        let tx = self.shared.job_tx.lock().map_err(poisoned_domain)?;
+        let tx = self
+            .shared
+            .job_tx
+            .lock()
+            .map_err(poisoned_domain)?
+            .clone()
+            .ok_or_else(|| {
+                FrStorageError::closed("domain worker exited: queue closed".to_owned())
+            })?;
         tx.send(job)
             .map_err(|error| FrStorageError::closed(format!("domain worker exited: {error}")))
     }
 
     /// Waits for the worker thread to exit and collects the handle.
+    /// Drops the shared sender (the queue closes; in-flight clones from
+    /// `send_job` are transient).
+    fn drop_job_tx(&self) {
+        if let Ok(mut slot) = self.shared.job_tx.lock() {
+            *slot = None;
+        }
+    }
+
     fn wait_worker_exit(&self) {
         let handle = self
             .shared

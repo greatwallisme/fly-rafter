@@ -471,7 +471,11 @@ pub struct NoticeState {
     finalizes: Mutex<HashMap<u64, (Value, Value)>>,
     delivery: CompletionDelivery,
     wake_budget: Option<usize>,
-    tasks: Mutex<mpsc::Sender<NoticeTask>>,
+    /// `None` once the queue is closed (teardown): the shared-arc worker
+    /// must observe closure and exit, or its own arc keeps the sender alive
+    /// and `recv` parks forever against the teardown join (the 2026-11-04
+    /// in-process shutdown hang).
+    tasks: Mutex<Option<mpsc::Sender<NoticeTask>>>,
 }
 
 impl std::fmt::Debug for NoticeState {
@@ -499,7 +503,7 @@ impl NoticeState {
             finalizes: Mutex::new(HashMap::new()),
             delivery,
             wake_budget,
-            tasks: Mutex::new(tasks),
+            tasks: Mutex::new(Some(tasks)),
         }
     }
 
@@ -571,11 +575,20 @@ impl NoticeState {
     /// Enqueues one notice task; a closed queue contains (the machine's
     /// listener-throw shape: delivery is best-effort, never blocking).
     pub fn enqueue(&self, task: NoticeTask) {
-        let _ignored = self
+        let queue = self
             .tasks
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .send(task);
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _ignored = queue.as_ref().map_or(Ok(()), |sender| sender.send(task));
+    }
+
+    /// Closes the queue: every shared-arc sender copy goes `None`, so the
+    /// worker's `recv` returns and the teardown join converges even though
+    /// the worker itself still holds an arc of this state.
+    pub fn close_tasks(&self) {
+        if let Ok(mut slot) = self.tasks.lock() {
+            *slot = None;
+        }
     }
 
     /// Delivers one task per the resolved config (dsh `wakeup` &&

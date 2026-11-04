@@ -22,7 +22,10 @@ headless 是第一个交付入口（M1）：一次性任务、`--json` 事件流
 - 续用与输出硬细则 MUST：连字符任务参数必须唯一；任务参数非空但 trim 后为空报错；--session-id trim 后判空但原串交付（空白属身份）；--json 下语法错误也发 error 事件；采纳四拒（preset 不匹配、子代理与 fork、无 cwd、cwd 不一致）加 live Agent 拒绝加 resume 双重复查；final 文本 = durable log 最后一段非空 assistant text、exit reason 取 turn/end reason；等待托管子孙结束（子代理收尾提前唤醒时以 seq 未变且无存活子判定抑制）；--json 首事件含 cwd；字符串与 key 均封顶 8KiB、行限 32KiB 二级降级梯；usage 跨 attempt 累加且任一 attempt 无样本则整 step 省略；tool_result 仅 surfaceOp 为 append 时投影（dsh startup.ts:83-113、index.ts:73-99,212-292,375-386、json-stream.ts:16-66,132-149,266-303）。
 - 宿主壳三件套 MUST（PRD 4.3、决策 16/27）：`fr` bin = 装配器（fr-config 编译装配文档，入口默认 bundle 嵌入常量走同一解析路径）+ 事件泵（emit 事件按订阅插件 descriptor 的 listen 表送达 on_event）+ 入口分发；装载文档每槽 `{name, source{kind}, config, isolate}`，第一方槽一律 dylib 源，builtin 源在 fr 装配中从不使用（决策 16）。
 - dylib 装载清单 MUST 覆盖 headless 组合所需的全部第一方插件 cdylib 工件（现 20 crate 均为 cdylib+rlib 双输出，已实勘）；fr-llm-retry 与 fr-working-directory 两行占位待各自切片兑现（2026-11-04 裁决 2B）。
-- cmdline/appExit MUST 为宿主值注入形态（决策 47 5A）：宿主壳解析根 argv，入口事实（app argv 快照）烘进装载文档行 config 交入口插件激活期读取；宿主壳持有信号注册与有界退出通道，插件不直接退出进程。
+- cmdline/appExit MUST 为宿主值注入形态（决策 47 5A，2026-11-04 执法点核对后修订）：宿主壳解析根 argv，入口事实（app argv 快照）烘进装载文档行 config；读取轨道经入口插件自 provide 的 headless-startup 服务在 boot 窗由宿主中继同一快照（dougong 执法事实：dylib 激活不收槽位 config——`DynPlugin::apply` 丢弃 `_config`（dougong-dylib lib.rs:1676）、`provide` 必须 fiber 绑定故宿主不能 provide、决策 16 禁 builtin 源插件；5A 原文「dougong 等价面开工时按其契约核对后定案细节」兑现）；宿主壳持有信号注册与有界退出通道，插件不直接退出进程。
+- fr-headless 最小入口插件脚手架随 18a 落地（2026-11-04 裁决 Q3A）：真实 cdylib 工件（descriptor provide "headless-startup"、inject 空、listen 空），激活持 boot 窗中继快照并经服务面读回；startup 参数解析/runner 驱动/json 投影等行为面随后续切片扩同一 crate。新建 crate 须改根 Cargo.toml members（Allowed 已扩该文件，仅限 members 数组增行）。
+- `fr headless` CLI 分发面随 18a 挂起（2026-11-04 裁决 Q2A）：走完整 boot 链（装配→装载→join 收敛→事件泵→信号面），入口插件激活持事实后进程等信号（SIGINT 130/SIGTERM 0）；runner 语义随 18b+ 落。launcher 全局旗标 `--profile`/`--from-default-profile`/`--patch` 先于首个非旗标 token（dsh args.ts:166-174 同构），`fr headless [app...]` 为 profile 缩写展开（dsh args.ts:205-208 同构）。
+- 六枚集成测试的 cdylib 工件由四关门流程前置 `cargo build --workspace` 供给（2026-11-04 裁决 Q1A：`cargo test` 不产 cdylib 工件——实测；dougong loader_demo 判例同形）；测试对缺失工件 fail-loud 并给指引，绝不静默跳过。
 - 信号面 MUST：SIGINT 映射退出码 130、SIGTERM 映射退出码 0，宿主壳先广播 shutdown 再有界 join 插件自有线程（teardown join 纪律，dsh profile-boot.ts:307-308 同码）。
 - 启动诊断 MUST：boot 期致命错误 stderr 单行摘要 + 完整报告落盘 `$FR_HOME/logs/startup-<时间>-<uuid>.log`（警告头 "WARNING: Raw diagnostics may contain configuration or credential values from plugin errors. Review before sharing." 逐字）后退出码 1（PRD 18.1、dsh startup-diagnostics.ts:34-67 + bin.ts:43-47）。
 - realm 声明位 MUST：装载文档槽位支持 isolate 声明（dougong D15 isolate_realm；每会话 realm 挂载落码属后续切片，18a 只钉声明面被 loader 接受）。
@@ -30,8 +33,12 @@ headless 是第一个交付入口（M1）：一次性任务、`--json` 事件流
 ## Boundaries
 
 ### Allowed Changes
+- Cargo.toml
 - crates/fr/**
 - crates/fr-headless/**
+- crates/fr-schema/**（2026-11-04 追加裁决：首次真装配实证 registry 将 plan-mode `section` 钉为 fr-tools-builtin 顶层必填，而 crate 侧该键烘焙不存在（plugin_shell.rs prompt_sections 静态表）——移除该幽灵必填并同片内调整钉测）
+- crates/fr-agent-loop/** + crates/fr-tools-builtin/**（2026-11-04 追加裁决：首次真装配实证三 crate 描述符声明环 skills←agent←shell←tools-builtin，内核激活门控下组合结构性不可 boot；手术 = agent-loop descriptor inject 去 skills（dsh 软读边）、tools-builtin setup 增 grant(agent→skills) 惰性授权（时序：agent 剩余 inject 无环先激活→shell 解 park→tools-builtin 激活时 agent 已提交、grant 成立））
+- crates/fr-session/**（2026-11-04 追加裁决：首次真装配实证工件壳未装配 session-persistence 服务带（dispatch 仅 declare/describe/projections，create/append/drain/read 等方法带从未接线、ShellState 无 SessionService——单测全部绕过工件直驱 service 面）；修复 = 工件 setup 装配 SessionService（烘焙根+core 词表+毫秒时钟+stderr 告警钩）并在 dispatch 路由 2-11 与 1002/1003 方法带，同片内补接线钉测）
 
 ### Forbidden
 - Do not weaken or remove the source requirement clauses.
@@ -206,7 +213,7 @@ Scenario: 入口事实经文档行注入
   Test: entry_facts_injected_through_document_rows
   假设 宿主壳解析到根 argv
   当 组装装载文档时
-  那么 app argv 快照落在入口插件槽位 config 中且激活期可读
+  那么 app argv 快照落在入口插件槽位 config 中，且经宿主在 boot 窗中继至入口插件自持的 headless-startup 服务后可读回
 
 Scenario: 装配失败启动诊断落盘
   Test: startup_failure_writes_diagnostic_log

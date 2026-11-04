@@ -42,7 +42,12 @@ use fr_wire::ids::SessionId;
 /// required this spelling, and PRD 4.4 lists it). The service-face
 /// constants live in the shell-free service module; the re-exports keep
 /// this path stable.
-pub use crate::service::{METHOD_DECLARE_EVENT_TYPES, METHOD_DESCRIBE, SERVICE_NAME};
+pub use crate::service::{
+    METHOD_DECLARE_EVENT_TYPES, METHOD_DESCRIBE, METHOD_PERSISTED_COLD_READ, METHOD_PERSISTED_LIST,
+    METHOD_REQUEST_HEADER, METHOD_SESSION_APPEND, METHOD_SESSION_CREATE, METHOD_SESSION_DRAIN,
+    METHOD_SESSION_FLUSH, METHOD_SESSION_FORK, METHOD_SESSION_READ, METHOD_SESSION_RESTORE,
+    METHOD_SESSION_RESUME, SERVICE_NAME,
+};
 
 /// The projections service's name and selectors, re-exported for path
 /// stability (the constants live in the shell-free projections module).
@@ -198,6 +203,7 @@ impl FoldCaller for WireFoldCaller {
 pub struct ShellState {
     vocabulary: EventVocabulary,
     projections: Projections,
+    service: crate::service::SessionService,
 }
 
 impl std::fmt::Debug for ShellState {
@@ -217,24 +223,56 @@ impl ShellState {
     #[must_use]
     pub fn try_new(link: Option<HostLink>) -> Option<Self> {
         let link = link?;
+        let vocabulary = EventVocabulary::core();
+        // The session-persistence band rides the same assembled runtime the
+        // rlib face tests drive: baked root, core vocabulary, the wall
+        // clock, and a stderr warn hook (2026-11-04 co-load wiring ruling).
+        let clock: Arc<dyn Fn() -> i64 + Send + Sync> = Arc::new(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| {
+                    i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+                })
+        });
+        let warn: Arc<dyn Fn(String) + Send + Sync> = Arc::new(|message: String| {
+            eprintln!("fr: session: {message}");
+        });
+        let service = crate::service::SessionService::new(
+            &baked_sessions_root(),
+            vocabulary.clone(),
+            clock,
+            warn,
+        )
+        .ok()?;
         Some(Self {
-            vocabulary: EventVocabulary::core(),
+            vocabulary,
             projections: Projections::new(
                 Arc::new(WireColdRead {
                     root: baked_sessions_root(),
                 }),
                 Arc::new(WireFoldCaller { link }),
             ),
+            service,
         })
     }
 
     /// Assembles the state over explicit pieces (the vocabulary-face
     /// tests drive the shell without a host).
+    ///
+    /// # Panics
+    ///
+    /// Never in this constructor; the assembled runtime only fails later
+    /// at its own calls.
     #[must_use]
-    pub const fn with_parts(vocabulary: EventVocabulary, projections: Projections) -> Self {
+    pub const fn with_parts(
+        vocabulary: EventVocabulary,
+        projections: Projections,
+        service: crate::service::SessionService,
+    ) -> Self {
         Self {
             vocabulary,
             projections,
+            service,
         }
     }
 }
@@ -309,8 +347,25 @@ pub fn dispatch(method: u32, payload: &[u8], state: &mut ShellState) -> Result<V
             let ShellState {
                 vocabulary,
                 projections,
+                ..
             } = state;
             projections.serve(method, payload, vocabulary)
+        }
+        // The session-persistence band (create/append/flush/fork/resume/
+        // restore/drain/read/request-header + the persisted list/cold
+        // read faces) routes to the assembled service runtime.
+        METHOD_SESSION_CREATE
+        | METHOD_SESSION_APPEND
+        | METHOD_SESSION_FLUSH
+        | METHOD_SESSION_FORK
+        | METHOD_SESSION_RESUME
+        | METHOD_SESSION_RESTORE
+        | METHOD_SESSION_DRAIN
+        | METHOD_SESSION_READ
+        | METHOD_REQUEST_HEADER
+        | METHOD_PERSISTED_LIST
+        | METHOD_PERSISTED_COLD_READ => {
+            crate::service::dispatch(method, payload, &mut state.service)
         }
         other if other >= METHOD_PROJECTIONS_REGISTER => {
             Err(format!("unknown session-projections method {other}"))
@@ -512,9 +567,22 @@ mod tests {
     }
 
     fn shell_state() -> ShellState {
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "fr-session-shell-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        ));
+        std::fs::create_dir_all(&root).expect("test sessions root");
+        let clock: Arc<dyn Fn() -> i64 + Send + Sync> = Arc::new(|| 0);
+        let warn: Arc<dyn Fn(String) + Send + Sync> = Arc::new(|_| {});
+        let service =
+            crate::service::SessionService::new(&root, EventVocabulary::core(), clock, warn)
+                .expect("test service");
         ShellState::with_parts(
             EventVocabulary::core(),
             Projections::new(Arc::new(EmptyRead), Arc::new(NoFold)),
+            service,
         )
     }
 
@@ -572,8 +640,8 @@ mod tests {
             "unknown session-persistence method 99"
         );
         assert_eq!(
-            dispatch(1002, b"{}", &mut state).expect_err("projections band"),
-            "unknown session-projections method 1002"
+            dispatch(1501, b"{}", &mut state).expect_err("projections band"),
+            "unknown session-projections method 1501"
         );
     }
 
@@ -768,6 +836,11 @@ mod tests {
             .declare(&["permission/preset".to_owned()])
             .expect("declare");
         let link = super::HostLink::new(exports());
+        let clock: Arc<dyn Fn() -> i64 + Send + Sync> = Arc::new(|| 0);
+        let warn: Arc<dyn Fn(String) + Send + Sync> = Arc::new(|_| {});
+        let service =
+            crate::service::SessionService::new(root.path(), EventVocabulary::core(), clock, warn)
+                .expect("test service");
         let mut state = ShellState::with_parts(
             vocabulary,
             Projections::new(
@@ -776,6 +849,7 @@ mod tests {
                 }),
                 Arc::new(super::WireFoldCaller { link }),
             ),
+            service,
         );
 
         let registration = json!({

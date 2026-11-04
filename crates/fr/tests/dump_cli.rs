@@ -311,9 +311,17 @@ fn root_dispatch_version_help_and_unknown_modes() {
     assert_eq!(bare.status, 1);
     assert_eq!(bare.stdout, "");
     assert!(bare.stderr.starts_with("error: expected a mode"));
-    let unknown = run(&["headless"], &home);
-    assert_eq!(unknown.status, 1);
-    assert!(unknown.stderr.starts_with("error: expected a mode"));
+    // 18a extends the entry modes (Q30B marked the usage-error rule
+    // provisional): a bare non-flag token is now the dsh profile shorthand
+    // and dispatches to the boot chain, which fails closed on the missing
+    // profile (exit 1, diagnostics under the temp home).
+    let missing_profile = run(&["no-such-profile"], &home);
+    assert_eq!(missing_profile.status, 1);
+    assert!(
+        missing_profile
+            .stderr
+            .contains("cannot assemble the profile")
+    );
 }
 
 #[test]

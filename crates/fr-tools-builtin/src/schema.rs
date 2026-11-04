@@ -2969,3 +2969,158 @@ mod tests {
         );
     }
 }
+
+/// Converts the crate's authoring dialect (`required: true` inside a
+/// property definition) into the standard JSON Schema form (an
+/// object-level `required` array), recursively over every object node.
+///
+/// The tools registry validates the standard dialect (the dsh catalog
+/// emits object-level arrays), so every registration payload crossing
+/// the wire passes through this conversion — see
+/// `plugin_shell::normalize_register_payload`.
+pub fn standardize_required(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(object) => {
+            let mut required: Vec<serde_json::Value> = Vec::new();
+            for (key, member) in object.iter_mut() {
+                if key == "properties" {
+                    // Schema nodes keyed by property name: read each
+                    // authoring boolean, strip it, recurse, and fold the
+                    // name into this object's standard array.
+                    if let Some(properties) = member.as_object_mut() {
+                        for (name, property) in properties.iter_mut() {
+                            // The authoring boolean is read and stripped
+                            // BEFORE the recursion: the recursion
+                            // replaces an object-level boolean with the
+                            // computed array, and stripping after it
+                            // would delete that array.
+                            let is_required = property
+                                .get("required")
+                                .and_then(serde_json::Value::as_bool)
+                                == Some(true);
+                            if is_required && let Some(inner) = property.as_object_mut() {
+                                inner.remove("required");
+                            }
+                            standardize_required(property);
+                            if is_required {
+                                required.push(serde_json::Value::String(name.clone()));
+                            }
+                        }
+                    }
+                } else {
+                    standardize_required(member);
+                }
+            }
+            // The authoring dialect also marks whole objects with a
+            // boolean `required: true`; the standard form only knows the
+            // array.
+            if object.get("required").and_then(serde_json::Value::as_bool) == Some(true) {
+                object.remove("required");
+            }
+            if !required.is_empty() {
+                object
+                    .entry("required")
+                    .or_insert(serde_json::Value::Array(required));
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                standardize_required(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod standardization_tests {
+    use super::standardize_required;
+    use serde_json::json;
+
+    #[test]
+    fn per_property_flags_become_object_level_arrays() {
+        let mut schema = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "kind": { "type": "string", "required": true, "const": "background" },
+                "jobId": { "type": "string", "required": true },
+                "cwd": { "type": "string" },
+            },
+        });
+        standardize_required(&mut schema);
+        assert_eq!(
+            schema,
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "kind": { "type": "string", "const": "background" },
+                    "jobId": { "type": "string" },
+                    "cwd": { "type": "string" },
+                },
+                "required": ["kind", "jobId"],
+            })
+        );
+    }
+
+    #[test]
+    fn nested_objects_and_arrays_convert_recursively() {
+        let mut schema = json!({
+            "oneOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "stdout": {
+                            "type": "object",
+                            "properties": {
+                                "text": { "type": "string", "required": true },
+                                "spillPath": { "type": "string" },
+                            },
+                        },
+                        "sandbox": {
+                            "type": "object",
+                            "properties": {
+                                "mode": { "type": "string", "required": true },
+                                "denied": { "type": "boolean", "required": true },
+                                "enforcement": { "type": "string" },
+                            },
+                        },
+                    },
+                },
+            ],
+        });
+        standardize_required(&mut schema);
+        let arm = &schema["oneOf"][0];
+        assert_eq!(arm["properties"]["stdout"]["required"], json!(["text"]));
+        assert_eq!(
+            arm["properties"]["sandbox"]["required"],
+            json!(["mode", "denied"])
+        );
+        assert_eq!(
+            arm["properties"]["stdout"]["properties"]["text"],
+            json!({ "type": "string" })
+        );
+    }
+}
+
+#[cfg(test)]
+mod normalize_probe {
+    use super::standardize_required;
+
+    #[test]
+    fn shell_output_schema_fully_normalizes() {
+        let mut schema = super::shell_output_schema();
+        standardize_required(&mut schema);
+        let arm = &schema["oneOf"][0];
+        println!("arm0 after: {arm}");
+        assert_eq!(arm["required"], serde_json::json!(["kind", "jobId", "cwd"]));
+        assert_eq!(
+            arm["properties"]["kind"].get("required"),
+            None,
+            "the per-property flag must be stripped"
+        );
+        let stream = &schema["oneOf"][2]["properties"]["stdout"];
+        assert_eq!(stream["required"], serde_json::json!(["text", "truncated"]));
+    }
+}

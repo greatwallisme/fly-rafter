@@ -243,10 +243,6 @@ fn build_table() -> Vec<(&'static str, Schema)> {
                     120.0,
                     "Foreground wait before automatic continuation. Defaults to 120 seconds.",
                 ),
-                required_string_property(
-                    "section",
-                    "Guidance rendered as the `plan:policy` prompt section while plan mode is active.",
-                ),
                 integer_property(
                     "max-search-results",
                     1,
@@ -1162,14 +1158,14 @@ mod tests {
         assert!(
             violations_empty(
                 schema,
-                &serde_json::json!({"allow-parallel-in-progress": true, "section": "You are in plan mode."})
+                &serde_json::json!({"allow-parallel-in-progress": true})
             ),
             "the true choice validates"
         );
         assert!(
             violations_empty(
                 schema,
-                &serde_json::json!({"allow-parallel-in-progress": false, "section": "You are in plan mode."})
+                &serde_json::json!({"allow-parallel-in-progress": false})
             ),
             "the false choice validates"
         );
@@ -1219,7 +1215,7 @@ mod tests {
         assert!(
             violations_empty(
                 schema,
-                &serde_json::json!({"allow-parallel-in-progress": true, "section": "You are in plan mode."})
+                &serde_json::json!({"allow-parallel-in-progress": true})
             ),
             "absence of the optional wake cap validates"
         );
@@ -1301,7 +1297,6 @@ mod tests {
                 &serde_json::json!({
                     "allow-parallel-in-progress": true,
                     "allow-parallel-in-progress": true,
-                "section": "You are in plan mode.",
                     "delivery-history-days": 3_650,
                     "delivery-history-records": 10_000,
                 })
@@ -1631,7 +1626,6 @@ mod tests {
             schema,
             &serde_json::json!({
                 "allow-parallel-in-progress": true,
-                "section": "You are in plan mode.",
                 "web-deepseek-api": { "count": 51 },
             }),
         );
@@ -1645,7 +1639,6 @@ mod tests {
             schema,
             &serde_json::json!({
                 "allow-parallel-in-progress": true,
-                "section": "You are in plan mode.",
                 "web-search-perplexity": { "search-recency": "hour" },
             }),
         );
@@ -1659,7 +1652,6 @@ mod tests {
             schema,
             &serde_json::json!({
                 "allow-parallel-in-progress": true,
-                "section": "You are in plan mode.",
                 "web": { "searchProvider": "exa" },
             }),
         );
@@ -1674,7 +1666,6 @@ mod tests {
             schema,
             &serde_json::json!({
                 "allow-parallel-in-progress": true,
-                "section": "You are in plan mode.",
                 "tool-web": { "search-timeout-ms": 60_000.0 },
             }),
         );
@@ -1691,7 +1682,6 @@ mod tests {
                 &serde_json::json!({
                     "allow-parallel-in-progress": true,
                     "allow-parallel-in-progress": true,
-                "section": "You are in plan mode.",
                     "max-search-results": 0,
                 })
             ),
@@ -1703,7 +1693,6 @@ mod tests {
                 &serde_json::json!({
                     "allow-parallel-in-progress": true,
                     "allow-parallel-in-progress": true,
-                "section": "You are in plan mode.",
                     "search-timeout-ms": 0,
                 })
             ),
@@ -1715,7 +1704,6 @@ mod tests {
                 &serde_json::json!({
                     "allow-parallel-in-progress": true,
                     "allow-parallel-in-progress": true,
-                "section": "You are in plan mode.",
                     "search-timeout-ms": 2_147_483_648i64,
                 })
             ),
@@ -1727,7 +1715,6 @@ mod tests {
                 &serde_json::json!({
                     "allow-parallel-in-progress": true,
                     "allow-parallel-in-progress": true,
-                "section": "You are in plan mode.",
                     "journal-mode": "memory",
                 })
             ),
@@ -1739,7 +1726,6 @@ mod tests {
                 &serde_json::json!({
                     "allow-parallel-in-progress": true,
                     "allow-parallel-in-progress": true,
-                "section": "You are in plan mode.",
                     "max-search-results": 1,
                     "search-timeout-ms": 30_000,
                     "journal-mode": "wal",
@@ -1763,7 +1749,6 @@ mod tests {
                 &serde_json::json!({
                     "allow-parallel-in-progress": true,
                     "allow-parallel-in-progress": true,
-                "section": "You are in plan mode.",
                     "max-limit": 9_007_199_254_740_992i64,
                 })
             ),
@@ -1775,7 +1760,6 @@ mod tests {
                 &serde_json::json!({
                     "allow-parallel-in-progress": true,
                     "allow-parallel-in-progress": true,
-                "section": "You are in plan mode.",
                     "prepared-session-cache-size": 9_007_199_254_740_992i64,
                 })
             ),
@@ -1787,7 +1771,6 @@ mod tests {
                 &serde_json::json!({
                     "allow-parallel-in-progress": true,
                     "allow-parallel-in-progress": true,
-                "section": "You are in plan mode.",
                     "default-limit": 1.5,
                 })
             ),
@@ -1813,10 +1796,6 @@ mod tests {
             rows.get("timeout").expect("row").get("default"),
             Some(&serde_json::json!(120.0))
         );
-        assert!(
-            rows.get("section").is_some(),
-            "the plan-mode section row exists"
-        );
         // The mode enum refuses unknown selections; the timeout row is
         // a plain number (the dsh config-catalog row; the timed
         // -1|1..2147483 union rides the tool body validation).
@@ -1826,7 +1805,6 @@ mod tests {
                 &serde_json::json!({
                     "allow-parallel-in-progress": true,
                     "allow-parallel-in-progress": true,
-                "section": "You are in plan mode.",
                     "mode": "fast",
                 })
             ),
@@ -1838,20 +1816,19 @@ mod tests {
                 &serde_json::json!({
                     "allow-parallel-in-progress": true,
                     "allow-parallel-in-progress": true,
-                "section": "You are in plan mode.",
                     "timeout": "120s",
                 })
             ),
             "expected number"
         );
-        assert_eq!(
-            first_message(
+        assert!(
+            violations_empty(
                 schema,
                 &serde_json::json!({
                     "allow-parallel-in-progress": true,
                 })
             ),
-            "missing required key `section`"
+            "the minimal builtin row validates (the plan-mode section is baked, not configured)"
         );
         // The two session-read bound probes: snippet chars floor and
         // the persisted read concurrency band.
@@ -1861,7 +1838,6 @@ mod tests {
                 &serde_json::json!({
                     "allow-parallel-in-progress": true,
                     "allow-parallel-in-progress": true,
-                "section": "You are in plan mode.",
                     "snippet-chars": 0,
                 })
             ),
@@ -1873,7 +1849,6 @@ mod tests {
                 &serde_json::json!({
                     "allow-parallel-in-progress": true,
                     "allow-parallel-in-progress": true,
-                "section": "You are in plan mode.",
                     "persisted-read-concurrency": 0,
                 })
             ),
@@ -1885,7 +1860,6 @@ mod tests {
                 &serde_json::json!({
                     "allow-parallel-in-progress": true,
                     "allow-parallel-in-progress": true,
-                "section": "You are in plan mode.",
                     "persisted-read-concurrency": 9_007_199_254_740_992i64,
                 })
             ),
@@ -1923,12 +1897,12 @@ mod tests {
         }
         assert!(violations_empty(
             schema,
-            &serde_json::json!({"allow-parallel-in-progress": true, "section": "p", "backend-type": "pty-x", "timeout-ms": 1000.0, "max-output-chars": 100.0, "description": "x"})
+            &serde_json::json!({"allow-parallel-in-progress": true, "backend-type": "pty-x", "timeout-ms": 1000.0, "max-output-chars": 100.0, "description": "x"})
         ));
         assert_eq!(
             first_message(
                 schema,
-                &serde_json::json!({"allow-parallel-in-progress": true, "section": "p", "max-result-bytes": 63})
+                &serde_json::json!({"allow-parallel-in-progress": true, "max-result-bytes": 63})
             ),
             "below minimum"
         );

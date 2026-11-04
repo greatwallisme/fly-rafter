@@ -1849,3 +1849,10 @@
 - **18a 合同**（step 1-2）：headless spec 扩写完成——Intent 增宿主壳句、Decisions 增六行（含决策 16/47 引证）、Allowed += crates/fr/**、场景六枚（真实选择器，18a 实现后绑定生效）；parse 31 scenarios、lint Quality 100%（0 error，警告全为 generated-draft/pending 设计态 advisory）。
 - **勘察三事实**：①dougong D9/D15 isolate_realm 面（设计文档 :77-79/:106-107）+fiber_realm 场景要求每会话 realm（18e 细勘）；②宿主值注入落位=文档行 config（builtin 源被决策 16 禁用）；③cdylib 20/20 全双输出零工件缺口；依赖面 libc 0.2+uuid v4 已在 workspace（零新增外部 crate）。全锚落 findings.md 2026-11-04「18a 开工勘察」节。
 - **下一动作=18a 实现：fr 增 dougong/dougong-loader 依赖→boot 装配臂+事件泵面+宿主值注入行→信号面→启动诊断→六测试→四关+七步收口。**
+
+## 2026-11-04 — 18a 实现日（fr 宿主装配面 + fr-headless 脚手架 + 五缺陷连环修 + dougong 0.5.1 跨仓修复）
+
+- **裁决链**：三开题裁决（工件策略=关门加 build 前置 / 18a 挂 fr headless boot+待信号 / 18a 建 fr-headless）→ 合同措辞修订批准（事实中继轨）→ fr-schema 边界扩展 → agent-loop/tools-builtin 环切扩展 → fr-session 接线扩展 → dougong 仓修复裁决 → 「先还旧账+requirements 先行」纠偏 → 发布前 code-review 裁决（进行中）。
+- **实现面**：fr crate（lib+bin 拆分，assembly/manifest/pump/signals/diagnostics 五模块）；fr-headless 新 crate（20+1 cdylib）；dougong-dylib 0.5.1 停摆纪律修复（R1-R8 全落）；旧账 v0.5.0 tag 补推 GitHub。
+- **测试面**：host_boot.rs 六集成测试（真实 cdylib 全装载+29 服务 require+manifest 无 builtin+facts 双面+诊断进程测试+信号进程测试 130/0+泵真实对 presets 播种）；dougong 回归钉测 teardown_joins；fr 单测全绿；dougong 四关+241 测试+六 demo 全绿。
+- **当前**：code-review --fix high（≤2 subagent）后台审查 dougong d55ff60，完成后按裁决发布+tag+复验+提交。

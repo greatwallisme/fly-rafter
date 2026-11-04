@@ -605,9 +605,9 @@ dependencies = [
 
 [[package]]
 name = "dougong"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a54f9d173abb37703e3e7c554a6cc09f5692ac394394cf6c6a54a7a27beae53c"
+checksum = "c32c0c01772d8d129c181fa49e62d4fe711acbc3f19f0a9c427c2e26b1840677"
 dependencies = [
  "parking_lot",
  "serde",
@@ -618,15 +618,15 @@ dependencies = [
 
 [[package]]
 name = "dougong-abi"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc508eab8c247f2db59964fdf066863359456f5b565479026aa32f15da0cd187"
+checksum = "5db777a35d4cd3e6af3ee2055814bb21453dc0bbb2b27eb1dd3cedb96e299f2b"
 
 [[package]]
 name = "dougong-dylib"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "641224271340a141e0c418458f84a54e776d729b5892e7eb138e57af76bf7311"
+checksum = "f3a26c1e8acc334ea73df453e5172cebf93dcb23e66de648d6799d7444d26a86"
 dependencies = [
  "dougong",
  "dougong-abi",
@@ -638,9 +638,9 @@ dependencies = [
 
 [[package]]
 name = "dougong-loader"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc05c11847b5f453e09c823821639d3d085c33f6bd3fafe2a595a704ae8d54c4"
+checksum = "238b19ccdeb4173044166abc59af310ce0ba39b03c8efd21b9bb5891a5db8ee2"
 dependencies = [
  "dougong",
  "dougong-dylib",
@@ -652,9 +652,9 @@ dependencies = [
 
 [[package]]
 name = "dougong-wasm"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "200d232abcb9fe91f823f2d6c2188ca5a4ca1ad29c840c075b6f36ea80e558c3"
+checksum = "db92b5937f8085b56ca91450ef2520c18c0cd7ddb425e2bab92567a69d86a50c"
 dependencies = [
  "dougong",
  "parking_lot",
@@ -792,8 +792,12 @@ dependencies = [
 name = "fr"
 version = "0.1.0"
 dependencies = [
+ "dougong",
+ "dougong-loader",
  "fr-config",
  "serde_json",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -884,6 +888,14 @@ dependencies = [
  "fr-timeout",
  "fr-tools",
  "fr-wire",
+ "serde_json",
+]
+
+[[package]]
+name = "fr-headless"
+version = "0.1.0"
+dependencies = [
+ "dougong-abi",
  "serde_json",
 ]
 

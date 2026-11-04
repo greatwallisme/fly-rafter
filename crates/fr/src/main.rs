@@ -18,7 +18,7 @@ use fr_config::{
     prepare_profile, render_dump, schema_lookup,
 };
 
-const USAGE: &str = "Usage:\n  fr dump-config [--profile <name>] [--from-default-profile <name>] [--patch <path>]... [--default-only]\n  fr dump-config-schema [--profile <name>] [--from-default-profile <name>] [--patch <path>]...\n  fr -V, --version    output the version number\n  fr -h, --help       show this help";
+const USAGE: &str = "Usage:\n  fr --profile <name> [app args...]                  boot the headless composition (18a: boots and waits for signals)\n  fr <profile> [app args...]                         profile shorthand (dsh args.ts:205-208 twin)\n  fr dump-config [--profile <name>] [--from-default-profile <name>] [--patch <path>]... [--default-only]\n  fr dump-config-schema [--profile <name>] [--from-default-profile <name>] [--patch <path>]...\n  fr -V, --version    output the version number\n  fr -h, --help       show this help";
 
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -36,8 +36,126 @@ fn main() -> ExitCode {
             println!("{USAGE}");
             ExitCode::SUCCESS
         }
-        _ => usage_error(),
+        _ => run_boot(&argv),
     }
+}
+
+/// The boot dispatch (the dsh launcher twin): the launcher owns the
+/// global flags before the first app token; a first token that does not
+/// start with `-` is the dsh profile shorthand (dsh args.ts:205-208 twin:
+/// expand `fr headless ...` to `--profile headless ...`); everything the
+/// parser does not own belongs to the app verbatim (dsh args.ts:8-10 head
+/// comment).
+fn run_boot(argv: &[String]) -> ExitCode {
+    let expanded: Vec<String> = match argv.first().map(String::as_str) {
+        Some(first) if !first.starts_with('-') => {
+            let mut expanded = vec!["--profile".to_owned()];
+            expanded.extend(argv.iter().cloned());
+            expanded
+        }
+        _ => argv.to_vec(),
+    };
+    let mut profile: Option<String> = None;
+    let mut from_default_profile: Option<String> = None;
+    let mut patches: Vec<std::path::PathBuf> = Vec::new();
+    let mut app: Vec<String> = Vec::new();
+    let mut index = 0;
+    while index < expanded.len() {
+        let (flag, inline) = match expanded[index].split_once('=') {
+            Some((name, value)) => (name, Some(value.to_owned())),
+            None => (expanded[index].as_str(), None),
+        };
+        match flag {
+            "--profile" => {
+                if profile.is_some() {
+                    return boot_usage_error();
+                }
+                let Ok(value) = option_value(
+                    inline,
+                    &expanded,
+                    &mut index,
+                    "error: option '--profile <name>' argument missing",
+                ) else {
+                    return boot_usage_error();
+                };
+                if value.is_empty() {
+                    return boot_usage_error();
+                }
+                profile = Some(value);
+            }
+            "--from-default-profile" => {
+                let Ok(value) = option_value(
+                    inline,
+                    &expanded,
+                    &mut index,
+                    "error: option '--from-default-profile <name>' argument missing",
+                ) else {
+                    return boot_usage_error();
+                };
+                from_default_profile = Some(value);
+            }
+            "--patch" => {
+                let Ok(value) = option_value(
+                    inline,
+                    &expanded,
+                    &mut index,
+                    "error: option '--patch <path>' argument missing",
+                ) else {
+                    return boot_usage_error();
+                };
+                patches.push(std::path::PathBuf::from(value));
+            }
+            "-V" | "--version" if inline.is_none() => {
+                println!("{}", env!("CARGO_PKG_VERSION"));
+                return ExitCode::SUCCESS;
+            }
+            _ => {
+                app.extend_from_slice(&expanded[index..]);
+                break;
+            }
+        }
+        index += 1;
+    }
+    let Some(profile) = profile else {
+        return boot_usage_error();
+    };
+    let mut invocation = fr::assembly::BootInvocation::new(profile, from_default_profile, patches);
+    invocation.set_app_argv(app);
+    run_boot_invocation(&invocation)
+}
+
+fn boot_usage_error() -> ExitCode {
+    eprintln!("error: --profile <name> is required");
+    ExitCode::from(1)
+}
+
+/// Drives the boot chain on the current-thread runtime and maps the
+/// outcome to the process exit code.
+fn run_boot_invocation(invocation: &fr::assembly::BootInvocation) -> ExitCode {
+    let Ok(home) = fr_config::resolve_home(None) else {
+        eprintln!("fr: cannot resolve the fr home");
+        return ExitCode::from(1);
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build();
+    let Ok(runtime) = runtime else {
+        eprintln!("fr: cannot build the boot runtime");
+        return ExitCode::from(1);
+    };
+    runtime.block_on(async {
+        match fr::assembly::boot_and_serve(invocation, &home).await {
+            Ok(running) => ExitCode::from(u8::try_from(running.exit_code()).unwrap_or(1)),
+            Err(fatal) => {
+                if let Ok(home) = fr_config::resolve_home(None) {
+                    fr::diagnostics::report(&fatal, &home, invocation.profile());
+                } else {
+                    eprintln!("{}", fatal.summary);
+                }
+                ExitCode::from(1)
+            }
+        }
+    })
 }
 
 fn usage_error() -> ExitCode {

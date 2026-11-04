@@ -29,6 +29,7 @@ pub struct RuntimeSignal {
 struct SignalState {
     requested: bool,
     deadline_changed: bool,
+    shutdown: bool,
 }
 
 impl RuntimeSignal {
@@ -55,6 +56,19 @@ impl RuntimeSignal {
         self.wake.notify_all();
     }
 
+    /// Requests the runtime thread's exit: the wait wakes with
+    /// `Wait::Shutdown` and the loop breaks (teardown quiescence; the
+    /// 2026-11-04 shutdown hang).
+    pub fn shutdown(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.shutdown = true;
+        drop(state);
+        self.wake.notify_all();
+    }
+
     /// Waits for the next obligation: a mutation request or deadline
     /// hit drives; a re-arm loop recomputes the nearest target first.
     fn wait(&self, deadline: Option<std::time::Instant>) -> Wait {
@@ -67,6 +81,9 @@ impl RuntimeSignal {
             let changed = state.deadline_changed;
             state.requested = false;
             state.deadline_changed = false;
+            if state.shutdown {
+                return Wait::Shutdown;
+            }
             if requested {
                 return Wait::Drive;
             }
@@ -79,7 +96,7 @@ impl RuntimeSignal {
                     let (guard, result) = self
                         .wake
                         .wait_timeout_while(state, timeout, |state| {
-                            !(state.requested || state.deadline_changed)
+                            !(state.requested || state.deadline_changed || state.shutdown)
                         })
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     state = guard;
@@ -106,6 +123,8 @@ enum Wait {
     Drive,
     /// The nearest target changed; recompute the wait first.
     Rearm,
+    /// The runtime thread's exit request (teardown quiescence).
+    Shutdown,
 }
 
 /// Spawns the delivery runtime over the shared service and signal (the
@@ -118,6 +137,7 @@ pub fn spawn(schedules: Arc<Schedules>, signal: Arc<RuntimeSignal>) -> std::thre
             loop {
                 let deadline = next_deadline(&schedules);
                 match signal.wait(deadline) {
+                    Wait::Shutdown => return,
                     Wait::Rearm => continue,
                     Wait::Drive => drive(&schedules),
                 }
