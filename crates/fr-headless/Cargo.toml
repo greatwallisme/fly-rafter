@@ -15,6 +15,19 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 serde_json.workspace = true
 
+# rlib faces only: the runner's typed inputs stay single-sourced in their
+# provider crates (the tools_client judgment — wire DTOs of consumed
+# services never get local copies; PRD 8.1 injects the matching services).
+# - fr-wire: the durable session event envelope the `--json` projection
+#   folds and the adoption checks read.
+# - fr-agent-loop: the `agent/assistant-stream` frame vocabulary published
+#   by the consumed 'agent' service.
+# - fr-schema: the eight `--json` frame schema documents the projection's
+#   output contract is pinned against.
+fr-agent-loop = { workspace = true }
+fr-schema = { workspace = true }
+fr-wire = { workspace = true }
+
 # Kernel family edge for the C-ABI dylib artifact (PRD 4.5): the plugin
 # shell links only dougong-abi across the kernel boundary.
 dougong-abi = { workspace = true }

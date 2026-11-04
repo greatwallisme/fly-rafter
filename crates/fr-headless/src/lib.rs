@@ -12,4 +12,9 @@
 //! Kernel-family edge: this module is the only `dougong-abi` consumer; the
 //! rest of the crate stays a plain rlib.
 
+pub mod adopt;
+pub mod help_text;
+pub mod json_stream;
 pub mod plugin_shell;
+pub mod reasoning;
+pub mod startup;

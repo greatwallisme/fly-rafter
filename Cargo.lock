@@ -897,6 +897,9 @@ name = "fr-headless"
 version = "0.1.0"
 dependencies = [
  "dougong-abi",
+ "fr-agent-loop",
+ "fr-schema",
+ "fr-wire",
  "serde_json",
 ]
 

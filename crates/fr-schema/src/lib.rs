@@ -11,6 +11,7 @@
 #![forbid(unsafe_code)]
 
 pub mod dump;
+pub mod json_stream;
 pub mod registry;
 pub mod schema;
 
@@ -18,6 +19,7 @@ pub use dump::{
     DiagnosticLevel, EntryStatus, SchemaDiagnostic, SchemaDump, SchemaEntry, TreeKind,
     dump_config_schema,
 };
+pub use json_stream::{FrameKind, frame_document, validate_frame, validate_line};
 pub use registry::lookup;
 pub use schema::{
     DeclarationError, Finite, Properties, Property, Schema, Violation, to_json_schema, validate,

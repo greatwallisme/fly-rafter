@@ -32,9 +32,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Condvar, Mutex};
 
-use dougong_abi::{
-    ABI_VERSION, HostExports, PluginExports, STATUS_CAPACITY, STATUS_FAILED, STATUS_OK, write_out,
-};
+use dougong_abi::{ABI_VERSION, HostExports, STATUS_CAPACITY, STATUS_FAILED, STATUS_OK, write_out};
 use fr_wire::message::Message;
 use serde::Deserialize;
 
@@ -1211,19 +1209,7 @@ unsafe extern "C" fn teardown(handle: *mut std::os::raw::c_void) {
     shutdown_and_join(&state.sessions, &state.drivers);
 }
 
-/// Export table for the fr-agent-loop dylib artifact; the host resolves
-/// this symbol by name at load time.
-#[unsafe(no_mangle)]
-pub static DOUGONG_PLUGIN_EXPORTS: PluginExports = PluginExports {
-    abi_version: ABI_VERSION,
-    name: plugin_name,
-    descriptor,
-    setup,
-    call,
-    on_event,
-    on_next,
-    teardown,
-};
+mod export;
 
 #[cfg(test)]
 mod tests {

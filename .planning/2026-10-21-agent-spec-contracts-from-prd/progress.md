@@ -1914,3 +1914,11 @@
 - **下一动作=b3 测试**（跨 crate 真 serve 往返判定+spec 四场景绑定测试+门四关）。
 
 - **b3 完成（本会话）**：Q9A 裁决 A（载荷扩 reasoningEffort/maxTokens）→契约层（fr-wire 注释+EVENT_USER_ADMITTED；agent_service 三常量+face pin）→Q4B 全链（ErrorPayload+session_id/seq、EVENT_ERROR re-export、driver last_seq+LoopInbox last_seq 双写者取 max——单计数漏 claim splice 实证修正、emit_error 填充）→driver_factory.rs（生产 deps+spawn+maxTokens 校验）→三臂（dispatch_lifecycle 守卫/持久层/attach/live）+SessionReadsClient::session_header→六测试全真绑定→lifecycle 27+3skip→四关绿（1921/0）。退化 8 枚当场修复。计划文件已更新。**下一动作=c（fr-schema json-stream+fr-headless 纯件）→d（runner 集成+退出守望+e2e+25 场景绑定+收口）**。
+
+## 2026-11-04 — 18b c 会话（fr-schema json-stream schema+fr-headless 纯件）
+
+- **勘察**：dsh headless 五文件 908 行全读+commander v15 源（command.js/option.js/suggestSimilar.js）逐语义核（program.error 无自加前缀=文案自带 'error: '；help 环内即发；未知旗循环后错；required 值 verbatim 吞旗形 token；suggestSimilar 仅 -- 前缀）+PRD 18.1 字段级+fr-wire 事件形（SessionEvent/TokenUsage/AssistantStreamRecord/KnownMessage/SessionHeader）+泵轨 session/{kind} 形+assistant-stream 批载形——全锚 findings「18b c 开工深勘」。
+- **实现**：fr-schema json_stream.rs（八帧声明单源→文档常量+校验器，8 测试）；fr-headless startup.rs（commander 移植+suggestSimilar+三态 parse，14 测试）、json_stream.rs（bound 梯+usage 累加+投影 fold+schema 校验种子，19 测试）、reasoning.rs（4 测试）、adopt.rs（6 测试）、help_text.rs 生成件+extract-headless-help.py。
+- **fr-agent-loop export.rs 隔离**（b-a 判例兑现，nm/ar 实证法复验）。
+- **门**：fmt/clippy/test 1968-0/doc 四关全绿+21 cdylib 工件+boot 集成绿。退化 8 枚当场修复。计划文件已更新。
+- **下一动作=d：runner 集成（headlessStartup 消费行+采纳链+等待/抑制+summarize+退出守望+宿主监听插件）→ mock e2e → 25 场景绑定+七步收口。**
