@@ -737,6 +737,10 @@ pub struct LoopDriver {
     request_surface_generation: u64,
     assistant_attempt_counter: u64,
     assistant_stream_revision: Arc<AtomicU64>,
+    /// The session's log seq at the last committed append (the Q4B
+    /// `agent/error` `seq` fact: the consumer's `atOffset` at the failure
+    /// moment; restored from the log tail, advanced by every commit).
+    last_seq: u64,
     /// The step-scoped tool recovery (dsh registers a `session/event`
     /// observer around each step; the driver observes its own committed
     /// appends at the same boundary).
@@ -794,6 +798,7 @@ impl LoopDriver {
         let runtime_context =
             RuntimeContextProjection::restore(view.events.iter().rev(), &view.surface);
         let request_surface_generation = deps.reads.surface_generation();
+        let last_seq = view.events.last().map_or(0, |event| event.seq.get());
         let machine = PhaseMachine::new(
             session_id.as_str(),
             Phase::Idle {
@@ -847,6 +852,7 @@ impl LoopDriver {
             request_surface_generation,
             assistant_attempt_counter: 0,
             assistant_stream_revision: Arc::new(AtomicU64::new(0)),
+            last_seq,
             step_recovery: None,
             kick_pending: false,
         })
@@ -1165,10 +1171,15 @@ impl LoopDriver {
             Phase::Running { turn, step, .. } => (*turn, *step),
             Phase::Idle { last_turn } | Phase::Maintenance { last_turn, .. } => (*last_turn, 0),
         };
+        // The emission-time log tail is the max of the two in-thread
+        // writers (the driver's committed turns/steps and the inbox
+        // splices) — the Q4B `seq` fact the consumer anchors atOffset on.
         self.events.emit_error(&ErrorPayload {
+            session_id: self.session_id.as_str().to_owned(),
             turn,
             step,
             error: turn_failure(error),
+            seq: self.last_seq.max(self.inbox.last_seq()),
         });
     }
 
@@ -1240,6 +1251,7 @@ impl LoopDriver {
         let event = self
             .client
             .append(type_name, &value, surface_op, source_event_seqs)?;
+        self.last_seq = event.seq.get();
         self.runtime_context.observe(&event);
         if let Some(recovery) = &mut self.step_recovery {
             recovery.observe(&event);
@@ -2932,7 +2944,7 @@ mod tests {
         SystemPromptFace, TOOL_ABORTED_BEFORE_DISPATCH, ToolExecution, ToolExecutionMode,
         ToolExecutionResult, ToolPrepared, ToolSettlement, ToolsFace, is_user_message,
     };
-    use crate::agent_events::AgentEvents;
+    use crate::agent_events::{AgentEvents, ErrorPayload};
     use crate::outbound::Outbound;
     use crate::plugin_shell::{InboundCommand, SessionMap, session_mailbox};
     use dougong_abi::{HostExports, STATUS_OK};
@@ -5182,6 +5194,71 @@ mod tests {
             admitted.as_slice(),
             ["s1".to_owned()].as_slice(),
             "one user batch admits one notification carrying the session id"
+        );
+    }
+
+    /// The driver boundary reports one escaped failure through
+    /// `agent/error` carrying the Q4B wire facts: the session id, the
+    /// running phase's turn/step, the failure, and the session's log
+    /// seq at the moment (spec: 驱动边界失败发 agent/error).
+    #[test]
+    fn driver_boundary_failure_emits_agent_error() {
+        let errors: Arc<Mutex<Vec<ErrorPayload>>> = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&errors);
+        let mut harness = harness_with(
+            vec![ScriptedLlm::text_generation("done")],
+            ToolExecutionMode::Parallel,
+            false,
+            Vec::new(),
+            10,
+            move |events| {
+                events.on_error(Box::new(move |payload| {
+                    recorded.lock().expect("errors lock").push(payload.clone());
+                    Ok(())
+                }));
+            },
+            None,
+        );
+        harness.driver.skills = Some(Box::new(SkillsDouble {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            inject: None,
+            fail: Some("the skills transform refused".to_owned()),
+        }));
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the failed turn ends",
+        );
+        drop(thread);
+        let errors = errors.lock().expect("errors lock");
+        assert_eq!(errors.len(), 1, "one escaped failure, one report");
+        let payload = errors[0].clone();
+        drop(errors);
+        assert_eq!(payload.session_id, "s1");
+        // The running phase's position: turn 1 at the phase's step
+        // counter 0 — the failing pre-step runs before any step/start
+        // commits, so the phase still holds the last completed step
+        // (the dsh `phase.step` read, agent.ts:246-247).
+        assert_eq!(payload.turn, 1);
+        assert_eq!(payload.step, 0);
+        // The log seq at the failure: the admitted splice (0), the turn
+        // opener (1), and the claim splice (2) committed; the pre-step
+        // refused before the step opened.
+        assert_eq!(payload.seq, 2);
+        let value = serde_json::to_value(payload).expect("payload serializes");
+        assert_eq!(value["sessionId"], "s1");
+        assert!(
+            value["error"]["message"]
+                .as_str()
+                .expect("failure message")
+                .contains("skills"),
+            "the failure names the refusing seam"
         );
     }
 

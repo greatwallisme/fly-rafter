@@ -38,6 +38,8 @@ use crate::assistant_stream::AssistantStreamFrame;
 use crate::outbound::Outbound;
 use crate::phase::AgentStatus;
 
+/// Observer event: the loop reported one failure at its live boundary.
+pub use fr_wire::services::events::EVENT_AGENT_ERROR as EVENT_ERROR;
 /// Waterfall middleware event: one proposed step boundary (the dsh
 /// `agent/pre-step`; fr-agent-loop dispatches it to the kernel bus on
 /// every step proposal — the 17f outbound wiring).
@@ -50,8 +52,6 @@ pub use fr_wire::services::events::EVENT_REQUEST_ERROR;
 /// name rides the shared protocol table (`fr_wire::events`); the other
 /// plugins listen by the same constant.
 pub use fr_wire::services::events::EVENT_STATUS;
-/// Observer event: the loop reported one failure at its live boundary.
-pub const EVENT_ERROR: &str = "agent/error";
 /// Observer event: one assistant attempt frame.
 pub const EVENT_ASSISTANT_STREAM: &str = "agent/assistant-stream";
 /// Observer event: one inbox message was claimed for a turn.
@@ -135,15 +135,24 @@ pub struct AssistantStreamBatchPayload {
 }
 
 /// The `agent/error` payload: the failure at its live boundary.
+///
+/// The Q4B wire extension names the session (the dsh payload scopes
+/// through the agent subject; the fr mirror names the session so the
+/// headless failure tracker keys on it), and `seq` carries the
+/// session's log seq at the failure — the consumer's `atOffset`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ErrorPayload {
+    /// The session whose boundary reported the failure.
+    pub session_id: String,
     /// The turn the failure belongs to.
     pub turn: u64,
     /// The step the failure belongs to.
     pub step: u64,
     /// The structured failure facts.
     pub error: Failure,
+    /// The session's log seq at the failure (the consumer's `atOffset`).
+    pub seq: u64,
 }
 
 /// The `agent/assistant-stream` payload.
@@ -935,18 +944,22 @@ mod tests {
         // The payload types are the wire contract for the bus mirror; their
         // serialized shapes pin here without a bus round-trip.
         let error: ErrorPayload = ErrorPayload {
+            session_id: "s1".to_owned(),
             turn: 3,
             step: 2,
             error: serde_json::from_value(serde_json::json!({
                 "message": "boom", "code": "UNKNOWN"
             }))
             .expect("fixture failure"),
+            seq: 11,
         };
         assert_eq!(
             serde_json::to_value(&error).expect("serializes"),
             serde_json::json!({
+                "sessionId": "s1",
                 "turn": 3, "step": 2,
-                "error": { "message": "boom", "code": "UNKNOWN" }
+                "error": { "message": "boom", "code": "UNKNOWN" },
+                "seq": 11
             })
         );
         let claimed = InboxClaimedPayload {

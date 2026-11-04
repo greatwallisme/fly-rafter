@@ -49,12 +49,20 @@ pub mod agent {
     pub const METHOD_MAINTENANCE_POLL: u32 = 8;
     /// `{sessionId, token}` → `{}` — close the window and converge.
     pub const METHOD_MAINTENANCE_END: u32 = 9;
-    /// `{sessionId, cwd, provider?, model?}` → `{}` — create the session
-    /// and spawn its driver thread (the dsh `agents.create`; wire numbers
-    /// are fr-own, the dsh face is in-process function calls).
+    /// Creates the session and spawns its driver thread (the dsh
+    /// `agents.create`; wire numbers are fr-own, the dsh face is
+    /// in-process function calls).
+    ///
+    /// `{sessionId, cwd, provider?, model?, reasoningEffort?, maxTokens?}`
+    /// → `{sessionId}`; the four route fields are the dsh `agentOptions`
+    /// projection (Q9A).
     pub const METHOD_CREATE: u32 = 10;
-    /// `{sessionId}` → `{}` — adopt one persisted session and spawn its
-    /// driver over the restored log (the dsh `agents.resume`).
+    /// Adopts one persisted session and spawns its driver over the
+    /// restored log (the dsh `agents.resume`).
+    ///
+    /// `{sessionId, provider?, model?, reasoningEffort?, maxTokens?}` →
+    /// `{sessionId}`; the route fields are the same `agentOptions`
+    /// projection (Q9A).
     pub const METHOD_RESUME: u32 = 11;
     /// `{sessionId}` → `{live}` — liveness probe; never creates the
     /// session mailbox (the dsh `agents.get` liveness read).
@@ -763,6 +771,13 @@ pub mod events {
     /// The payload carries `{sessionId, turn, step, error, seq}` and the
     /// failure stays live until a later terminal event cures it.
     pub const EVENT_AGENT_ERROR: &str = "agent/error";
+    /// Emit: one user-source message was admitted into a step batch (the
+    /// Q102′A interjection mirror; fr-additive — the dsh face is the
+    /// `agent/pre-step` reset predicate, observed in-process).
+    ///
+    /// The payload carries `{"agent": <session id>}` (the guard
+    /// consumers key their reset chains on it).
+    pub const EVENT_USER_ADMITTED: &str = "agent/user-admitted";
 }
 
 // Rust guideline compliant 2026-11-03

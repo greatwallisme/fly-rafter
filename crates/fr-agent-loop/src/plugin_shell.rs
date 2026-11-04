@@ -38,8 +38,12 @@ use dougong_abi::{
 use fr_wire::message::Message;
 use serde::Deserialize;
 
+use crate::agent_events::AgentEvents;
+use crate::driver::{AgentOptions, LoopDriver};
+use crate::driver_factory::{production_deps, spawn_driver, validated_max_tokens};
 use crate::inbox::InboxTarget;
 use crate::outbound::Outbound;
+use crate::session_reads::SessionReadsClient;
 
 /// The provided service name consumers call, and the seven method
 /// selectors of the `'agent'` face — the constants live in the
@@ -47,9 +51,9 @@ use crate::outbound::Outbound;
 /// them without pulling this shell's FFI export object into their
 /// link); the re-exports keep this path stable.
 pub use crate::agent_service::{
-    METHOD_CANCEL, METHOD_DESCRIBE, METHOD_FOLLOWUP, METHOD_INJECT, METHOD_MAINTENANCE_BEGIN,
-    METHOD_MAINTENANCE_END, METHOD_MAINTENANCE_POLL, METHOD_SEND, METHOD_STATUS, METHOD_STEER,
-    SERVICE_NAME,
+    METHOD_CANCEL, METHOD_CREATE, METHOD_DESCRIBE, METHOD_FOLLOWUP, METHOD_INJECT, METHOD_LIVE,
+    METHOD_MAINTENANCE_BEGIN, METHOD_MAINTENANCE_END, METHOD_MAINTENANCE_POLL, METHOD_RESUME,
+    METHOD_SEND, METHOD_STATUS, METHOD_STEER, SERVICE_NAME,
 };
 
 /// The dylib artifact's plugin name.
@@ -615,6 +619,31 @@ struct WindowRequest {
     token: String,
 }
 
+/// `create` payload (the dsh `agents.create` wire projection; the route
+/// fields are the Q9A ruling — the four dsh `agentOptions` fields).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateRequest {
+    session_id: String,
+    cwd: String,
+    provider: Option<String>,
+    model: Option<String>,
+    reasoning_effort: Option<fr_wire::ReasoningEffortId>,
+    max_tokens: Option<u64>,
+}
+
+/// `resume` payload (the dsh `agents.resume` wire projection; the route
+/// fields are the Q9A ruling — the four dsh `agentOptions` fields).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResumeRequest {
+    session_id: String,
+    provider: Option<String>,
+    model: Option<String>,
+    reasoning_effort: Option<fr_wire::ReasoningEffortId>,
+    max_tokens: Option<u64>,
+}
+
 fn parse<T: serde::de::DeserializeOwned>(payload: &[u8], entry: &str) -> Result<T, String> {
     serde_json::from_slice(payload).map_err(|error| format!("{entry} payload is invalid: {error}"))
 }
@@ -721,6 +750,194 @@ pub fn dispatch(method: u32, payload: &[u8], sessions: &SessionMap) -> Result<Ve
         _ => return Err(format!("unknown agent method {method}")),
     }
     Ok(serde_json::to_vec(&serde_json::json!({ "queued": true })).unwrap_or_default())
+}
+
+/// Serves the lifecycle arms (CREATE/RESUME/LIVE — the driver-spawning
+/// faces over the full shell state). Returns `None` for every other
+/// method so the `call` entry falls through to the pure quick-enqueue
+/// face ([`dispatch`]).
+///
+/// # Errors
+///
+/// Returns the failure text the host surfaces as `STATUS_FAILED`.
+fn dispatch_lifecycle(
+    method: u32,
+    payload: &[u8],
+    state: &ShellState,
+) -> Option<Result<Vec<u8>, String>> {
+    match method {
+        METHOD_CREATE => Some(create_session_driver(state, payload)),
+        METHOD_RESUME => Some(resume_session_driver(state, payload)),
+        METHOD_LIVE => Some(live_probe(state, payload)),
+        _ => None,
+    }
+}
+/// The CREATE arm (the dsh `agents.create` wire face): guard the
+/// driver registry, create the session through the persistence face,
+/// assemble the production deps, restore-fold the driver, and spawn its
+/// thread into the registry. The reply carries the session identity
+/// (the spec's session-handle face).
+///
+/// A failure past the persistence create does not roll the session
+/// back: the dsh rollback unwinds through cordis effects, and the wire
+/// face has no session-dispose arm — the fail-closed shape keeps the
+/// persisted log, so a restart resumes cleanly.
+///
+/// # Errors
+///
+/// Returns the registry, persistence, restore, or spawn refusal.
+fn create_session_driver(state: &ShellState, payload: &[u8]) -> Result<Vec<u8>, String> {
+    let request: CreateRequest = parse(payload, "create")?;
+    guard_driver_registry(state, &request.session_id)?;
+    let outbound = state.sessions.outbound;
+    let create_body = serde_json::to_vec(&serde_json::json!({
+        "id": request.session_id,
+        "meta": { "cwd": request.cwd },
+    }))
+    .map_err(|error| format!("create payload encode failed: {error}"))?;
+    let reply = outbound
+        .require(
+            fr_wire::services::session_persistence::SERVICE_NAME,
+            fr_wire::services::session_persistence::METHOD_SESSION_CREATE,
+            &create_body,
+        )
+        .map_err(|error| format!("session create failed: {error}"))?;
+    let created: serde_json::Value = serde_json::from_slice(&reply)
+        .map_err(|error| format!("session create reply decode failed: {error}"))?;
+    let created_id = created
+        .get("sessionId")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "session create reply carries no sessionId".to_owned())?;
+    if created_id != request.session_id {
+        return Err(format!(
+            "session create reply names session \"{created_id}\", expected \"{}\"",
+            request.session_id
+        ));
+    }
+    attach_session_driver(
+        state,
+        &request.session_id,
+        &request.cwd,
+        AgentOptions {
+            provider: request.provider,
+            model: request.model,
+            reasoning_effort: request.reasoning_effort,
+            max_tokens: validated_max_tokens(request.max_tokens)?,
+        },
+    )
+}
+/// The RESUME arm (the dsh `agents.resume` wire face): guard the
+/// registry, take the persistence write claim and crash-repair closers
+/// (method 6 = the full `resumeWith` chain), read the session header
+/// for the workspace path, and attach the restored driver.
+///
+/// # Errors
+///
+/// Returns the registry, persistence, header-read, restore, or spawn
+/// refusal.
+fn resume_session_driver(state: &ShellState, payload: &[u8]) -> Result<Vec<u8>, String> {
+    let request: ResumeRequest = parse(payload, "resume")?;
+    guard_driver_registry(state, &request.session_id)?;
+    let outbound = state.sessions.outbound;
+    let resume_body = serde_json::to_vec(&serde_json::json!({ "id": request.session_id }))
+        .map_err(|error| format!("resume payload encode failed: {error}"))?;
+    outbound
+        .require(
+            fr_wire::services::session_persistence::SERVICE_NAME,
+            fr_wire::services::session_persistence::METHOD_SESSION_RESUME,
+            &resume_body,
+        )
+        .map_err(|error| format!("session resume failed: {error}"))?;
+    let cwd = SessionReadsClient::new(outbound, &request.session_id)
+        .session_header()
+        .map_err(|error| format!("session header read failed: {error}"))?
+        .cwd
+        .unwrap_or_default();
+    attach_session_driver(
+        state,
+        &request.session_id,
+        &cwd,
+        AgentOptions {
+            provider: request.provider,
+            model: request.model,
+            reasoning_effort: request.reasoning_effort,
+            max_tokens: validated_max_tokens(request.max_tokens)?,
+        },
+    )
+}
+/// Builds the production driver over the created/claimed session,
+/// spawns its thread, and registers the handle. The mailbox attaches
+/// through the same helper the inbound faces use, so a send queued
+/// before the attach drains into the live driver (decision 46).
+///
+/// # Errors
+///
+/// Returns the restore or spawn refusal.
+fn attach_session_driver(
+    state: &ShellState,
+    session_id: &str,
+    cwd: &str,
+    options: AgentOptions,
+) -> Result<Vec<u8>, String> {
+    let mailbox = session_mailbox(&state.sessions, session_id);
+    let events = Arc::new(AgentEvents::new(
+        state.sessions.outbound,
+        Arc::new(|warning: &str| eprintln!("fr: agent-loop: {warning}")),
+    ));
+    let driver = LoopDriver::new(
+        session_id,
+        options,
+        Arc::clone(&mailbox),
+        Arc::clone(&events),
+        production_deps(state.sessions.outbound, session_id, cwd),
+    )
+    .map_err(|error| format!("driver restore failed: {error}"))?;
+    let handle = spawn_driver(session_id, driver)?;
+    state
+        .drivers
+        .lock()
+        .expect("driver registry lock poisoned")
+        .insert(session_id.to_owned(), handle);
+    Ok(serde_json::to_vec(&serde_json::json!({
+        "sessionId": session_id,
+    }))
+    .unwrap_or_default())
+}
+
+/// Refuses a second driver for one session id (the dsh registry insert
+/// guard, index.ts:469; the registry check precedes all persistence
+/// I/O).
+///
+/// # Errors
+///
+/// Returns the dsh verbatim replacement refusal.
+fn guard_driver_registry(state: &ShellState, session_id: &str) -> Result<(), String> {
+    if state
+        .drivers
+        .lock()
+        .expect("driver registry lock poisoned")
+        .contains_key(session_id)
+    {
+        return Err(format!("agent \"{session_id}\" is already registered"));
+    }
+    Ok(())
+}
+
+/// The LIVE arm (the dsh `agents.get` liveness read): reports whether a
+/// driver thread is attached for the id. It never touches the session
+/// map, so a probe cannot mint a mailbox (the spec's no-create pin).
+///
+/// # Errors
+///
+/// Returns the payload decode refusal.
+fn live_probe(state: &ShellState, payload: &[u8]) -> Result<Vec<u8>, String> {
+    let request: SessionRequest = parse(payload, "live")?;
+    let live = state
+        .drivers
+        .lock()
+        .expect("driver registry lock poisoned")
+        .contains_key(&request.session_id);
+    Ok(serde_json::to_vec(&serde_json::json!({ "live": live })).unwrap_or_default())
 }
 
 /// Handles one `llm/chunk-ready` notification (the on-event fast path:
@@ -901,7 +1118,9 @@ unsafe extern "C" fn call(
         // for `in_len` readable bytes per the host contract.
         unsafe { std::slice::from_raw_parts(in_data, in_len) }
     };
-    let reply = match dispatch(method, payload, &state.sessions) {
+    let reply = match dispatch_lifecycle(method, payload, state)
+        .unwrap_or_else(|| dispatch(method, payload, &state.sessions))
+    {
         Ok(reply) => reply,
         Err(message) => {
             let body = serde_json::json!({ "error": message }).to_string();
@@ -1009,14 +1228,15 @@ pub static DOUGONG_PLUGIN_EXPORTS: PluginExports = PluginExports {
 #[cfg(test)]
 mod tests {
     use super::{
-        CancelCause, InboundCommand, METHOD_CANCEL, METHOD_DESCRIBE, METHOD_FOLLOWUP,
-        METHOD_INJECT, METHOD_MAINTENANCE_BEGIN, METHOD_MAINTENANCE_END, METHOD_MAINTENANCE_POLL,
-        METHOD_SEND, METHOD_STATUS, METHOD_STEER, PLUGIN_NAME, SessionMap, dispatch,
+        CancelCause, InboundCommand, METHOD_CANCEL, METHOD_CREATE, METHOD_DESCRIBE,
+        METHOD_FOLLOWUP, METHOD_INJECT, METHOD_LIVE, METHOD_MAINTENANCE_BEGIN,
+        METHOD_MAINTENANCE_END, METHOD_MAINTENANCE_POLL, METHOD_RESUME, METHOD_SEND, METHOD_STATUS,
+        METHOD_STEER, PLUGIN_NAME, SessionMap, ShellState, dispatch, dispatch_lifecycle,
         handle_chunk_ready, handle_tools_settled, session_mailbox, shutdown_and_join,
     };
     use crate::inbox::InboxTarget;
     use crate::outbound::Outbound;
-    use dougong_abi::{HostExports, STATUS_OK};
+    use dougong_abi::{HostExports, STATUS_FAILED, STATUS_OK};
     use fr_wire::message::Message;
     use std::collections::HashMap;
     use std::ffi::c_void;
@@ -1435,5 +1655,290 @@ mod tests {
         let error =
             dispatch(METHOD_MAINTENANCE_BEGIN, br#"{"sessionId":"s1"}"#, &map).expect_err("busy");
         assert_eq!(error, "agent \"s1\" already has active work");
+    }
+    // --- lifecycle arms: real serve round trips against the real
+    // fr-session dispatch (the session_client integration judgment).
+
+    /// Removes the lifecycle integration tests' temporary backend root.
+    struct LifecycleTempRoot(std::path::PathBuf);
+
+    impl Drop for LifecycleTempRoot {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Routes one require into the real fr-session service dispatch
+    /// (the `session_client` integration judgment).
+    unsafe extern "C" fn real_persistence_require(
+        host: *mut c_void,
+        _service: *const u8,
+        _service_len: usize,
+        method: u32,
+        in_data: *const u8,
+        in_len: usize,
+        out_buf: *mut u8,
+        cap: usize,
+        out_len: *mut usize,
+    ) -> i32 {
+        // SAFETY: the handle aliases the test-owned service box.
+        let service = unsafe { &*(host.cast::<Mutex<fr_session::service::SessionService>>()) };
+        // SAFETY: the payload slice is valid for this call per the vtable
+        // contract.
+        let payload = unsafe { std::slice::from_raw_parts(in_data, in_len) };
+        let mut service = service.lock().expect("service lock");
+        match fr_session::service::dispatch(method, payload, &mut service) {
+            Ok(reply) => {
+                // SAFETY: the caller-owned buffer contract.
+                if unsafe { dougong_abi::write_out(&reply, out_buf, cap, out_len) } {
+                    STATUS_OK
+                } else {
+                    dougong_abi::STATUS_CAPACITY
+                }
+            }
+            Err(text) => {
+                let body = serde_json::json!({ "error": text }).to_string();
+                // SAFETY: same caller-owned buffer contract.
+                let _ = unsafe { dougong_abi::write_out(body.as_bytes(), out_buf, cap, out_len) };
+                STATUS_FAILED
+            }
+        }
+    }
+
+    /// Builds the shell state over a real fr-session service (the raw
+    /// service box stays alive for the driver thread's requires; the
+    /// caller reclaims it after joining the driver).
+    fn lifecycle_state(
+        root: &std::path::Path,
+    ) -> (ShellState, *mut Mutex<fr_session::service::SessionService>) {
+        let mut vocabulary = fr_session::vocabulary::EventVocabulary::core();
+        vocabulary
+            .declare(&["agent/inbox/spliced".to_owned()])
+            .expect("declare the loop's extension type");
+        let service = fr_session::service::SessionService::new(
+            root,
+            vocabulary,
+            Arc::new(|| 1_700_000_000_000_i64),
+            Arc::new(|_warning: String| {}),
+        )
+        .expect("assemble the real service");
+        let service = Box::new(Mutex::new(service));
+        let handle = Box::into_raw(service);
+        let outbound = Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
+            dispatch: crate::outbound::noop_dispatch,
+            host_handle: handle.cast::<c_void>(),
+            require: real_persistence_require,
+            emit: quiet_emit,
+        });
+        let state = ShellState {
+            sessions: SessionMap::new(outbound),
+            drivers: Mutex::new(HashMap::new()),
+        };
+        (state, handle)
+    }
+
+    /// Shuts the session's driver down and joins it, then reclaims the
+    /// raw service box (the v3 thread discipline in test form).
+    fn lifecycle_teardown(
+        state: &ShellState,
+        service: *mut Mutex<fr_session::service::SessionService>,
+    ) {
+        let mailboxes: Vec<_> = state
+            .sessions
+            .sessions
+            .lock()
+            .expect("session map lock")
+            .values()
+            .cloned()
+            .collect();
+        for mailbox in mailboxes {
+            mailbox.request_shutdown();
+        }
+        let handles: Vec<_> = state
+            .drivers
+            .lock()
+            .expect("driver registry lock")
+            .drain()
+            .map(|(_id, handle)| handle)
+            .collect();
+        for handle in handles {
+            let _ = handle.join();
+        }
+        // SAFETY: every vtable user joined above; reclaimed exactly once.
+        drop(unsafe { Box::from_raw(service) });
+    }
+
+    /// The CREATE arm: persistence create, driver spawn, the reply's
+    /// session-handle face, and the liveness flip (spec: create 臂建会话
+    /// 并 spawn 驱动).
+    #[test]
+    fn create_arm_spawns_a_session_driver() {
+        let root = std::env::temp_dir().join(format!(
+            "fr-agent-loop-b3-create-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let _guard = LifecycleTempRoot(root.clone());
+        let (state, service) = lifecycle_state(&root);
+
+        let payload = serde_json::json!({
+            "sessionId": "s1",
+            "cwd": "/repo",
+            "provider": "deepseek-official",
+            "model": "deepseek-chat",
+        });
+        let reply = dispatch_lifecycle(METHOD_CREATE, payload.to_string().as_bytes(), &state)
+            .expect("the create arm serves")
+            .expect("the create arm succeeds");
+        let reply: serde_json::Value = serde_json::from_slice(&reply).expect("reply json");
+        assert_eq!(reply["sessionId"], "s1");
+
+        let live = dispatch_lifecycle(METHOD_LIVE, br#"{"sessionId":"s1"}"#, &state)
+            .expect("the live arm serves")
+            .expect("the live arm succeeds");
+        let live: serde_json::Value = serde_json::from_slice(&live).expect("live json");
+        assert_eq!(live["live"], true);
+
+        // The mailbox attached at the spawn; the registry holds the
+        // thread and the persistence store holds the session.
+        assert!(
+            state
+                .sessions
+                .sessions
+                .lock()
+                .expect("session map lock")
+                .contains_key("s1")
+        );
+        let store_read = {
+            // SAFETY: the raw service box aliases the vtable handle; it
+            // outlives this read (reclaimed in `lifecycle_teardown`).
+            let service_ref = unsafe { &*service };
+            let mut service = service_ref.lock().expect("service lock");
+            fr_session::service::dispatch(
+                fr_session::service::METHOD_SESSION_READ,
+                br#"{"id":"s1"}"#,
+                &mut service,
+            )
+            .expect("the created session is live in the store")
+        };
+        let store_read: serde_json::Value = serde_json::from_slice(&store_read).expect("read json");
+        assert_eq!(store_read["header"]["cwd"], "/repo");
+
+        lifecycle_teardown(&state, service);
+    }
+
+    /// The LIVE probe reports not-live for an unknown id and mints no
+    /// mailbox entry (spec: live 探测不建邮箱).
+    #[test]
+    fn live_probe_reports_without_creating_mailboxes() {
+        let state = ShellState {
+            sessions: empty_map(),
+            drivers: Mutex::new(HashMap::new()),
+        };
+        let reply = dispatch_lifecycle(METHOD_LIVE, br#"{"sessionId":"ghost"}"#, &state)
+            .expect("the live arm serves")
+            .expect("the live arm succeeds");
+        let reply: serde_json::Value = serde_json::from_slice(&reply).expect("live json");
+        assert_eq!(reply["live"], false);
+        assert!(
+            state
+                .sessions
+                .sessions
+                .lock()
+                .expect("session map lock")
+                .is_empty()
+        );
+    }
+
+    /// The RESUME arm: adopt a persisted session from a previous
+    /// process (a first service instance seeded the backend and torn
+    /// down), restore over its log, spawn the driver, and read the
+    /// seeded history back (spec: resume 臂接续持久化会话).
+    #[test]
+    fn resume_arm_adopts_the_persisted_session() {
+        let root = std::env::temp_dir().join(format!(
+            "fr-agent-loop-b3-resume-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let _guard = LifecycleTempRoot(root.clone());
+        let mut vocabulary = fr_session::vocabulary::EventVocabulary::core();
+        vocabulary
+            .declare(&["agent/inbox/spliced".to_owned()])
+            .expect("declare the loop's extension type");
+
+        // The previous process: create the session with its cwd, append
+        // one user message, and release every write claim.
+        {
+            let service = fr_session::service::SessionService::new(
+                &root,
+                vocabulary.clone(),
+                Arc::new(|| 1_700_000_000_000_i64),
+                Arc::new(|_warning: String| {}),
+            )
+            .expect("assemble the seeding service");
+            let mut service = service;
+            fr_session::service::dispatch(
+                fr_session::service::METHOD_SESSION_CREATE,
+                br#"{"id":"r1","meta":{"cwd":"/repo"}}"#,
+                &mut service,
+            )
+            .expect("seed create");
+            fr_session::service::dispatch(
+                fr_session::service::METHOD_SESSION_APPEND,
+                br#"{"id":"r1","type":"user/message","data":{"role":"user","id":"usr-1","content":[{"type":"text","text":"seed"}],"source":{"kind":"user"}},"surfaceOp":"append"}"#,
+                &mut service,
+            )
+            .expect("seed append");
+            service.teardown().expect("release the write claims");
+        }
+
+        let (state, service) = lifecycle_state(&root);
+        let reply = dispatch_lifecycle(METHOD_RESUME, br#"{"sessionId":"r1"}"#, &state)
+            .expect("the resume arm serves")
+            .expect("the resume arm succeeds");
+        let reply: serde_json::Value = serde_json::from_slice(&reply).expect("reply json");
+        assert_eq!(reply["sessionId"], "r1");
+
+        let live = dispatch_lifecycle(METHOD_LIVE, br#"{"sessionId":"r1"}"#, &state)
+            .expect("the live arm serves")
+            .expect("the live arm succeeds");
+        let live: serde_json::Value = serde_json::from_slice(&live).expect("live json");
+        assert_eq!(live["live"], true);
+
+        // The adopted session's seeded history reads back through the
+        // same face the driver folded at construction.
+        let read = {
+            // SAFETY: the raw service box aliases the vtable handle; it
+            // outlives this read (reclaimed in `lifecycle_teardown`).
+            let service_ref = unsafe { &*service };
+            let mut service = service_ref.lock().expect("service lock");
+            fr_session::service::dispatch(
+                fr_session::service::METHOD_SESSION_READ,
+                br#"{"id":"r1"}"#,
+                &mut service,
+            )
+            .expect("the adopted session is live in the store")
+        };
+        let read: serde_json::Value = serde_json::from_slice(&read).expect("read json");
+        assert_eq!(read["total"], 1);
+        assert_eq!(read["header"]["cwd"], "/repo");
+        assert_eq!(read["events"][0]["data"]["id"], "usr-1");
+
+        // A second RESUME refuses before any I/O (the registry guard's
+        // dsh verbatim replacement text).
+        let error = dispatch_lifecycle(METHOD_RESUME, br#"{"sessionId":"r1"}"#, &state)
+            .expect("the resume arm serves")
+            .expect_err("the second resume refuses");
+        assert_eq!(error, "agent \"r1\" is already registered");
+
+        lifecycle_teardown(&state, service);
     }
 }

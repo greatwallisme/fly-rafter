@@ -71,6 +71,11 @@ pub struct LoopInbox {
     client: SessionClient,
     events: Arc<AgentEvents>,
     state: InboxState,
+    /// The last committed splice's log seq (the Q4B `agent/error` seq
+    /// fact's second in-thread writer: the driver's commit counter and
+    /// the inbox splices interleave on one thread, and the emission-time
+    /// log tail is the max of both).
+    last_seq: u64,
 }
 
 impl LoopInbox {
@@ -81,6 +86,7 @@ impl LoopInbox {
             client,
             events,
             state: InboxState::default(),
+            last_seq: 0,
         }
     }
 
@@ -97,7 +103,9 @@ impl LoopInbox {
         log: &[fr_wire::event::SessionEvent],
     ) -> Result<Self, InboxError> {
         let mut state = InboxState::default();
+        let mut last_seq = 0;
         for event in log {
+            last_seq = last_seq.max(event.seq.get());
             if event.event_type() != EVENT_INBOX_SPLICED {
                 continue;
             }
@@ -108,7 +116,15 @@ impl LoopInbox {
             client,
             events,
             state,
+            last_seq,
         })
+    }
+
+    /// The last committed splice's log seq (the `agent/error` seq fact's
+    /// inbox half; 0 before any splice).
+    #[must_use]
+    pub const fn last_seq(&self) -> u64 {
+        self.last_seq
     }
 
     /// The bound session id.
@@ -291,6 +307,7 @@ impl LoopInbox {
             .client
             .append(EVENT_INBOX_SPLICED, &data, None, None)
             .map_err(InboxError::Session)?;
+        self.last_seq = self.last_seq.max(event.seq.get());
         let committed = committed_splice(&event).map_err(InboxError::SpliceDecode)?;
         self.state =
             fold_inbox(&self.state, event.seq.get(), &committed).map_err(InboxError::Fold)?;

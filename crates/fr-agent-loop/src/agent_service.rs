@@ -53,6 +53,22 @@ pub const METHOD_MAINTENANCE_POLL: u32 = 8;
 /// wake replay).
 pub const METHOD_MAINTENANCE_END: u32 = 9;
 
+/// Method selector: create the session and spawn its driver thread
+/// (`{sessionId, cwd, provider?, model?, reasoningEffort?, maxTokens?}`
+/// → `{sessionId}`; the dsh `agents.create`; Q9A route projection).
+pub const METHOD_CREATE: u32 = 10;
+
+/// Method selector: adopt one persisted session and spawn its driver
+/// over the restored log (the dsh `agents.resume`).
+///
+/// `{sessionId, provider?, model?, reasoningEffort?, maxTokens?}` →
+/// `{sessionId}`; Q9A route projection.
+pub const METHOD_RESUME: u32 = 11;
+
+/// Method selector: liveness probe (`{sessionId}` → `{live}`); never
+/// creates the session mailbox (the dsh `agents.get` liveness read).
+pub const METHOD_LIVE: u32 = 12;
+
 #[cfg(test)]
 mod tests {
     /// The local face pins the shared protocol table selector-for-selector
@@ -61,16 +77,16 @@ mod tests {
     #[test]
     fn face_matches_the_shared_protocol_table() {
         use super::{
-            METHOD_CANCEL, METHOD_DESCRIBE, METHOD_FOLLOWUP, METHOD_INJECT,
-            METHOD_MAINTENANCE_BEGIN, METHOD_MAINTENANCE_END, METHOD_MAINTENANCE_POLL, METHOD_SEND,
-            METHOD_STATUS, METHOD_STEER, SERVICE_NAME,
+            METHOD_CANCEL, METHOD_CREATE, METHOD_DESCRIBE, METHOD_FOLLOWUP, METHOD_INJECT,
+            METHOD_LIVE, METHOD_MAINTENANCE_BEGIN, METHOD_MAINTENANCE_END, METHOD_MAINTENANCE_POLL,
+            METHOD_RESUME, METHOD_SEND, METHOD_STATUS, METHOD_STEER, SERVICE_NAME,
         };
         use fr_wire::services::agent::{
-            METHOD_CANCEL as W_CANCEL, METHOD_DESCRIBE as W_DESCRIBE,
-            METHOD_FOLLOWUP as W_FOLLOWUP, METHOD_INJECT as W_INJECT,
+            METHOD_CANCEL as W_CANCEL, METHOD_CREATE as W_CREATE, METHOD_DESCRIBE as W_DESCRIBE,
+            METHOD_FOLLOWUP as W_FOLLOWUP, METHOD_INJECT as W_INJECT, METHOD_LIVE as W_LIVE,
             METHOD_MAINTENANCE_BEGIN as W_BEGIN, METHOD_MAINTENANCE_END as W_END,
-            METHOD_MAINTENANCE_POLL as W_POLL, METHOD_SEND as W_SEND, METHOD_STATUS as W_STATUS,
-            METHOD_STEER as W_STEER, SERVICE_NAME as W_SERVICE,
+            METHOD_MAINTENANCE_POLL as W_POLL, METHOD_RESUME as W_RESUME, METHOD_SEND as W_SEND,
+            METHOD_STATUS as W_STATUS, METHOD_STEER as W_STEER, SERVICE_NAME as W_SERVICE,
         };
         assert_eq!(SERVICE_NAME, W_SERVICE);
         assert_eq!(METHOD_SEND, W_SEND);
@@ -83,6 +99,9 @@ mod tests {
         assert_eq!(METHOD_MAINTENANCE_BEGIN, W_BEGIN);
         assert_eq!(METHOD_MAINTENANCE_POLL, W_POLL);
         assert_eq!(METHOD_MAINTENANCE_END, W_END);
+        assert_eq!(METHOD_CREATE, W_CREATE);
+        assert_eq!(METHOD_RESUME, W_RESUME);
+        assert_eq!(METHOD_LIVE, W_LIVE);
     }
 }
 

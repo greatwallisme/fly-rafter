@@ -1902,3 +1902,15 @@
 - **门**：workspace fmt/clippy -D warnings/test 1915-0（FR_DSH_SOURCE 必带）/doc -D warnings 全绿；cdylib fr-agent-loop+fr-tools 双工件链接实证（新 rlib 边零碰撞）。
 - **退化 6 枚当场修复**（Edit/Write 随机尾部损坏）；对策=小片段+写后即验+python 拼接。code-quality hook panic 标记=fail_read 已裁决误报类。
 - **下一动作=b3（生命周期臂+agent/error 发射）**。
+
+## 2026-11-04 — 18b b3 会话（生命周期臂 CREATE/RESUME/LIVE）
+
+- **Q9A 裁决（用户选 A：扩载荷）**：CREATE/RESUME 载荷增可选 reasoningEffort/maxTokens（dsh agentOptions 四字段 1:1；assertAgentOptions maxTokens 校验文案逐字）。
+- **契约层**：fr-wire agent 模块 CREATE/RESUME 注释改 `{sessionId,...}` 回含句柄面（spec 场景钉死）+ events 增 EVENT_USER_ADMITTED（Q102′A 共享表）；agent_service.rs 增 METHOD_CREATE=10/RESUME=11/LIVE=12 + face pin 测试扩三常量。
+- **Q4B 落地**：ErrorPayload += session_id/seq（agent_events.rs；wire 形测试更新）；EVENT_ERROR 改 re-export fr_wire EVENT_AGENT_ERROR；driver.rs 增 last_seq 追踪（restore 尾初始化 + commit 逐事件更新）→ emit_error 填 session_id/seq。
+- **生产组装**：新 driver_factory.rs（DEFAULT_MAX_PARALLEL_TOOL_CALLS=10 dsh constants.ts:6 1:1 + validated_max_tokens + production_deps{四客户端+InstructionsClient(cwd)+skills=None(dsh loop inject 不含 skills 判例)+wall clock+uuid v4 next_id+emit_user_admitted(键 agent,guard serve_event 解码键钉死)}+spawn_driver(fr-llm 线程命名判例)）；lib.rs 挂 mod。
+- **生命周期臂**：plugin_shell.rs dispatch_lifecycle（私有 fn，call() 先试 lifecycle None 落回纯 dispatch）+create_session_driver（守卫 drivers 注册表 dsh 文案→持久层 CREATE(2)+回读 sessionId 校验→attach_session_driver{mailbox+AgentEvents(stderr warn 判例)+LoopDriver::new+spawn+注册表}）；resume_session_driver（守卫→RESUME(6) 写租约→read(9) header cwd→attach）；live_probe（drivers 注册表查找，不建邮箱）；CreateRequest/ResumeRequest 载荷结构体；SessionReadsClient::session_header()（read(9) header，组装面专用）。
+- **编译**：cargo check 全绿（中途退化 6 枚全部当场修复：Edit 尾腐化 4、heredoc 尾腐化 2——小片段+写后即验+python 插入对策有效）。
+- **下一动作=b3 测试**（跨 crate 真 serve 往返判定+spec 四场景绑定测试+门四关）。
+
+- **b3 完成（本会话）**：Q9A 裁决 A（载荷扩 reasoningEffort/maxTokens）→契约层（fr-wire 注释+EVENT_USER_ADMITTED；agent_service 三常量+face pin）→Q4B 全链（ErrorPayload+session_id/seq、EVENT_ERROR re-export、driver last_seq+LoopInbox last_seq 双写者取 max——单计数漏 claim splice 实证修正、emit_error 填充）→driver_factory.rs（生产 deps+spawn+maxTokens 校验）→三臂（dispatch_lifecycle 守卫/持久层/attach/live）+SessionReadsClient::session_header→六测试全真绑定→lifecycle 27+3skip→四关绿（1921/0）。退化 8 枚当场修复。计划文件已更新。**下一动作=c（fr-schema json-stream+fr-headless 纯件）→d（runner 集成+退出守望+e2e+25 场景绑定+收口）**。

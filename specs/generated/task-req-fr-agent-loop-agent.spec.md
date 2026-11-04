@@ -28,6 +28,7 @@ fly-rafter 是字面全插件系统：agent 主循环不是宿主内置，而是
 - 切片边界（2026-10-27 Q81-A/Q83-A 裁决）：本切片循环侧建 tools/system-prompt 消费端封装（fr-wire 编解码 + 类型），以测试桩驱动全控制流；真 crate 随 Phase 14/15 装配对接；fr-system-prompt 含 scripts/extract-prompts 抽取脚本为切片 8。
 - 生命周期臂 MUST（2026-11-04 18b Q2A 裁决）：`'agent'` 服务增 METHOD_CREATE=10 / METHOD_RESUME=11 / METHOD_LIVE=12（no-create 存活探测）。create = 会话创建（session-persistence METHOD_SESSION_CREATE）+ 驱动线程 spawn（决策 46 形态；dsh agents.create 行为 1:1）；resume = 持久层 resume/restore（方法带 6/7）组合 + 驱动构造 + setup 发布（dsh agents.resume→resumeWith 行为 1:1，agent-loop/index.ts:843-935）；wire 方法号 fr 自有（dsh 为进程内函数调用无 wire 层）；STATUS 按需建邮箱语义不变，探测臂禁建箱（dsh agents.get 存活判定 index.ts:266-276 的 fr 等价面）。Allowed += crates/fr-wire/src/services.rs（跨插件契约常量单文件，Q61A 判例同形）。
 - `agent/error` 事件面 MUST（2026-11-04 18b Q4B 裁决）：驱动边界失败 containment 处 emit `agent/error` `{sessionId, turn, step, error, seq}`（dsh agent.ts:244-249 throwError 1:1：running 相位取 turn/step，否则 lastTurn/0；seq = 失败时会话 seq，即消费方 atOffset）；失败保留至消费方由其后终结事件治愈（dsh headless index.ts:365-372 治愈契约的发射半）。
+- 生命周期路由投影 MUST（2026-11-04 18b Q9A 裁决）：CREATE/RESUME 载荷增可选 `reasoningEffort`/`maxTokens`（dsh agentOptions 四字段 1:1 投影，request seed 双消费 dsh agent.ts:581-582；`maxTokens` 按 assertAgentOptions 校验正安全整数、文案逐字 'agent maxTokens must be a positive safe integer'）；CREATE/RESUME 回 `{sessionId}`（会话句柄面）。
 
 ## Boundaries
 
@@ -202,7 +203,7 @@ Scenario: runtime-context 恰好 admitted 一次
 Scenario: create 臂建会话并 spawn 驱动
   Test: create_arm_spawns_a_session_driver
   假设 组合内 session-persistence 与 fr-agent-loop 均已激活
-  当 以 `{sessionId, cwd, provider?, model?}` 调用 agent 服务 METHOD_CREATE 时
+  当 以 `{sessionId, cwd, provider?, model?, reasoningEffort?, maxTokens?}` 调用 agent 服务 METHOD_CREATE 时
   那么 持久层创建该会话、驱动线程 spawn 并回含会话句柄面
 
 Scenario: resume 臂接续持久化会话

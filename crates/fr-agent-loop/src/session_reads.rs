@@ -22,6 +22,7 @@ use crate::runtime_context::system_prompt_nodes;
 use crate::session_client::SessionClientError;
 use fr_wire::event::EpochHeader;
 use fr_wire::event::SessionEvent;
+use fr_wire::event::SessionHeader;
 
 /// Reads one session through the `session-persistence` service.
 #[derive(Debug)]
@@ -81,6 +82,27 @@ impl SessionReadsClient {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| SessionClientError::Reply(format!("surface seq: {error}")))?;
         Ok((events, surface))
+    }
+
+    /// The session header as the read arm carries it (the resume
+    /// assembly's cwd source — the dsh `resumeWith` meta comes from
+    /// `handle.header()`).
+    ///
+    /// # Errors
+    ///
+    /// Returns the transport or decode refusal.
+    pub fn session_header(&self) -> Result<SessionHeader, SessionClientError> {
+        let reply = self.read(
+            wire::METHOD_SESSION_READ,
+            &serde_json::json!({ "id": self.session_id }),
+        )?;
+        serde_json::from_value(
+            reply
+                .get("header")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        )
+        .map_err(|error| SessionClientError::Reply(format!("session header decode: {error}")))
     }
 }
 
