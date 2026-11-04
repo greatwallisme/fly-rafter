@@ -26,11 +26,14 @@ fly-rafter 是字面全插件系统：agent 主循环不是宿主内置，而是
 - LLM 流消费 MUST（2026-10-27 Q80-B/Q84-B2 裁决）：provider 侧 per-generation FIFO 缓冲 + 极小通知事件 {session_id, generation_id}（乱序/重复/丢失无害，丢失由下次通知或步边界兜底补偿）；循环线程非阻塞 require('llm','drain') 批量拉取（次序由 provider 缓冲保证，绕开 emit 次序无承诺契约）。
 - 服务方法快路径不变量 MUST（全仓纪律，Q79-A/Q84-B2 推论）：服务方法 = 内存操作级快路径，慢工作（网络流/长 I/O）= 插件自有 worker 线程 + 通知/拉取；on_event 处理器内禁止 require、禁止阻塞（只入信箱/置唤醒标志）；whenIdle 跨 ABI 重建 = agent/status 事件 + 查询型 require（禁止阻塞等 idle 的 require）；initiator 因果归因 = 载荷显式携带（dsh AsyncLocalStorage 面结构性消失，行为等价；PRD 决策 46）。
 - 切片边界（2026-10-27 Q81-A/Q83-A 裁决）：本切片循环侧建 tools/system-prompt 消费端封装（fr-wire 编解码 + 类型），以测试桩驱动全控制流；真 crate 随 Phase 14/15 装配对接；fr-system-prompt 含 scripts/extract-prompts 抽取脚本为切片 8。
+- 生命周期臂 MUST（2026-11-04 18b Q2A 裁决）：`'agent'` 服务增 METHOD_CREATE=10 / METHOD_RESUME=11 / METHOD_LIVE=12（no-create 存活探测）。create = 会话创建（session-persistence METHOD_SESSION_CREATE）+ 驱动线程 spawn（决策 46 形态；dsh agents.create 行为 1:1）；resume = 持久层 resume/restore（方法带 6/7）组合 + 驱动构造 + setup 发布（dsh agents.resume→resumeWith 行为 1:1，agent-loop/index.ts:843-935）；wire 方法号 fr 自有（dsh 为进程内函数调用无 wire 层）；STATUS 按需建邮箱语义不变，探测臂禁建箱（dsh agents.get 存活判定 index.ts:266-276 的 fr 等价面）。Allowed += crates/fr-wire/src/services.rs（跨插件契约常量单文件，Q61A 判例同形）。
+- `agent/error` 事件面 MUST（2026-11-04 18b Q4B 裁决）：驱动边界失败 containment 处 emit `agent/error` `{sessionId, turn, step, error, seq}`（dsh agent.ts:244-249 throwError 1:1：running 相位取 turn/step，否则 lastTurn/0；seq = 失败时会话 seq，即消费方 atOffset）；失败保留至消费方由其后终结事件治愈（dsh headless index.ts:365-372 治愈契约的发射半）。
 
 ## Boundaries
 
 ### Allowed Changes
 - crates/fr-agent-loop/**
+- crates/fr-wire/src/services.rs（跨插件契约常量单文件，Q61A 判例同形）
 
 ### Forbidden
 - Do not weaken or remove the source requirement clauses.
@@ -195,6 +198,30 @@ Scenario: runtime-context 恰好 admitted 一次
   假设 某步因流错误重试
   当 重试请求组装时
   那么 本步已注入的 runtime-context 快照不重复出现
+
+Scenario: create 臂建会话并 spawn 驱动
+  Test: create_arm_spawns_a_session_driver
+  假设 组合内 session-persistence 与 fr-agent-loop 均已激活
+  当 以 `{sessionId, cwd, provider?, model?}` 调用 agent 服务 METHOD_CREATE 时
+  那么 持久层创建该会话、驱动线程 spawn 并回含会话句柄面
+
+Scenario: resume 臂接续持久化会话
+  Test: resume_arm_adopts_the_persisted_session
+  假设 存在一个已持久化会话
+  当 以该 id 调用 METHOD_RESUME 时
+  那么 持久层 resume/restore 组合后驱动构造并发布 setup，会话历史可续
+
+Scenario: live 探测不建邮箱
+  Test: live_probe_reports_without_creating_mailboxes
+  假设 进程内无该会话驱动
+  当 以该 id 调用 METHOD_LIVE 时
+  那么 回报非存活且会话邮箱表不新增条目
+
+Scenario: 驱动边界失败发 agent/error
+  Test: driver_boundary_failure_emits_agent_error
+  假设 turn 循环内错误逸出到驱动边界
+  当 containment 记录失败时
+  那么 emit `agent/error` 载荷含 sessionId、turn、step、error、seq，running 相位取当前 turn/step、否则 lastTurn/0
 
 ## Questions
 

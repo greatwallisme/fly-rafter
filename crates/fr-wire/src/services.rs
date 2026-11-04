@@ -49,6 +49,16 @@ pub mod agent {
     pub const METHOD_MAINTENANCE_POLL: u32 = 8;
     /// `{sessionId, token}` → `{}` — close the window and converge.
     pub const METHOD_MAINTENANCE_END: u32 = 9;
+    /// `{sessionId, cwd, provider?, model?}` → `{}` — create the session
+    /// and spawn its driver thread (the dsh `agents.create`; wire numbers
+    /// are fr-own, the dsh face is in-process function calls).
+    pub const METHOD_CREATE: u32 = 10;
+    /// `{sessionId}` → `{}` — adopt one persisted session and spawn its
+    /// driver over the restored log (the dsh `agents.resume`).
+    pub const METHOD_RESUME: u32 = 11;
+    /// `{sessionId}` → `{live}` — liveness probe; never creates the
+    /// session mailbox (the dsh `agents.get` liveness read).
+    pub const METHOD_LIVE: u32 = 12;
 }
 
 /// The `'session-persistence'` service face (owner crate `fr-session`).
@@ -74,11 +84,28 @@ pub mod session_persistence {
     /// Drain the outbound mirror lane.
     pub const METHOD_SESSION_DRAIN: u32 = 8;
     /// Read one live session's log slice (Q107-A).
+    ///
+    /// The reply carries `events`/`total`/`header`/`inheritedEventCount`
+    /// plus the fr-own `surface` field — the ordered surface seq list the
+    /// driver's restore folds consume (fr-additive; the dsh face is
+    /// in-process and hands the projection objects directly).
     pub const METHOD_SESSION_READ: u32 = 9;
     /// `{id}` → `{"header": EpochHeader | null}` — the log's latest
     /// `request/header` snapshot (the dsh `session.requestHeader()`; the
     /// Q16b-1A route-gate seam).
     pub const METHOD_REQUEST_HEADER: u32 = 10;
+    /// `{id}` → `{"history": ToolHistory}` — the folded tool declaration
+    /// history (the dsh `session.toolHistory()` in-process read; fr-own
+    /// wire arm, the dsh face is an in-process fold).
+    pub const METHOD_TOOL_HISTORY: u32 = 11;
+    /// `{id}` → `{"generation": u64}` — the surface content generation
+    /// (the dsh `session.surfaceGeneration` in-process read; fr-own wire
+    /// arm).
+    pub const METHOD_SURFACE_GENERATION: u32 = 14;
+    /// `{id}` → `{"messages": [Message]}` — the derived message
+    /// projection (the dsh `session.deriveMessages()` in-process read;
+    /// fr-own wire arm).
+    pub const METHOD_DERIVE_MESSAGES: u32 = 15;
     /// `{}` → `{"sessions": [{"header": ...}]}` — the stored-session
     /// listing (the session-query corpus's persisted face).
     ///
@@ -575,6 +602,31 @@ pub mod llm {
     /// Until the attachments path resolver wires into dispatch (the
     /// projection is not wired today), the face answers the no-path arm.
     pub const METHOD_FILE_REQUEST_TEXT: u32 = 8;
+    /// `{provider, service}` → `{}` — register one provider route.
+    ///
+    /// The runtime-registry slice: the provider key maps to the provider
+    /// plugin's own generation-face service name, and the caller is the
+    /// provider plugin's `setup` (the dsh in-process adapter
+    /// registration's channel-side carrier).
+    pub const METHOD_REGISTER_ROUTE: u32 = 9;
+    /// Emit: the provider generation face's pull-now notification.
+    ///
+    /// Payload `{sessionId, generationId}` (fr-own carrier: the dsh
+    /// runtime consumes its adapter in process, so dsh has no
+    /// counterpart; the payload shape is the Q84-B2 notification twin).
+    pub const EVENT_PROVIDER_CHUNK_READY: &str = "llm/provider-chunk-ready";
+}
+
+/// The `'llm-deepseek'` generation-face service (owner crate
+/// `fr-llm-deepseek`; the runtime-registry registration names it as the
+/// face behind the `deepseek-official` provider route).
+pub mod llm_deepseek {
+    /// The provided service name the runtime-registry registration
+    /// points at.
+    pub const SERVICE_NAME: &str = "llm-deepseek";
+    /// The provider key the route registers under (the dsh base patch's
+    /// `agent-default-model` provider value verbatim, base/cordis.patch.yml:90-94).
+    pub const PROVIDER_KEY: &str = "deepseek-official";
 }
 
 /// The `'token-meter'` service face (owner crate `fr-token-meter`).
@@ -705,6 +757,12 @@ pub mod events {
     /// (the dsh `compaction/summary-error`; the compaction plugin
     /// dispatches it, the image-offload plugin answers it).
     pub const EVENT_SUMMARY_ERROR: &str = "compaction/summary-error";
+    /// Emit: one driver-boundary failure, preserved for consumer
+    /// containment (the dsh `agent/error`; `throwError` 1:1).
+    ///
+    /// The payload carries `{sessionId, turn, step, error, seq}` and the
+    /// failure stays live until a later terminal event cures it.
+    pub const EVENT_AGENT_ERROR: &str = "agent/error";
 }
 
 // Rust guideline compliant 2026-11-03

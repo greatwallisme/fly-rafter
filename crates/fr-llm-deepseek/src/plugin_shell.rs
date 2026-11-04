@@ -5,14 +5,15 @@
 //! rest of the crate stays a plain rlib housing the provider behavior
 //! (wire types, serialization, SSE translation, replay, credentials).
 //!
-//! The shell injects the `llm` service (PRD 4.5/:336 — dsh `llm-deepseek`
-//! registers its adapter into the LLM runtime). The registration protocol
-//! over the dynamic channel (the Invoker-face of dsh's
-//! `registerDeepSeekProvider`) is refined by the runtime-registry slice
-//! under the PRD :131 contract framework; this M1 shell carries the
-//! descriptor, the B2 generation trio (Q84-B2, Q85-C: the same fr-llm
-//! helper hooked per provider shell), and the adapter-registration seam
-//! the runtime-registry slice owns.
+//! The shell provides the `llm-deepseek` generation face (the provider
+//! plugin's own generation hub, 18b Q7A) and registers the
+//! `deepseek-official` route into the `llm` runtime at `setup` (the
+//! channel-side registration protocol; the Invoker-face of dsh's
+//! in-process `registerDeepSeekProvider`). The face serves the same
+//! method table the fr-llm shell proxies through (the B2 generation
+//! trio Q84-B2/Q85-C over this crate's own hub), and its pull-now
+//! notification rides `llm/provider-chunk-ready` (the Q84-B2 payload
+//! twin under the fr-own carrier name).
 
 use dougong_abi::{
     ABI_VERSION, HostExports, PluginExports, STATUS_CAPACITY, STATUS_FAILED, STATUS_OK, write_out,
@@ -24,20 +25,31 @@ pub const INJECTED_SERVICE: &str = "llm";
 /// The dylib artifact's plugin name.
 pub const PLUGIN_NAME: &str = "fr-llm-deepseek";
 
+/// The generation-face service this shell provides (the runtime-registry
+/// route target).
+pub const FACE_SERVICE: &str = fr_wire::services::llm_deepseek::SERVICE_NAME;
+
+/// The provider key the route registers under (the dsh base default
+/// selection's provider value).
+pub const PROVIDER_KEY: &str = fr_wire::services::llm_deepseek::PROVIDER_KEY;
+
 /// Method selector: shell metadata echo (`{}`).
 pub const METHOD_DESCRIBE: u32 = 1;
 
-pub use fr_llm::generation::{METHOD_ABORT, METHOD_BEGIN, METHOD_DRAIN, METHOD_PREPARE_CALL};
+pub use fr_llm::generation::{
+    METHOD_ABORT, METHOD_BEGIN, METHOD_DRAIN, METHOD_IMAGE_REQUEST_PRICING, METHOD_PREPARE_CALL,
+    METHOD_RESOLVE_MODEL_INFO,
+};
 
-/// The descriptor the loader consumes: no provided service, the `llm`
-/// service injected over the dynamic channel plus the two providers the
-/// access resolver reads (the dsh `resolveAttachments` pair), no
-/// listeners in this slice. The version is sourced from crate metadata
-/// so it cannot drift from the artifact.
+/// The descriptor the loader consumes: the `llm-deepseek` generation
+/// face provided, the `llm` service injected over the dynamic channel
+/// plus the two providers the access resolver reads (the dsh
+/// `resolveAttachments` pair), no listeners in this slice. The version is
+/// sourced from crate metadata so it cannot drift from the artifact.
 const DESCRIPTOR: &[u8] = concat!(
     "{\"name\":\"fr-llm-deepseek\",\"version\":\"",
     env!("CARGO_PKG_VERSION"),
-    "\",\"provide\":[],\"inject\":[\"llm\",\"attachments\",\"fs\"],\"listen\":{}}"
+    "\",\"provide\":[\"llm-deepseek\"],\"inject\":[\"llm\",\"attachments\",\"fs\"],\"listen\":{}}"
 )
 .as_bytes();
 
@@ -176,7 +188,12 @@ pub fn dispatch(state: &ShellState, method: u32, payload: &[u8]) -> Result<Vec<u
             }))
             .unwrap_or_default())
         }
-        METHOD_PREPARE_CALL | METHOD_BEGIN | METHOD_DRAIN | METHOD_ABORT => {
+        METHOD_PREPARE_CALL
+        | METHOD_BEGIN
+        | METHOD_DRAIN
+        | METHOD_ABORT
+        | METHOD_RESOLVE_MODEL_INFO
+        | METHOD_IMAGE_REQUEST_PRICING => {
             match fr_llm::generation::serve(&state.service, method, payload) {
                 Ok(reply) => Ok(reply),
                 Err(fr_llm::generation::ServiceError::Llm(failure)) => {
@@ -196,8 +213,8 @@ pub fn dispatch(state: &ShellState, method: u32, payload: &[u8]) -> Result<Vec<u
     }
 }
 
-/// The shell state: the generation service plus the copied emit vtable
-/// its notification seam publishes `llm/chunk-ready` through.
+/// The shell state: the generation face's own hub plus the copied emit
+/// vtable whose notification seam publishes `llm/provider-chunk-ready`.
 pub struct ShellState {
     service: fr_llm::generation::GenerationService,
 }
@@ -208,7 +225,7 @@ impl ShellState {
     #[must_use]
     pub fn new(host: Option<fr_llm::generation::EmitVtable>) -> Self {
         let notify = host.map_or_else(fr_llm::generation::quiet_notify, |vtable| {
-            vtable.notify_seam()
+            vtable.notify_seam_with_event(fr_wire::services::llm::EVENT_PROVIDER_CHUNK_READY)
         });
         Self {
             service: fr_llm::generation::GenerationService::new(notify),
@@ -216,11 +233,83 @@ impl ShellState {
     }
 
     /// The hosted service (tests register the crate's adapter and drive
-    /// the trio; production registration is the runtime-registry slice).
+    /// the trio; production registers the adapter in `setup`).
     #[must_use]
     pub const fn service(&self) -> &fr_llm::generation::GenerationService {
         &self.service
     }
+
+    /// Registers the crate's production adapter into the face hub under
+    /// the `deepseek-official` route key (the in-process registration
+    /// seam; the channel-side `llm` registration is the caller's).
+    fn register_production_adapter(&self, host: HostExports) -> Result<(), String> {
+        let dependencies = production_dependencies(host)?;
+        let adapter = std::sync::Arc::new(crate::adapter::DeepSeekAdapter::new(dependencies));
+        self.service.register_source(
+            PROVIDER_KEY,
+            std::sync::Arc::new(fr_llm::generation::AdapterSource::new(adapter)),
+        );
+        Ok(())
+    }
+}
+
+/// Announces the route to the `llm` runtime (the runtime-registry
+/// registration; the caller runs inside `setup`, where the injected
+/// `llm` service is committed by the activation gating).
+///
+/// # Errors
+///
+/// The require failure text (a refused route fails the activation
+/// loudly instead of booting a face the runtime cannot find).
+fn require_route(link: &AccessLink) -> Result<(), String> {
+    let payload = serde_json::json!({
+        "provider": PROVIDER_KEY,
+        "service": FACE_SERVICE,
+    });
+    let bytes = serde_json::to_vec(&payload)
+        .map_err(|error| format!("fr-llm-deepseek: route encode failed: {error}"))?;
+    link.require(
+        INJECTED_SERVICE,
+        fr_wire::services::llm::METHOD_REGISTER_ROUTE,
+        &bytes,
+    )?;
+    Ok(())
+}
+
+/// Builds the production dependency set: env-resolved connection facts
+/// resolved once at activation (a malformed `$DEEPSEEK_BASE_URL` fails
+/// the activation loudly, fail-closed), the env-resolved API key per
+/// request, the production ureq transport, and the wire-backed image
+/// access resolver.
+///
+/// # Errors
+///
+/// The connection-resolution diagnostic (a plain `String`, the dsh
+/// `resolveConnection` twin).
+fn production_dependencies(host: HostExports) -> Result<crate::types::Dependencies, String> {
+    let ambient_base_url = std::env::var(crate::config::BASE_URL_ENV).ok();
+    let connection = std::sync::Arc::new(crate::config::resolve_adapter_options(
+        &crate::config::ConfigOptions::default(),
+        ambient_base_url.as_deref(),
+    )?);
+    let mut dependencies = crate::types::Dependencies::new(
+        std::sync::Arc::new(move || (*connection).clone()),
+        std::sync::Arc::new(|_connection: &crate::types::ConnectionOptions| {
+            crate::auth::resolve_api_key(
+                std::env::var(crate::auth::DEFAULT_API_KEY_ENV)
+                    .ok()
+                    .as_deref(),
+                crate::auth::DEFAULT_API_KEY_ENV,
+            )
+            .map(|key| crate::types::RequestAuth {
+                headers: vec![(crate::auth::API_KEY_HEADER.to_owned(), key)],
+                on_request_error: None,
+            })
+        }),
+        std::sync::Arc::new(fr_net::http::UreqFetch::new()),
+    );
+    dependencies.image_access = Some(wire_image_access(host));
+    Ok(dependencies)
 }
 
 impl std::fmt::Debug for ShellState {
@@ -273,7 +362,29 @@ unsafe extern "C" fn setup(host: *const HostExports) -> *mut std::os::raw::c_voi
         // copying by value is the sanctioned pattern (dylib-plugin.md).
         Some(fr_llm::generation::EmitVtable::new(unsafe { *host }))
     };
-    Box::into_raw(Box::new(ShellState::new(emit))).cast::<std::ffi::c_void>()
+    let state = ShellState::new(emit);
+    if host.is_null() {
+        // No host: no runtime to register into (the unit-test shell).
+        return Box::into_raw(Box::new(state)).cast::<std::ffi::c_void>();
+    }
+    // SAFETY: non-null by the arm above; the copy is the sanctioned pattern.
+    let copied = unsafe { *host };
+    if let Err(error) = state.register_production_adapter(copied) {
+        report_setup_failure(&error);
+        return std::ptr::null_mut();
+    }
+    let link = AccessLink { host: copied };
+    if let Err(error) = require_route(&link) {
+        report_setup_failure(&error);
+        return std::ptr::null_mut();
+    }
+    Box::into_raw(Box::new(state)).cast::<std::ffi::c_void>()
+}
+
+/// Prints one single-line activation failure (the stderr face; the boot
+/// diagnostics surface it in the loader's activation report).
+fn report_setup_failure(error: &str) {
+    eprintln!("fr-llm-deepseek: activation failed: {error}");
 }
 
 unsafe extern "C" fn call(
@@ -553,7 +664,10 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_slice(super::DESCRIPTOR).expect("json");
         assert_eq!(parsed["name"], PLUGIN_NAME);
         assert_eq!(parsed["version"], env!("CARGO_PKG_VERSION"));
-        assert_eq!(parsed["provide"], serde_json::json!([]));
+        assert_eq!(
+            parsed["provide"],
+            serde_json::json!(["llm-deepseek"])
+        );
         assert_eq!(
             parsed["inject"],
             serde_json::json!(["llm", "attachments", "fs"])

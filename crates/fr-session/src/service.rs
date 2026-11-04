@@ -96,6 +96,20 @@ pub const METHOD_SESSION_READ: u32 = 9;
 /// snapshot (`{id}` → `{"header": EpochHeader | null}`; the dsh
 /// `session.requestHeader()`; the Q16b-1A route-gate seam).
 pub const METHOD_REQUEST_HEADER: u32 = 10;
+/// `{id}` → `{"history": ToolHistory}` — the folded tool declaration
+/// history (the dsh `session.toolHistory()` in-process read; fr-own
+/// wire arm).
+pub const METHOD_TOOL_HISTORY: u32 =
+    fr_wire::services::session_persistence::METHOD_TOOL_HISTORY;
+/// `{id}` → `{"generation": u64}` — the surface content generation (the
+/// dsh `session.surfaceGeneration` in-process read; fr-own wire arm).
+pub const METHOD_SURFACE_GENERATION: u32 =
+    fr_wire::services::session_persistence::METHOD_SURFACE_GENERATION;
+/// `{id}` → `{"messages": [Message]}` — the derived message projection
+/// (the dsh `session.deriveMessages()` in-process read; fr-own wire
+/// arm).
+pub const METHOD_DERIVE_MESSAGES: u32 =
+    fr_wire::services::session_persistence::METHOD_DERIVE_MESSAGES;
 /// Method selector: list the stored sessions (`{}` →
 /// `{"sessions": [{"header": ...}]}`; the corpus's persisted face).
 ///
@@ -777,11 +791,20 @@ fn service_read(
                 .map_err(|error| format!("session event encode failed: {error}"))
         })
         .collect::<Result<_, _>>()?;
+    let surface: Vec<serde_json::Value> = session
+        .surface_nodes()
+        .iter()
+        .map(|seq| {
+            serde_json::to_value(seq)
+                .map_err(|error| format!("surface seq encode failed: {error}"))
+        })
+        .collect::<Result<_, _>>()?;
     Ok(serde_json::json!({
         "events": slice,
         "total": total_u64,
         "header": session.header(),
         "inheritedEventCount": session.inherited_event_count(),
+        "surface": surface,
     }))
 }
 
@@ -801,6 +824,69 @@ fn service_request_header(
         "header": header,
     }))
     .map_err(|error| format!("request-header reply encode failed: {error}"))
+}
+
+/// Serves one live session's folded tool declaration history (the dsh
+/// `session.toolHistory()` in-process read): the projection folds the
+/// full log per call (stateless and deterministic; the driver asks once
+/// per request assembly).
+fn service_tool_history(
+    service: &SessionService,
+    request: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let id = require_id(request, "id")?;
+    let session = service
+        .store
+        .get(&id)
+        .ok_or_else(|| format!("session \"{id}\" is not live in this store"))?;
+    let mut projection = crate::tool_history::ToolHistoryProjection::default();
+    for event in session.events() {
+        projection.apply(event);
+    }
+    let history = projection.snapshot();
+    serde_json::to_value(serde_json::json!({ "history": history }))
+        .map_err(|error| format!("tool-history reply encode failed: {error}"))
+}
+
+/// Serves one live session's surface content generation (the dsh
+/// `session.surfaceGeneration` read).
+fn service_surface_generation(
+    service: &SessionService,
+    request: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let id = require_id(request, "id")?;
+    let session = service
+        .store
+        .get(&id)
+        .ok_or_else(|| format!("session \"{id}\" is not live in this store"))?;
+    serde_json::to_value(serde_json::json!({
+        "generation": session.content_generation(),
+    }))
+    .map_err(|error| format!("surface-generation reply encode failed: {error}"))
+}
+
+/// Serves one live session's derived message projection (the dsh
+/// `session.deriveMessages()` read; the cached fold lives on the
+/// session).
+fn service_derive_messages(
+    service: &mut SessionService,
+    request: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let id = require_id(request, "id")?;
+    let session = service
+        .store
+        .get_mut(&id)
+        .ok_or_else(|| format!("session \"{id}\" is not live in this store"))?;
+    let messages: Vec<serde_json::Value> = session
+        .derive_messages()
+        .iter()
+        .map(|message| {
+            serde_json::to_value(message)
+                .map_err(|error| format!("derived message encode failed: {error}"))
+        })
+        .collect::<Result<_, _>>()?;
+    serde_json::to_value(serde_json::json!({ "messages": messages }))
+        .map_err(|error| format!("derive-messages reply encode failed: {error}"))
 }
 
 /// Serves the stored-session listing (the session-query corpus's
@@ -906,6 +992,9 @@ pub fn dispatch(
         METHOD_SESSION_DRAIN => service_drain(service, &request)?,
         METHOD_SESSION_READ => service_read(service, &request)?,
         METHOD_REQUEST_HEADER => service_request_header(service, &request)?,
+        METHOD_TOOL_HISTORY => service_tool_history(service, &request)?,
+        METHOD_SURFACE_GENERATION => service_surface_generation(service, &request)?,
+        METHOD_DERIVE_MESSAGES => service_derive_messages(service, &request)?,
         METHOD_PERSISTED_LIST => service_persisted_list(service)?,
         METHOD_PERSISTED_COLD_READ => service_persisted_cold_read(service, &request)?,
         _ => return Err(format!("unknown session-persistence method {method}")),

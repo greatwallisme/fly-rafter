@@ -35,7 +35,9 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::task::{Context, Poll, Waker};
 
+use fr_wire::call_config::{Failure, FinishReason, FinishReasonKind};
 use fr_wire::content::TrueOnly;
+use fr_wire::stream::KnownStreamChunk;
 use fr_wire::{AdapterDefaults, CallControls, StreamChunk};
 use futures_core::Stream;
 
@@ -658,6 +660,13 @@ impl EmitVtable {
         Self { host }
     }
 
+    /// The copied vtable verbatim (the channel registry's require link
+    /// shares this copy; the copy contract is the emit seam's).
+    #[must_use]
+    pub const fn raw_host(&self) -> dougong_abi::HostExports {
+        self.host
+    }
+
     /// Builds the notification seam publishing [`CHUNK_READY_EVENT`].
     ///
     /// Notification failures are dropped by design: the payload is
@@ -665,13 +674,22 @@ impl EmitVtable {
     /// compensates for any loss.
     #[must_use]
     pub fn notify_seam(&self) -> Notify {
+        self.notify_seam_with_event(CHUNK_READY_EVENT)
+    }
+
+    /// Builds the notification seam publishing one given event name (the
+    /// provider generation faces publish the
+    /// `llm/provider-chunk-ready` carrier through this parameterization;
+    /// the payload shape stays the Q84-B2 twin).
+    #[must_use]
+    pub fn notify_seam_with_event(&self, event: &'static str) -> Notify {
         let emit = *self;
         Arc::new(move |session: Option<&str>, generation: &str| {
-            emit.publish(session, generation);
+            emit.publish(event, session, generation);
         })
     }
 
-    fn publish(&self, session: Option<&str>, generation: &str) {
+    fn publish(&self, event: &'static str, session: Option<&str>, generation: &str) {
         let payload = ChunkReadyPayload {
             session_id: session.map(str::to_owned),
             generation_id: generation.to_owned(),
@@ -679,7 +697,7 @@ impl EmitVtable {
         let Ok(body) = serde_json::to_vec(&payload) else {
             return;
         };
-        let event = CHUNK_READY_EVENT.as_bytes();
+        let event = event.as_bytes();
         // SAFETY: the copied vtable is live until this activation's
         // `teardown` returns; the shell joins every worker holding a copy
         // before then (dylib thread discipline).
@@ -1037,6 +1055,7 @@ impl GenerationHub {
                 drive_stream(
                     stream,
                     |chunk| {
+                        let chunk = consume_fr_error(chunk);
                         push_fifo.push(chunk);
                         notify(notified_session.as_deref(), &notified_id);
                     },
@@ -1118,6 +1137,18 @@ impl GenerationHub {
         }
     }
 
+    /// Flags every live generation cancelled without joining anything:
+    /// the abort-relay callback rail the channel proxies register fires
+    /// here, so the proxies converge and exit before their owner joins
+    /// them (the teardown order: cancel, join proxies, then
+    /// [`Self::shutdown`]).
+    fn cancel_all(&self) {
+        let state = lock(&self.state);
+        for generation in state.generations.values() {
+            generation.signal.abort();
+        }
+    }
+
     /// Stops new generations, flags every live one cancelled, and joins
     /// every worker (live and retired). The join is unbounded by
     /// adjudication (Q84-B2: detaching races the vtable-lifetime UB; the
@@ -1175,6 +1206,54 @@ fn fr_error_chunk(error: &LlmError) -> StreamChunk {
     StreamChunk::Other(record)
 }
 
+/// Consumes one adapter-private `fr-error` record into the loop-facing
+/// error settlement (the Q73-A consumption mapping: the adapters keep
+/// the full `Result` channel internally and surface a held error as a
+/// terminal `{"type":"fr-error", ...}` record before terminating; the
+/// runtime maps it to the `finish(kind error)` settlement the consumers
+/// already classify). Every other chunk passes through unchanged.
+#[must_use]
+fn consume_fr_error(chunk: StreamChunk) -> StreamChunk {
+    let StreamChunk::Other(ref object) = chunk else {
+        return chunk;
+    };
+    let is_fr_error = object
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|kind| kind == "fr-error");
+    if !is_fr_error {
+        return chunk;
+    }
+    let message = object
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("provider stream failed")
+        .to_owned();
+    let code = object
+        .get("code")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(TRANSPORT_CODE)
+        .to_owned();
+    StreamChunk::Known(KnownStreamChunk::Finish {
+        reason: FinishReason::Known(FinishReasonKind::Error {
+            failure: Failure {
+                message,
+                code,
+                status: object
+                    .get("status")
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|status| u16::try_from(status).ok()),
+                provider_retry_after_ms: object
+                    .get("providerRetryAfterMs")
+                    .and_then(serde_json::Value::as_u64),
+                request_id: None,
+                offload_images: None,
+            },
+        }),
+        replay_state: None,
+    })
+}
+
 /// One prepared-call binding (dsh `PreparedLlmCall`'s one-shot dispatch
 /// gates, service-side): the registration snapshot travels with the
 /// binding, exactly as dsh captures it in the prepared closure.
@@ -1226,6 +1305,30 @@ impl GenerationService {
     /// is the test and assembly seam).
     pub fn register_source(&self, provider: &str, source: Arc<dyn GenerationSource>) {
         lock(&self.sources).insert(provider.to_owned(), source);
+    }
+
+    /// Registers one route's channel source (the runtime-registry
+    /// registration arm): duplicate provider keys fail closed.
+    ///
+    /// # Errors
+    ///
+    /// A text failure when the provider key already carries a source.
+    pub fn register_provider_route(
+        &self,
+        provider: &str,
+        source: Arc<dyn GenerationSource>,
+    ) -> Result<(), String> {
+        let duplicate = {
+            let sources = lock(&self.sources);
+            sources.contains_key(provider)
+        };
+        if duplicate {
+            return Err(format!(
+                "provider \"{provider}\" already has a registered source"
+            ));
+        }
+        lock(&self.sources).insert(provider.to_owned(), source);
+        Ok(())
     }
 
     /// Resolves one route and mints a prepared-call binding (dsh runtime
@@ -1373,6 +1476,13 @@ impl GenerationService {
     /// asynchronously per the dsh caller-abort semantics).
     pub fn abort(&self, generation_id: &str) {
         self.hub.abort(generation_id);
+    }
+
+    /// Flags every live generation cancelled without joining anything
+    /// (the teardown-sequencing face the channel-proxy shells call
+    /// before joining their own workers; see [`GenerationService::shutdown`]).
+    pub fn cancel_all(&self) {
+        self.hub.cancel_all();
     }
 
     /// Stops the service: no new generations, every live one cancelled,
@@ -1827,6 +1937,58 @@ mod tests {
                 .push((session.map(str::to_owned), generation.to_owned()));
         });
         (notify, log)
+    }
+
+    /// The Q73-A consumption mapping: an adapter-held error surfaces as a
+    /// terminal `fr-error` record; the runtime maps it to the
+    /// `finish(kind error)` settlement with the record's message and code.
+    #[test]
+    fn fr_error_chunk_maps_to_llm_error() {
+        let (notify, _log) = recording_notify();
+        let service = GenerationService::new(notify);
+        let source = ScriptSource::new();
+        let (sender, stream) = channel_stream();
+        source.push(stream);
+        service.register_source("p", source);
+
+        sender.send(StreamChunk::Other({
+            let mut record = serde_json::Map::new();
+            record.insert(
+                "type".to_owned(),
+                serde_json::Value::String("fr-error".to_owned()),
+            );
+            record.insert(
+                "message".to_owned(),
+                serde_json::Value::String("upstream exploded".to_owned()),
+            );
+            record.insert(
+                "code".to_owned(),
+                serde_json::Value::String("SERVER".to_owned()),
+            );
+            record
+        }));
+        drop(sender);
+        let id = service.begin(request(), None).expect("begin");
+        let reply = drain_until_done(&service, &id);
+        assert_eq!(reply.chunks.len(), 1, "the record maps one-to-one");
+        let fr_wire::StreamChunk::Known(fr_wire::stream::KnownStreamChunk::Finish {
+            reason,
+            replay_state,
+        }) = &reply.chunks[0]
+        else {
+            panic!(
+                "expected the mapped error finish, got {:?}",
+                reply.chunks[0]
+            );
+        };
+        assert!(replay_state.is_none());
+        match reason {
+            FinishReason::Known(FinishReasonKind::Error { failure }) => {
+                assert_eq!(failure.message, "upstream exploded");
+                assert_eq!(failure.code, "SERVER");
+            }
+            other => panic!("expected the error finish reason, got {other:?}"),
+        }
     }
 
     /// begin/drain round trip: batches keep delivery order, the terminal

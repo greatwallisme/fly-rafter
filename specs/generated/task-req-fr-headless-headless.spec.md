@@ -28,7 +28,14 @@ headless 是第一个交付入口（M1）：一次性任务、`--json` 事件流
 - 六枚集成测试的 cdylib 工件由四关门流程前置 `cargo build --workspace` 供给（2026-11-04 裁决 Q1A：`cargo test` 不产 cdylib 工件——实测；dougong loader_demo 判例同形）；测试对缺失工件 fail-loud 并给指引，绝不静默跳过。
 - 信号面 MUST：SIGINT 映射退出码 130、SIGTERM 映射退出码 0，宿主壳先广播 shutdown 再有界 join 插件自有线程（teardown join 纪律，dsh profile-boot.ts:307-308 同码）。
 - 启动诊断 MUST：boot 期致命错误 stderr 单行摘要 + 完整报告落盘 `$FR_HOME/logs/startup-<时间>-<uuid>.log`（警告头 "WARNING: Raw diagnostics may contain configuration or credential values from plugin errors. Review before sharing." 逐字）后退出码 1（PRD 18.1、dsh startup-diagnostics.ts:34-67 + bin.ts:43-47）。
-- realm 声明位 MUST：装载文档槽位支持 isolate 声明（dougong D15 isolate_realm；每会话 realm 挂载落码属后续切片，18a 只钉声明面被 loader 接受）。
+- realm 声明位 MUST：装载文档槽位支持 isolate 声明（dougong D15 isolate_realm；每会话 realm 挂载落码属后续切片，18a 只钉声明面，被 loader 接受）。
+- 模型选择 rail MUST（2026-11-04 18b Q1A 裁决）：宿主装配时读组合后 llm 行 config 与 fr-schema 声明默认（provider 默认 `'deepseek-official'`，dsh base/cordis.patch.yml:90-94 判例同值）烘 `{provider, model, reasoning-effort?}` 进入口 facts 文档（与 app argv 同轨，决策 47 5A 延伸）；runner 从中继快照读取；dsh agentDefaultModel 服务缝不在 PRD 4.4 逐字清单（非 wire 偏差，内部结构落位）；saveSelection（写回）M1 无 UI 写路径=结构性缺席备案。
+- runner 生命周期消费 MUST（2026-11-04 18b Q2A 裁决）：fr-headless descriptor inject += `["agent","session-persistence","session-query"]`——dsh runner inject `[agentDefaultModel, agents, sessions]` 的 fr 同构（index.ts 注入面）；服务双检文案逐字（sessionPersistence/sessionQuery 缺失两臂，index.ts:257-265）；create/resume/live 探测消费 fr-agent-loop 生命周期臂。
+- 失败跟踪 MUST（2026-11-04 18b Q4B 裁决）：runner listen `agent/error` + `session/turn/end`——`agent/error` 记 `{error, atOffset}`（同会话过滤），其后同会话 turn/end（seq ≥ atOffset）清零；收敛判定到达仍持未愈失败 → run 以该失败结束（stderr `fr:` 前缀错误行；--json 下 error 事件且无 final；exit 1）——dsh index.ts:365-372,391 1:1。
+- 退出轨 MUST（2026-11-04 18b 裁决）：runner 完成经 `headless/exit` `{code}` 内核事件请求退出（插件→宿主唯一推送面=emit，执法事实：宿主不能 provide、require/dispatch 均插件向）；宿主 fr crate 内嵌 in-process 监听插件听该事件并触发有界关停携带该退出码；SIGINT 130/SIGTERM 0 覆盖语义不变。
+- E2E 驱动 MUST（2026-11-04 18b Q3A 裁决）：集成测试以本地脚本化 SSE HTTP 服务器（测试内 TcpListener）+ profile patch 覆盖 fr-llm-deepseek base-url + DEEPSEEK_API_KEY 驱动全链真实生成，零 fixture crate。
+- `--json` schema 工件 MUST（2026-11-04 18b Q5A 裁决，M1 验收 2）：fr-schema 增 json-stream schema 模块（八帧 schema 文档常量+校验器）；fr-headless 测试以真实事件流校验（dsh 无 schema 工件=fr 自有增补面）。
+- 绑定与测试形态（2026-11-04 18b Q6 批准）：TTY 判定=注入判定单测（dsh startup.spec.ts:135 mock 判例同形）+进程级管道用例；场景 9=attempt 序列夹具投影级绑定（流错误重试 e2e 须 fr-llm-retry=18c，跨切片备案）；场景 21 四拒=夹具会话冷读+live 探测臂单测复合（fr 恒不发射 agent-preset/selected，preset 推进投影恒=header 值，损坏记录臂夹具构造）；场景 23=final 来源 e2e+提前唤醒抑制判定单测复合；help 文本=dsh cli-help.md 脚本抽取+品牌替换（fr-system-prompt extract 判例同轨，FR_DSH_SOURCE 缺席按设计 fail）。
 
 ## Boundaries
 
@@ -39,6 +46,7 @@ headless 是第一个交付入口（M1）：一次性任务、`--json` 事件流
 - crates/fr-schema/**（2026-11-04 追加裁决：首次真装配实证 registry 将 plan-mode `section` 钉为 fr-tools-builtin 顶层必填，而 crate 侧该键烘焙不存在（plugin_shell.rs prompt_sections 静态表）——移除该幽灵必填并同片内调整钉测）
 - crates/fr-agent-loop/** + crates/fr-tools-builtin/**（2026-11-04 追加裁决：首次真装配实证三 crate 描述符声明环 skills←agent←shell←tools-builtin，内核激活门控下组合结构性不可 boot；手术 = agent-loop descriptor inject 去 skills（dsh 软读边）、tools-builtin setup 增 grant(agent→skills) 惰性授权（时序：agent 剩余 inject 无环先激活→shell 解 park→tools-builtin 激活时 agent 已提交、grant 成立））
 - crates/fr-session/**（2026-11-04 追加裁决：首次真装配实证工件壳未装配 session-persistence 服务带（dispatch 仅 declare/describe/projections，create/append/drain/read 等方法带从未接线、ShellState 无 SessionService——单测全部绕过工件直驱 service 面）；修复 = 工件 setup 装配 SessionService（烘焙根+core 词表+毫秒时钟+stderr 告警钩）并在 dispatch 路由 2-11 与 1002/1003 方法带，同片内补接线钉测）
+- crates/fr-llm/** + crates/fr-llm-deepseek/**（2026-11-04 18b Q7A 裁决：runtime-registry 通道侧注册协议随 18b 落地——fr-llm REGISTER_ROUTE 臂+channel-proxy source+fr-llm-deepseek 生成面服务；真实生成 e2e 前置）
 
 ### Forbidden
 - Do not weaken or remove the source requirement clauses.
@@ -197,6 +205,12 @@ Scenario: tool_result 仅 append 投影
   假设 某工具结果曾被压缩替换（surfaceOp 非 append）
   当 投影 --json 流时
   那么 原始结果不出现，仅 append 形态的 tool_result 投影
+
+Scenario: agent/error 无终结事件不愈即败
+  Test: uncured_agent_error_fails_the_run
+  假设 agent/error 记录失败于某 seq 且其后无 seq ≥ 该值的 turn/end
+  当 收敛判定到达时
+  那么 run 以该失败结束：stderr fr 前缀错误行、--json 下 error 事件且无 final、exit 1
 
 Scenario: headless 组合经真实 dylib 装载走通
   Test: headless_assembly_boots_real_dylibs

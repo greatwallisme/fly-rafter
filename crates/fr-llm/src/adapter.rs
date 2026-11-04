@@ -30,6 +30,7 @@ use fr_wire::{ContentBlock, Message, StreamChunk, ToolHistory, ToolSchema};
 use futures_core::Stream;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// What one model call is for (dsh `GenerateOptions.purpose`).
@@ -54,25 +55,94 @@ impl CallPurpose {
 
 /// Caller cancellation for one model call: the query face of the dsh
 /// `AbortSignal` the seam reads.
+///
+/// The struct also carries the one-abort callback rail the runtime's
+/// channel proxies register (event-driven abort relay, no polling — the
+/// dsh signal's `addEventListener` face).
 #[derive(Clone, Debug, Default)]
-pub struct AbortSignal(Arc<AtomicBool>);
+pub struct AbortSignal(Arc<SignalState>);
+
+#[derive(Debug, Default)]
+struct SignalState {
+    aborted: AtomicBool,
+    listeners: SignalListeners,
+}
+
+/// The abort listener list. The callbacks carry no `Debug` face; the
+/// debug view reports only the registration count.
+#[derive(Default)]
+struct SignalListeners(Mutex<Vec<Arc<dyn Fn() + Send + Sync>>>);
+
+impl std::fmt::Debug for SignalListeners {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let count = self.0.lock().map_or(0, |listeners| listeners.len());
+        f.debug_tuple("SignalListeners").field(&count).finish()
+    }
+}
 
 impl AbortSignal {
     /// A signal that has not aborted.
     #[must_use]
     pub fn new() -> Self {
-        Self(Arc::new(AtomicBool::new(false)))
+        Self(Arc::new(SignalState::default()))
     }
 
-    /// Mark the call as aborted.
+    /// Registers one abort listener; fires immediately when the signal
+    /// has already aborted.
+    ///
+    /// Listeners are one-shot by contract (the signal aborts at most
+    /// once) and must stay cheap — they run on whatever thread called
+    /// [`Self::abort`].
+    ///
+    /// # Panics
+    ///
+    /// Panics when the listener lock is poisoned (a listener callback
+    /// panicked while holding it).
+    pub fn on_abort(&self, listener: Arc<dyn Fn() + Send + Sync>) {
+        let mut listeners = self
+            .0
+            .listeners
+            .0
+            .lock()
+            .expect("abort listener lock poisoned");
+        if self.0.aborted.load(Ordering::SeqCst) {
+            drop(listeners);
+            listener();
+            return;
+        }
+        listeners.push(listener);
+    }
+
+    /// Mark the call as aborted and fire the registered listeners.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the listener lock is poisoned (a listener callback
+    /// panicked while holding it) or when a listener callback itself
+    /// panics.
     pub fn abort(&self) {
-        self.0.store(true, Ordering::SeqCst);
+        let listeners = {
+            let mut listeners = self
+                .0
+                .listeners
+                .0
+                .lock()
+                .expect("abort listener lock poisoned");
+            if self.0.aborted.swap(true, Ordering::SeqCst) {
+                // Already aborted: the listeners fired at the first abort.
+                return;
+            }
+            std::mem::take(&mut *listeners)
+        };
+        for listener in listeners {
+            listener();
+        }
     }
 
     /// Whether the call was aborted.
     #[must_use]
     pub fn is_aborted(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
+        self.0.aborted.load(Ordering::SeqCst)
     }
 }
 

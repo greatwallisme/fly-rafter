@@ -1856,3 +1856,33 @@
 - **实现面**：fr crate（lib+bin 拆分，assembly/manifest/pump/signals/diagnostics 五模块）；fr-headless 新 crate（20+1 cdylib）；dougong-dylib 0.5.1 停摆纪律修复（R1-R8 全落）；旧账 v0.5.0 tag 补推 GitHub。
 - **测试面**：host_boot.rs 六集成测试（真实 cdylib 全装载+29 服务 require+manifest 无 builtin+facts 双面+诊断进程测试+信号进程测试 130/0+泵真实对 presets 播种）；dougong 回归钉测 teardown_joins；fr 单测全绿；dougong 四关+241 测试+六 demo 全绿。
 - **当前**：code-review --fix high（≤2 subagent）后台审查 dougong d55ff60，完成后按裁决发布+tag+复验+提交。
+
+## 2026-11-04 — 18a 收口：五缺陷+三通道收口修+内核 0.5.1 发布+六测试全绿
+
+- **审查后序**：code-review --fix high 六发现全修（回归钉测重写为 dispatch 链构造并双向实证 0.5.0 挂/0.5.1 绿；R8 参考文档补齐；文档 gitignore 强制入库；内部版本要求齐 0.5.1；provider_gone 常量去重；CHANGELOG 如实化）→ amend 折叠进 399a103 → 五 crate 发布 crates.io + tag v0.5.1 推 GitHub。
+- **fly-rafter 复验暴露残余三通道缺陷并全修**：fr-tools-builtin notice 通道共享 Arc sender 克隆自锁（Option<Sender>+close_tasks）；schedule runtime 缺 shutdown 信号臂（加臂+teardown 显式触发）；fr-storage job_tx 不丢弃（Option 化+close 握手后丢弃）。gdb（用户装）一次附加定位。
+- **测试隔离缺陷**：插件激活从进程 env 烘 FR_HOME，in-process 测试全写真实 home——TempHome 单点 unsafe set_var 修。
+- **终门**：fr 四关全绿（fmt/clippy 0/全测 1908/doc）；lifecycle 六枚 18a 场景全 pass+25 pending 设计态 skip（结构性基线）；boot 5/5；SIGTERM 0/SIGINT 130；六集成测试 16s 全绿。
+- **提交**：dougong 399a103（已发布+tag+推 GitHub）；fly-rafter 84eb8ed（18a 全量+doc/experience 经验沉淀）。
+- **下一动作=呈 18b 切片问题单（fr-headless startup/runner/json 投影行为面），或按用户指示继续 18b-18f 顺序推进。
+
+## 2026-11-04 — 18b 开工勘察完毕，问题单六题已呈（等待裁决）
+
+- **勘察执行**：计划文件+headless spec（25 pending 场景+18a 六枚已绑）+research-phase18 §1-§7+fr/fr-headless/fr-agent-loop/fr-session/fr-tools-builtin/fr-llm-deepseek 源码面全锚 findings.md「2026-11-04 18b 开工勘察」节（driver spawn 缺口/session-query 已真/双事件轨/退出轨力学/mock 面/失败跟踪映射缺口）。
+- **呈裁决**：问题单六题已单条消息统一编号呈报——Q1 默认模型选择 rail / Q2 agent 生命周期 wire 臂（含 live 探测） / Q3 e2e mock 路线 / Q4 失败跟踪映射 / Q5 --json schema 工件落点 / Q6 绑定与测试形态计划+条件边界扩展。等显式编号裁决后按七步流推进 18b（step 1-2 合同扩边→实现→四关→lifecycle→guard→stamp）。
+
+## 2026-11-04 — 18b 裁决链收齐（Q1A 2A 3A 4B 5A 6批准 + Q7A 补呈）+ 合同扩边 lint 全绿（step 1-2 完成）
+
+- **裁决执行**：Q1A=模型选择装配事实中继轨（provider 默认 deepseek-official，dsh base:90-94 同值）；Q2A='agent' 服务增 CREATE=10/RESUME=11/LIVE=12 探测臂+fr-headless inject += 三缝；Q3A=本地脚本化 SSE mock 服务器+base-url patch；Q4B=fr-agent-loop 增发 `agent/error` {sessionId,turn,step,error,seq}（throwError 1:1，agent.ts:244-249）+runner listen 治愈跟踪；Q5A=fr-schema json-stream schema 模块；Q6=绑定与测试形态计划批准；Q7A=runtime-registry 通道侧注册协议随 18b（勘察遗漏补呈：fr-llm 注册表真实装配零调用点 `plugin_shell.rs:13-14`、fr-llm-deepseek provide []，`Arc<dyn GenerationSource>` 不过 C-ABI+dylib 不收 config=力学唯一解）。
+- **合同扩边**（三 spec 同轮）：agent-loop spec（生命周期臂+agent/error 两 Decision、Allowed += fr-wire services.rs 单文件、四新场景真名绑定：create_arm_spawns_a_session_driver/resume_arm_adopts_the_persisted_session/live_probe_reports_without_creating_mailboxes/driver_boundary_failure_emits_agent_error）；headless spec（七 Decision 行+Allowed += fr-llm/fr-llm-deepseek+新场景 uncured_agent_error_fails_the_run）；fr-llm spec（Q7A Decision+Allowed += fr-wire services.rs+新 Rule runtime-registry 三场景，未注册臂绑既有测试 begin_without_a_route_replies_the_llm_error_document）。
+- **过程退化三枚**（全部当场恢复）：误替换 agent-loop 既有场景（observe_follows_events 场景体）→原样恢复后追加；年份'2026-'A+服务名 fr-llm-deepseek 错写 →即时纠正；fr-session Allowed 批准行截断替换 →完整恢复+追加。纪律：单 edit 单意图、追加前重锚原文、写后 rg 验证。
+- **step 2 门**：三 spec parse 过、lint Quality 100%×3、0 error（警告全为 generated-draft/pending 设计态 advisory 判例内）。
+- **下一动作=18b 实现**：分四阶段——a) fr-wire 常量+fr-llm REGISTER_ROUTE/channel-proxy+fr-llm-deepseek 生成面；b) fr-agent-loop 生命周期臂+agent/error 发射；c) fr-schema schema 模块+fr-headless 参数/投影纯件；d) runner 集成+fr 宿主退出守望+mock e2e+绑定+七步收口。
+
+## 2026-11-04 — 18b 阶段 a 收口 + b1 完成（会话深、续作地图落盘）
+
+- **阶段 a 全绿**（workspace clippy 0/全测 1911 passed 0 failed=基线 1908+3；六集成测试含 boot 5/5 稳定）：fr-wire 常量五组；fr-llm AbortSignal.on_abort/notify_seam_with_event/cancel_all/register_provider_route/consume_fr_error(Q73-A 映射)/ChannelSource 通道代理(Forwarder waker 配对纪律)/导出表 export.rs 隔离（CGU 共置碰撞发现+修复，nm/ar 实证法）；fr-llm-deepseek 生成面+生产 Dependencies+setup 注册。fr-session 180 测试绿。
+- **b1 完成**：fr-wire persistence 增 TOOL_HISTORY=11/SURFACE_GENERATION=14/DERIVE_MESSAGES=15（fr 自有读臂）+read(9) 回增 surface 字段；fr-session 三 serve 臂（tool_history=ToolHistoryProjection 全日志折叠、surface_generation=Session::content_generation 新只读访问器、derive_messages=缓存折叠）+plugin 路由+重导出；fr-agent-loop session_reads.rs=生产 SessionReadsClient（restore/system_prompt_nodes=read(9)重读+同源 helper 折叠[RuntimeContextProjection::system_prompt_nodes]；header/tool_history/generation/derive=专用臂；request_context=read 日志倒扫——每次读全观察当前 durable 面，无本地陈旧折叠，fail_read=trait 无错误通道下的 dsh throw 等价 fail-loud 已文档化）。fr-agent-loop clippy 0/113 测试绿。
+- **b2 勘察（未动工）**：fr-tools 调度面已是 token 基模型（prepare 铸 ToolExecutionToken、dispatch/finalize/finish 按 token 取 in-flight、SETTLED 返回 WireSettle 带序）——driver ToolsFace trait 是早期形状（无 token；settled 按 (ToolCallId, Settlement)）。桥接=协议适配工作：WireExecution/wire_execution 形状（fr-tools service.rs:297 已有）+token 生命周期管理+settle 路由回 callId。**这是 b2 的真实工作量，非简单六臂配对。**
+- **续作地图（新会话按此续）**：b2=ToolsFace 生产客户端（token 桥接+WireExecution/wire_execution 复用+settle→callId 路由+descriptor tools/settled 唤醒已有）；b3=生命周期臂 CREATE=10/RESUME=11/LIVE=12（CREATE 组 DriverDeps{reads=SessionReadsClient, prompt=SystemPromptClient, llm=LlmClient, tools=ToolsClient}+AgentEvents+mailbox attach+DriverThread spawn 判例+teardown join；RESUME=persistence 6/7 组合+驱动构造；LIVE=no-create 探测）+driver.rs agent/error 发射（throwError 1:1 容器边界）；c=fr-schema json-stream schema 模块+fr-headless 参数/投影/采纳纯件；d=runner 集成+fr 宿主退出守望（in-process 监听插件听 headless/exit）+mock e2e+25 场景绑定+四关+lifecycle/guard/stamp 收口。
+- **下一动作=新会话按续作地图推进 b2。**

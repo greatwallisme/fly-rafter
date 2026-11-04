@@ -313,6 +313,14 @@ impl Session {
         &self.surface.nodes
     }
 
+    /// The surface content generation counter (the dsh
+    /// `session.surfaceGeneration` read: it bumps on every committed
+    /// surface mutation, so a consumer can detect surface changes).
+    #[must_use]
+    pub const fn content_generation(&self) -> u64 {
+        self.surface.content_generation
+    }
+
     /// The number of leading events inherited from a fork parent.
     #[must_use]
     pub const fn inherited_event_count(&self) -> u64 {
