@@ -1987,3 +1987,14 @@
 - **lifecycle 29/31**：29 过 0 败 2 skip（fiber_realm→18e 欠/header_reason→18f 欠——旧三枚跨切片 skip 之 provider_retry 本切片偿还）；run-log 落 .agent-spec/runs；guard 按判例结构性不可过（全仓 pending spec）exit 143 记录在案；stamp dry-run "29/31 passed, 0 failed, 2 skipped"。
 - **提交**（--no-verify 判例，真门=四关+lifecycle）：14 文件（新 crate fr-llm-retry 6 文件+agent-loop driver/plugin_shell/Cargo+fr Cargo/tests×2+fr-schema registry+workspace Cargo+spec+计划三件）。
 - **队列推进**：18d fr-working-directory 抽移为下一切片。
+- **commit e93d0e2**（20 文件 +2170/−44）。
+
+## 2026-11-05 — 18d 完成（fr-working-directory 抽移 + 两处既有缺陷根因修复）
+
+- **抽移**：新 crate fr-working-directory（core/wire/outbound/plugin_shell/export；provide `working-directory` 方法 0 describe/1 get/2 set/3 ensure/900 fold/906 context-text；inject session-persistence/agent/session-projections/system-prompt；fs 面经 D31 grant 由 tools-builtin 授予，避免声明环；对 system-prompt/session-projections 自授 grant）；fr-tools-builtin 删域体（working_directory.rs 删除）、Seams 增 `working_directory_set`、工具 EXECUTE/lsp 经 seams、descriptor inject 14 项、describe 165→164；fr-schema 增 `fr-working-directory` rail（default-directory 单键）；manifest 注释+host_boot 清单；两 spec 扩边+3 条 Decision+2 新场景（lint 100%）。
+- **两处既有缺陷（根因修复，均有实证）**：(1) `rearm_parked`（18a 我的缺陷）名单快照+不复查致已自然激活的槽位被强制重载、setup 跑两遍；修=逐槽先 join 再复查 Active 则跳过。(2) **fr-llm 代理 `Forwarder::wake_final` 丢唤醒（HEAD 既有，约 1% 的 fr 进程生成阶段永久挂起，即用户报的 40 分钟 e2e 挂起）**：最终唤醒先于通道关闭（Sender 在 proxy_run 返回后才 drop），被唤醒的消费者 re-poll 仍见 Empty 再停放，之后关闭无人唤醒；修=`finish(self)` 先 drop Sender 再唤醒。回归测试 2 个（变异检验：旧顺序下 `finish_closes_the_channel_before_waking` 失败）。
+- **证据**：同参数压测（300 次/14 并发/stdio 写文件）——HEAD 基线 2/300 挂起、修前当前 3/300、修后 600/600 零挂起；启动期重复 setup 修前 3~4/96，修后 3 轮×96 零。
+- **四关 receipt（最终树）**：fmt ✓；clippy workspace --all-targets 0 告警；test workspace 63 组 2027 通过 0 失败；doc -D warnings ✓。
+- **lifecycle**：builtin-tools 357 过/0 败/53 skip（全为 pending_* 跨切片：run_code/subagent/interrupt/list/send 族，无非占位零匹配；新增 2 场景+working_directory 相关全 pass）；prompt 47/47；llm 43/43；headless 32/32；config 139 过/0 败/180 skip（pending）。stamp dry-run：builtin-tools 357/410（Spec-Passing false 因跨切片 skip）、prompt 47/47 true。guard 按判例结构性不可过（全仓含 pending 合约）未重试。
+- **未提交**：工作区待用户确认提交（改动：新 crate+fr-tools-builtin 重接+fr-llm channel 修复+fr assembly rearm 修复+fr-schema+两 spec+计划文件）。
+- **基线环境已清理**：~/project/fr-base-wt、fr-base-target 已删，worktree 已 prune。

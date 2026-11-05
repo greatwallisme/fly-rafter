@@ -8,8 +8,7 @@
 
 use serde_json::{Value, json};
 
-use crate::tools::BodyError;
-use crate::working_directory::WorkingDirectories;
+use crate::tools::{BodyError, Seams};
 
 /// The baked gate: the dsh base bundle mounts `tool-working-directory`
 /// (the Q16f-F baked mirror judgment).
@@ -31,13 +30,17 @@ pub fn parse_args(arguments: &Value) -> Result<Option<String>, BodyError> {
 }
 
 /// Executes one call (the dsh `execute`): the missing-agent refusal
-/// and the ensure/set fork over the committed domain.
+/// and the ensure/set fork over the fr-working-directory service.
+///
+/// The dsh `tool-working-directory` injects the workingDirectory
+/// service; the fr carrier routes the fork through the seams.
 ///
 /// # Errors
 ///
-/// The missing-agent refusal or the domain refusal.
+/// The missing-agent refusal or the domain refusal (the service's dsh
+/// texts carried verbatim through the require error chain).
 pub fn execute(
-    directories: &WorkingDirectories,
+    seams: &dyn Seams,
     arguments: &Value,
     agent: Option<&str>,
 ) -> Result<Value, BodyError> {
@@ -48,8 +51,12 @@ pub fn execute(
         ));
     };
     let cwd = match &arguments {
-        Some(cd) => directories.set(agent, cd).map_err(BodyError::plain)?,
-        None => directories.ensure(agent).map_err(BodyError::plain)?,
+        Some(cd) => seams
+            .working_directory_set(agent, cd)
+            .map_err(BodyError::plain)?,
+        None => seams
+            .working_directory_ensure(agent)
+            .map_err(BodyError::plain)?,
     };
     Ok(json!({ "cwd": cwd }))
 }

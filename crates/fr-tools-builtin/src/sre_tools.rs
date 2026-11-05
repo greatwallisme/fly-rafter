@@ -967,6 +967,10 @@ mod tests {
             Ok(self.workdir.clone())
         }
 
+        fn working_directory_set(&self, _agent: &str, _path: &str) -> Result<String, String> {
+            Ok(self.workdir.clone())
+        }
+
         fn shell_env_collect(
             &self,
             _agent: Option<&str>,

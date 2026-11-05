@@ -1091,6 +1091,10 @@ mod tests {
             Err("not reached".to_owned())
         }
 
+        fn working_directory_set(&self, _agent: &str, _path: &str) -> Result<String, String> {
+            Err("not reached".to_owned())
+        }
+
         fn shell_env_collect(
             &self,
             _agent: Option<&str>,

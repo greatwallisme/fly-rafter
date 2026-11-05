@@ -801,6 +801,10 @@ mod tests {
             // inert; the temp dir keeps it real.
             Ok(std::env::temp_dir().to_string_lossy().into_owned())
         }
+
+        fn working_directory_set(&self, _agent: &str, _path: &str) -> Result<String, String> {
+            Ok(std::env::temp_dir().to_string_lossy().into_owned())
+        }
         fn shell_env_collect(
             &self,
             _agent: Option<&str>,

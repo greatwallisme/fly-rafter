@@ -690,7 +690,23 @@ fn build_table() -> Vec<(&'static str, Schema)> {
         ("fr-compaction", compaction_row()),
         ("fr-llm-deepseek", llm_deepseek_row()),
         ("fr-llm-retry", llm_retry_row()),
+        ("fr-working-directory", working_directory_row()),
     ]
+}
+
+/// The `fr-working-directory` declaration (dsh
+/// `session/working-directory` Config 1:1): the one optional
+/// deployment fallback directory (dsh `defaultDirectory`, kebab-case;
+/// the dsh constructor validates absolute at runtime). The plugin
+/// bakes the dsh omitted-value default (`process.cwd()`) — the dylib
+/// activation has no config channel (the fr-shell key-table carrier
+/// judgment) — so the rail documents the surface and rejects foreign
+/// keys at assembly.
+fn working_directory_row() -> Schema {
+    object(vec![optional_string_property(
+        "default-directory",
+        "Absolute execution-world fallback directory; omitted values use the launch directory.",
+    )])
 }
 
 /// The `fr-llm-retry` declaration: the executor owns no config (dsh
@@ -1095,6 +1111,34 @@ mod tests {
         let violations = validate(schema, value);
         assert!(!violations.is_empty(), "the probe must violate: {value}");
         violations[0].message.clone()
+    }
+
+    #[test]
+    fn working_directory_config_pins_the_single_optional_key() {
+        let schema = lookup("fr-working-directory").expect("the working-directory declaration");
+        let Schema::Object {
+            properties,
+            additional_properties,
+            ..
+        } = schema
+        else {
+            panic!("the working-directory declaration is an object");
+        };
+        assert!(!additional_properties);
+        let names: Vec<_> = properties
+            .iter()
+            .map(|property| property.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["default-directory"]);
+        assert!(violations_empty(schema, &serde_json::json!({})));
+        assert!(violations_empty(
+            schema,
+            &serde_json::json!({ "default-directory": "/repo" })
+        ));
+        assert!(
+            first_message(schema, &serde_json::json!({ "unknown": true })).contains("unknown"),
+            "a foreign key names the rail"
+        );
     }
 
     #[test]

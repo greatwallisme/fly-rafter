@@ -306,6 +306,10 @@ mod tests {
             Err("unused".to_owned())
         }
 
+        fn working_directory_set(&self, _agent: &str, _path: &str) -> Result<String, String> {
+            Err("unused".to_owned())
+        }
+
         fn shell_env_collect(
             &self,
             _agent: Option<&str>,

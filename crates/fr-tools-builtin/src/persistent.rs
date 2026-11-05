@@ -1473,6 +1473,10 @@ mod loop_tests {
             Ok(format!("/ws/{agent}"))
         }
 
+        fn working_directory_set(&self, _agent: &str, _path: &str) -> Result<String, String> {
+            Ok("/ws/loop".to_owned())
+        }
+
         fn shell_env_collect(
             &self,
             _agent: Option<&str>,

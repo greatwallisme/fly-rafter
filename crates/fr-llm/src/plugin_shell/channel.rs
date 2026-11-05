@@ -435,7 +435,7 @@ impl GenerationSource for ChannelSource {
         }
         let worker = std::thread::Builder::new()
             .name("fr-llm-channel-proxy".to_owned())
-            .spawn(move || proxy_run(&worker_registry, service, &wake, &options, &forwarder));
+            .spawn(move || proxy_run(&worker_registry, service, &wake, &options, forwarder));
         if let Ok(handle) = worker {
             registry.push_worker(handle);
         }
@@ -547,11 +547,17 @@ impl Forwarder {
         true
     }
 
-    /// Wakes the consumer one final time (a worker exit closes the
-    /// channel; the parked consumer must re-poll to observe it).
-    fn wake_final(&self) {
-        let waker = self
-            .waker
+    /// Closes the channel and wakes the consumer one final time.
+    ///
+    /// The order is the contract: the sender drops first, so a poll that
+    /// runs after the wake observes the disconnect, and a poll that
+    /// registered its waker earlier is woken by the take below. Waking
+    /// before the close lets the woken consumer re-poll against a still
+    /// live sender, park again, and never be woken by the later drop.
+    fn finish(self) {
+        let Self { sender, waker } = self;
+        drop(sender);
+        let waker = waker
             .lock()
             .expect("proxy stream waker lock poisoned")
             .take();
@@ -608,7 +614,7 @@ fn proxy_run(
     service: String,
     wake: &Arc<ProxyWake>,
     options: &GenerateOptions,
-    forwarder: &Forwarder,
+    forwarder: Forwarder,
 ) {
     let source = ChannelSource {
         service,
@@ -621,7 +627,7 @@ fn proxy_run(
                 "channel begin failed: {}",
                 error.failure().message
             )));
-            forwarder.wake_final();
+            forwarder.finish();
             return;
         }
     };
@@ -663,5 +669,101 @@ fn proxy_run(
     }
     registry.remove_wake(&generation_id);
     // A parked consumer must observe the disconnect.
-    forwarder.wake_final();
+    forwarder.finish();
+}
+
+#[cfg(test)]
+mod tests {
+    use std::pin::Pin;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::{self, Receiver, TryRecvError};
+    use std::sync::{Arc, Mutex};
+    use std::task::{Context, Poll, Wake, Waker};
+
+    use super::{Forwarder, ProxyStream, Stream, WakerSlot};
+
+    /// A waker that probes the channel at the instant it is woken: the
+    /// order contract is observable only from the consumer's side.
+    struct Probe {
+        receiver: Mutex<Receiver<fr_wire::StreamChunk>>,
+        woken: AtomicBool,
+        saw_disconnect: AtomicBool,
+    }
+
+    impl Wake for Probe {
+        fn wake(self: Arc<Self>) {
+            let probed = self
+                .receiver
+                .lock()
+                .expect("probe receiver lock")
+                .try_recv();
+            self.saw_disconnect.store(
+                matches!(probed, Err(TryRecvError::Disconnected)),
+                Ordering::SeqCst,
+            );
+            self.woken.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// The final wake finds the channel already closed: a consumer woken
+    /// by it re-polls against a dead sender instead of parking again with
+    /// nobody left to wake it (the lost-wakeup that hung `fr headless`).
+    #[test]
+    fn finish_closes_the_channel_before_waking() {
+        let (sender, receiver) = mpsc::channel();
+        let probe = Arc::new(Probe {
+            receiver: Mutex::new(receiver),
+            woken: AtomicBool::new(false),
+            saw_disconnect: AtomicBool::new(false),
+        });
+        let slot: WakerSlot = Arc::new(Mutex::new(Some(Waker::from(Arc::clone(&probe)))));
+        Forwarder {
+            sender,
+            waker: slot,
+        }
+        .finish();
+        assert!(probe.woken.load(Ordering::SeqCst), "the parked waker fires");
+        assert!(
+            probe.saw_disconnect.load(Ordering::SeqCst),
+            "the channel is already closed when the wake lands"
+        );
+    }
+
+    /// A stream parked on an empty channel is woken by the final wake and
+    /// then reports its end.
+    #[test]
+    fn finish_ends_a_parked_stream() {
+        struct Flag(AtomicBool);
+        impl Wake for Flag {
+            fn wake(self: Arc<Self>) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let (sender, receiver) = mpsc::channel();
+        let slot: WakerSlot = Arc::new(Mutex::new(None));
+        let forwarder = Forwarder {
+            sender,
+            waker: Arc::clone(&slot),
+        };
+        let mut stream = ProxyStream {
+            receiver,
+            waker: slot,
+        };
+        let flag = Arc::new(Flag(AtomicBool::new(false)));
+        let waker = Waker::from(Arc::clone(&flag));
+        let mut cx = Context::from_waker(&waker);
+        assert!(matches!(
+            Pin::new(&mut stream).poll_next(&mut cx),
+            Poll::Pending
+        ));
+        forwarder.finish();
+        assert!(
+            flag.0.load(Ordering::SeqCst),
+            "the parked consumer is woken"
+        );
+        assert!(matches!(
+            Pin::new(&mut stream).poll_next(&mut cx),
+            Poll::Ready(None)
+        ));
+    }
 }

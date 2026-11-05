@@ -18,11 +18,13 @@ satisfies: [REQ-FR-PROMPT]
 - 提示词常量 MUST 由脚本从 dsh 源文件抽取生成，禁止手抄。
 - 组装确定性 MUST：同 order 按 name code-unit 序、重名抛错、scoped 遮蔽 global；complete section 至多一个、waterfall 后恢复唯一 prompt section、refreshContext 只重跑 context 节；toolOrder 保留标记 unlisted-tools 恰好出现一次、未列工具字典序插入 rest 位；变量名限小写首字母加数字下划线、畸形或未注册抛错并指明 section、interpolate:false 保留字面（dsh system-prompt/src/index.ts:196-239,248-250,290-377,582-602,653-656）。
 - SECTION_ORDERS 全表 32 项数值 MUST 逐字为：HARNESS_IDENTITY -1000、DEPLOYMENT_PERSONA_PREFIX 0、PLAN_POLICY 500、TEAM_POLICY 600、PTC_ONLY 800、FILE_REFERENCE 900、TOOL_BASH 1000、TOOL_PWSH 1010、TOOL_READ 1100、TOOL_WRITE 1200、TOOL_EDIT 1300、TOOL_GLOB 1400、TOOL_GREP 1500、TOOL_JOBS 1600、TOOL_PTY 1700、TOOL_WEB_SEARCH 2000、TOOL_WEB_FETCH 2100、TOOL_LSP 2200、TOOL_SESSION_QUERY 2300、TOOL_GOAL 2400、TOOL_WORKFLOW 2600、TOOL_RALPH 2700、TOOL_SUBAGENT 2800、TOOL_REPORT 2900、TOOL_COMPUTER_USE 3000、MCP_SERVERS 3100、TOOLS_SDK 5000、DELIVERABLE_FILE_REFERENCES 9000、STRUCTURED_OUTPUT 9900、HARNESS_SOURCE 10000、WEB_SURFACE 10100、DEPLOYMENT_PERSONA_SUFFIX 10200；CONTEXT_ORDERS 7 项：WORKING_DIRECTORY 100、SANDBOX_POLICY 110、APPROVAL_POLICY 115、SUBAGENT_DELEGATION 120、TEAM_IDENTITY 125、HARNESS_SOURCE 200、WEB_SURFACE 210（dsh system-prompt/src/index.ts:131-165,170-179）。
+- working-directory context 端点迁移 MUST（2026-11-05 18d 执行决策 47-3A）：`working-directory:current` context 的 textProvider 注册随域迁至 fr-working-directory 服务（workingDirectory 投影 fold 端点同迁；注册驱动消费，fr-system-prompt 组装面零改动）；`context_tracks_the_working_directory` 真测随域迁至 crates/fr-working-directory（测试名不变）。Allowed += crates/fr-working-directory/**。
 
 ## Boundaries
 
 ### Allowed Changes
 - crates/fr-system-prompt/**
+- crates/fr-working-directory/**
 
 ### Forbidden
 - Do not weaken or remove the source requirement clauses.

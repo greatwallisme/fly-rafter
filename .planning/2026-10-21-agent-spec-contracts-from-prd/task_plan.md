@@ -21,7 +21,7 @@
 | 切片 | 内容 | 状态 |
 |---|---|---|
 | 18c | fr-llm-retry 新 crate（决策 47-2A）+偿还 provider_retry | complete（lifecycle 29/31：29 过 0 败 2 skip=fiber_realm/header_reason 旧欠；四关 62 组 0 败；e2e 7/7） |
-| 18d | fr-working-directory 抽移+装配行兑现（47-3A） | pending |
+| 18d | fr-working-directory 抽移+装配行兑现（47-3A） | complete（四关 63 组 2027 过；lifecycle builtin-tools 357/0/53skip、prompt 47/47；顺带根因修复 fr-llm 代理丢唤醒+rearm 双 setup；待提交） |
 |  | （Q3A：permission-presets 竞窗排查随 18e 同期） | |
 | 18e | fiber_realm+竞窗排查（47-1A+Q3A） | pending |
 | 18f | M1 小账清零片（header_reason+孤儿批核对+abort 补偿集成场景；Q1A） | pending |
@@ -30,7 +30,16 @@
 | 21 | fr-ptc | pending |
 | 22 | M1 收官片（对拍+批绑+标题治理 Q4A+文档评审+清零核验） | pending |
 
-### Phase 18c — fr-llm-retry
+### Phase 18d — fr-working-directory
+**Status:** complete（待提交；详见 progress.md 2026-11-05 18d 完成）
+
+1. 勘察 ✓（findings「18d 开工勘察」：实现体 16f 已全量，纯抽移+跨插件重接线）
+2. 合同：builtin-tools/prompt 两 spec 扩边（Allowed += crates/fr-working-directory/**）+47-3A Decision 行 → lint 0.7
+3. 实现：新 crate fr-working-directory（core/wire/outbound/plugin_shell/export，18c 判例形；DirectoryLeg 缝走 fs wire 面）+fr-tools-builtin 重接（Seams 增 set、EXECUTE 臂经 seams、删域体/注册/fold_log/describe 165→164、descriptor inject 增名）+fr-schema default-directory rail+manifest 注释+host_boot 清单
+4. 测试：9 域测试+context 注册钉迁新 crate（名字不变，spec 选择器不动）；fake Seams ×7 增 set；serve 形/descriptor/注册 spec 钉新增
+5. 收口：四关（fmt/clippy/test/doc）→ lifecycle（builtin-tools+prompt）→ explain/stamp/提交
+
+
 **Status:** complete（lifecycle 29/31 全过 0 败 2 旧欠 skip；四关 receipt：fmt/clippy 0/test 62 组 0 败 EXIT=0/doc ✓；e2e 7/7 serial；stamp 29/31）
 
 1. 勘察 ✓（findings「18c 开工勘察」）
@@ -40,7 +49,7 @@
 5. 收口：四关 ✓（62 组 0 败 EXIT=0;fmt/clippy/doc ✓;host_boot 期望清单随 fr-llm-retry 解析更新）→ lifecycle 跑动中 → explain/stamp/提交
 
 ## Next Step
-**18c 完成（stamp 29/31、guard 判例记录、四关 62 组 0 败）。下一步=18d fr-working-directory 抽移+装配行兑现。队列：18e（含竞窗排查）→18f→19 subagent→20 mcp→21 ptc→22 收官。**
+**18d 完成待提交。下一步=18e fiber_realm+permission-presets 竞窗排查（Q3A）。队列：18e→18f→19 subagent→20 mcp→21 ptc→22 收官。**
 
 ## Errors Encountered
 | Error | Attempt | Resolution |

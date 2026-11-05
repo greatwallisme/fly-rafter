@@ -436,6 +436,18 @@ async fn rearm_parked(
         .collect();
     for name in parked {
         let entry = &reconciler.live()[&name];
+        // The list above is a snapshot: an earlier restart in this sweep
+        // commits services whose natural wake converges a later slot in
+        // the background. `join` absorbs that in-flight activation (a
+        // woken fiber is busy through its dirty flag), while a slot with
+        // a genuinely lost wake is settled-parked and returns at once;
+        // restarting a slot that has meanwhile become active would force
+        // an unload-load round trip and run its setup twice.
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let _settled = entry.handle.join_with_timeout(remaining).await;
+        if entry.handle.state() == dougong::FiberState::Active {
+            continue;
+        }
         let _restarted = entry.handle.restart().await;
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         entry

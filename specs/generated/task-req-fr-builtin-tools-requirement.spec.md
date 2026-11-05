@@ -19,6 +19,9 @@ satisfies: [REQ-FR-BUILTIN-TOOLS]
 - web_search 与 web_fetch MUST 支持 provider 可换（deepseek-official / exa / perplexity / http 适配位）。
 - shell 组单合同双 crate（Q92-A）：fr-shell 插件承载执行体与作业域（provide shell/subprocess/jobs），fr-tools-builtin provide 全部域服务与工具（Q93-A）；caller-abort kill 走 fr-shell jobs killByToolCall 载体（Q16a-6：fr-tools watcher require jobs 1008，fr-shell D31 grant jobs→tools；body 以切片 wait 释放实例锁承接）。
 - 每工具参数级 schema 以 scripts/generate-tool-catalog.py 从 dsh docs/tool-catalog.md 抽取生成常量（Q95-A），--check 钉测防漂移；tool:bash/tool:pwsh 两 systemPrompt section 文本同脚本抽取自 dsh 工具源（2026-10-29 section-text 裁决，PRD 22 规则）；escalation 对、非 promote timeoutMs 文本与 pwsh Windows 附件段为注册时变体，留在组合源并由钉测覆盖。
+- working-directory 域抽移 MUST（2026-11-05 18d 执行决策 47-3A）：域（workingDirectory 投影 stateVersion 1、ensure 存在臂+null 回填臂+消失恢复腿、set 空拒+目录腿+commit 同值早退、recovered/changed 两通知变体逐字、context 文本 ensure+取文本合一、`working-directory/change` 事件声明）=独立 fr-working-directory 插件：provide `working-directory` 服务（get/set/ensure/fold/context-text），inject `fs`/`session-persistence`/`agent`/`session-projections`/`system-prompt`（dsh session/working-directory index.ts:63 三项 inject+ambient agent 的 fr 声明纪律同形）；投影 fold 注册+context textProvider 注册+事件声明随域迁移至该插件激活序列；fs 腿经 fr-wire fs 面 resolve/stat/process_path（dsh ctx.fs.resolve+stat+processPath 对应）。Allowed += crates/fr-working-directory/**。
+- working_directory 工具留位 MUST（Q93-A 聚合判例；dsh tool-working-directory index.ts:13 inject ['tools','workingDirectory'] 的 fr 映射）：工具本体/registration/schema/catalog 说明留 fr-tools-builtin；descriptor inject 增 `working-directory`；工具 set/ensure 两腿与 bash/skill/persistent 等域内 ensure 消费经 Seams `working_directory_ensure`/`working_directory_set` 走 wire require 到 fr-working-directory 服务（dsh 逐字文案经 require 错误链透传）。
+- fr-working-directory config rail MUST：fr-schema 增 `fr-working-directory` 行=可选单键 `default-directory`（dsh defaultDirectory kebab 投影，绝对目录）；dylib 激活无 config 通道→缺省值烘焙 process.cwd()（fr-shell 键表文档载判例）。
 
 ## Boundaries
 
@@ -28,6 +31,7 @@ satisfies: [REQ-FR-BUILTIN-TOOLS]
 - crates/fr-shell/**
 - crates/fr-attachment/**
 - crates/fr-llm/**
+- crates/fr-working-directory/**
 
 ### Forbidden
 - Do not weaken or remove the source requirement clauses.
@@ -2039,6 +2043,18 @@ Scenario: working_directory 行为 1
   假设 工具 working_directory 执行时
   当 达到触发条件时
   那么 shell 与运行进程保留自身目录；origin 元数据与权限根固定
+
+Scenario: working-directory 服务面装配
+  Test: working_directory_service_pins_the_descriptor_and_registrations
+  假设 fr-working-directory 插件激活
+  当 读取其 descriptor 与激活注册载荷
+  那么 provide working-directory、inject fs/session-persistence/agent/session-projections/system-prompt、投影 fold 与 context textProvider 两端点指向自身服务、working-directory/change 事件已声明
+
+Scenario: working_directory 工具经服务收发
+  Test: working_directory_seams_route_through_the_service
+  假设 fr-tools-builtin descriptor 已声明 working-directory 依赖
+  当 工具 set/ensure 两腿与域内 ensure 消费触发
+  那么 经 wire require 到 fr-working-directory 服务收发且 dsh 逐字文案经错误链透传
 
 Scenario: cordis_inspect_list 调度与呈现
   Test: cordis_inspect_registrations_pin_the_rows_with_the_gate_off

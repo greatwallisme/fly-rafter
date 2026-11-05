@@ -17,7 +17,6 @@ use serde_json::{Value, json};
 use crate::render;
 use crate::shell_env::ShellEnvRegistry;
 use crate::tools;
-use crate::working_directory;
 
 /// The service name this face provides.
 pub const SERVICE_NAME: &str = "builtin-tools";
@@ -46,9 +45,6 @@ pub const METHOD_PWSH_PRESENT_RESULT: u32 = 14;
 /// Method selector: the shared `{cwd}` presentation metadata (dsh
 /// `output.presentationMeta`; both twins project the same shape).
 pub const METHOD_PRESENTATION_META: u32 = 5;
-/// Method selector: the `workingDirectory` projection fold (the
-/// non-tool band; 20+ stays reserved for the later tool groups).
-pub const METHOD_WORKING_DIRECTORY_FOLD: u32 = 900;
 /// Method selector: the read tool body.
 pub const METHOD_READ_EXECUTE: u32 = 20;
 /// Method selector: the read render projection.
@@ -157,10 +153,6 @@ pub const METHOD_USER_QUESTIONS_FOLD: u32 = 903;
 pub const METHOD_PLAN_FOLD: u32 = 904;
 /// Method selector: the dynamic `plan:policy` section text endpoint.
 pub const METHOD_PLAN_POLICY_SECTION: u32 = 905;
-/// Method selector: the working-directory runtime-context text
-/// provider (the single resolve endpoint behind the PROMPT contract's
-/// working-directory context).
-pub const METHOD_WORKING_DIRECTORY_CONTEXT_TEXT: u32 = 906;
 /// Method selector: the `job_output` tool body.
 pub const METHOD_JOB_OUTPUT_EXECUTE: u32 = 102;
 /// Method selector: the `job_output` render projection.
@@ -402,7 +394,6 @@ pub fn js_number(value: f64) -> String {
 pub struct BuiltinTools {
     seams: Box<dyn tools::Seams>,
     env: std::sync::Arc<ShellEnvRegistry>,
-    directories: std::sync::Arc<working_directory::WorkingDirectories>,
     lists: std::sync::Arc<crate::todo::TodoLists>,
     goals: std::sync::Arc<crate::goal_service::Goals>,
     notices: std::sync::Arc<crate::job_tools::NoticeState>,
@@ -440,7 +431,6 @@ impl BuiltinTools {
     pub fn new(
         seams: Box<dyn tools::Seams>,
         env: std::sync::Arc<ShellEnvRegistry>,
-        directories: std::sync::Arc<working_directory::WorkingDirectories>,
         lists: std::sync::Arc<crate::todo::TodoLists>,
         goals: std::sync::Arc<crate::goal_service::Goals>,
         notices: std::sync::Arc<crate::job_tools::NoticeState>,
@@ -460,7 +450,6 @@ impl BuiltinTools {
         Ok(Self {
             seams,
             env,
-            directories,
             lists,
             goals,
             notices,
@@ -546,13 +535,6 @@ impl BuiltinTools {
         &self.env
     }
 
-    /// The hosted working-directory domain (16b migrates the fs leg
-    /// behind the seam).
-    #[must_use]
-    pub const fn directories(&self) -> &std::sync::Arc<working_directory::WorkingDirectories> {
-        &self.directories
-    }
-
     /// The terminal finalize parks (the shared dsh `finalizeContent`
     /// stash).
     #[must_use]
@@ -622,10 +604,6 @@ impl BuiltinTools {
                 let result = request.get("result").cloned().unwrap_or(Value::Null);
                 tools::present_result(&args, &result).unwrap_or(Value::Null)
             }
-            METHOD_WORKING_DIRECTORY_FOLD => {
-                let state = fold_log(&request);
-                json!({ "state": state })
-            }
             METHOD_WORKING_DIRECTORY_EXECUTE => {
                 let call = request
                     .get("call")
@@ -633,7 +611,7 @@ impl BuiltinTools {
                 let agent = call.get("agent").and_then(Value::as_str);
                 let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
                 return match crate::working_directory_tools::execute(
-                    self.directories.as_ref(),
+                    self.seams.as_ref(),
                     &arguments,
                     agent,
                 ) {
@@ -649,17 +627,6 @@ impl BuiltinTools {
                 let args = request.get("args").cloned().unwrap_or(Value::Null);
                 let value = request.get("value").cloned().unwrap_or(Value::Null);
                 json!(crate::working_directory_tools::render(&args, &value))
-            }
-            METHOD_WORKING_DIRECTORY_CONTEXT_TEXT => {
-                let agent = request.get("agent").and_then(Value::as_str);
-                let text = self
-                    .directories
-                    .context_text(agent)
-                    .map_err(|error| format!("context-text failure: {error}"))?;
-                // The registry's context resolve reads the provider reply
-                // as the bare text (the dsh context text fn returns a
-                // string; the first real assemble caught the wrap).
-                Value::String(text)
             }
             METHOD_INSPECT_LIST_EXECUTE => {
                 let call = request
@@ -710,7 +677,7 @@ impl BuiltinTools {
                 let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
                 return match crate::lsp_tools::execute(
                     &self.lsp,
-                    self.directories.as_ref(),
+                    &|agent| self.seams.working_directory_ensure(agent),
                     &arguments,
                     agent,
                 ) {
@@ -1909,27 +1876,6 @@ pub fn render_value(_args: &Value, value: &Value) -> Vec<Value> {
     vec![json!({ "type": "text", "text": text })]
 }
 
-/// Projects the cold log onto the committed directory (the dsh
-/// `workingDirectory` fold the relay calls).
-#[must_use]
-pub fn fold_log(request: &Value) -> Value {
-    let log = working_directory::ColdLog {
-        header: request.get("header").cloned().unwrap_or(Value::Null),
-        inherited_event_count: request
-            .get("inheritedEventCount")
-            .and_then(Value::as_u64)
-            .unwrap_or_default(),
-        events: request
-            .get("events")
-            .cloned()
-            .unwrap_or(Value::Array(Vec::new())),
-    };
-    match working_directory::fold(&log) {
-        working_directory::ProjectionState::At(cwd) => Value::String(cwd),
-        working_directory::ProjectionState::Null => Value::Null,
-    }
-}
-
 /// The describe surface's method names (the registration reality: the
 /// two shell tools' bands, the read/write/edit/glob/grep bands, the
 /// spill listeners, the editor band, the todo band, the goal band, the
@@ -2103,16 +2049,12 @@ const DESCRIBE_WEB_METHODS: [&str; 10] = [
     "web_fetch.presentationMeta",
 ];
 
-/// The 16f batch-2 rows: the working-directory tool's three faces
-/// (the dsh `tool-working-directory` registration; the context-text
-/// provider is the fr carrier for the dsh assemble prepend listener
-/// plus context-text pair — the tool carries no prompt section, so the
-/// registration reality is exactly these three selectors).
-const DESCRIBE_WORKING_DIRECTORY_METHODS: [&str; 3] = [
-    "workingDirectory.execute",
-    "workingDirectory.render",
-    "workingDirectory.contextText",
-];
+/// The working-directory tool's two faces (the dsh `tool-working-directory`
+/// registration; the context-text provider and the projection fold moved
+/// to the fr-working-directory service — the tool carries no prompt
+/// section, so the registration reality is exactly these two selectors).
+const DESCRIBE_WORKING_DIRECTORY_METHODS: [&str; 2] =
+    ["workingDirectory.execute", "workingDirectory.render"];
 
 /// The 16f batch-2 inspect rows: the two cordis-inspect tools' faces
 /// (the dsh `tool-cordis` registration reality; the pair stays baked
@@ -2151,9 +2093,9 @@ const DESCRIBE_PLUGIN_MANAGER_METHODS: [&str; 3] = [
 /// describe row).
 const DESCRIBE_SKILL_METHODS: [&str; 3] = ["skill.execute", "skill.render", "skill.presentCall"];
 
-const fn describe_methods() -> [&'static str; 165] {
+const fn describe_methods() -> [&'static str; 164] {
     let mut index = 0;
-    let mut methods: [&'static str; 165] = [""; 165];
+    let mut methods: [&'static str; 164] = [""; 164];
     while index < 91 {
         methods[index] = DESCRIBE_BASE_METHODS[index];
         index += 1;
@@ -2174,34 +2116,34 @@ const fn describe_methods() -> [&'static str; 165] {
         web_index += 1;
     }
     let mut working_directory_index = 0;
-    while working_directory_index < 3 {
+    while working_directory_index < 2 {
         methods[144 + working_directory_index] =
             DESCRIBE_WORKING_DIRECTORY_METHODS[working_directory_index];
         working_directory_index += 1;
     }
     let mut inspect_index = 0;
     while inspect_index < 6 {
-        methods[147 + inspect_index] = DESCRIBE_INSPECT_METHODS[inspect_index];
+        methods[146 + inspect_index] = DESCRIBE_INSPECT_METHODS[inspect_index];
         inspect_index += 1;
     }
     let mut lsp_index = 0;
     while lsp_index < 3 {
-        methods[153 + lsp_index] = DESCRIBE_LSP_METHODS[lsp_index];
+        methods[152 + lsp_index] = DESCRIBE_LSP_METHODS[lsp_index];
         lsp_index += 1;
     }
     let mut wsd_index = 0;
     while wsd_index < 3 {
-        methods[156 + wsd_index] = DESCRIBE_WSD_METHODS[wsd_index];
+        methods[155 + wsd_index] = DESCRIBE_WSD_METHODS[wsd_index];
         wsd_index += 1;
     }
     let mut plugin_manager_index = 0;
     while plugin_manager_index < 3 {
-        methods[159 + plugin_manager_index] = DESCRIBE_PLUGIN_MANAGER_METHODS[plugin_manager_index];
+        methods[158 + plugin_manager_index] = DESCRIBE_PLUGIN_MANAGER_METHODS[plugin_manager_index];
         plugin_manager_index += 1;
     }
     let mut skill_index = 0;
     while skill_index < 3 {
-        methods[162 + skill_index] = DESCRIBE_SKILL_METHODS[skill_index];
+        methods[161 + skill_index] = DESCRIBE_SKILL_METHODS[skill_index];
         skill_index += 1;
     }
     methods
@@ -2224,11 +2166,11 @@ mod tests {
     }
 
     /// The 16f rows complete the web face: the two tools' five faces
-    /// each (147 selectors total with the working-directory band).
+    /// each (146 selectors total with the working-directory band).
     #[test]
     fn describe_surface_carries_the_web_pair() {
         let methods = super::describe_methods();
-        assert_eq!(methods.len(), 165);
+        assert_eq!(methods.len(), 164);
         for name in [
             "web_search.execute",
             "web_search.presentResult",
@@ -2241,17 +2183,16 @@ mod tests {
         }
     }
 
-    /// The 16f batch-2 rows complete the surface: the working-directory
-    /// band rides its three faces (execute/render/contextText) and the
-    /// inspect pair rides its six faces.
+    /// The working-directory band rides its two tool faces (the
+    /// context provider and the fold moved to the fr-working-directory
+    /// service) and the inspect pair rides its six faces.
     #[test]
     fn describe_surface_carries_the_working_directory_band() {
         let methods = super::describe_methods();
-        assert_eq!(methods.len(), 165);
+        assert_eq!(methods.len(), 164);
         for name in [
             "workingDirectory.execute",
             "workingDirectory.render",
-            "workingDirectory.contextText",
             "cordis_inspect_list.execute",
             "cordis_inspect_query.presentCall",
         ] {
@@ -2265,7 +2206,7 @@ mod tests {
     #[test]
     fn describe_surface_carries_the_terminal_family() {
         let methods = super::describe_methods();
-        assert_eq!(methods.len(), 165);
+        assert_eq!(methods.len(), 164);
         for name in [
             "terminal_send.execute",
             "terminal_send.presentResult",
@@ -2290,9 +2231,9 @@ mod tests {
     #[test]
     fn describe_surface_carries_the_skill_band() {
         let methods = super::describe_methods();
-        assert_eq!(methods.len(), 165);
+        assert_eq!(methods.len(), 164);
         assert_eq!(
-            &methods[162..],
+            &methods[161..],
             &["skill.execute", "skill.render", "skill.presentCall",]
         );
         for absent in [

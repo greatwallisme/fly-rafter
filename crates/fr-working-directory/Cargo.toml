@@ -1,0 +1,35 @@
+[package]
+name = "fr-working-directory"
+description = "Fly Rafter working-directory context plugin: the dsh session/working-directory twin (projection, ensure/set, notices, prompt context)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+# Zero doctests in this crate; the harness's empty doctest stage trips the
+# cargo uplift race on the `cdylib, rlib` dependency's unhashed rlib path
+# (E0463 with 0 tests to run). Skipping the empty stage loses nothing.
+doctest = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+
+# rlib faces only: the wire vocabulary stays single-sourced in the owner
+# crate (the tools_client judgment — wire DTOs of a boundary never get
+# local copies). fr-tools-builtin consumes this rlib for the service face
+# constants its ensure/set seams require.
+fr-wire = { workspace = true }
+
+# Kernel family edge for the C-ABI dylib artifact (PRD 4.5): the plugin
+# shell links only dougong-abi across the kernel boundary.
+dougong-abi = { workspace = true }
+
+[lints]
+workspace = true

@@ -4,10 +4,11 @@
 //! constants → builtin bundles → profile patch → home patch → overlays);
 //! this manifest carries the first-party rows the headless composition
 //! must have that the composition itself does not name (the post-Q5B
-//! facility/guard/token-meter set) plus the two decision-47 reserved rows
-//! (fr-llm-retry, fr-working-directory) that await their own slices
-//! (2026-11-04 ruling 2B: until then they fail artifact resolution and
-//! surface as pending-slice warnings, never a silent gap).
+//! facility/guard/token-meter set) plus the two decision-47 rows
+//! (fr-llm-retry, fr-working-directory; the 2026-11-04 ruling 2B
+//! reserved-row mechanism: while a crate was pending its row failed
+//! artifact resolution and surfaced as a pending-slice warning — both
+//! crates exist since 18c/18d, so both rows resolve).
 //!
 //! The manifest never names a `builtin` source: decision 16 keeps builtin
 //! sources out of fr assembly documents entirely.
@@ -72,9 +73,9 @@ pub fn manifest_rows() -> Vec<ManifestRow> {
     ]
 }
 
-/// The two decision-47 reserved rows (fr-llm-retry, fr-working-directory):
-/// declared so the manifest covers them; they fail artifact resolution
-/// until their slices build the crates (2026-11-04 ruling 2B).
+/// The two decision-47 rows (fr-llm-retry, fr-working-directory): both
+/// crates exist since the 18c/18d slices, so the rows resolve (the
+/// ruling-2B pending mechanism kept for the record).
 #[must_use]
 pub fn reserved_rows() -> Vec<ManifestRow> {
     vec![

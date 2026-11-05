@@ -192,6 +192,12 @@ pub trait Seams: Send + Sync {
     ///
     /// The minimal-arm failure family.
     fn working_directory_ensure(&self, agent: &str) -> Result<String, String>;
+    /// The working-directory `set` (dsh `ctx.workingDirectory.set`).
+    ///
+    /// # Errors
+    ///
+    /// The dsh refusal family (the empty and not-a-directory texts).
+    fn working_directory_set(&self, agent: &str, path: &str) -> Result<String, String>;
     /// The managed-environment snapshot (dsh `ctx.shellEnv.collect`).
     ///
     /// # Errors
@@ -1513,6 +1519,10 @@ mod tests {
         }
 
         fn working_directory_ensure(&self, _agent: &str) -> Result<String, String> {
+            Ok(self.existing_dir.to_owned())
+        }
+
+        fn working_directory_set(&self, _agent: &str, _path: &str) -> Result<String, String> {
             Ok(self.existing_dir.to_owned())
         }
 

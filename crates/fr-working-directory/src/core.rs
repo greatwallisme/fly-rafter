@@ -1,14 +1,17 @@
-// Rust guideline compliant 2026-10-29
-//! The session working directories (dsh `working-directory`).
+// Rust guideline compliant 2026-11-05
+//! The session working directories (dsh `working-directory` 1:1; PRD
+//! decision 47-3A: an independent plugin owning the committed directory
+//! and its model-visible changes).
 //!
-//! The full 16f arm: per-session serialized `ensure`/`set`, the
-//! committed change records with their model notices, and the
-//! runtime-context text.
+//! The full arm: per-session serialized `ensure`/`set`, the committed
+//! change records with their model notices, and the runtime-context
+//! text.
 //!
-//! The directory legs ride the in-crate fs domain (the dsh
-//! `ctx.fs.resolve/stat/processPath` isomorph); the durable changes
-//! ride the `'session-persistence'` faces; the notices ride the
-//! `'agent'` inject face.
+//! The directory legs ride the [`DirectoryLeg`] seam (the dsh
+//! `ctx.fs.resolve/stat/processPath` isomorph; the plugin shell
+//! implements it over the `'fs'` service); the durable changes ride the
+//! `'session-persistence'` faces; the notices ride the `'agent'` inject
+//! face.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -16,14 +19,12 @@ use std::sync::Mutex;
 
 use serde_json::Value;
 
-use crate::fs_domain::FsDomain;
+use crate::wire::CHANGE_EVENT;
 
 /// The projection key (dsh `workingDirectory`).
 pub const PROJECTION_KEY: &str = "workingDirectory";
 /// The projection format version (dsh `stateVersion: 1`).
 pub const STATE_VERSION: u64 = 1;
-/// The durable change event type (dsh `working-directory/change`).
-pub const CHANGE_EVENT: &str = "working-directory/change";
 
 /// The session-log seam: cold-reads one session's header plus the
 /// event window the self-read folds, and appends the durable change
@@ -54,6 +55,36 @@ pub trait AgentInject: Send + Sync {
     ///
     /// The transport refusal.
     fn inject(&self, agent: &str, message: &Value) -> Result<(), String>;
+}
+
+/// The directory seam (the dsh `ctx.fs.resolve`/`stat`/`processPath`
+/// isomorph).
+///
+/// The target token is opaque: the producer of [`Self`] defines its
+/// spelling (the wire carrier carries the fs target JSON; tests carry
+/// plain paths).
+pub trait DirectoryLeg: Send + Sync {
+    /// Resolves `path` against `cwd` into the opaque target token
+    /// (pure path algebra; existence is [`Self::stat_is_directory`]'s
+    /// question).
+    ///
+    /// # Errors
+    ///
+    /// The resolution refusal message.
+    fn resolve(&self, path: &str, cwd: Option<&str>) -> Result<String, String>;
+
+    /// Inspects the target: `Some(true)` when it exists and is a
+    /// directory, `Some(false)` when it exists as something else, and
+    /// `None` when it is missing.
+    ///
+    /// # Errors
+    ///
+    /// The inspection failure message.
+    fn stat_is_directory(&self, target: &str) -> Result<Option<bool>, String>;
+
+    /// Spells the canonical absolute path a subprocess in this
+    /// execution world can open (the dsh `processPath`).
+    fn process_path(&self, target: &str) -> String;
 }
 
 /// The cold log the fold kernel projects (the dsh `read` reply shape:
@@ -107,7 +138,7 @@ pub struct WorkingDirectories {
     /// One serialization gate per session (dsh `serialize`).
     gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     log: Arc<dyn SessionLog>,
-    fs: Arc<FsDomain>,
+    leg: Arc<dyn DirectoryLeg>,
     inject: Arc<dyn AgentInject>,
     default_dir: String,
 }
@@ -121,19 +152,19 @@ impl std::fmt::Debug for WorkingDirectories {
 }
 
 impl WorkingDirectories {
-    /// Assembles the domain over the log/inject seams, the fs domain,
-    /// and the launch directory (dsh `defaultDirectory`).
+    /// Assembles the domain over the log/inject seams, the directory
+    /// leg, and the launch directory (dsh `defaultDirectory`).
     #[must_use]
     pub fn new(
         log: Arc<dyn SessionLog>,
-        fs: Arc<FsDomain>,
+        leg: Arc<dyn DirectoryLeg>,
         inject: Arc<dyn AgentInject>,
         default_dir: String,
     ) -> Self {
         Self {
             gates: Mutex::new(HashMap::new()),
             log,
-            fs,
+            leg,
             inject,
             default_dir,
         }
@@ -262,12 +293,8 @@ impl WorkingDirectories {
     /// The existence probe behind the dsh `fs.resolve+stat` pair for
     /// the ensure's current-directory leg (absolute input, no cwd).
     fn directory_exists(&self, path: &str) -> Result<bool, String> {
-        let target = self.fs.resolve(path, None).map_err(|error| error.message)?;
-        Ok(self
-            .fs
-            .stat(&target)
-            .map_err(|error| error.message)?
-            .is_some_and(|info| info.kind == crate::fs_types::FsKind::Directory))
+        let target = self.leg.resolve(path, None)?;
+        Ok(self.leg.stat_is_directory(&target)?.unwrap_or(false))
     }
 
     /// The dsh `directory` helper: resolves `path` against `cwd`,
@@ -275,22 +302,15 @@ impl WorkingDirectories {
     /// carries the raw input spelling), and returns the canonical
     /// absolute path.
     fn directory(&self, path: &str, cwd: &str) -> Result<String, String> {
-        let target = self
-            .fs
-            .resolve(path, Some(cwd))
-            .map_err(|error| error.message)?;
-        let is_dir = self
-            .fs
-            .stat(&target)
-            .map_err(|error| error.message)?
-            .is_some_and(|info| info.kind == crate::fs_types::FsKind::Directory);
+        let target = self.leg.resolve(path, Some(cwd))?;
+        let is_dir = self.leg.stat_is_directory(&target)?.unwrap_or(false);
         if !is_dir {
             return Err(format!(
                 "working-directory: directory does not exist: {}",
                 quote(path)
             ));
         }
-        Ok(FsDomain::process_path(&target))
+        Ok(self.leg.process_path(&target))
     }
 
     /// The dsh `commit`: no-op when the directory did not move, the
@@ -351,31 +371,81 @@ pub fn notice_message(previous: &str, directory: &str, recovered: bool) -> Value
 fn quote(text: &str) -> String {
     Value::String(text.to_owned()).to_string()
 }
+
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod test_support {
+    //! Shared test seams: one std-fs directory leg plus the fake
+    //! log/inject pair (the in-process fakes the fr-tools-builtin arm
+    //! carried; the leg stands in for the wire carrier).
+
+    use super::{AgentInject, CHANGE_EVENT, ColdLog, DirectoryLeg, SessionLog};
+    use serde_json::Value;
+    use std::path::Path;
+    use std::sync::Mutex;
+
+    /// The std-fs directory leg (the dsh `resolveLocalTarget` algebra
+    /// for the test shapes: absolute inputs pass through, relative
+    /// inputs join the cwd; existence is a plain metadata probe).
+    #[derive(Debug, Default)]
+    pub struct StdLeg;
+
+    impl DirectoryLeg for StdLeg {
+        fn resolve(&self, path: &str, cwd: Option<&str>) -> Result<String, String> {
+            if Path::new(path).is_absolute() {
+                return Ok(path.to_owned());
+            }
+            let Some(cwd) = cwd else {
+                return Err("relative path without a cwd".to_owned());
+            };
+            Ok(Path::new(cwd).join(path).to_string_lossy().into_owned())
+        }
+
+        fn stat_is_directory(&self, target: &str) -> Result<Option<bool>, String> {
+            Ok(std::fs::metadata(target)
+                .ok()
+                .map(|metadata| metadata.is_dir()))
+        }
+
+        fn process_path(&self, target: &str) -> String {
+            std::fs::canonicalize(target).map_or_else(
+                |_| target.to_owned(),
+                |path| path.to_string_lossy().into_owned(),
+            )
+        }
+    }
 
     /// One fake log: a fixed header and an appendable change list.
     #[derive(Debug, Default)]
-    struct FakeLog {
+    pub struct FakeLog {
         header: Mutex<Option<Value>>,
         seed: Mutex<Vec<String>>,
         changes: Mutex<Vec<String>>,
     }
 
     impl FakeLog {
-        fn with_header(cwd: &str) -> Self {
+        #[must_use]
+        pub fn with_header(cwd: &str) -> Self {
             Self {
                 header: Mutex::new(Some(serde_json::json!({ "cwd": cwd }))),
                 ..Self::default()
             }
         }
 
-        fn with_changes(paths: &[&str]) -> Self {
+        #[must_use]
+        pub fn with_changes(paths: &[&str]) -> Self {
             Self {
                 seed: Mutex::new(paths.iter().map(|path| (*path).to_owned()).collect()),
                 ..Self::default()
             }
+        }
+
+        /// The committed change count (the append assertions).
+        ///
+        /// # Panics
+        ///
+        /// Panics when the change lock is poisoned.
+        pub fn change_count(&self) -> usize {
+            self.changes.lock().expect("changes").len()
         }
     }
 
@@ -411,9 +481,29 @@ mod tests {
     /// One fake inject: records the queued notice messages and can be
     /// armed to refuse.
     #[derive(Debug, Default)]
-    struct FakeInject {
+    pub struct FakeInject {
         refused: std::sync::atomic::AtomicBool,
         notices: Mutex<Vec<String>>,
+    }
+
+    impl FakeInject {
+        /// Arms the transport refusal.
+        #[must_use]
+        pub fn refusing() -> Self {
+            Self {
+                refused: std::sync::atomic::AtomicBool::new(true),
+                notices: Mutex::new(Vec::new()),
+            }
+        }
+
+        /// The recorded notice texts (the variant assertions).
+        ///
+        /// # Panics
+        ///
+        /// Panics when the notice lock is poisoned.
+        pub fn notices(&self) -> std::sync::MutexGuard<'_, Vec<String>> {
+            self.notices.lock().expect("notices")
+        }
     }
 
     impl AgentInject for FakeInject {
@@ -431,22 +521,13 @@ mod tests {
         }
     }
 
-    /// The standing-policy fake: the wd directory legs never consult
-    /// the policy, so an empty resolution suffices.
-    struct OpenPolicy;
-
-    impl crate::fs_domain::StandingPolicy for OpenPolicy {
-        fn resolve(&self, _session: Option<&str>) -> Result<Value, String> {
-            Ok(serde_json::json!({}))
-        }
-    }
-
     /// One unique scratch root per test (cleaned on drop); the
     /// scripted directory set becomes real directories under it.
-    struct Scratch(std::path::PathBuf);
+    pub struct Scratch(std::path::PathBuf);
 
     impl Scratch {
-        fn new(tag: &str) -> Self {
+        #[must_use]
+        pub fn new(tag: &str) -> Self {
             let dir = std::env::temp_dir().join(format!(
                 "fr-wd-{tag}-{}-{}",
                 std::process::id(),
@@ -456,11 +537,13 @@ mod tests {
             Self(dir)
         }
 
-        fn path(&self, name: &str) -> String {
+        #[must_use]
+        pub fn path(&self, name: &str) -> String {
             self.0.join(name).to_string_lossy().into_owned()
         }
 
-        fn make(&self, name: &str) -> String {
+        #[must_use]
+        pub fn make(&self, name: &str) -> String {
             std::fs::create_dir_all(self.0.join(name)).expect("scratch subdir creates");
             self.path(name)
         }
@@ -471,9 +554,15 @@ mod tests {
             let _ = std::fs::remove_dir_all(&self.0);
         }
     }
+}
 
-    /// Assembles the domain over a fake log/inject pair and a real fs
-    /// domain rooted at the scratch (the fs-domain test judgment).
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_support::{FakeInject, FakeLog, Scratch, StdLeg};
+
+    /// Assembles the domain over a fake log/inject pair and the std-fs
+    /// leg rooted at the scratch.
     fn domain(
         log: FakeLog,
         inject: FakeInject,
@@ -481,23 +570,19 @@ mod tests {
     ) -> (WorkingDirectories, Arc<FakeLog>, Arc<FakeInject>, Scratch) {
         let scratch = Scratch::new("domain");
         for name in existing {
-            scratch.make(name);
+            let _ = scratch.make(name);
         }
         let log: Arc<FakeLog> = Arc::new(log);
         let inject: Arc<FakeInject> = Arc::new(inject);
-        let config = crate::fs_domain::FsDomainConfig {
-            cwd: scratch.path("launch"),
-            diff_basis_max_bytes: crate::fsio::DEFAULT_DIFF_BASIS_MAX_BYTES,
-        };
-        let fs = Arc::new(FsDomain::new(config, Box::new(OpenPolicy), None));
         let wd = WorkingDirectories::new(
             Arc::clone(&log) as Arc<dyn SessionLog>,
-            Arc::clone(&fs),
+            Arc::new(StdLeg),
             Arc::clone(&inject) as Arc<dyn AgentInject>,
             scratch.path("launch"),
         );
         (wd, log, inject, scratch)
     }
+
     /// The fold kernel: header init, then change events in log order.
     #[test]
     fn fold_inits_from_header_and_applies_changes() {
@@ -528,10 +613,10 @@ mod tests {
         let got = wd.ensure("s1").expect("ensure");
         assert_eq!(got, scratch.path("launch"));
         // The null projection was backfilled exactly once.
-        assert_eq!(log.changes.lock().expect("changes").len(), 1);
+        assert_eq!(log.change_count(), 1);
         let second = wd.ensure("s1").expect("second ensure");
         assert_eq!(second, scratch.path("launch"));
-        assert_eq!(log.changes.lock().expect("changes").len(), 1);
+        assert_eq!(log.change_count(), 1);
     }
 
     /// A vanished committed directory restores the original with the
@@ -547,14 +632,12 @@ mod tests {
             &["launch"],
         );
         assert_eq!(wd.ensure("s1").expect("ensure"), scratch.path("launch"));
-        assert_eq!(log.changes.lock().expect("changes").len(), 1);
-        assert_eq!(inject.notices.lock().expect("notices").len(), 1);
-        assert!(
-            inject.notices.lock().expect("notices")[0].contains(&format!(
-                "is unavailable. The working directory is now {}.",
-                quote(&scratch.path("launch"))
-            ))
-        );
+        assert_eq!(log.change_count(), 1);
+        assert_eq!(inject.notices().len(), 1);
+        assert!(inject.notices()[0].contains(&format!(
+            "is unavailable. The working directory is now {}.",
+            quote(&scratch.path("launch"))
+        )));
         // A vanished header cwd is also-unavailable: the dsh recovery
         // refusal (the header's own project is the restore target; the
         // default launch dir exists but the committed state is the
@@ -591,8 +674,8 @@ mod tests {
         );
         let got = wd.set("s1", &scratch.path("target")).expect("set");
         assert_eq!(got, scratch.path("target"));
-        assert_eq!(log.changes.lock().expect("changes").len(), 1);
-        let notices = inject.notices.lock().expect("notices");
+        assert_eq!(log.change_count(), 1);
+        let notices = inject.notices();
         assert_eq!(notices.len(), 1);
         assert_eq!(
             notices[0],
@@ -618,8 +701,8 @@ mod tests {
             wd.set("s1", "/nonexistent-target-dir").unwrap_err(),
             "working-directory: directory does not exist: \"/nonexistent-target-dir\""
         );
-        assert_eq!(log.changes.lock().expect("changes").len(), 0);
-        assert_eq!(inject.notices.lock().expect("notices").len(), 0);
+        assert_eq!(log.change_count(), 0);
+        assert_eq!(inject.notices().len(), 0);
     }
 
     /// Setting the directory that is already current short-circuits:
@@ -633,23 +716,22 @@ mod tests {
         );
         wd.set("s1", &scratch.path("target")).expect("first set");
         wd.set("s1", &scratch.path("target")).expect("second set");
-        assert_eq!(log.changes.lock().expect("changes").len(), 1);
-        assert_eq!(inject.notices.lock().expect("notices").len(), 1);
+        assert_eq!(log.change_count(), 1);
+        assert_eq!(inject.notices().len(), 1);
     }
 
     /// A notice refusal is contained: the commit stands (the dsh
     /// warn-not-rollback judgment).
     #[test]
     fn set_commits_when_the_notice_refuses() {
-        let refused = FakeInject {
-            refused: std::sync::atomic::AtomicBool::new(true),
-            notices: Mutex::new(Vec::new()),
-        };
-        let (wd, log, _inject, scratch) =
-            domain(FakeLog::default(), refused, &["launch", "target"]);
+        let (wd, log, _inject, scratch) = domain(
+            FakeLog::default(),
+            FakeInject::refusing(),
+            &["launch", "target"],
+        );
         let got = wd.set("s1", &scratch.path("target")).expect("set");
         assert_eq!(got, scratch.path("target"));
-        assert_eq!(log.changes.lock().expect("changes").len(), 1);
+        assert_eq!(log.change_count(), 1);
     }
 
     /// The context text is empty without an agent and reflects the
@@ -701,6 +783,6 @@ mod tests {
         // The origin metadata rides the immutable header: no header
         // write face exists, and the log holds only the one change
         // record.
-        assert_eq!(log.changes.lock().expect("changes").len(), 1);
+        assert_eq!(log.change_count(), 1);
     }
 }

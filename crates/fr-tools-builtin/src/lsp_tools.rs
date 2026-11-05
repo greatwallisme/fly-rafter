@@ -13,7 +13,6 @@ use std::collections::HashMap;
 use serde_json::{Value, json};
 
 use crate::tools::BodyError;
-use crate::working_directory::WorkingDirectories;
 
 /// The baked gate: the dsh base bundle mounts no `tool-lsp` row
 /// (web-app/desktop compositions only — the Q16f-F baked mirror).
@@ -146,7 +145,7 @@ fn one_based(value: Option<&Value>, name: &str) -> Result<i64, BodyError> {
 /// unavailable refusal.
 pub fn execute(
     registry: &LspRegistry,
-    directories: &WorkingDirectories,
+    working_directory_ensure: &dyn Fn(&str) -> Result<String, String>,
     arguments: &Value,
     agent: Option<&str>,
 ) -> Result<Value, BodyError> {
@@ -157,8 +156,7 @@ pub fn execute(
             "the lsp tool requires a session workspace cwd",
         ));
     };
-    let _workspace_root = directories
-        .ensure(agent)
+    let _workspace_root = working_directory_ensure(agent)
         .map_err(|error| lsp_error("LSP_WORKSPACE_REQUIRED", error))?;
     // The dsh route lookup (the extension-to-provider table): the
     // fr composition registers no provider, so the lookup misses and
@@ -362,58 +360,22 @@ mod tests {
     /// ensure leg runs.
     #[test]
     fn execute_refuses_unavailable_after_the_workspace_leg() {
-        struct OpenPolicy;
-        impl crate::fs_domain::StandingPolicy for OpenPolicy {
-            fn resolve(&self, _session: Option<&str>) -> Result<Value, String> {
-                Ok(json!({}))
-            }
-        }
-        struct NoLog;
-        impl crate::working_directory::SessionLog for NoLog {
-            fn read(&self, _id: &str) -> Result<crate::working_directory::ColdLog, String> {
-                Ok(crate::working_directory::ColdLog {
-                    header: json!({}),
-                    inherited_event_count: 0,
-                    events: Value::Array(Vec::new()),
-                })
-            }
-            fn append(&self, _id: &str, _cwd: &str) -> Result<(), String> {
-                Ok(())
-            }
-        }
-        struct NoInject;
-        impl crate::working_directory::AgentInject for NoInject {
-            fn inject(&self, _agent: &str, _message: &Value) -> Result<(), String> {
-                Ok(())
-            }
-        }
+        // The ensure leg rides a fixed workspace (the image tests'
+        // inert-cwd judgment; the refusal paths below never read it).
+        let ensure = |_agent: &str| Ok(std::env::temp_dir().to_string_lossy().into_owned());
         let registry = LspRegistry::new();
-        let config = crate::fs_domain::FsDomainConfig {
-            cwd: std::env::temp_dir().to_string_lossy().into_owned(),
-            diff_basis_max_bytes: crate::fsio::DEFAULT_DIFF_BASIS_MAX_BYTES,
-        };
-        let directories = WorkingDirectories::new(
-            std::sync::Arc::new(NoLog),
-            std::sync::Arc::new(crate::fs_domain::FsDomain::new(
-                config,
-                Box::new(OpenPolicy),
-                None,
-            )),
-            std::sync::Arc::new(NoInject),
-            std::env::temp_dir().to_string_lossy().into_owned(),
-        );
         let arguments = json!({
             "operation": "hover",
             "file_path": "src/lib.rs",
             "line": 3,
             "character": 7,
         });
-        let error = execute(&registry, &directories, &arguments, Some("agent-1")).unwrap_err();
+        let error = execute(&registry, &ensure, &arguments, Some("agent-1")).unwrap_err();
         assert_eq!(error.code.as_deref(), Some("LSP_UNAVAILABLE"));
         assert_eq!(error.name, "LspError");
         assert_eq!(error.message, "no LSP provider handles \"src/lib.rs\"");
         // The missing-agent refusal rides the workspace code.
-        let error = execute(&registry, &directories, &arguments, None).unwrap_err();
+        let error = execute(&registry, &ensure, &arguments, None).unwrap_err();
         assert_eq!(error.code.as_deref(), Some("LSP_WORKSPACE_REQUIRED"));
     }
 

@@ -29,9 +29,12 @@
 //! `str_replace_editor` ([`sre_tools`]).
 //!
 //! The domain vocabulary lands module-for-module ([`shell_env`],
-//! [`working_directory`], [`render`], [`schema`], [`tools`],
+//! [`working_directory_tools`], [`render`], [`schema`], [`tools`],
 //! [`service`], [`plugin_shell`], [`catalog_gen`], and the test-only
-//! catalog-freeze verifier).
+//! catalog-freeze verifier). The working-directory domain itself (the
+//! projection, the ensure/set legs, the notices, and the prompt
+//! context) lives in the independent `fr-working-directory` plugin
+//! since 18d; this crate keeps the tool body over its service.
 
 pub mod attribution;
 pub mod catalog_gen;
@@ -85,6 +88,5 @@ pub mod web_search_deepseek;
 pub mod web_search_exa;
 pub mod web_search_perplexity;
 pub mod web_tools;
-pub mod working_directory;
 pub mod working_directory_tools;
 pub mod wsd_tools;

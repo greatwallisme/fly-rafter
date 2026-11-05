@@ -24,7 +24,6 @@ use serde_json::json;
 use crate::service::BuiltinTools;
 use crate::shell_env::ShellEnvRegistry;
 use crate::tools::Seams;
-use crate::working_directory::WorkingDirectories;
 
 /// The plugin name the host registers the artifact under.
 pub const PLUGIN_NAME: &str = "fr-tools-builtin";
@@ -42,13 +41,13 @@ pub const EVENT_JOB_SETTLED: &str = "job/settled";
 /// The claimed event (the fr-agent-loop owner crate's word).
 pub const EVENT_INBOX_CLAIMED: &str = "agent/inbox/claimed";
 
-/// The static descriptor: one provided service, thirteen injected
+/// The static descriptor: one provided service, fourteen injected
 /// seams (the terminals band rides the baked-gated terminal family)
 /// (the search tools' subprocess face rides the injection), and the two
 /// completion-notice events — the spill listeners register at activation
 /// instead (the descriptor `listen` map stays a dylib event face, not a
 /// tools-pipeline registration).
-const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\",\"fs\",\"user-questions\",\"plan-mode\",\"session-query\",\"skills\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\",\"subprocess\",\"attachments\",\"llm\",\"session-projections\",\"storage-domain\",\"terminals\"],\"listen\":{\"job/settled\":1,\"agent/inbox/claimed\":2}}";
+const DESCRIPTOR: &str = "{\"name\":\"fr-tools-builtin\",\"provide\":[\"builtin-tools\",\"fs\",\"user-questions\",\"plan-mode\",\"session-query\",\"skills\"],\"inject\":[\"tools\",\"shell\",\"jobs\",\"sandbox-policy\",\"approval\",\"session-persistence\",\"system-prompt\",\"subprocess\",\"attachments\",\"llm\",\"session-projections\",\"storage-domain\",\"terminals\",\"working-directory\"],\"listen\":{\"job/settled\":1,\"agent/inbox/claimed\":2}}";
 
 /// The maximum host reply the require loop grows its buffer toward (the
 /// approval judgment).
@@ -172,8 +171,38 @@ impl HostLink {
 /// (dsh `ctx.*` consumption over the host vtable).
 struct WireSeams {
     link: HostLink,
-    directories: Arc<WorkingDirectories>,
     env: Arc<ShellEnvRegistry>,
+}
+
+impl WireSeams {
+    /// One working-directory service round trip (the dsh
+    /// `ctx.workingDirectory` twin over the wire; the reply's `{cwd}`
+    /// decodes and the refusal detail carries the dsh text verbatim
+    /// through the fr-approval `{"error": <text>}` spelling).
+    fn working_directory_call(
+        &self,
+        method: u32,
+        agent: &str,
+        path: Option<&str>,
+    ) -> Result<String, String> {
+        let mut payload = json!({ "agent": agent });
+        if let Some(path) = path {
+            payload["path"] = Value::String(path.to_owned());
+        }
+        let bytes = serde_json::to_vec(&payload)
+            .map_err(|error| format!("working-directory encode failed: {error}"))?;
+        let reply = self
+            .link
+            .require(fr_working_directory::wire::SERVICE_NAME, method, &bytes)
+            .map_err(|detail| fr_working_directory::outbound::Outbound::message_of(&detail))?;
+        let parsed: Value = serde_json::from_slice(&reply)
+            .map_err(|error| format!("working-directory decode failed: {error}"))?;
+        parsed
+            .get("cwd")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| "working-directory reply carries no cwd".to_owned())
+    }
 }
 
 impl crate::tools::PolicySeam for WireSeams {
@@ -435,7 +464,11 @@ impl Seams for WireSeams {
     }
 
     fn working_directory_ensure(&self, agent: &str) -> Result<String, String> {
-        self.directories.ensure(agent)
+        self.working_directory_call(fr_working_directory::wire::METHOD_ENSURE, agent, None)
+    }
+
+    fn working_directory_set(&self, agent: &str, path: &str) -> Result<String, String> {
+        self.working_directory_call(fr_working_directory::wire::METHOD_SET, agent, Some(path))
     }
 
     fn shell_env_collect(
@@ -771,7 +804,6 @@ fn declare_change_event(link: &HostLink) -> Option<()> {
         fr_wire::services::session_persistence::METHOD_DECLARE_EVENT_TYPES,
         serde_json::to_vec(&json!({
             "types": [
-                crate::working_directory::CHANGE_EVENT,
                 crate::todo::CHANGE_EVENT,
                 crate::goal::CHANGE_EVENT,
                 crate::plan_mode::CHANGE_EVENT,
@@ -1019,36 +1051,6 @@ fn register_plan_policy_section(link: &HostLink) -> Option<()> {
     )
 }
 
-/// Registers the working-directory runtime context (dsh
-/// `ctx.systemPrompt.context` with the assemble prepend listener's
-/// ensure-and-text resolve; order 100 `WORKING_DIRECTORY`, required,
-/// non-interpolated).
-fn register_working_directory_context_spec() -> Value {
-    json!({
-        "name": "working-directory:current",
-        "order": 100.0,
-        "text": {
-            "textProvider": {
-                "service": crate::service::SERVICE_NAME,
-                "method": crate::service::METHOD_WORKING_DIRECTORY_CONTEXT_TEXT,
-            },
-        },
-        "interpolate": false,
-        "required": true,
-    })
-}
-
-fn register_working_directory_context(link: &HostLink) -> Option<()> {
-    step(
-        link,
-        fr_wire::services::system_prompt::SERVICE_NAME,
-        fr_wire::services::system_prompt::METHOD_REGISTER_CONTEXT,
-        serde_json::to_vec(&register_working_directory_context_spec())
-            .ok()?
-            .as_slice(),
-    )
-}
-
 /// Registers the two prompt sections (dsh `ctx.systemPrompt.section`).
 fn register_sections(link: &HostLink) -> Option<()> {
     for (name, order, text) in prompt_sections() {
@@ -1068,18 +1070,13 @@ fn register_sections(link: &HostLink) -> Option<()> {
     Some(())
 }
 
-/// Registers the `workingDirectory` projection (the relay's third-party
-/// read face; the fold endpoint is the 900 selector), the `todos`
-/// projection (stateVersion 2; the fold endpoint is the 901 selector),
-/// and the `goal` projection (stateVersion 6; the fold endpoint is the
-/// 902 selector).
+/// Registers the `todos` projection (the relay's third-party read
+/// face; stateVersion 2, the fold endpoint is the 901 selector), the
+/// `goal` projection (stateVersion 6; the fold endpoint is the 902
+/// selector), and the interaction rows. (The `workingDirectory`
+/// projection registers in its owner plugin since 18d.)
 fn register_projection(link: &HostLink) -> Option<()> {
     for (key, version, fold_method) in [
-        (
-            crate::working_directory::PROJECTION_KEY,
-            crate::working_directory::STATE_VERSION,
-            crate::service::METHOD_WORKING_DIRECTORY_FOLD,
-        ),
         (
             crate::todo::PROJECTION_KEY,
             crate::todo::STATE_VERSION,
@@ -2661,6 +2658,15 @@ impl BuiltinState {
         // the declared cycle). The timing holds: the loop's remaining
         // injects are acyclic, so it commits before shell, shell before
         // this crate, and the grant's target is committed here.
+        // The 2026-11-05 18d cycle-cut ruling (the declared-inject
+        // twin of the two rulings above): fr-working-directory consumes
+        // this crate's `fs` service, and this crate declares
+        // `working-directory` — a declared fs inject would close the
+        // declaration cycle and gate both activations. The capability
+        // rides a grant; the timing holds: this crate's declared
+        // working-directory inject gates this setup on the target's
+        // commit, so the grant's target is committed here.
+        link.grant("working-directory", "fs").ok()?;
         link.grant("agent", "skills").ok()?;
         // The 2026-11-05 first-real-turn ruling (user-approved; the
         // mechanism per this file's own D31 judgments): the prompt
@@ -2702,16 +2708,16 @@ impl BuiltinState {
         let worker = crate::job_tools::spawn_notice_worker(Arc::clone(&notices), receiver, link);
         register_sections(&link)?;
         register_plan_policy_section(&link)?;
-        register_working_directory_context(&link)?;
         register_projection(&link)?;
         register_tools(&link, !escalation.is_empty(), attachments_mounted)?;
 
         // The managed-environment registry over the resolved home.
         let env = ShellEnvRegistry::new(None).ok()?;
 
-        // The working-directory domain over the wire log/inject seams
-        // and the in-crate fs domain (the dsh ctx.fs isomorph; built
-        // first so the directory legs resolve through it).
+        // The in-crate fs domain (the dsh ctx.fs isomorph; the `'fs'`
+        // service and the skills provider own it — the working-directory
+        // domain moved to its owner plugin in 18d and consumes this
+        // service over the wire).
         let config = crate::fs_domain::FsDomainConfig::new().ok()?;
         let policy = WireStandingPolicy { link };
         let fs = Arc::new(crate::fs_domain::FsDomain::new(
@@ -2719,12 +2725,6 @@ impl BuiltinState {
             Box::new(policy),
             escalation.first().map(|mode| (*mode).to_owned()),
         ));
-        let directories = WorkingDirectories::new(
-            Arc::new(WireSessionLog { link }),
-            Arc::clone(&fs),
-            Arc::new(WireAgentInject { link }),
-            std::env::current_dir().ok()?.to_string_lossy().to_string(),
-        );
 
         // The todo domain over the wire append seam (the baked
         // `allow-parallel-in-progress: true` bundle judgment).
@@ -2751,10 +2751,8 @@ impl BuiltinState {
         let schedule_worker = crate::schedule::spawn_runtime(Arc::clone(&schedules), signal);
 
         let env_arc = Arc::new(env);
-        let directories_arc = Arc::new(directories);
         let seams = WireSeams {
             link,
-            directories: Arc::clone(&directories_arc),
             env: Arc::clone(&env_arc),
         };
         let interactions = Arc::new(crate::interaction_tools::InteractionState {
@@ -2830,7 +2828,6 @@ impl BuiltinState {
         let tools = BuiltinTools::new(
             Box::new(seams),
             env_arc,
-            directories_arc,
             Arc::new(lists),
             Arc::new(goals),
             notices,
@@ -2898,76 +2895,6 @@ impl crate::fs_domain::StandingPolicy for WireStandingPolicy {
             &bytes,
         )?;
         serde_json::from_slice(&reply).map_err(|error| format!("policy decode failed: {error}"))
-    }
-}
-
-/// The durable working-directory change records over the
-/// `'session-persistence'` faces (the dsh `agent.session.append`/read
-/// pair).
-struct WireSessionLog {
-    link: HostLink,
-}
-
-/// The model notices over the `'agent'` inject face (the dsh
-/// `agent.inject(notice)` pair).
-struct WireAgentInject {
-    link: HostLink,
-}
-
-impl crate::working_directory::AgentInject for WireAgentInject {
-    fn inject(&self, agent: &str, message: &Value) -> Result<(), String> {
-        let bytes = serde_json::to_vec(&json!({
-            "sessionId": agent,
-            "message": message,
-        }))
-        .map_err(|error| format!("notice encode failed: {error}"))?;
-        self.link
-            .require(
-                fr_wire::services::agent::SERVICE_NAME,
-                fr_wire::services::agent::METHOD_INJECT,
-                &bytes,
-            )
-            .map(|_| ())
-    }
-}
-
-impl crate::working_directory::SessionLog for WireSessionLog {
-    fn read(&self, id: &str) -> Result<crate::working_directory::ColdLog, String> {
-        let bytes = serde_json::to_vec(&json!({ "id": id }))
-            .map_err(|error| format!("session read encode failed: {error}"))?;
-        let reply = self.link.require(
-            fr_wire::services::session_persistence::SERVICE_NAME,
-            fr_wire::services::session_persistence::METHOD_SESSION_READ,
-            &bytes,
-        )?;
-        let parsed: Value = serde_json::from_slice(&reply)
-            .map_err(|error| format!("session read decode failed: {error}"))?;
-        Ok(crate::working_directory::ColdLog {
-            header: parsed.get("header").cloned().unwrap_or(Value::Null),
-            inherited_event_count: parsed
-                .get("inheritedEventCount")
-                .and_then(Value::as_u64)
-                .unwrap_or_default(),
-            events: parsed
-                .get("events")
-                .cloned()
-                .unwrap_or(Value::Array(Vec::new())),
-        })
-    }
-
-    fn append(&self, id: &str, cwd: &str) -> Result<(), String> {
-        let bytes = serde_json::to_vec(&json!({
-            "id": id,
-            "type": crate::working_directory::CHANGE_EVENT,
-            "data": { "cwd": cwd },
-        }))
-        .map_err(|error| format!("session append encode failed: {error}"))?;
-        self.link.require(
-            fr_wire::services::session_persistence::SERVICE_NAME,
-            fr_wire::services::session_persistence::METHOD_SESSION_APPEND,
-            &bytes,
-        )?;
-        Ok(())
     }
 }
 
@@ -3641,6 +3568,11 @@ pub fn session_event_read_registration() -> Value {
 
 #[cfg(test)]
 mod tests {
+    use super::{HostLink, ShellEnvRegistry, WireSeams};
+    use crate::tools::Seams;
+    use serde_json::Value;
+    use std::sync::Arc;
+
     /// The working-directory registration row keeps the partial face
     /// (the dsh `tool-working-directory` defineTool: no concurrency
     /// flag — the exclusive default, no custom present faces — the
@@ -3681,27 +3613,158 @@ mod tests {
         }
     }
 
-    /// The working-directory runtime context registers with the dsh
-    /// name, the order-100 `WORKING_DIRECTORY` slot, the required
-    /// flag, the non-interpolated flag, and the endpoint route (the
-    /// PROMPT contract's context registration face).
-    #[test]
-    fn working_directory_context_pins_the_registration() {
-        let spec = super::register_working_directory_context_spec();
-        assert_eq!(spec["name"], serde_json::json!("working-directory:current"));
-        assert_eq!(spec["order"], serde_json::json!(100.0));
-        assert_eq!(spec["interpolate"], serde_json::json!(false));
-        assert_eq!(spec["required"], serde_json::json!(true));
-        assert_eq!(
-            spec["text"]["textProvider"]["service"],
-            serde_json::json!(crate::service::SERVICE_NAME)
-        );
-        assert_eq!(
-            spec["text"]["textProvider"]["method"],
-            serde_json::json!(crate::service::METHOD_WORKING_DIRECTORY_CONTEXT_TEXT)
-        );
+    /// The scripted far side of the host vtable: records every require
+    /// and answers from one slot (the fr-approval fake-host
+    /// discipline; only the far side is scripted).
+    struct FarSide {
+        calls: std::sync::Mutex<Vec<(String, u32, Value)>>,
+        reply: std::sync::Mutex<Result<Vec<u8>, String>>,
     }
 
+    // SAFETY: the recorded state is only touched behind its mutexes
+    // from the vtable callbacks, which the ABI contract may invoke from
+    // any plugin thread.
+    unsafe impl Send for FarSide {}
+
+    // SAFETY: same mutex-only access contract as `Send`.
+    unsafe impl Sync for FarSide {}
+
+    unsafe extern "C" fn scripted_require(
+        host: *mut std::ffi::c_void,
+        service: *const u8,
+        service_len: usize,
+        method: u32,
+        in_data: *const u8,
+        in_len: usize,
+        out: *mut u8,
+        cap: usize,
+        out_len: *mut usize,
+    ) -> i32 {
+        // SAFETY: the handle is the leaked FarSide the test owns; the
+        // vtable contract serializes the calls.
+        let far = unsafe { &*host.cast::<FarSide>() };
+        // SAFETY: service_len bytes readable per the host contract.
+        let service = unsafe { std::slice::from_raw_parts(service, service_len) };
+        let service = std::str::from_utf8(service)
+            .expect("service utf8")
+            .to_owned();
+        let payload: Value = if in_len == 0 || in_data.is_null() {
+            Value::Null
+        } else {
+            // SAFETY: in_len nonzero bytes readable per the host
+            // contract.
+            serde_json::from_slice(unsafe { std::slice::from_raw_parts(in_data, in_len) })
+                .expect("payload JSON")
+        };
+        far.calls
+            .lock()
+            .expect("calls")
+            .push((service, method, payload));
+        let reply = far.reply.lock().expect("reply").clone();
+        let bytes = match reply {
+            Ok(bytes) => bytes,
+            Err(detail) => {
+                let n = detail.len().min(cap);
+                // SAFETY: host buffer contract.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(detail.as_ptr(), out, n);
+                    *out_len = n;
+                }
+                return dougong_abi::STATUS_FAILED;
+            }
+        };
+        if bytes.len() > cap {
+            return dougong_abi::STATUS_CAPACITY;
+        }
+        // SAFETY: host buffer contract.
+        unsafe {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len());
+            *out_len = bytes.len();
+        }
+        dougong_abi::STATUS_OK
+    }
+
+    unsafe extern "C" fn loud_two_name(
+        _host: *mut std::ffi::c_void,
+        _a: *const u8,
+        _b: usize,
+        _c: *const u8,
+        _d: usize,
+    ) -> i32 {
+        dougong_abi::STATUS_FAILED
+    }
+
+    unsafe extern "C" fn loud_dispatch(
+        _host: *mut std::ffi::c_void,
+        _a: *const u8,
+        _b: usize,
+        _c: u32,
+        _d: *const u8,
+        _e: usize,
+        _f: *mut u8,
+        _g: usize,
+        _h: *mut usize,
+    ) -> i32 {
+        dougong_abi::STATUS_FAILED
+    }
+
+    /// One shell over a leaked far side with the scripted reply.
+    fn routed_seams(far: &'static FarSide) -> WireSeams {
+        let exports = dougong_abi::HostExports {
+            host_handle: std::ptr::from_ref(far)
+                .cast_mut()
+                .cast::<std::ffi::c_void>(),
+            require: scripted_require,
+            emit: loud_two_name,
+            grant: loud_two_name,
+            dispatch: loud_dispatch,
+        };
+        WireSeams {
+            link: HostLink::new(exports),
+            env: Arc::new(ShellEnvRegistry::new(None).expect("env registry")),
+        }
+    }
+
+    /// The ensure leg routes through the fr-working-directory service
+    /// (the builtin-tools contract's cross-plugin seam clause): the
+    /// payload spells `{agent}` and the reply's `{cwd}` decodes.
+    #[test]
+    fn working_directory_seams_route_through_the_service() {
+        let far: &'static FarSide = Box::leak(Box::new(FarSide {
+            calls: std::sync::Mutex::new(Vec::new()),
+            reply: std::sync::Mutex::new(Ok(br#"{"cwd":"/repo"}"#.to_vec())),
+        }));
+        let seams = routed_seams(far);
+        let cwd = seams.working_directory_ensure("s1").expect("ensure");
+        assert_eq!(cwd, "/repo");
+        let calls = far.calls.lock().expect("calls");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "working-directory");
+        assert_eq!(calls[0].1, fr_working_directory::wire::METHOD_ENSURE);
+        assert_eq!(calls[0].2, serde_json::json!({ "agent": "s1" }));
+    }
+
+    /// The set leg carries `{path}` and the `{"error": <text>}` refusal
+    /// detail carries the dsh text verbatim through the host's
+    /// prefixed require line.
+    #[test]
+    fn working_directory_seams_carry_refusal_texts() {
+        let far: &'static FarSide = Box::leak(Box::new(FarSide {
+            calls: std::sync::Mutex::new(Vec::new()),
+            reply: std::sync::Mutex::new(Err(
+                "require working-directory.2 failed with host status 2: {\"error\":\"working-directory: cd must not be empty\"}"
+                    .to_owned(),
+            )),
+        }));
+        let seams = routed_seams(far);
+        let error = seams.working_directory_set("s1", "").unwrap_err();
+        assert_eq!(error, "working-directory: cd must not be empty");
+        let calls = far.calls.lock().expect("calls");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "working-directory");
+        assert_eq!(calls[0].1, fr_working_directory::wire::METHOD_SET);
+        assert_eq!(calls[0].2, serde_json::json!({ "agent": "s1", "path": "" }));
+    }
     /// The inspect pair keeps its registration rows reachable with
     /// the baked gate off (the Q16f-B ruling): the rows exist for the
     /// composed web-app/desktop faces while the dsh base bundle mounts

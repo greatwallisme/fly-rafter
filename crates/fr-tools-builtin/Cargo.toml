@@ -13,6 +13,10 @@ categories.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+# The working-directory service face constants (the tools_client
+# judgment: the wire vocabulary stays single-sourced in the owner crate).
+fr-working-directory = { workspace = true }
+
 dougong-abi.workspace = true
 encoding_rs = "0.8"
 percent-encoding = "2.3"
