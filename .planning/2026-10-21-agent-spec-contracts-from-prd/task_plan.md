@@ -6,7 +6,7 @@
 ## Phases（Phase 18 18b d 当前进行中）
 
 ### Phase 18b d — runner 集成
-**Status:** in_progress（实现+门绿,收口=.lifecycle+stamp+commit）
+**Status:** complete（commit fb10a2e:lifecycle 32/32 全过 0 败 0 跳 quality 1.0;四关 receipt=0;e2e 进程级 5 场景全绿）
 
 1. fr-schema registry 增 fr-llm-deepseek rail 声明（provider 默认 deepseek-official/model 默认 deepseek-flash/reasoning-effort 候选 off-low-high-max/base-url；additional_properties=true）+ 字符串默认读取助手
 2. fr 宿主：compile_stage 烘 facts "model" 段（组合后 llm 行 config + 声明默认）；exit_watcher in-process 监听插件（听 headless/exit {code}→通道）；serve_until_shutdown select 信号 vs 退出通道；Cargo += fr-schema
@@ -17,7 +17,7 @@
 7. 四关全绿 → spec 场景绑定（含新建 uncured_agent_error_fails_the_run）→ lifecycle/guard/explain/stamp 七步收口
 
 ## Next Step
-**18b d 实现全绿收口中：四关 receipt=0（fmt/clippy/test 61 组 0 败/doc）；e2e 进程级 5 场景+runner 18 测全绿；spec 25 选择器绑定；两项用户裁决 A/A 落地。lifecycle 后台长跑中（pid 699907,32 场景×逐测 cargo 慢）——完成后 guard(判例跳)+stamp+提交。**
+**18b d 完成（commit fb10a2e）。下一步=Phase 18 收官评估（18b d 已含 25 场景绑定+lifecycle 32/32）；残留独立排查项:fr-permission-presets 空 session/created 载荷 listener_failure（非致命,留独立切片）。**
 
 ## Errors Encountered
 | Error | Attempt | Resolution |

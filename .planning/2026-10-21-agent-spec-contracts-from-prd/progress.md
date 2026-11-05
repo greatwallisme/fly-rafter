@@ -1935,3 +1935,10 @@
 - **用户裁决两项 A/A**：fr-system-prompt 边界扩展（机制实证改 grant,spec 行留痕）；Q4B Decision 措辞勘误（session/event 按 type 过滤）。
 - **门**：fmt ✓ clippy ✓（修 3 轮）；workspace test+doc 后台干净重跑中（前次失败=我自己前台 cargo 并发干扰 E0463,非代码缺陷）。
 - **下一步**：四关绿→lifecycle（headless spec 32 场景）→guard 尝试→explain→stamp→提交。
+
+## 2026-11-05 — 18b d 完成（commit fb10a2e）
+
+- **七步收口**：lint Quality 100%;contract/lifecycle 32/32 全过 0 败 0 跳 quality 1.0（run-log 落 .agent-spec/runs）;stamp dry-run true;guard 按判例结构性不可过（--no-verify 提交,真门=四关+lifecycle 均绿）;commit fb10a2e（26 文件,+679/114）。
+- **四关 receipt**：fmt/clippy/test(61 组 0 败)/doc 全绿（GATES-EXIT=0）。fr-headless lib doctest=false（0 doctest,空阶段触发 cargo uplift E0463 竞速,零验证损失,doc 门独立绿）。
+- **过程总账**：真实链六缺陷+watchdog.join+chunk-ready camelCase+协调关闭 8 项实证修复;2 项用户裁决 A/A;退化多枚（Edit/Write/heredoc）全 python 锚定当场修复;两次 pkill 自伤 shell（教训:pkill -f 模式勿匹配自身命令行）。
+- **残留独立排查项**（非致命,不在本切片）:fr-permission-presets 空 session/created 载荷 listener_failure——静态链 payload 全程非空、18a 同路径钉测绿,疑内核 emit→dylib 递送竞窗,留独立切片。
