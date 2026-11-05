@@ -689,7 +689,25 @@ fn build_table() -> Vec<(&'static str, Schema)> {
         ),
         ("fr-compaction", compaction_row()),
         ("fr-llm-deepseek", llm_deepseek_row()),
+        ("fr-llm-retry", llm_retry_row()),
     ]
+}
+
+/// The `fr-llm-retry` declaration: the executor owns no config (dsh
+/// `z.object({})`; providers carry `retryPolicy` under their own rows) —
+/// an empty closed object rejects any key at assembly time (the dsh
+/// schema layer gate; the plugin's `validateConfig` copy keeps the dsh
+/// wording for the config-relay slice).
+fn llm_retry_row() -> Schema {
+    let properties = Properties::try_from(Vec::new()).expect("the empty rail carries unique keys");
+    Schema::Object {
+        properties,
+        additional_properties: false,
+        description: Some(
+            "The provider-retry executor has no config; providers own retry-policy              (PRD decision 47-2A)."
+                .to_owned(),
+        ),
+    }
 }
 
 /// Reads one declared string property's default for `plugin` (the model

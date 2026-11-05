@@ -29,12 +29,15 @@ fly-rafter 是字面全插件系统：agent 主循环不是宿主内置，而是
 - 生命周期臂 MUST（2026-11-04 18b Q2A 裁决）：`'agent'` 服务增 METHOD_CREATE=10 / METHOD_RESUME=11 / METHOD_LIVE=12（no-create 存活探测）。create = 会话创建（session-persistence METHOD_SESSION_CREATE）+ 驱动线程 spawn（决策 46 形态；dsh agents.create 行为 1:1）；resume = 持久层 resume/restore（方法带 6/7）组合 + 驱动构造 + setup 发布（dsh agents.resume→resumeWith 行为 1:1，agent-loop/index.ts:843-935）；wire 方法号 fr 自有（dsh 为进程内函数调用无 wire 层）；STATUS 按需建邮箱语义不变，探测臂禁建箱（dsh agents.get 存活判定 index.ts:266-276 的 fr 等价面）。Allowed += crates/fr-wire/src/services.rs（跨插件契约常量单文件，Q61A 判例同形）。
 - `agent/error` 事件面 MUST（2026-11-04 18b Q4B 裁决）：驱动边界失败 containment 处 emit `agent/error` `{sessionId, turn, step, error, seq}`（dsh agent.ts:244-249 throwError 1:1：running 相位取 turn/step，否则 lastTurn/0；seq = 失败时会话 seq，即消费方 atOffset）；失败保留至消费方由其后终结事件治愈（dsh headless index.ts:365-372 治愈契约的发射半）。
 - 生命周期路由投影 MUST（2026-11-04 18b Q9A 裁决）：CREATE/RESUME 载荷增可选 `reasoningEffort`/`maxTokens`（dsh agentOptions 四字段 1:1 投影，request seed 双消费 dsh agent.ts:581-582；`maxTokens` 按 assertAgentOptions 校验正安全整数、文案逐字 'agent maxTokens must be a positive safe integer'）；CREATE/RESUME 回 `{sessionId}`（会话句柄面）。
+- provider 重试执行 MUST（2026-11-05 18c Q1A 裁决；决策 47-2A 引：独立 fr-llm-retry 插件，dsh llm-retry/src/index.ts 259 行 1:1）：经内核 waterfall 监听 `agent/request-error`（descriptor listen+CPS 续延，STATUS_DEFERRED 拉 next 续延→on_next 收下游结果）；两段载体=监听器即决即返（`llm/retry` 先持久 1:1 dsh backoff 先行 append；链值 fr 自有扩展 `{"kind":"retry","delayMs":N}`）→驱动做可取消 park 等待（deadline|cancel 命令|shutdown 三源唤醒，其余命令留队）→中止=丢弃决策（`llm/retry` 留存、无 `llm/retry-started`=dsh 逐字节同）→到期=驱动补 append `llm/retry-started` `{retryId,turn,step,retry}`→重试 step。durable 面零偏差、取消即时。门语义 1:1：policy 缺/码不可重试/normal 超限=放行下游（恒等回包=untouched→in-process 兜底）；always=先审下游再无帽退避（下游 warn `'llm-retry: provider "X" always policy ignored a downstream recovery failure: %o'`）；providerRetryAfterMs 有限>0 直用（超 maxDelayMs：normal 放行/always 本地退避）；localDelay 指数+对称抖动（fr-llm local_delay 单源）。Allowed += crates/fr-llm-retry/**。
+- 重试状态与事件权 MUST（2026-11-05 18c 裁决）：llmRetry=fr-llm-retry 自持 (session,turn,step,provider,policyKey) 键控表（fr-compaction 自持会话表判例；dsh sessionProjections 通用投影服务不建——消费方到场纪律），首见会话冷读折叠重建（`llm/retry` 事件数据自带 turn/step/provider/policyKey/retry/retryId 全字段=精确 dsh fold 语义含重启恢复；同 (retry,retryId) 幂等守卫 1:1）；事件类型所有权=激活期 persistence DECLARE_EVENT_TYPES 声明 `llm/retry`+`llm/retry-started`（Q34A 通道）；retryId=uuid v4（dsh RetryId 品牌串，同链复用）。
 
 ## Boundaries
 
 ### Allowed Changes
 - crates/fr-agent-loop/**
 - crates/fr-wire/src/services.rs（跨插件契约常量单文件，Q61A 判例同形）
+- crates/fr-llm-retry/**
 
 ### Forbidden
 - Do not weaken or remove the source requirement clauses.
@@ -93,10 +96,16 @@ Scenario: step 抛错补齐缺失 tool/result
   那么 缺失的 tool/result 被补齐且重放合法
 
 Scenario: provider 重试策略生效
-  Test: pending_req_fr_agent_loop_provider
-  假设 provider 插件声明了 provider_retry_policy
+  Test: provider_retry_retries_within_the_policy_and_throws_past_the_limit
+  假设 provider 插件声明了 provider_retry_policy 且独立 fr-llm-retry 插件监听 agent/request-error
   当 流错误发生时
-  那么 按策略重试，超限后向循环抛错
+  那么 按策略重试（llm/retry 先持久、等待后 llm/retry-started、step 内重试），超限后向循环抛错
+
+Scenario: 重试等待被取消中断
+  Test: cancel_during_the_retry_wait_skips_retry_started_and_aborts
+  假设 一次失败的 attempt 获得带延迟的重试决策且 llm/retry 已持久
+  当 等待期间取消到达
+  那么 决策被丢弃、不落 llm/retry-started、attempt 走中止结算路径（dsh backoff 可取消等待逐字节同）
 
 Scenario: assistant-stream 批量分发基准
   Test: stream_dispatch_meets_the_m1_benchmark_floor

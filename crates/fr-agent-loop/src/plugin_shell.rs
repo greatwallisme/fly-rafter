@@ -117,6 +117,19 @@ pub enum InboundCommand {
     MaintenanceEnd,
 }
 
+/// Why the loop's retry-backoff park ended (the `wait_retry_backoff`
+/// outcome: the dsh `cancellableDelay` boolean widened to its three
+/// sources).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetryWait {
+    /// The scheduled delay elapsed.
+    Deadline,
+    /// A queued cancel command was peeked.
+    Aborted,
+    /// The shell requested shutdown.
+    Shutdown,
+}
+
 /// The per-session mailbox shared between the host-facing shell and the
 /// session's loop thread.
 ///
@@ -477,6 +490,42 @@ impl SessionMailbox {
         }
         inner.pending_wake = false;
         drop(inner);
+    }
+
+    /// Parks the calling driver thread until the retry-backoff deadline,
+    /// a queued cancel command, or the shutdown flag (the loop-side twin
+    /// of the dsh `cancellableDelay`: the two-stage carrier keeps the
+    /// wait on the loop thread, so cancel breaks through immediately).
+    /// Commands are peeked, never consumed — the run loop applies them
+    /// after the wait ends. Stray notifications (chunk wakes with no
+    /// in-flight stream) re-arm the remaining wait.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mailbox lock is poisoned (a holder panicked).
+    pub fn wait_retry_backoff(&self, deadline: std::time::Instant) -> RetryWait {
+        let mut inner = self.inner.lock().expect("mailbox lock poisoned");
+        loop {
+            if inner
+                .commands
+                .iter()
+                .any(|command| matches!(command, InboundCommand::Cancel { .. }))
+            {
+                return RetryWait::Aborted;
+            }
+            if inner.shutdown {
+                return RetryWait::Shutdown;
+            }
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                return RetryWait::Deadline;
+            }
+            let (guard, _timed_out) = self
+                .wake
+                .wait_timeout(inner, deadline - now)
+                .expect("mailbox wait");
+            inner = guard;
+        }
     }
 
     /// Runs one step with the transition mutex held — the serialization

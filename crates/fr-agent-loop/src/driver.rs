@@ -57,8 +57,8 @@ use fr_wire::{ContentBlock, KnownContentBlock, RawObject, SessionSeq, TrueOnly};
 
 use crate::agent_events::{
     AgentEvents, AssistantStreamPayload, EVENT_PRE_STEP, EVENT_REQUEST_ERROR, ErrorPayload,
-    PreStepDecision, PreStepEventPayload, PreStepPayload, RequestErrorAction,
-    RequestErrorEventPayload, RequestErrorPayload, RequestPayload, TurnStoppingPayload,
+    PreStepDecision, PreStepEventPayload, PreStepPayload, RequestErrorEventPayload,
+    RequestErrorPayload, RequestPayload, TurnStoppingPayload,
 };
 use crate::assistant_stream::{
     AssistantStreamAttempt, FrameSink, RevisionAllocator, SettlementType,
@@ -67,7 +67,7 @@ use crate::inbox::InboxTarget;
 use crate::loop_inbox::{InboxError, LoopInbox};
 use crate::outbound::WATERFALL_MODE;
 use crate::phase::{AbortLatch, Phase, PhaseMachine};
-use crate::plugin_shell::{InboundCommand, SessionMailbox};
+use crate::plugin_shell::{InboundCommand, RetryWait, SessionMailbox};
 use crate::runtime_context::{
     RuntimeContextProjection, SystemPromptDecisionInput, SystemPromptNode, project_system_prompt,
 };
@@ -1482,15 +1482,6 @@ impl LoopDriver {
         })
     }
 
-    /// Decodes a short-circuited `agent/request-error` chain value (the
-    /// dsh ruling wire form: `{"kind":"retry"}` rules a retry, any other
-    /// JSON value keeps the no-retry default).
-    fn decode_request_error_action(bytes: &[u8]) -> Option<RequestErrorAction> {
-        let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
-        let kind = value.get("kind").and_then(serde_json::Value::as_str)?;
-        (kind == "retry").then_some(RequestErrorAction::Retry)
-    }
-
     /// Proposes one step boundary (dsh `preStep`): claim, assemble,
     /// waterfall, with abort checks around the assembled prompt.
     fn pre_step(
@@ -2288,8 +2279,11 @@ impl LoopDriver {
     /// Rules one failed attempt's retry through the kernel chain first
     /// (the 17f outbound wiring): bus listeners rule before the
     /// in-process registry; an untouched chain keeps the no-retry
-    /// default, and a listener's chain value decodes as the dsh
-    /// `RequestErrorAction`.
+    /// default. A listener's ruling carries the full retry identity
+    /// (delay, chain id, retry number — the 18c Q1A two-stage carrier);
+    /// a listener failure or a malformed ruling is contained to the
+    /// in-process default (the dsh waterfall's listener-rejection
+    /// containment).
     fn retry_ruling(
         &self,
         turn: u64,
@@ -2297,7 +2291,7 @@ impl LoopDriver {
         request: &GenerateOptions,
         prepared: Option<&PreparedCall>,
         failure: &fr_wire::Failure,
-    ) -> Result<Option<RequestErrorAction>, DriverError> {
+    ) -> Result<Option<RetryRuling>, DriverError> {
         let wire = RequestErrorEventPayload {
             session_id: self.session_id.as_str().to_owned(),
             turn,
@@ -2311,24 +2305,93 @@ impl LoopDriver {
         let bytes = serde_json::to_vec(&wire).map_err(|error| {
             DriverError::Dispatch(format!("request-error payload encode failed: {error}"))
         })?;
-        let reply = self
-            .events
-            .outbound()
-            .dispatch(EVENT_REQUEST_ERROR, WATERFALL_MODE, &bytes)
-            .map_err(|error| DriverError::Dispatch(error.to_string()))?;
+        let in_process = || {
+            Ok(self
+                .events
+                .waterfall_request_error(
+                    RequestErrorPayload {
+                        turn,
+                        step,
+                        provider: request.provider.clone(),
+                        failure: failure.clone(),
+                        retry_policy: prepared.and_then(|p| p.retry_policy.clone()),
+                    },
+                    Box::new(|_| None),
+                )
+                .map(|_| RetryRuling::InProcess))
+        };
+        // The dsh waterfall contains a listener failure to the
+        // default: the loop survives and the classification reads
+        // the original attempt's failure.
+        let Ok(reply) =
+            self.events
+                .outbound()
+                .dispatch(EVENT_REQUEST_ERROR, WATERFALL_MODE, &bytes)
+        else {
+            return in_process();
+        };
         if reply == bytes {
-            return Ok(self.events.waterfall_request_error(
-                RequestErrorPayload {
+            return in_process();
+        }
+        match fr_llm_retry::wire::decode_retry_decision(&reply) {
+            Some(fr_llm_retry::wire::RetryDecision {
+                delay_ms,
+                retry_id,
+                retry,
+            }) => Ok(Some(RetryRuling::Scheduled {
+                delay_ms,
+                retry_id,
+                retry,
+            })),
+            // A malformed ruling is contained to the default.
+            None => in_process(),
+        }
+    }
+
+    /// Runs the scheduled retry's loop-side half (the 18c Q1A carrier):
+    /// the cancellable park for the delay (cancel and shutdown break
+    /// through immediately — the dsh `cancellableDelay` on its own
+    /// thread), then the durable transition after the wait. The
+    /// in-process face carries no identity and skips the append.
+    fn settle_retry_wait(
+        &mut self,
+        turn: u64,
+        step: u64,
+        failure: &fr_wire::Failure,
+        delay_ms: f64,
+        wire_retry_id: Option<&str>,
+        wire_retry: Option<u64>,
+    ) -> Result<(), DriverError> {
+        if delay_ms > 0.0 {
+            // The ruling carries milliseconds; `from_secs_f64` takes
+            // seconds (the 511s park bug the e2e caught).
+            match self.mailbox.wait_retry_backoff(
+                std::time::Instant::now()
+                    + std::time::Duration::from_secs_f64(delay_ms.max(0.0) / 1000.0),
+            ) {
+                RetryWait::Deadline => {}
+                // The dsh cancelled wait returns undefined: no
+                // `llm/retry-started`, and the original failure
+                // propagates for the run loop's classification.
+                RetryWait::Aborted | RetryWait::Shutdown => {
+                    return Err(DriverError::Llm(llm_error(failure)));
+                }
+            }
+        }
+        if let (Some(retry_id), Some(retry)) = (wire_retry_id, wire_retry) {
+            self.commit(
+                fr_llm_retry::wire::EVENT_LLM_RETRY_STARTED,
+                &fr_llm_retry::wire::LlmRetryStartedEventData {
+                    retry_id: retry_id.to_owned(),
                     turn,
                     step,
-                    provider: request.provider.clone(),
-                    failure: failure.clone(),
-                    retry_policy: prepared.and_then(|p| p.retry_policy.clone()),
+                    retry,
                 },
-                Box::new(|_| None),
-            ));
+                None,
+                None,
+            )?;
         }
-        Ok(Self::decode_request_error_action(&reply))
+        Ok(())
     }
 
     /// Settles one completed stream (dsh the post-stream block): failed
@@ -2364,11 +2427,27 @@ impl LoopDriver {
                         .map(|event| event.seq)
                 })?;
             }
-            let action = self.retry_ruling(turn, step, request, prepared, &failure)?;
+            let ruling = self.retry_ruling(turn, step, request, prepared, &failure)?;
             self.poll()?;
-            if action != Some(RequestErrorAction::Retry) {
+            let Some(ruling) = ruling else {
                 return Err(DriverError::Llm(llm_error(&failure)));
-            }
+            };
+            let (delay_ms, wire_retry_id, wire_retry) = match ruling {
+                RetryRuling::InProcess => (0.0, None, None),
+                RetryRuling::Scheduled {
+                    delay_ms,
+                    retry_id,
+                    retry,
+                } => (delay_ms, retry_id, retry),
+            };
+            self.settle_retry_wait(
+                turn,
+                step,
+                &failure,
+                delay_ms,
+                wire_retry_id.as_deref(),
+                wire_retry,
+            )?;
             return Ok(AttemptEnd::Retry);
         }
         let message = assistant_message(
@@ -2414,6 +2493,22 @@ impl LoopDriver {
             concluded.then_some(TurnEndReasonKind::Completed),
         ))
     }
+}
+
+/// The decoded retry ruling handed to the step loop (the 18c Q1A
+/// carrier): `InProcess` is the middleware face (no retry identity —
+/// the durable `llm/retry-started` pair belongs to the provider chain),
+/// `Scheduled` is the wire ruling with its full identity.
+#[derive(Debug, Clone, PartialEq)]
+enum RetryRuling {
+    /// The in-process middleware face (the registry returned `Retry`;
+    /// the only variant that face carries).
+    InProcess,
+    Scheduled {
+        delay_ms: f64,
+        retry_id: Option<String>,
+        retry: Option<u64>,
+    },
 }
 
 /// How one attempt ended for the step's retry loop.
@@ -5143,7 +5238,7 @@ mod tests {
             10,
             |events| {
                 events.on_request_error(Box::new(|_payload, _next| {
-                    Some(crate::driver::RequestErrorAction::Retry)
+                    Some(crate::agent_events::RequestErrorAction::Retry)
                 }));
             },
             None,
@@ -5862,6 +5957,126 @@ mod tests {
             session.typed("assistant/attempt").len()
         };
         assert!(count > 0);
+    }
+    /// The two-stage carrier end to end: a wire ruling with the full
+    /// identity parks the loop for the scheduled delay, then the loop
+    /// appends the durable transition and re-enters the step.
+    #[test]
+    fn provider_retry_wire_ruling_appends_retry_started_and_retries() {
+        let session = Arc::new(Mutex::new(TestSession::new()));
+        let host = Arc::new(DispatchHost {
+            session: Arc::clone(&session),
+            calls: Mutex::new(Vec::new()),
+            replies: Mutex::new(
+                std::iter::once((
+                    super::EVENT_REQUEST_ERROR.to_owned(),
+                    br#"{"kind":"retry","delayMs":0,"retryId":"r-1","retry":1}"#.to_vec(),
+                ))
+                .collect(),
+            ),
+        });
+        let (harness, _host) = harness_with_dispatch(
+            vec![
+                Script {
+                    chunks: vec![finish_error("transport down")],
+                    cancel_after_first_batch: false,
+                    followup_after_cancel: false,
+                    prepare_no_adapter: false,
+                },
+                ScriptedLlm::text_generation("recovered"),
+            ],
+            session,
+            host,
+        );
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("assistant/message").is_empty(),
+            "the retried step lands",
+        );
+        drop(thread);
+        let started: Vec<fr_wire::event::SessionEventData> = {
+            let session = harness.session.lock().expect("test session lock");
+            session
+                .typed("llm/retry-started")
+                .iter()
+                .map(|event| event.data.clone())
+                .collect()
+        };
+        assert_eq!(started.len(), 1, "one durable transition after the wait");
+        let fr_wire::event::SessionEventData::Unknown(payload) = &started[0] else {
+            panic!("the transition is an extension event");
+        };
+        assert_eq!(payload.data["retryId"], "r-1");
+        assert_eq!(payload.data["retry"], 1);
+    }
+
+    /// A cancel peeked during the backoff park ends the wait before the
+    /// deadline: the decision drops, `llm/retry-started` never lands,
+    /// and the original failure classifies the turn (the dsh cancelled
+    /// wait twin).
+    #[test]
+    fn cancel_during_the_retry_wait_skips_retry_started_and_aborts() {
+        let session = Arc::new(Mutex::new(TestSession::new()));
+        let host = Arc::new(DispatchHost {
+            session: Arc::clone(&session),
+            calls: Mutex::new(Vec::new()),
+            replies: Mutex::new(
+                std::iter::once((
+                    super::EVENT_REQUEST_ERROR.to_owned(),
+                    br#"{"kind":"retry","delayMs":30000,"retryId":"r-1","retry":1}"#.to_vec(),
+                ))
+                .collect(),
+            ),
+        });
+        let (harness, _host) = harness_with_dispatch(
+            vec![Script {
+                chunks: vec![finish_error("transport down")],
+                cancel_after_first_batch: false,
+                followup_after_cancel: false,
+                prepare_no_adapter: false,
+            }],
+            session,
+            host,
+        );
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        harness.mailbox.enqueue(InboundCommand::Input {
+            target: crate::inbox::InboxTarget::NextTurn,
+            message: user_message("m1", "task"),
+            wakeup: true,
+        });
+        // The cancel lands only once the failed attempt is durable and
+        // the loop is parked inside the backoff (the 30s deadline makes
+        // the window wide; the wait observes the queued command without
+        // any sleep racing).
+        wait_for(
+            &harness.session,
+            |session| !session.typed("assistant/attempt").is_empty(),
+            "the failed attempt settles",
+        );
+        harness.mailbox.enqueue(InboundCommand::Cancel {
+            cause: fr_wire::event::CancelCause::User,
+            keep_inbox: true,
+        });
+        wait_for(
+            &harness.session,
+            |session| !session.typed("turn/end").is_empty(),
+            "the aborted turn settles",
+        );
+        drop(thread);
+        let session = harness.session.lock().expect("test session lock");
+        assert_eq!(
+            session.typed("llm/retry-started").len(),
+            0,
+            "a cancelled wait never appends the transition",
+        );
+        assert_eq!(session.typed("assistant/message").len(), 0);
+        assert_eq!(session.typed("assistant/attempt").len(), 1);
     }
     /// A send racing the remote maintenance window latches behind it and
     /// replays when the window converges (the dsh `wakeRequested` replay

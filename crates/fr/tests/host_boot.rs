@@ -209,13 +209,9 @@ fn assembly_manifest_has_no_builtin_sources() {
         .collect();
     assert_eq!(
         pending,
-        vec![
-            "fr-mcp",
-            "fr-ptc",
-            "fr-subagent",
-            "fr-llm-retry",
-            "fr-working-directory"
-        ],
+        vec!["fr-mcp", "fr-ptc", "fr-subagent", "fr-working-directory"],
+        // fr-llm-retry resolved when the 18c slice built its crate; the
+        // remaining four wait for their own slices.
         "only the future-crate rows may fail resolution"
     );
 }

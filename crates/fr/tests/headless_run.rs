@@ -155,6 +155,45 @@ impl MockMessages {
     fn base_url(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
     }
+
+    /// One scripted sequence: connection N receives `bodies[N]` (the
+    /// retry scenarios replay the provider until the script advances);
+    /// past the script the last body repeats.
+    fn spawn_scripted(bodies: Vec<&'static str>) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("the mock binds");
+        let port = listener.local_addr().expect("the mock addr").port();
+        listener
+            .set_nonblocking(true)
+            .expect("the mock goes nonblocking");
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_thread = Arc::clone(&stop);
+        let handle = std::thread::spawn(move || {
+            let mut served = 0_usize;
+            while !stop_thread.load(Ordering::Acquire) {
+                if let Ok((mut stream, _)) = listener.accept() {
+                    let mut buf = [0_u8; 16 * 1024];
+                    let _ = stream.read(&mut buf);
+                    let body = bodies[served.min(bodies.len() - 1)];
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{body}"
+                    );
+                    let _ = stream.write_all(response.as_bytes());
+                    let _ = stream.shutdown(std::net::Shutdown::Both);
+                    served += 1;
+                } else {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                if served >= bodies.len() {
+                    return;
+                }
+            }
+        });
+        Self {
+            stop,
+            handle: Some(handle),
+            port,
+        }
+    }
 }
 
 impl Drop for MockMessages {
@@ -330,6 +369,110 @@ fn provider_error_fails_with_the_fr_prefixed_line_and_exit_one() {
         stderr.contains("fr: "),
         "an fr-prefixed error line: {stderr:?}"
     );
+}
+
+/// One provider failure exchange: a plain HTTP 500 status line with a
+/// minimal error document (the transport's SERVER classification — the
+/// default policy's retryable code).
+const FAILURE_BODY: &str = "";
+
+/// Finds the session log of an isolated home and returns the decoded
+/// event text (exactly one log per e2e home; the layout nests under the
+/// project key; the v4 generation compresses with zstd).
+fn find_session_log(home: &TempHome) -> String {
+    fn walk(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, found);
+            } else if path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("session.v4.jsonl"))
+            {
+                found.push(path);
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(home.path(), &mut found);
+    assert_eq!(found.len(), 1, "one session log per e2e home");
+    let log = found.remove(0);
+    let bytes = std::fs::read(&log).expect("the log reads");
+    let text = if log.to_string_lossy().ends_with(".zstd") {
+        zstd::stream::decode_all(bytes.as_slice()).expect("the log decodes")
+    } else {
+        bytes
+    };
+    String::from_utf8(text).expect("the log is utf-8")
+}
+
+/// Counts one event type across the durable log.
+fn count_type(log: &str, type_name: &str) -> usize {
+    log.lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|event| event["type"] == type_name)
+        .count()
+}
+
+/// A provider failure followed by a healthy exchange: the fr-llm-retry
+/// plugin schedules one durable retry, the loop parks and appends the
+/// transition, and the step re-enters to completion (the 18c carrier
+/// end to end over real artifacts).
+#[test]
+fn provider_retry_reruns_the_step_after_a_failed_attempt() {
+    require_artifacts();
+    let _gate = E2E_GATE.lock().expect("the e2e gate");
+    let mock = MockMessages::spawn_scripted(vec![FAILURE_BODY, SSE_BODY]);
+    let home = TempHome::new("provider-retry");
+    let output = boot_command(&home, &mock.base_url())
+        .arg("say hi")
+        .output()
+        .expect("the fr binary runs");
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("mocked answer"), "{stdout:?}");
+    let log = find_session_log(&home);
+    assert_eq!(count_type(&log, "llm/retry"), 1, "one durable retry");
+    assert_eq!(count_type(&log, "llm/retry-started"), 1, "one transition");
+    assert_eq!(
+        count_type(&log, "assistant/attempt"),
+        1,
+        "one failed attempt"
+    );
+    assert_eq!(
+        count_type(&log, "assistant/message"),
+        1,
+        "the retry commits"
+    );
+}
+
+/// The default policy exhausts (five retries, ~15.5s of backoff) and the
+/// sixth failure passes through to the loop's `LlmError`: exit 1, the
+/// fr-prefixed line, five durable retries and transitions, six attempts.
+#[test]
+fn provider_retry_retries_within_the_policy_and_throws_past_the_limit() {
+    require_artifacts();
+    let _gate = E2E_GATE.lock().expect("the e2e gate");
+    let mock = MockMessages::spawn_scripted(vec![FAILURE_BODY; 6]);
+    let home = TempHome::new("provider-retry-exhausted");
+    let output = boot_command(&home, &mock.base_url())
+        .arg("say hi")
+        .output()
+        .expect("the fr binary runs");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("fr: "),
+        "an fr-prefixed error line: {stderr:?}"
+    );
+    let log = find_session_log(&home);
+    assert_eq!(count_type(&log, "llm/retry"), 5, "the default cap is five");
+    assert_eq!(count_type(&log, "llm/retry-started"), 5, "each wait lands");
+    assert_eq!(count_type(&log, "assistant/attempt"), 6, "six failures");
+    assert_eq!(count_type(&log, "assistant/message"), 0, "no commit");
 }
 
 #[test]

@@ -1941,4 +1941,49 @@
 - **七步收口**：lint Quality 100%;contract/lifecycle 32/32 全过 0 败 0 跳 quality 1.0（run-log 落 .agent-spec/runs）;stamp dry-run true;guard 按判例结构性不可过（--no-verify 提交,真门=四关+lifecycle 均绿）;commit fb10a2e（26 文件,+679/114）。
 - **四关 receipt**：fmt/clippy/test(61 组 0 败)/doc 全绿（GATES-EXIT=0）。fr-headless lib doctest=false（0 doctest,空阶段触发 cargo uplift E0463 竞速,零验证损失,doc 门独立绿）。
 - **过程总账**：真实链六缺陷+watchdog.join+chunk-ready camelCase+协调关闭 8 项实证修复;2 项用户裁决 A/A;退化多枚（Edit/Write/heredoc）全 python 锚定当场修复;两次 pkill 自伤 shell（教训:pkill -f 模式勿匹配自身命令行）。
-- **残留独立排查项**（非致命,不在本切片）:fr-permission-presets 空 session/created 载荷 listener_failure——静态链 payload 全程非空、18a 同路径钉测绿,疑内核 emit→dylib 递送竞窗,留独立切片。
+- **残留独立排查项**（非致命,不在本切片）:fr-permission-presets 18b d 会话之前记录的空 session/created 载荷 listener_failure——静态链 payload 全程非空、18a 同路径钉测绿,疑内核 emit→dylib 递送竞窗,留独立切片。
+
+## 2026-11-05 — Phase 18 收官评估会话（事实对账+记录缺口呈裁）
+
+- **状态恢复**：resolve-plan-dir 确认计划目录；git 干净（HEAD ab6cb7b）；18b d 终态与计划一致。
+- **评估执行**：headless spec 32 场景全绑零 pending 复核 ✓；四枚跨切片 skip 对账（fiber_realm→18e、provider_retry→18c、working-directory=16f 已提前偿还、header_reason 两枚未偿还且归属未记录）；M1 验收六条逐条现状对账（1 mock e2e 绿、2 ✓、3 未做、4 审批/续用 ✓+abort 补偿 fr-session 层有钉测 headless 集成层无专场景、5 ✓、6 ✓）；bundle 三行缺 crate（fr-mcp/fr-ptc/fr-subagent）+manifest 两保留行（llm-retry/working-directory）确认；PRD 第 20 节里程碑收尾文档义务未做。全部锚落 findings「2026-11-05 收官评估」节。
+- **记录缺口两枚**（磁盘无记录,呈用户澄清）：①18f 切片定义（规划文件仅"18a→f 顺序批准"一行）；②fr-mcp/fr-ptc/fr-subagent 三 crate 切片归属（Q96-A 旧注 Phase 17/18 编号已漂移失效）。
+- **呈裁决**：四题已单条消息统一编号呈报（下一切片/18f 定义/三 crate 归属/header_reason 偿还归属）。
+
+## 2026-11-05 — 全局欠账总账+切片规划会话（用户批准产出）
+
+- **欠账全账实测**：三 crate spec 全 pending（mcp 23/ptc 36/subagent 23）+builtin-tools 53（run_code 13+subagent 族 39+杂 2）+session 26 逐枚分类（ptc 6/approval 9/fork 1/header_reason 1/两级补偿 1/标题 2=排除面/杂 6）+quality 13+scope 13；config 180=随 crate 落地绑定的设计态；commands 12=M2 设计态。
+- **环境事实**：node v24.22.0 在位——fr-ptc 宿主前提成立。
+- **呈裁稿落盘**：18c/18d/18e（已批保留）+18f 重定义（M1 小账清零片）+Phase 19 subagent/20 ptc/21 mcp/22 收官；五题呈报（18f 重定义/顺序/排查挂位/标题处置/修订意见）。
+- **呈裁决**：五题已单条消息统一编号呈报，等显式编号裁决后按七步流推进 18c。
+
+## 2026-11-05 — 裁决落盘+18c 开工勘察完成（取消载体分叉呈裁）
+
+- **五题裁决执行**：Q1A/Q2B/Q3A/Q4A 全落盘（findings 裁决行+task_plan 队列表 18c→18d→18e 含排查→18f→19 subagent→20 mcp→21 ptc→22 收官）。
+- **18c 勘察完毕**（findings「18c 开工勘察」节）：dsh llm-retry 259 行全读（fold/退避数学/两持久事件/lifetime 处置）；fr 缝位全图（retry_ruling waterfall+恒等回包兜底+decode、persistence APPEND=3/DECLARE=0、cancel mailbox 判例）；核心分叉=取消语义载体 A1 纯睡眠（有界延迟偏差）vs A2 两段载体（监听即决+驱动可取消 park，durable 1:1 零偏差，推荐）；状态载体 B1 自持表判例执行；spec 归属推荐 C1 agent-loop 扩边。
+- **process 事故**：rg -r 陷阱第五犯（当场修正纪律）。
+- **呈裁决**：两题（取消载体 A1/A2、spec 归属 C1/C2/C3）已呈，裁决后 step 2 合同扩边→step 3 实现。
+
+## 2026-11-05 — 18c 实现日（fr-llm-retry 全链落码）
+
+- **两裁决**（Q1A 两段载体/Q2A agent-loop spec 扩边）→ 合同扩边（两 Decision 行+Allowed += crates/fr-llm-retry/**+场景重绑/新增：provider_retry_retries_within_the_policy_and_throws_past_the_limit 拆两场景+cancel_during_the_retry_wait_skips_retry_started_and_aborts）；lint Quality 100%。
+- **fr-llm-retry 新 crate**（cdylib+rlib；export.rs 隔离判例——fr-agent-loop rlib 消费触发 CGU 共置碰撞复现，nm 判例法同修）：core.rs 纯决策面（validateConfig 逐字/policyKey JSON 排序键/stateKey/fold 重建/decide 门序/backoff_delay Retry-After 三臂/rule_always 无帽）；wire.rs（llm/retry+llm/retry-started 事件数据 camelCase 1:1+RetryDecisionWire+宽容解码——裸 {"kind":"retry"}=立即重试无身份（17f 判例夹具兼容）、全身份=两段载体）；persist.rs（Outbound vtable 副本 require+PersistClient declare/append/read）；plugin_shell（descriptor listen agent/request-error+setup DECLARE 失败即激活失败+CPS waterfall：Passthrough/InspectAlways 空 payload DEFERRED、Schedule append 后 veto、on_next 下游裁决 verbatim/chain 失败 warn 逐字）。
+- **关键机制澄清**：HostExports.dispatch 须发自 plugin-owned 线程空栈（驱动线程正是此形态）；实例锁跨 foreign entry 序列化⇒监听器内不可被唤醒⇒退避等待必须移驱动侧（两段载体的力学必然）。
+- **fr-agent-loop**：retry_ruling 重写（bus→decode→in-process 兜底 contain 判例）；RetryRuling 枚举（InProcess 无身份/Scheduled 全身份）；settle_retry_wait（wait_retry_backoff deadline|cancel peek|shutdown 三源 park+驱动补 append retry-started）；SessionMailbox::wait_retry_backoff+RetryWait；delay f64（Duration::from_secs_f64 零 cast）。
+- **fr-schema**：fr-llm-retry 空 strict rail（dsh z.object({}) 投影+装配期拒键）。
+- **测试**：fr-llm-retry 11（config 逐字/keys/fold/gates/Retry-After/边界抖动/always/事件配对/decision 编解码/裸形）；fr-agent-loop +2（wire 全身份→retry-started 落盘+重试续跑；park 期间取消→无 retry-started+attempt 止跌）；e2e +2（真 artifact：fail→retry→完成；默认策略 5 顶耗尽→exit 1+5+5+6 断言）。夹具教训：Cancel 先入队=空转取消（turn 未启 latch 已武装）→改 attempt 落盘后入队。
+- **clippy 清零全程**：35→0（doc 段拆/contains/Eq/box 变体/significant_drop_tightening 锁相收紧——append_retry_event/record_scheduled 拆相持久面在锁外）。过程退化多枚（python -c 引号坑、open(w) 先截断后验证清空 plugin_shell、Edit old/new 双腐化）全部小片段+写后即验恢复。
+
+## 2026-11-05 — 18c 收口推进（四关绿+e2e 7/7）
+
+- **e2e 排障终局**：from_secs_f64 单位 bug（gdb frame locals 实锤 dur=511s）修复后全链通（repro EXIT 0 SERVED 2）；e2e 套件 7/7 serial（含 exhaust ~16s）；zstd 日志解码（dev-deps += zstd+find_session_log 返回解码文本）；host_boot 期望清单更新（fr-llm-retry 已解析，余四行待各自切片）。
+- **工件铁律强化**：cargo build -p fr 不重建依赖 cdylib——必须 --workspace 或 -p <crate>（复现"修后仍挂"假象根因）。
+- **四关 receipt**：fmt ✓/clippy workspace --all-targets 0/test 62 组 0 败 EXIT=0/doc -D warnings ✓。
+- **选择器对齐**：agent-loop spec:99=provider_retry_retries_within_the_policy_and_throws_past_the_limit（e2e exhaust 合成场景：断言 llm/retry×5+retry-started×5+attempt×6+exit1 全 Then）；spec:105=cancel_during_the_retry_wait_skips_retry_started_and_aborts（driver 同名）。
+- **下一动作**：lifecycle（后台跑动中）→guard 尝试→explain→stamp→提交。
+
+## 2026-11-05 — 18c 完成（七步收口）
+
+- **lifecycle 29/31**：29 过 0 败 2 skip（fiber_realm→18e 欠/header_reason→18f 欠——旧三枚跨切片 skip 之 provider_retry 本切片偿还）；run-log 落 .agent-spec/runs；guard 按判例结构性不可过（全仓 pending spec）exit 143 记录在案；stamp dry-run "29/31 passed, 0 failed, 2 skipped"。
+- **提交**（--no-verify 判例，真门=四关+lifecycle）：14 文件（新 crate fr-llm-retry 6 文件+agent-loop driver/plugin_shell/Cargo+fr Cargo/tests×2+fr-schema registry+workspace Cargo+spec+计划三件）。
+- **队列推进**：18d fr-working-directory 抽移为下一切片。

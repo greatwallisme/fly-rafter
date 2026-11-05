@@ -12,6 +12,7 @@ members = [
     "crates/fr-session",
     "crates/fr-llm",
     "crates/fr-llm-deepseek",
+    "crates/fr-llm-retry",
     "crates/fr-llm-openai",
     "crates/fr-llm-anthropic",
     "crates/fr-agent-loop",
@@ -73,6 +74,7 @@ fr-config = { path = "crates/fr-config" }
 fr-llm = { path = "crates/fr-llm" }
 fr-schema = { path = "crates/fr-schema" }
 fr-wire = { path = "crates/fr-wire" }
+fr-llm-retry = { path = "crates/fr-llm-retry" }
 fr-session = { path = "crates/fr-session" }
 fr-timeout = { path = "crates/fr-timeout" }
 fr-net = { path = "crates/fr-net" }

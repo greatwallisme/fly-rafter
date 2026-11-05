@@ -3262,3 +3262,54 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - **serve select biased 信号优先**（裁决原文覆盖语义的确定性实现）：信号臂先于 exit 臂。
 - **e2e 工程面**：signals 测试滴水式 SSE hold（50ms ping 保活,读窗 200ms 内永不断流）使子进程稳定服务过信号窗;进程级 e2e 静态门闩串行（两真子进程并行=boot 界竞争,串行=套件自身契约）;host_boot Write import。
 - **实证**：fr crate 全绿（11+5+6+5）；e2e 串行 2.4s 全绿；headless 62/62。
+
+## 2026-11-05 — Phase 18 收官评估（事实全锚；18f 与三 crate 切片归属=记录缺口待裁）
+
+- **Phase 18 已完成**：18a 装配面（84eb8ed）+18b a-d headless 行为面（91e3cf2/3efe56f/16aff99/8ca53dd/fb10a2e）；headless spec 32 场景全绑真测、lifecycle 32/32、四关绿。
+- **已批未做切片**（记录在案）：18c=fr-llm-retry（决策 47-2A 独立插件；manifest 保留行 `llm-retry` crates/fr/src/manifest.rs:79-87；偿还 agent-loop `pending_req_fr_agent_loop_provider` specs/generated/task-req-fr-agent-loop-agent.spec.md:96；dsh 真源 llm-retry/src/index.ts:194-256 全录 research-phase18 §5.b）；18d=fr-working-directory（决策 47-3A 独立插件；保留行 `working-directory` 同上；**实现体已在 fr-tools-builtin 16f 全量落地** crates/fr-tools-builtin/src/working_directory.rs 头注"16f arm"——18d=抽移成独立 crate+装配行兑现，PROMPT spec 场景已绑 fr-tools-builtin 真测 `context_tracks_the_working_directory` :659，抽移须测试随迁重绑）；18e=fiber_realm（决策 47-1A 驱动线程挂 isolate_realm，开工先细勘 dougong loader 装配面 doc/research/dougong-design.md:77-79,106-107；偿还 agent-loop `pending_req_fr_agent_loop_fiber_realm` spec :55）。
+- **18f=记录缺口**：规划文件仅"18a→f 顺序批准"一行（findings :3102），18f 内容无任何落盘记录；候选=M1 验收对拍收尾片或 fr-subagent（Q96-A 旧注"fr-subagent（Phase 18）"为漂移前旧编号）——待用户澄清。
+- **bundle 三行缺 crate**（headless bundle 16 行全锚 crates/fr-config/src/bundles/headless/fr.patch.yml）：fr-mcp/fr-ptc/fr-subagent 未建（workspace members 26 crate 实测无此三 crate）；boot 期 per-slot CompileFailure stderr 警告非致命（assembly.rs:221-226 判例）。PRD M1 范围明列 fr-mcp、fr-ptc（doc/prd.md:717）；Q96-A（旧编号 2026-10-29）注 fr-ptc=Phase 17/fr-subagent=Phase 18 已被实际执行漂移失效（实际 Phase 17=fr-compaction、18=装配），三 crate 切片归属无落盘记录。
+- **跨切片 skip 余量**（Q4A 四枚对账）：fiber_realm→18e ✓、provider_retry→18c ✓、working-directory→**已提前在 16f 偿还**（PROMPT spec :83 已绑真测）、header_reason→**未偿还且归属未记录**（agent-loop `pending_req_fr_agent_loop_header_reason` spec :138 + fr-session `pending_req_fr_session_request_header_reason` spec :58 两枚；research §5.c：fr-agent-loop driver 已实现 reason 判定与 headerEquals（fr 侧已实现面、绑定行号待补核），偿还物=绑真实测试）。
+- **M1 验收六条现状**（doc/prd.md:717 表）：1 headless turn 周期+v4 会话=mock e2e 5 场景绿（真实 provider 链 fr-llm-deepseek 生成面已真）；2 --json schema=fr-schema 八帧+e2e 校验 ✓；3 逐事件同型 diff=**未做**（对拍设计未启动；基准口径已裁 6A 两侧禁用 session-title，PRD :647）；4 审批 fail-closed ✓（unavailable 场景绑真测）+续用 ✓（resume_path_adopts_and_rechecks）+abort 补偿=fr-session 层 repair 钉测已有（service.rs:1389 resume_repairs_interrupted_turn+repair::interrupted_turn_closers :675），headless 集成层无专门场景；5 dump 两态 ✓（fr dump 11 测试）；6 四关 ✓（fb10a2e receipt）。
+- **里程碑收尾义务**（PRD 第 20 节尾注）：生成式文档（tool-catalog/config-catalog 等价物）更新并与 dsh 同名目录 diff 评审——M1 收尾未做。
+- **残留独立项**：fr-permission-presets 空 session/created 载荷 listener_failure 排查（非致命，疑内核 emit→dylib 递送竞窗，计划留独立切片）。
+
+## 2026-11-05 — 全局欠账总账+Phase 18 尾-22 切片规划（用户批准产出；裁决五题随呈报）
+
+- **欠账全账**（pending 选择器全量对账，本日 rg 实测）：
+  - 无主三 crate 认领：fr-mcp（spec 178 行/23 场景全 pending）、fr-ptc（261 行/36）、fr-subagent（180 行/23）+builtin-tools 53（run_code 13+subagent 五工具族 39+headless_ask_fail_closed+「注册表含第 17 节全部工具」全量断言 `_17`）。
+  - fr-session 26 逐枚分类：ptc 事件 6（dispatch/dispatch-start×触发/表面归属/回环→ptc 片）、approval 事件 9（asked/decided/policy×触发/表面归属/回环→归属核对批）、fork 会话拒绝续用 1（→subagent 片）、header reason 1（→18f）、两级补偿错误码 1（→18f）、标题 2（无 LLM 回退标题/LLM 标题参数生效=**决策 47-6A 排除面**→治理处置挂收官片）、杂 6（tool schema 顺序敏感/工具增删 developer 门控/first-node 归一化/in-history 增量/replace-op 源事件留存/空渲染清空活跃尾部+requirement→归属核对批）。
+  - quality spec 13（crate 命名/ctx_get 禁令/dougong 依赖向/golden_session=验收 3 锚/lint 族等）→收官片批绑。
+  - scope spec 13（19.1 排除负向断言：api/worktree/plugin_market/ralph/stagehand/team 系等）→收官片批绑。
+  - config 180=各 crate config rail 随 crate 落地绑定+宿主已裁范围外——设计态非独立债，随 19-21 各片带绑；commands 12=M2 设计态（bundle 无 commands 行、headless 不解析命令，本切片范围外）。
+  - M1 验收 3 对拍（golden_session 锚+6A 基准口径）+生成式文档 diff 评审→收官片。
+- **环境事实**：node v24.22.0+npx 11.19.1 在位（/usr/local/bin/nodejs/bin/node）——fr-ptc 宿主前提成立；dsh stripTypeScriptTypes=Node 原生 strip-only 类型擦除，Node 24 原生支持。
+- **切片规划呈裁稿**：
+  - **18c fr-llm-retry**（已批，决策 47-2A）：独立插件挂 agent/request-error、持久 llm/retry+retry-started、投影状态、超限回落抛错；偿还 agent-loop provider_retry。
+  - **18d fr-working-directory**（已批，47-3A）：从 fr-tools-builtin 抽移三腿+装配行兑现；PROMPT 已绑真测随迁重绑。
+  - **18e fiber_realm**（已批，47-1A）：驱动线程挂 isolate_realm，先细勘 dougong loader 装配面；偿还 fiber_realm。
+  - **18f（重定义呈裁）**=M1 小账清零片：header_reason 两枚绑定+session 孤儿归属核对批（approval 9+杂 6）+两级补偿码+headless_ask_fail_closed+abort 补偿 headless 集成场景（验收 4 补全）。
+  - **Phase 19=fr-subagent**：in-process spawn/fork+五工具族+manager（catalog/激活池/深度容量/结果送达/UNAUTHORIZED 矩阵）；63 绑定面（spec 23+bt 39+session fork 1）；依赖 fr-agent-loop spawn/fork 已有+fr-session；零新外部依赖。
+  - **Phase 20=fr-ptc**：Node 子进程 strip-only+wire 帧协议（channel/json-wire/protocol 帧上限+有界写队列+八类失败分类 fail-closed）+bootstrap JS 抽取脚本（Q89-A 判例）+绑定声明生成+子调度回流（含审批升级）+dispatch-log 消费兑现（17h-b 死码激活）；55 绑定面（spec 36+bt 13+session 6）。
+  - **Phase 21=fr-mcp**：stdio+Streamable HTTP 双 transport（fr-net 复用）+动态注册（名字归一 64 帽+12hex 后缀，Q101′A 面）+资源工具 3 件+生命周期（connection.ready/failOnStartupError/dispose 5s）+指令捕获+重连状态机（指数退避+稳定窗预算重置+超限注销）+两段式同步。
+  - **Phase 22=M1 收官片**：验收 3 对拍设计+执行（golden_session+6A 两侧禁标题基准）+quality/scope 26 枚批绑+「第 17 节全部工具」全量在册断言+标题排除 2 场景治理（需求修订流程）+生成式文档 diff 评审（PRD 第 20 节收尾义务）+全账清零核验。
+  - **备选序**：20↔21 可换（mcp 先=更自洽；ptc 先=早暴露 Node 依赖与协议栈风险，推荐 ptc 先）。
+- **待裁决五题**：①18f 重定义批准 ②Phase 19-21 顺序 ③fr-permission-presets 竞窗排查挂位（建议 18e 同期，同涉内核递送面） ④标题 2 场景处置方式（排除标记 vs 删场景，需走需求修订流程） ⑤规划修订意见。
+- **五题裁决（2026-11-05 用户）**：Q1A=18f 重定义批准（M1 小账清零片）；Q2B=Phase 19 subagent→20 mcp→21 ptc（mcp 提前、ptc 压轴）；Q3A=permission-presets 竞窗排查挂 18e 同期；Q4A=标题 2 场景走需求修订流程（intake 补排除标注→重生成→场景消失→重放绑定脚本，Phase 22 执行）；Q5=无修订。规划定稿，Phase 18 尾=18c→18d→18e（含排查）→18f。
+
+## 2026-11-05 — 18c 开工勘察（dsh llm-retry 全读+fr 缝位全图+取消载体分叉呈裁）
+
+- **dsh 真源全读**（llm-retry/src/index.ts 259 行）：inject [agents,sessionProjections]、零 config（validateConfig 拒 retryPolicy 键 `'llm-retry: retryPolicy belongs under each provider configuration'`/未知键 `'llm-retry: unknown key "X"'`）；sessionProjections.register llmRetry fold=step/start|turn/end→{} 重置、llm/retry→按 [provider,policyKey] upsert {retry,retryId}+同值幂等守卫；retryPolicyKey=JSON[mode,maxRetries,sortedCodes,initial,max,jitter]（normal）/JSON[mode,initial,max,jitter]（always）、retryStateKey=JSON[provider,policyKey]；localDelay=exponent min(retry-1,1024)、min(initial·2^exp,max)·(1-ratio+2·ratio·random) 再 min(·,max)；cancellableDelay=aborted 即 false/timer true/abort false；backoff=fused signal→**append llm/retry（先持久后可取消等待）**→等待→append llm/retry-started {retryId,turn,step,retry}→{kind:'retry'}；recover=policy 缺→next()；always=先 settleDownstream(next)（error→warn `'llm-retry: provider "X" always policy ignored a downstream recovery failure: %o'`、下游 retry 决策直返）后落回退避无帽；normal=码不在 retryableCodes→next()、previousRetry≥maxRetries→next()；providerRetryAfterMs 有限>0→超 max：normal next()/always localDelay，未超=直用；lifetime AbortController dispose=disposeListener+abort+allSettled(active)，stale 回调守卫（aborted→resolve undefined）。RetryInternals.random=抖动采样缝。策略所有权在 provider（retry-policy.ts:149-195，fr-llm/retry_policy.rs 已移植：defaults 5/500/10000/0.1+JitterRandom+MAX_TIMER_DELAY_MS）。
+- **fr 缝位全图**：①驱动侧 retry_ruling（driver.rs:2288-2328）=outbound dispatch EVENT_REQUEST_ERROR×WATERFALL_MODE（bus 监听先行）→reply==bytes 恒等回包→in-process 注册表兜底（boxed |_| None）→decode_request_error_action（driver.rs:1485-1491，`{"kind":"retry"}`=重试）；②出站织物=outbound.rs（ABI v3 HostExports 副本，dispatch=ABI v5 await 模式**同步阻塞调用线程至链结算**，outbound.rs:213-218）；③桥语义（dougong-plugin-dev）：waterfall 监听经 descriptor listen+CPS（STATUS_DEFERRED 拉 next 续延→on_next 收下游结果）；恒等链=原载荷字节；**实例锁跨 foreign entry 序列化（18a 锁序倒置修复实证）**⇒监听器在 on_event 内无法被任何内核递送（事件/require 回调）中途唤醒；④持久面全备：fr-wire persistence METHOD_SESSION_APPEND=3+METHOD_DECLARE_EVENT_TYPES=0（services.rs:77-91）、fr-agent-loop SessionClient append 判例（session_client.rs:31）；⑤cancel=mailbox 命令驱动线程消费（cancel_queues_the_durable_cause 判例 plugin_shell.rs:1351、driver.rs:1071 fn cancel）——驱动 park 循环被命令推送唤醒（pump_generation wait_step 同型）。
+- **核心分叉（取消语义载体）**：dsh 退避=循环 await 链内可取消等待（中止近即时）；fr 监听器若在 on_event 内睡眠=驱动线程被阻塞→cancel 命令延迟至睡眠结束（≤maxDelayMs）→SIGINT 期 teardown join 同滞（双信号强制升级兜底）。**A1 纯睡眠**=有界取消延迟偏差（19.2 候选）；**A2 两段载体**=监听器即决即返（llm/retry 先持久 1:1+链值 fr 自有扩展 `{"kind":"retry","delayMs":N}`）→驱动做可取消 park 等待（deadline|cancel 命令|shutdown 三源唤醒，inbox 判例同型）→中止=丢弃决策（llm/retry 留存、无 retry-started=1:1）→到期=驱动 append llm/retry-started（fr-wire 形）→重试 step；durable 面逐字节 1:1、取消即时、零 19.2（request-error waterfall 本就是 fr 内部织物非 dsh wire）。
+- **状态载体（判例执行非分叉）**：llmRetry 投影=B1 自持表判例同形（fr-compaction pending_spill 两腿会话表；消费方到场纪律）：键 (session,turn,step,provider,policyKey)——payload 自带 turn/step 使 step 边界重置天然成立（查时按 (turn,step) 匹配）；首见会话冷读 read(9) 折叠重建（llm/retry 事件数据自带 turn/step/provider/policyKey/retry/retryId 全字段=精确 dsh fold 语义，含崩溃重启恢复）；B2 通用 session-projection 服务=M1 单消费方不建（消费方到场纪律）。
+- **spec 归属（推荐 C1）**：C1=agent-loop spec 扩边（场景「provider 重试策略生效」主场+fr-token-meter 挂 compaction spec 判例同形，Allowed += crates/fr-llm-retry/**）；C2=新 spec；C3=fr-llm spec 扩边。
+- **process 事故**：rg `-r` 陷阱第五犯（-rn 误用致输出失真）——修正纪律：rg 一律 `-n`，禁 `-r`（`-r`=--replace）。
+
+## 2026-11-05 — 18c e2e 排障三教训（ms 单位 bug/zstd 日志/工件陈旧）
+
+- **from_secs_f64 单位 bug（e2e 首功）**：delay 切 f64 时 `Duration::from_secs_f64(delay_ms)` 把毫秒值当秒——511ms 退避变 511s park，e2e 悬挂。诊断链：python 脚本化复现（控 mock+env+home）→ gdb 附加活进程抓栈（`wait_retry_backoff` in condvar wait_timeout）→ frame locals 打出 `dur=Duration{secs:511}` 实锤。修复=from_secs_f64(delay_ms/1000.0)。教训：单位换算切浮点 API 时必须过一遍语义（gdb frame locals 是单位类 bug 的决定性证据面）。
+- **复现纪律**：手工复现脚本（python TcpListener mock+subprocess env 注入）比裸跑测试快得多；gdb batch 三连（info threads→thread N→frame locals）。孤儿进程干扰=pgrep 模式含脚本自身命令行（python heredoc 含同串）——用 ps args+rg -v python 过滤。
+- **会话日志 zstd**：v4 世代默认 zstd 压缩（session.v4.jsonl.zstd）——e2e 读日志必须 `zstd::stream::decode_all`（fr dev-deps += zstd；find_session_log 改返回解码文本）。
+- **cdylib 工件陈旧陷阱（18a 判例强化）**：`cargo build -p fr` 不重建依赖 crate 的 cdylib 工件——驱动修了单位 bug 但 libfr_agent_loop.so 仍是旧件（复现"修后仍挂"假象）。`--workspace` 或 `-p <crate>` 显式建。require_artifacts 只查存在不查新鲜——四关前置 `cargo build --workspace` 铁律。
+- **e2e 全绿**：7/7（serial --test-threads=1；含两新场景：reruns_the_step ~2.5s、retries_within_the_policy_and_throws_past_the_limit ~16s 默认策略 5 顶耗尽）。选择器对齐：spec:99→e2e exhaust 合成场景（断言 retry×5+started×5+attempt×6+exit1 全 Then）、spec:105→driver cancel 测试同名。

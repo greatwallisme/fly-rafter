@@ -799,6 +799,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "uuid",
+ "zstd 0.14.3",
 ]
 
 [[package]]
@@ -807,6 +808,7 @@ version = "0.1.0"
 dependencies = [
  "dougong-abi",
  "fr-llm",
+ "fr-llm-retry",
  "fr-session",
  "fr-system-prompt",
  "fr-tools",
@@ -963,6 +965,18 @@ dependencies = [
  "futures-core",
  "regex",
  "serde_json",
+]
+
+[[package]]
+name = "fr-llm-retry"
+version = "0.1.0"
+dependencies = [
+ "dougong-abi",
+ "fr-llm",
+ "fr-wire",
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]
