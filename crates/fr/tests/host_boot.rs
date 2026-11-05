@@ -5,6 +5,7 @@
 //! `cargo build --workspace` first; these tests fail loud with the
 //! instruction when the artifacts are missing.
 
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -169,7 +170,7 @@ fn headless_assembly_boots_real_dylibs() {
                 "service {service} must resolve after boot: {resolved:?}"
             );
         }
-        let code = shutdown_tree(&mut live, fr::signals::ShutdownReason::Terminate).await;
+        let code = shutdown_tree(&mut live, 0).await;
         assert_eq!(code, 0, "SIGTERM maps to exit 0");
     });
 }
@@ -260,10 +261,16 @@ fn entry_facts_injected_through_document_rows() {
         let facts: Value = serde_json::from_slice(&reply).expect("json facts");
         assert_eq!(
             facts,
-            serde_json::json!({ "app": { "argv": app } }),
-            "the relayed snapshot reads back verbatim"
+            serde_json::json!({
+                "app": { "argv": app },
+                "model": {
+                    "provider": "deepseek-official",
+                    "model": "deepseek-flash",
+                },
+            }),
+            "the relayed snapshot reads back verbatim (argv + the model selection rail)"
         );
-        let code = shutdown_tree(&mut live, fr::signals::ShutdownReason::Terminate).await;
+        let code = shutdown_tree(&mut live, 0).await;
         assert_eq!(code, 0);
     });
 }
@@ -320,16 +327,37 @@ fn signals_map_to_dsh_exit_codes() {
 /// so the delivery phase does not change the code).
 fn assert_signal_exit(signal: &str, expected: i32) {
     require_artifacts();
+    // The runner drives a live generation against a dripping SSE hold
+    // (the stream stays open), so the child serves until the signal: the
+    // operator override lands inside the serve window deterministically
+    // (a self-exiting usage-error run would finish before any signal).
+    let hold = std::net::TcpListener::bind("127.0.0.1:0").expect("the hold binds");
+    let hold_port = hold.local_addr().expect("hold addr").port();
+    let _hold_thread = std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = hold.accept() {
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n: ping\n\n";
+            let _ = stream.write_all(head.as_bytes());
+            loop {
+                std::thread::sleep(Duration::from_millis(50));
+                if stream.write_all(b": ping\n\n").is_err() {
+                    return;
+                }
+            }
+        }
+    });
     let home = TempHome::new("signals");
     let mut child = Command::new(env!("CARGO_BIN_EXE_fr"))
         .arg("headless")
+        .arg("--json")
+        .arg("say hi")
         .env("FR_HOME", home.path())
+        .env("DEEPSEEK_API_KEY", "test-key")
+        .env("DEEPSEEK_BASE_URL", format!("http://127.0.0.1:{hold_port}"))
         .spawn()
         .expect("the fr binary spawns");
-    // Give the boot a beat; a signal that lands earlier is buffered by the
-    // runtime's signal driver and surfaces at the serve loop with the same
-    // mapped code.
-    std::thread::sleep(Duration::from_secs(3));
+    // The serve window: the boot settles and the generation holds on the
+    // dripping stream; the signal lands inside it.
+    std::thread::sleep(Duration::from_millis(1500));
     let delivery = Command::new("kill")
         .arg("-s")
         .arg(signal)
@@ -436,7 +464,7 @@ fn event_pump_delivers_listened_events() {
             types.contains(&"approval/policy"),
             "approval/policy seeded: {types:?}"
         );
-        let code = shutdown_tree(&mut live, fr::signals::ShutdownReason::Terminate).await;
+        let code = shutdown_tree(&mut live, 0).await;
         assert_eq!(code, 0);
     });
 }

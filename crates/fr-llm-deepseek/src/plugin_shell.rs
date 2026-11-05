@@ -73,6 +73,28 @@ unsafe impl Send for AccessLink {}
 unsafe impl Sync for AccessLink {}
 
 impl AccessLink {
+    /// Grants one committed target activation access to a provided
+    /// service (the D31 registration primitive; no call, no buffer).
+    fn grant(&self, target_service: &str, granted_service: &str) -> Result<(), String> {
+        // SAFETY: the copied vtable is live until this activation's
+        // `teardown` returns; both names are read-only byte strings for
+        // the call.
+        let status = unsafe {
+            (self.host.grant)(
+                self.host.host_handle,
+                target_service.as_ptr(),
+                target_service.len(),
+                granted_service.as_ptr(),
+                granted_service.len(),
+            )
+        };
+        if status == dougong_abi::STATUS_OK {
+            Ok(())
+        } else {
+            Err(format!("grant failed with host status {status}"))
+        }
+    }
+
     /// Performs one synchronous cross-plugin call (growable buffer
     /// protocol; `STATUS_CAPACITY` doubles up to the shared ceiling).
     fn require(&self, service: &str, method: u32, payload: &[u8]) -> Result<Vec<u8>, String> {
@@ -273,6 +295,16 @@ fn require_route(link: &AccessLink) -> Result<(), String> {
         fr_wire::services::llm::METHOD_REGISTER_ROUTE,
         &bytes,
     )?;
+    // The channel-side completion of the registration protocol (the Q7A
+    // mechanism; the first real generation caught the gate): fr-llm's
+    // proxy worker requires this face by the REGISTERED name, which no
+    // static inject list can declare ahead of time — the D31 grant hands
+    // the committed 'llm' activation runtime access to this service (the
+    // fr-tools-builtin section grant's identical judgment). The timing
+    // holds: this crate injects 'llm', so the target commits first, and
+    // the worker requires only when a generation begins.
+    link.grant(fr_wire::services::llm::SERVICE_NAME, FACE_SERVICE)
+        .map_err(|error| format!("fr-llm-deepseek: llm grant failed: {error}"))?;
     Ok(())
 }
 

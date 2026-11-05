@@ -1922,3 +1922,16 @@
 - **fr-agent-loop export.rs 隔离**（b-a 判例兑现，nm/ar 实证法复验）。
 - **门**：fmt/clippy/test 1968-0/doc 四关全绿+21 cdylib 工件+boot 集成绿。退化 8 枚当场修复。计划文件已更新。
 - **下一动作=d：runner 集成（headlessStartup 消费行+采纳链+等待/抑制+summarize+退出守望+宿主监听插件）→ mock e2e → 25 场景绑定+七步收口。**
+
+## 2026-11-05 — 18b d 会话（runner 集成）开工
+
+- 勘察完成：dsh runner 真源（index.ts 420 行）+whenIdle 真语义（activityDone do-while）+泵轨事实修正（无 session/turn/end 事件，Q4B=listen session/event 按 type 过滤）+facts 模型段判例（dsh base agent-default-model 行）+退出轨/接收机制/flush 追平判定全锚 findings「18b d 开工勘察」。
+- 计划文件已更新（18b d 七步骤清单）。开始步骤 1（fr-schema rail 声明）。
+
+## 2026-11-05 — 18b d 实现+真实链六缺陷连环（同日续）
+
+- **实现全落**：fr-schema rail 声明+string_default;fr 宿主 facts model 段+exit_watcher（in-process 监听插件）+serve select+biased 信号优先;fr-headless 壳（descriptor inject×3+listen×4+RunnerBus+spawn-once）+runner.rs 全量移植（whenIdle 事件镜像/失败跟踪/flush 追平/summarize/DriveEnd 协调关闭）；三 crate CONTEXT face 裸 String 修正；fr-llm-deepseek grant("llm","llm-deepseek");fr-tools-builtin grant("system-prompt","builtin-tools")+chunk-ready camelCase 对齐；serve watchdog.join 缺陷修复（退出 5s→即时）。
+- **测试**：fr-headless 62/62（runner 18:scripted fake host 全链+stdin 两枚+json 失败面+bus 解码钉）；fr crate 27（host_boot 6 含滴水 hold 信号测+e2e 5+dump 11+watcher 5）；e2e 进程级 5 场景全绿（--json 首末帧+schema 验证+reasoning stderr+ghost 拒+provider 错+help）；spec 25 pending 选择器全绑定真测。
+- **用户裁决两项 A/A**：fr-system-prompt 边界扩展（机制实证改 grant,spec 行留痕）；Q4B Decision 措辞勘误（session/event 按 type 过滤）。
+- **门**：fmt ✓ clippy ✓（修 3 轮）；workspace test+doc 后台干净重跑中（前次失败=我自己前台 cargo 并发干扰 E0463,非代码缺陷）。
+- **下一步**：四关绿→lifecycle（headless spec 32 场景）→guard 尝试→explain→stamp→提交。

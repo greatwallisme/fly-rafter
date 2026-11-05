@@ -25,6 +25,7 @@ use fr_config::{
 use serde_json::json;
 
 use crate::diagnostics::BootFatal;
+use crate::exit_watcher;
 use crate::manifest;
 use crate::pump;
 use crate::signals;
@@ -104,10 +105,15 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 pub struct CompileStage {
     /// The typed loader document.
     pub config: Config,
-    /// Per-row compile failures (reserved rows and the four future crates).
+    /// Per-row compile failures (reserved rows and boots fail closed on the
+    /// entry row; the pending-slice warnings surface on stderr).
     pub failures: Vec<fr_config::CompileFailure>,
     /// The number of slots that resolved into the document.
     pub slot_count: usize,
+    /// The model selection rail facts baked beside the app argv (the Q1A
+    /// ruling): the composed llm row's config joined with the fr-schema
+    /// declared defaults.
+    pub model_facts: serde_json::Value,
 }
 
 /// The entry-facts injection target: the headless bundle's entry row id.
@@ -183,9 +189,14 @@ pub fn compile_stage(
             disabled: false,
         });
     }
-    // Entry facts: bake the app argv snapshot into the entry row config
-    // (headless spec decision line; the service relay is the reading rail
-    // — dougong dylib activations receive no slot config).
+    // The model selection rail (the Q1A ruling): the composed llm row's
+    // config joined with the fr-schema declared defaults — the facts the
+    // runner reads beside the app argv (decision 47's host-value face).
+    let model_facts = model_facts(&rows);
+    // Entry facts: bake the app argv snapshot plus the model selection
+    // into the entry row config (headless spec decision line; the service
+    // relay is the reading rail — dougong dylib activations receive no
+    // slot config).
     let entry_row = rows
         .iter_mut()
         .find(|row| row.id == ENTRY_ROW_ID && !row.disabled)
@@ -193,7 +204,8 @@ pub fn compile_stage(
             fatal("fr: the headless entry row is missing from the composition".to_owned())
         })?;
     entry_row.config = json!({
-        "app": { "argv": invocation.app_argv() }
+        "app": { "argv": invocation.app_argv() },
+        "model": model_facts,
     });
     let compiled = compile_to_loader_doc(
         &rows,
@@ -231,7 +243,42 @@ pub fn compile_stage(
         config,
         failures: compiled.failures,
         slot_count,
+        model_facts,
     })
+}
+
+/// The model selection rail facts (the Q1A ruling): the composed llm row's
+/// `provider`/`model`/`reasoning-effort` values joined with the fr-schema
+/// declared defaults; a missing row falls back to the declared defaults
+/// (the composition cannot run turns without it anyway). The key spellings
+/// are kebab-case (the row config face); the reply document is the
+/// host-value face the runner reads.
+fn model_facts(rows: &[FlatRow]) -> serde_json::Value {
+    let rail_row = rows
+        .iter()
+        .find(|row| row.name == "fr-llm-deepseek")
+        .map(|row| &row.config);
+    let declared = |key: &str| fr_schema::string_default("fr-llm-deepseek", key);
+    let row_value = |key: &str| {
+        rail_row
+            .and_then(|config| config.get(key))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    };
+    let provider = row_value("provider").or_else(|| declared("provider"));
+    let model = row_value("model").or_else(|| declared("model"));
+    let reasoning_effort = row_value("reasoning-effort");
+    let mut facts = serde_json::Map::new();
+    if let Some(provider) = provider {
+        facts.insert("provider".to_owned(), json!(provider));
+    }
+    if let Some(model) = model {
+        facts.insert("model".to_owned(), json!(model));
+    }
+    if let Some(effort) = reasoning_effort {
+        facts.insert("reasoning-effort".to_owned(), json!(effort));
+    }
+    serde_json::Value::Object(facts)
 }
 
 /// The artifact search dirs: `FR_PLUGIN_PATH` entries first, then the
@@ -283,7 +330,7 @@ pub async fn boot_and_serve(
 }
 
 /// The live boot tree: the kernel context, the reconciler owning the
-/// fibers, and the running pump task.
+/// fibers, the running pump task, and the exit-watcher channel.
 #[derive(Debug)]
 pub struct LiveTree {
     /// The kernel root context.
@@ -292,6 +339,9 @@ pub struct LiveTree {
     pub reconciler: Reconciler,
     /// The host pump task handle.
     pub pump: tokio::task::JoinHandle<()>,
+    /// The headless exit request lane (the 退出守望): the receiver side of
+    /// the in-process watcher plugin's channel.
+    pub exit: exit_watcher::ExitRequest,
 }
 
 /// Boots the composition without serving: compile → kernel → join →
@@ -331,12 +381,14 @@ pub async fn boot(
     let deadline = tokio::time::Instant::now() + BOOT_JOIN_BOUND;
     join_tree(&reconciler).await?;
     rearm_parked(&reconciler, deadline).await?;
-    relay_facts(&kernel_ctx, invocation).await?;
+    let exit = exit_watcher::spawn_watcher(&kernel_ctx, deadline).await?;
+    relay_facts(&kernel_ctx, invocation, &stage.model_facts).await?;
     let pump = pump::spawn(kernel_ctx.clone());
     Ok(LiveTree {
         ctx: kernel_ctx,
         reconciler,
         pump,
+        exit,
     })
 }
 
@@ -414,12 +466,19 @@ async fn rearm_parked(
 /// # Errors
 ///
 /// Fails closed when the entry service is missing or refuses the facts.
-async fn relay_facts(ctx: &Context, invocation: &BootInvocation) -> Result<(), BootFatal> {
+async fn relay_facts(
+    ctx: &Context,
+    invocation: &BootInvocation,
+    model_facts: &serde_json::Value,
+) -> Result<(), BootFatal> {
     let fatal = |summary: String| BootFatal {
         detail: summary.clone(),
         summary,
     };
-    let facts = json!({ "app": { "argv": invocation.app_argv() } });
+    let facts = json!({
+        "app": { "argv": invocation.app_argv() },
+        "model": model_facts,
+    });
     let bytes = serde_json::to_vec(&facts)
         .map_err(|error| fatal(format!("fr: cannot serialize the entry facts: {error}")))?;
     let invoker = ctx
@@ -459,18 +518,30 @@ impl RunningBoot {
 /// Panics only if the watchdog thread cannot spawn (thread-exhaustion
 /// level failure; nothing the boot can recover).
 pub async fn serve_until_shutdown(live: &mut LiveTree) -> RunningBoot {
-    let reason = signals::wait_shutdown().await;
-    let code = reason.exit_code();
-    let watchdog = std::thread::Builder::new()
+    // The exit lane comes out of the tree before the race so the select
+    // arm cannot resolve immediately through a dropped receiver.
+    let mut exit = std::mem::replace(&mut live.exit, exit_watcher::ExitRequest::dead());
+    // Biased, signals first: the operator override is deterministic (the
+    // 18b 退出轨 ruling — SIGINT 130 / SIGTERM 0 win over a racing exit
+    // request whenever both are ready).
+    let code = tokio::select! {
+        biased;
+        reason = signals::wait_shutdown() => reason.exit_code(),
+        code = exit.recv() => code.unwrap_or(1),
+    };
+    let _watchdog = std::thread::Builder::new()
         .name("fr-shutdown-watchdog".to_owned())
         .spawn(move || {
             std::thread::sleep(SHUTDOWN_GRACE);
             std::process::exit(code.cast_signed());
         })
         .expect("the shutdown watchdog spawns");
-    let _ = shutdown_tree(live, reason).await;
-    let _ = watchdog.join();
-    // The graceful dispose converged (or the watchdog already fired).
+    let _ = shutdown_tree(live, code).await;
+    // The graceful dispose converged: exit immediately (the dsh twin's
+    // explicit process.exit — a pending force-exit timer never blocks
+    // it). The watchdog stays armed only as the failsafe for a teardown
+    // that outlives the grace; joining it would hold every exit for the
+    // full grace even on success.
     std::process::exit(code.cast_signed());
 }
 
@@ -487,8 +558,7 @@ pub async fn serve_until_shutdown(live: &mut LiveTree) -> RunningBoot {
 ///
 /// Never in practice; the retire task spawn panics only without a
 /// runtime.
-pub async fn shutdown_tree(live: &mut LiveTree, reason: signals::ShutdownReason) -> u32 {
-    let code = reason.exit_code();
+pub async fn shutdown_tree(live: &mut LiveTree, code: u32) -> u32 {
     // Quiesce the host pump first: its 50ms drain requires race the
     // retire's dispose chain on the target plugins' instance locks, and a
     // tick landing mid-dispose can stall the retire (2026-11-04

@@ -17,4 +17,5 @@ pub mod help_text;
 pub mod json_stream;
 pub mod plugin_shell;
 pub mod reasoning;
+pub mod runner;
 pub mod startup;

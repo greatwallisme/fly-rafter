@@ -656,7 +656,10 @@ impl BuiltinTools {
                     .directories
                     .context_text(agent)
                     .map_err(|error| format!("context-text failure: {error}"))?;
-                json!({ "text": text })
+                // The registry's context resolve reads the provider reply
+                // as the bare text (the dsh context text fn returns a
+                // string; the first real assemble caught the wrap).
+                Value::String(text)
             }
             METHOD_INSPECT_LIST_EXECUTE => {
                 let call = request

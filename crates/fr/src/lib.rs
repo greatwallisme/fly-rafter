@@ -10,6 +10,7 @@
 
 pub mod assembly;
 pub mod diagnostics;
+pub mod exit_watcher;
 pub mod manifest;
 pub mod pump;
 pub mod signals;

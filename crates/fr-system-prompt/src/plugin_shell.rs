@@ -29,6 +29,12 @@ pub const PLUGIN_NAME: &str = "fr-system-prompt";
 
 /// The descriptor the loader consumes: the `system-prompt` service over
 /// the dynamic channel, no injected dependencies or listeners. The
+/// registered sections' textProvider endpoints ride runtime grants (the
+/// D31 lane the providers' own setups take — the approval section's
+/// identical judgment), not inject declarations: declaring them here
+/// closes a declaration cycle (`system-prompt -> builtin-tools ->
+/// approval -> system-prompt`) the kernel can never order.
+/// The
 /// version is sourced from crate metadata so it cannot drift.
 const DESCRIPTOR: &[u8] = concat!(
     "{\"name\":\"fr-system-prompt\",\"version\":\"",

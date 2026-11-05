@@ -950,6 +950,7 @@ fn live_probe(state: &ShellState, payload: &[u8]) -> Result<Vec<u8>, String> {
 /// Returns the failure text for a malformed notification payload.
 pub fn handle_chunk_ready(payload: &[u8], sessions: &SessionMap) -> Result<(), String> {
     #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
     struct Notification {
         session_id: String,
         /// Pinned for wire-shape validation only (Q84-B2: the wake is a
@@ -1417,12 +1418,12 @@ mod tests {
         let map = empty_map();
         for generation in ["g1", "g1", "g2"] {
             let payload = serde_json::json!({
-                "session_id": "s7",
-                "generation_id": generation,
+                "sessionId": "s7",
+                "generationId": generation,
             });
             handle_chunk_ready(payload.to_string().as_bytes(), &map).expect("notification");
         }
-        let other = serde_json::json!({ "session_id": "s8", "generation_id": "g9" });
+        let other = serde_json::json!({ "sessionId": "s8", "generationId": "g9" });
         handle_chunk_ready(other.to_string().as_bytes(), &map).expect("other session");
 
         // The one-bit wake: repeated notifications coalesce into one
@@ -1438,7 +1439,7 @@ mod tests {
         assert_eq!(super::EVENT_CHUNK_READY, "llm/chunk-ready");
 
         assert!(
-            handle_chunk_ready(br#"{"session_id": "s7"}"#, &map)
+            handle_chunk_ready(br#"{"sessionId": "s7"}"#, &map)
                 .expect_err("missing generation id")
                 .contains("llm/chunk-ready payload is invalid")
         );
@@ -1464,7 +1465,7 @@ mod tests {
         assert_eq!(super::EVENT_TOOLS_SETTLED, "tools/settled");
 
         assert!(
-            handle_tools_settled(br#"{"session_id": "s7"}"#, &map)
+            handle_tools_settled(br#"{"sessionId": "s7"}"#, &map)
                 .expect_err("missing token")
                 .contains("tools/settled payload is invalid")
         );

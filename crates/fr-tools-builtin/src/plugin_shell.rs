@@ -2662,6 +2662,19 @@ impl BuiltinState {
         // injects are acyclic, so it commits before shell, shell before
         // this crate, and the grant's target is committed here.
         link.grant("agent", "skills").ok()?;
+        // The 2026-11-05 first-real-turn ruling (user-approved; the
+        // mechanism per this file's own D31 judgments): the prompt
+        // assembly requires the registered sections' textProvider
+        // endpoints (the plan-policy section's 905) on the assembling
+        // crate's own vtable, so the capability rides a grant instead of
+        // a system-prompt inject — a declared inject would close the
+        // declaration cycle system-prompt -> builtin-tools -> approval ->
+        // system-prompt (the boot fatal the first real turn caught; the
+        // fr-approval section's grant is the identical judgment). The
+        // timing holds: this crate injects system-prompt, so the target
+        // commits before this setup runs, and the endpoint requires fire
+        // only at assemble time.
+        link.grant("system-prompt", "builtin-tools").ok()?;
         let escalation = read_default_mode(&link)?;
         // The composition gate (the dsh `ctx.inject(['attachments'], …)`
         // conditional registration): without a committed durable store
@@ -3082,11 +3095,25 @@ impl crate::session_query::QueryWire for WireSessionQuery {
     fn session_read(&self, id: &str) -> Result<Option<crate::session_query::QueryLog>, String> {
         let bytes = serde_json::to_vec(&json!({ "id": id }))
             .map_err(|error| format!("session read encode failed: {error}"))?;
-        let reply = self.link.require(
+        let reply = match self.link.require(
             fr_wire::services::session_persistence::SERVICE_NAME,
             fr_wire::services::session_persistence::METHOD_SESSION_READ,
             &bytes,
-        )?;
+        ) {
+            Ok(reply) => reply,
+            Err(error) => {
+                // An absent session is not a transport failure: the
+                // store's refusal for a session with no live entry names
+                // it verbatim, and the query face maps that to the
+                // absence option (the observe face then answers through
+                // the cold read's not-found taxonomy instead of a
+                // spurious persistence failure).
+                if error.contains("is not live in this store") {
+                    return Ok(None);
+                }
+                return Err(error);
+            }
+        };
         let parsed: Value = serde_json::from_slice(&reply)
             .map_err(|error| format!("session read decode failed: {error}"))?;
         if parsed.get("header").is_none() {

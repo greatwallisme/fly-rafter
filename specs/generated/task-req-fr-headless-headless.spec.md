@@ -31,7 +31,7 @@ headless 是第一个交付入口（M1）：一次性任务、`--json` 事件流
 - realm 声明位 MUST：装载文档槽位支持 isolate 声明（dougong D15 isolate_realm；每会话 realm 挂载落码属后续切片，18a 只钉声明面，被 loader 接受）。
 - 模型选择 rail MUST（2026-11-04 18b Q1A 裁决）：宿主装配时读组合后 llm 行 config 与 fr-schema 声明默认（provider 默认 `'deepseek-official'`，dsh base/cordis.patch.yml:90-94 判例同值）烘 `{provider, model, reasoning-effort?}` 进入口 facts 文档（与 app argv 同轨，决策 47 5A 延伸）；runner 从中继快照读取；dsh agentDefaultModel 服务缝不在 PRD 4.4 逐字清单（非 wire 偏差，内部结构落位）；saveSelection（写回）M1 无 UI 写路径=结构性缺席备案。
 - runner 生命周期消费 MUST（2026-11-04 18b Q2A 裁决）：fr-headless descriptor inject += `["agent","session-persistence","session-query"]`——dsh runner inject `[agentDefaultModel, agents, sessions]` 的 fr 同构（index.ts 注入面）；服务双检文案逐字（sessionPersistence/sessionQuery 缺失两臂，index.ts:257-265）；create/resume/live 探测消费 fr-agent-loop 生命周期臂。
-- 失败跟踪 MUST（2026-11-04 18b Q4B 裁决）：runner listen `agent/error` + `session/turn/end`——`agent/error` 记 `{error, atOffset}`（同会话过滤），其后同会话 turn/end（seq ≥ atOffset）清零；收敛判定到达仍持未愈失败 → run 以该失败结束（stderr `fr:` 前缀错误行；--json 下 error 事件且无 final；exit 1）——dsh index.ts:365-372,391 1:1。
+- 失败跟踪 MUST（2026-11-04 18b Q4B 裁决；2026-11-05 措辞勘误经用户裁决 A：泵轨无 session/turn/end 事件，dsh index.ts:369 原文即 session/event 按 type 过滤）：runner listen `agent/error` + `session/event`（按 event.type=='turn/end' 过滤）——`agent/error` 记 `{error, atOffset}`（同会话过滤），其后同会话 turn/end（seq ≥ atOffset）清零；收敛判定到达仍持未愈失败 → run 以该失败结束（stderr `fr:` 前缀错误行；--json 下 error 事件且无 final；exit 1）——dsh index.ts:365-372,391 1:1。
 - 退出轨 MUST（2026-11-04 18b 裁决）：runner 完成经 `headless/exit` `{code}` 内核事件请求退出（插件→宿主唯一推送面=emit，执法事实：宿主不能 provide、require/dispatch 均插件向）；宿主 fr crate 内嵌 in-process 监听插件听该事件并触发有界关停携带该退出码；SIGINT 130/SIGTERM 0 覆盖语义不变。
 - E2E 驱动 MUST（2026-11-04 18b Q3A 裁决）：集成测试以本地脚本化 SSE HTTP 服务器（测试内 TcpListener）+ profile patch 覆盖 fr-llm-deepseek base-url + DEEPSEEK_API_KEY 驱动全链真实生成，零 fixture crate。
 - `--json` schema 工件 MUST（2026-11-04 18b Q5A 裁决，M1 验收 2）：fr-schema 增 json-stream schema 模块（八帧 schema 文档常量+校验器）；fr-headless 测试以真实事件流校验（dsh 无 schema 工件=fr 自有增补面）。
@@ -46,6 +46,7 @@ headless 是第一个交付入口（M1）：一次性任务、`--json` 事件流
 - crates/fr-schema/**（2026-11-04 追加裁决：首次真装配实证 registry 将 plan-mode `section` 钉为 fr-tools-builtin 顶层必填，而 crate 侧该键烘焙不存在（plugin_shell.rs prompt_sections 静态表）——移除该幽灵必填并同片内调整钉测）
 - crates/fr-agent-loop/** + crates/fr-tools-builtin/**（2026-11-04 追加裁决：首次真装配实证三 crate 描述符声明环 skills←agent←shell←tools-builtin，内核激活门控下组合结构性不可 boot；手术 = agent-loop descriptor inject 去 skills（dsh 软读边）、tools-builtin setup 增 grant(agent→skills) 惰性授权（时序：agent 剩余 inject 无环先激活→shell 解 park→tools-builtin 激活时 agent 已提交、grant 成立））
 - crates/fr-session/**（2026-11-04 追加裁决：首次真装配实证工件壳未装配 session-persistence 服务带（dispatch 仅 declare/describe/projections，create/append/drain/read 等方法带从未接线、ShellState 无 SessionService——单测全部绕过工件直驱 service 面）；修复 = 工件 setup 装配 SessionService（烘焙根+core 词表+毫秒时钟+stderr 告警钩）并在 dispatch 路由 2-11 与 1002/1003 方法带，同片内补接线钉测）
+- crates/fr-system-prompt/**（2026-11-05 18b d 首次真实 turn 实证裁决 A：装配臂 require builtin-tools.905（fr-tools-builtin 注册的 plan-policy textProvider endpoint）被内核能力门拒绝 undeclared_dependency。用户批准 A 后实证 inject += builtin-tools 关断声明环 system-prompt→builtin-tools→approval→system-prompt（boot fatal approval-policy Pending）——机制改按本仓既有 D31 判例（fr-approval 对自身 section 的 grant 同形、tools-builtin agent→skills 环断同形）：fr-tools-builtin setup 增 grant(system-prompt→builtin-tools)，fr-system-prompt descriptor 不动（inject=[]），该 crate 最终零改动、此边界行保留为实证记录）
 - crates/fr-llm/** + crates/fr-llm-deepseek/**（2026-11-04 18b Q7A 裁决：runtime-registry 通道侧注册协议随 18b 落地——fr-llm REGISTER_ROUTE 臂+channel-proxy source+fr-llm-deepseek 生成面服务；真实生成 e2e 前置）
 
 ### Forbidden
@@ -58,150 +59,150 @@ headless 是第一个交付入口（M1）：一次性任务、`--json` 事件流
 ## Completion Criteria
 
 Scenario: 裸连字符从 stdin 读整段任务
-  Test: pending_req_fr_headless_stdin
+  Test: stdin_task_flows_when_the_argument_is_the_bare_hyphen
   假设 TASK 为裸 - 且 stdin 提供整段任务文本
   当 运行 fr headless 加该参数时
   那么 整段文本作为任务且不再等待更多输入
 
 Scenario: 给了 TASK 不读 stdin
-  Test: pending_req_fr_headless_task_stdin
+  Test: given_task_skips_the_stdin_read
   假设 命令行已给定 TASK
   当 运行时
   那么 stdin 被忽略且不阻塞
 
 Scenario: 无 TASK 且 stdin 为 TTY 报 usage error
-  Test: pending_req_fr_headless_task_stdin_tty_usage_error
+  Test: tty_usage_error_and_its_message
   假设 终端交互运行且未给 TASK
   当 执行 fr headless 时
   那么 输出 usage error 且 exit 非 0
 
 Scenario: 完整任务走通并产出 v4 会话
-  Test: pending_req_fr_headless_v4
+  Test: json_run_completes_with_the_first_and_last_frames_pinned
   假设 有效 provider 配置
   当 执行 fr headless 加任务时
   那么 最终答案到 stdout、产生 v4 会话文件且 exit 0
 
 Scenario: 运行错误走 stderr 且 exit 1
-  Test: pending_req_fr_headless_stderr_exit_1
+  Test: provider_error_fails_with_the_fr_prefixed_line_and_exit_one
   假设 provider 配置错误
   当 运行失败时
   那么 stderr 输出 fr 前缀错误行、exit 1 且 stdout 无答案文本
 
 Scenario: reasoning 流到 stderr
-  Test: pending_req_fr_headless_reasoning_stderr
+  Test: default_mode_prints_the_answer_and_streams_reasoning_to_stderr
   假设 模型输出含 reasoning delta
   当 默认模式运行时
   那么 reasoning 实时写入 stderr 且带 fr 前缀标题，stdout 不混入
 
 Scenario: --json 首末事件定型
-  Test: pending_req_fr_headless_json
+  Test: json_run_completes_with_the_first_and_last_frames_pinned
   假设 --json 模式运行成功
   当 解析 stdout 事件流时
   那么 首事件 type 为 session，末事件 type 为 final 且答案无损
 
 Scenario: 中间事件类型齐备
-  Test: pending_req_fr_headless_requirement
+  Test: projection_opens_with_the_session_frame_and_folds_the_run
   假设 任务触发工具调用
   当 解析 --json 流时
   那么 status、text、thinking、tool_call、tool_result 事件按序出现
 
 Scenario: 丢弃的 attempt 不投影
-  Test: pending_req_fr_headless_attempt
+  Test: committed_blocks_project_as_text_and_thinking
   假设 流错误后重试成功
   当 解析 --json 流时
   那么 text 与 thinking 仅来自已提交 assistant message，重试尝试文本不出现
 
 Scenario: 值截断封顶
-  Test: pending_req_fr_headless_requirement
+  Test: bound_line_truncates_strings_and_flags
   假设 某 tool_result 值超过 8 KiB
   当 输出该事件时
   那么 值被截断且标 truncated 为 true，单行不超过 32 KiB
 
 Scenario: 运行错误输出 error 无 final
-  Test: pending_req_fr_headless_error_final
+  Test: uncured_json_run_emits_the_error_event_without_final
   假设 --json 模式运行失败
   当 输出事件流时
   那么 含 error 事件且无 final 事件
 
 Scenario: 需审批工具收到 unavailable
-  Test: pending_req_fr_headless_unavailable
+  Test: set_approval_transport_failure_fails_closed_unavailable
   假设 模型调用需审批工具且无 answerer
   当 工具进入审批时
   那么 模型收到 unavailable 拒绝结果
 
 Scenario: danger-full-access 直接放行
-  Test: pending_req_fr_headless_danger_full_access
+  Test: the_baked_default_follows_the_bundle_expression
   假设 FR_PERMISSION_MODE 为 danger-full-access
   当 工具执行时
   那么 策略为 never 且工具直接执行
 
 Scenario: 续用已持久化会话
-  Test: pending_req_fr_headless_requirement
+  Test: resume_path_adopts_and_rechecks
   假设 存在一个已持久化的非 fork 非 子代理会话
   当 以 --session-id 指定该 id 运行时
   那么 接续其历史继续且新事件追加到原会话
 
 Scenario: 不存在的 session id 失败
-  Test: pending_req_fr_headless_session_id
+  Test: missing_session_id_fails_with_the_omission_refusal
   假设 --session-id 指向不存在的会话
   当 启动时
   那么 直接失败且不创建新会话
 
 Scenario: 默认生成新会话 id
-  Test: pending_req_fr_headless_id
+  Test: json_run_completes_with_the_first_and_last_frames_pinned
   假设 未指定 --session-id
   当 启动时
   那么 创建形如 session 加 uuid 的新会话
 
 Scenario: headless 装配无交互运行时
-  Test: pending_req_fr_headless_headless
+  Test: headless_assembly_boots_real_dylibs
   假设 headless profile 装配完成
   当 检查装配产物时
   那么 无 Host/HTTP/Web 运行时插件、无交互式凭证插件、无 UI answerer
 
 Scenario: --help 输出用法
-  Test: pending_req_fr_headless_help
+  Test: help_prints_the_usage_and_exits_zero
   当 运行 fr headless --help 时
   那么 输出用法说明且 exit 0
 
 Scenario: 语法错误走 JSON 契约
-  Test: pending_req_fr_headless_json
+  Test: json_usage_error_also_emits_the_error_event
   假设 --json 模式传入非法参数组合
   当 解析失败时
   那么 stdout 输出 error 事件行且 exit 1
 
 Scenario: key 级截断与降级梯
-  Test: pending_req_fr_headless_key
+  Test: long_keys_truncate_and_collide_last_wins
   假设 事件含超长 key 与超大值
   当 boundJsonLine 处理时
   那么 key 与字符串值均封顶 8KiB，行超限依次降级为标量加 truncated 再到仅 type
 
 Scenario: 采纳四拒与 live 拒绝
-  Test: pending_req_fr_headless_live
+  Test: preset_mismatch_is_named_before_the_live_refusal
   假设 --session-id 分别指向 preset 不匹配、子代理、cwd 不一致或已被 live Agent 占用的会话
   当 采纳时
   那么 一律拒绝且给出对应错误
 
 Scenario: trim 空任务参数报错
-  Test: pending_req_fr_headless_trim
+  Test: blank_session_id_and_blank_task_fail_verbatim
   假设 任务参数为连续空白非空串
   当 启动时
   那么 报错且 exit 非 0；--session-id 空白串同理判空失败但原串保留于错误上下文
 
 Scenario: final 来源与提前唤醒抑制
-  Test: pending_req_fr_headless_final
+  Test: summarize_takes_the_last_nonempty_text_and_the_final_reason
   假设 会话日志含多段 assistant 文本且某子代理在收尾时提前唤醒主循环
   当 汇总输出时
   那么 final 取 durable log 最后一段非空 assistant text，唤醒以 seq 未变且无存活子判定抑制、继续等待
 
 Scenario: usage 累加与省略
-  Test: pending_req_fr_headless_usage
+  Test: usage_accumulates_and_omits_partial_steps
   假设 同一 step 跨两次 attempt 且其中一次无 usage 样本
   当 投影事件时
   那么 有效样本跨 attempt 累加；任一 attempt 无样本则整 step 省略 usage
 
 Scenario: tool_result 仅 append 投影
-  Test: pending_req_fr_headless_tool_result_append
+  Test: replaced_results_never_project
   假设 某工具结果曾被压缩替换（surfaceOp 非 append）
   当 投影 --json 流时
   那么 原始结果不出现，仅 append 形态的 tool_result 投影

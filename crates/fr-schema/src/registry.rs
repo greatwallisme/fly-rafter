@@ -688,7 +688,67 @@ fn build_table() -> Vec<(&'static str, Schema)> {
             ]),
         ),
         ("fr-compaction", compaction_row()),
+        ("fr-llm-deepseek", llm_deepseek_row()),
     ]
+}
+
+/// Reads one declared string property's default for `plugin` (the model
+/// selection rail's defaults face): `None` for an unknown plugin, an
+/// undeclared key, or a property without a declared default.
+#[must_use]
+pub fn string_default(plugin: &str, key: &str) -> Option<String> {
+    let schema = lookup(plugin)?;
+    let Schema::Object { properties, .. } = schema else {
+        return None;
+    };
+    properties
+        .iter()
+        .find(|property| property.name == key)
+        .and_then(|property| {
+            let Schema::String { default, .. } = &property.schema else {
+                return None;
+            };
+            default.clone()
+        })
+}
+
+/// The `fr-llm-deepseek` declaration: the model-selection rail keys the
+/// host reads when baking the entry facts (`provider`/`model`/`reasoning-effort`,
+/// plus the adapter's endpoint key). The row's remaining deployment keys
+/// stay open (`additional_properties`) until their own schema slice lands,
+/// so existing rows keep validating; the rail itself is exactly the dsh
+/// base `agent-default-model` row twin (provider/model defaults, dsh
+/// base/cordis.patch.yml:88-94).
+fn llm_deepseek_row() -> Schema {
+    let properties = Properties::try_from(vec![
+        string_property(
+            "provider",
+            &[],
+            "deepseek-official",
+            "The provider route key this adapter serves.",
+        ),
+        string_property(
+            "model",
+            &[],
+            "deepseek-flash",
+            "The default model id Agents start with.",
+        ),
+        optional_enum_property(
+            "reasoning-effort",
+            &["off", "low", "high", "max"],
+            "Default thinking effort; absent means the adapter's own default applies.",
+        ),
+        optional_string_property(
+            "base-url",
+            "Endpoint base; `$DEEPSEEK_BASE_URL` (trusted layers) overrides at activation.",
+        ),
+    ])
+    .expect("the rail declaration carries unique keys");
+    Schema::Object {
+        properties,
+        additional_properties: true,
+        description: None,
+    }
 }
 
 /// The `fr-compaction` declaration: the dsh compaction-basic schemastery
@@ -2184,5 +2244,36 @@ mod tests {
             ),
             Some(&serde_json::json!(false))
         );
+    }
+    #[test]
+    fn llm_deepseek_rail_declares_the_defaults() {
+        let schema = lookup("fr-llm-deepseek").expect("the rail declaration");
+        // The declared defaults are the model selection rail's values the
+        // host reads (the dsh base agent-default-model row twin).
+        assert_eq!(
+            crate::registry::string_default("fr-llm-deepseek", "provider").as_deref(),
+            Some("deepseek-official")
+        );
+        assert_eq!(
+            crate::registry::string_default("fr-llm-deepseek", "model").as_deref(),
+            Some("deepseek-flash")
+        );
+        // The effort key declares no default (absent stays absent); the
+        // endpoint key is a free-form string without candidates.
+        assert_eq!(
+            crate::registry::string_default("fr-llm-deepseek", "reasoning-effort"),
+            None
+        );
+        let violations = validate(
+            schema,
+            &serde_json::json!({"model": "m", "reasoning-effort": "nope", "models": []}),
+        );
+        let messages: Vec<&str> = violations.iter().map(|v| v.message.as_str()).collect();
+        assert!(
+            messages.contains(&"value not in candidates"),
+            "{messages:?}"
+        );
+        // The undeclared deployment keys stay open (additionalProperties).
+        assert!(violations_empty(schema, &serde_json::json!({"models": []})));
     }
 }

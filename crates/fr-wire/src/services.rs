@@ -149,6 +149,10 @@ pub mod session_query {
     /// The selector sits in the 1400+ band (the disjoint method-space
     /// judgment).
     pub const METHOD_OBSERVE: u32 = 1400;
+    /// Shell metadata echo (`{}`) — the shared describe arm the owning
+    /// plugin answers for every provided service (the runner's service
+    /// presence double-check rides it).
+    pub const METHOD_DESCRIBE: u32 = 0;
 }
 
 /// The `'skills'` service face (owner crate `fr-tools-builtin`; the dsh

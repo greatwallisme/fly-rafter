@@ -169,7 +169,10 @@ impl ApprovalService {
                     .map_err(|error| format!("context-text payload must be JSON: {error}"))?;
                 let agent = optional_word(&request, "agent")?;
                 let text = self.domain.context_text(agent.as_deref())?;
-                json!({ "text": text })
+                // The registry's context resolve reads the provider reply
+                // as the bare text (the dsh context text fn returns a
+                // string; the first real assemble caught the wrap).
+                Value::String(text)
             }
             other => return Err(format!("unknown {PLUGIN_NAME} method {other}")),
         };
@@ -388,14 +391,14 @@ mod tests {
     fn context_text_round_trips() {
         let (service, _log) = service();
         let reply = call(&service, METHOD_CONTEXT_TEXT, &json!({})).expect("bare");
-        assert_eq!(reply["text"], "");
+        assert_eq!(reply, json!(""));
         let reply =
             call(&service, METHOD_CONTEXT_TEXT, &json!({ "agent": "s1" })).expect("ask text");
         assert!(
-            reply["text"]
+            reply
                 .as_str()
-                .expect("text")
-                .starts_with("Approval policy: ask.")
+                .expect("the bare text")
+                .starts_with("Approval policy: ask."),
         );
     }
 

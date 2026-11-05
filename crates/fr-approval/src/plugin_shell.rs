@@ -804,7 +804,7 @@ mod tests {
         // A bare context assembly (no agent) states nothing.
         let reply = dispatch(&state, METHOD_CONTEXT_TEXT, b"null").expect("context");
         let parsed: Value = serde_json::from_slice(&reply).expect("json");
-        assert_eq!(parsed["text"], "");
+        assert_eq!(parsed, Value::String(String::new()));
     }
 
     #[test]

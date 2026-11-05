@@ -795,6 +795,7 @@ dependencies = [
  "dougong",
  "dougong-loader",
  "fr-config",
+ "fr-schema",
  "serde_json",
  "tokio",
  "uuid",
@@ -900,7 +901,9 @@ dependencies = [
  "fr-agent-loop",
  "fr-schema",
  "fr-wire",
+ "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]

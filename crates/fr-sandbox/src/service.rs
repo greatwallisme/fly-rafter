@@ -177,7 +177,11 @@ impl SandboxPolicyService {
                 };
                 let Some(agent) = agent else {
                     // A bare context assembly (no agent) states nothing.
-                    return Ok(json!({ "text": "" }).to_string().into_bytes());
+                    // The registry's context resolve reads the reply as
+                    // the bare text (the first real assemble caught the
+                    // wrap).
+                    return serde_json::to_vec(&Value::String(String::new()))
+                        .map_err(|error| format!("context-text encode failed: {error}"));
                 };
                 let (cwd, events) = self.sessions.facts(&agent)?;
                 let text = render_policy_context(&self.home.resolve(&ResolveRequest {
@@ -190,7 +194,8 @@ impl SandboxPolicyService {
                     )),
                     mode: None,
                 })?);
-                Ok(json!({ "text": text }).to_string().into_bytes())
+                serde_json::to_vec(&Value::String(text))
+                    .map_err(|error| format!("context-text encode failed: {error}"))
             }
             METHOD_FOLD => {
                 let request: Value = serde_json::from_slice(payload)
@@ -415,7 +420,7 @@ mod tests {
     fn context_text_renders_the_resolved_policy_or_nothing() {
         let service = service_with(SandboxMode::WorkspaceWrite, "/fallback", Vec::new());
         let bare = call(&service, METHOD_CONTEXT_TEXT, &json!({})).expect("bare");
-        assert_eq!(bare, json!({ "text": "" }));
+        assert_eq!(bare, json!(""));
         let service = service_with(
             SandboxMode::WorkspaceWrite,
             "/fallback",
@@ -423,9 +428,8 @@ mod tests {
         );
         let text = call(&service, METHOD_CONTEXT_TEXT, &json!({ "agent": "s1" }))
             .expect("agent text")
-            .get("text")
-            .and_then(Value::as_str)
-            .expect("text word")
+            .as_str()
+            .expect("the bare text")
             .to_owned();
         assert_eq!(
             text,
