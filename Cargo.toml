@@ -29,6 +29,7 @@ members = [
     "crates/fr-token-meter",
     "crates/fr-compaction",
     "crates/fr-tools-builtin",
+    "crates/fr-subagent",
 ]
 
 [workspace.package]

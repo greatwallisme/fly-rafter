@@ -32,6 +32,7 @@ satisfies: [REQ-FR-BUILTIN-TOOLS]
 - crates/fr-attachment/**
 - crates/fr-llm/**
 - crates/fr-working-directory/**
+- crates/fr-subagent/**（Phase 19：subagent 五工具族适配器与定义级钉测归位，Q93-A 域归属精神+PRD 4.5 唯一 crate 边界）
 
 ### Forbidden
 - Do not weaken or remove the source requirement clauses.
@@ -2279,223 +2280,223 @@ Scenario: plugin_manager 行为 1
   那么 每动作需 danger-full-access 或本次批准；安装可执行允许的 build 脚本
 
 Scenario: subagent 调度与呈现
-  Test: pending_req_fr_builtin_tools_subagent
+  Test: subagent_tool_is_parallel_with_generic_presentation
   假设 合约要求的行为已实现
   当 读取工具 subagent 的声明时
   那么 executionMode 为 parallel（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: subagent 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_subagent
+  Test: subagent_tool_rejects_out_of_schema_arguments
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: subagent 说明 section 注册
-  Test: pending_req_fr_builtin_tools_subagent_section
+  Test: subagent_tool_registers_its_catalog_section
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 subagent 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: subagent 参数 description 形状
-  Test: pending_req_fr_builtin_tools_subagent_description
+  Test: subagent_tool_pins_the_description_parameter
   假设 工具 subagent 已注册
   当 校验 schema 时
   那么 参数行 [description:string:req（3-5 词）] 的名称与类型按目录行实现
 
 Scenario: subagent 参数 description 约束
-  Test: pending_req_fr_builtin_tools_subagent_description
+  Test: subagent_tool_pins_the_description_parameter
   假设 工具 subagent 已注册
   当 校验 schema 时
   那么 参数行 [description:string:req（3-5 词）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: subagent 参数 prompt 形状
-  Test: pending_req_fr_builtin_tools_subagent_prompt
+  Test: subagent_tool_pins_the_prompt_parameter
   假设 工具 subagent 已注册
   当 校验 schema 时
   那么 参数行 [prompt:string:req（自包含，child 不共享对话）] 的名称与类型按目录行实现
 
 Scenario: subagent 参数 prompt 约束
-  Test: pending_req_fr_builtin_tools_subagent_prompt
+  Test: subagent_tool_pins_the_prompt_parameter
   假设 工具 subagent 已注册
   当 校验 schema 时
   那么 参数行 [prompt:string:req（自包含，child 不共享对话）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: subagent 参数 cwd 形状
-  Test: pending_req_fr_builtin_tools_subagent_cwd
+  Test: subagent_tool_pins_the_cwd_parameter
   假设 工具 subagent 已注册
   当 校验 schema 时
   那么 参数行 [cwd:opt（相对按当前，省略继承；双方后续变更互不影响）] 的名称与类型按目录行实现
 
 Scenario: subagent 参数 cwd 约束
-  Test: pending_req_fr_builtin_tools_subagent_cwd
+  Test: subagent_tool_pins_the_cwd_parameter
   假设 工具 subagent 已注册
   当 校验 schema 时
   那么 参数行 [cwd:opt（相对按当前，省略继承；双方后续变更互不影响）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: subagent 行为 1
-  Test: pending_req_fr_builtin_tools_subagent_1
+  Test: subagent_tool_starts_the_activation_and_returns_the_child_id
   假设 工具 subagent 执行时
   当 达到触发条件时
   那么 立即返回 child id，完成通知；config provider 必填、maxDepth（0=禁委托或 provider-managed；省略读 Host 默认 1）、agentPreset/allowedAgentPresets（非空才暴露 agent_preset）
 
 Scenario: interrupt_agent 调度与呈现
-  Test: pending_req_fr_builtin_tools_interrupt_agent
+  Test: interrupt_agent_tool_is_exclusive_with_generic_presentation
   假设 合约要求的行为已实现
   当 读取工具 interrupt_agent 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: interrupt_agent 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_interrupt_agent
+  Test: interrupt_agent_tool_rejects_out_of_schema_arguments
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: interrupt_agent 说明 section 注册
-  Test: pending_req_fr_builtin_tools_interrupt_agent_section
+  Test: interrupt_agent_tool_registers_its_catalog_section
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 interrupt_agent 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: interrupt_agent 参数 agent_id 形状
-  Test: pending_req_fr_builtin_tools_interrupt_agent_agent_id
+  Test: interrupt_agent_tool_pins_the_agent_id_parameter
   假设 工具 interrupt_agent 已注册
   当 校验 schema 时
   那么 参数行 [agent_id:string:req（直接子代或更深后代）] 的名称与类型按目录行实现
 
 Scenario: interrupt_agent 参数 agent_id 约束
-  Test: pending_req_fr_builtin_tools_interrupt_agent_agent_id
+  Test: interrupt_agent_tool_pins_the_agent_id_parameter
   假设 工具 interrupt_agent 已注册
   当 校验 schema 时
   那么 参数行 [agent_id:string:req（直接子代或更深后代）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: interrupt_agent 行为 1
-  Test: pending_req_fr_builtin_tools_interrupt_agent_1
+  Test: interrupt_agent_tool_requests_without_waiting
   假设 工具 interrupt_agent 执行时
   当 达到触发条件时
   那么 请求停止不等待；外部执行永久停止；其启动的 subagent 继续跑
 
 Scenario: list_agents 调度与呈现
-  Test: pending_req_fr_builtin_tools_list_agents
+  Test: list_agents_tool_is_exclusive_with_generic_presentation
   假设 合约要求的行为已实现
   当 读取工具 list_agents 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: list_agents 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_list_agents
+  Test: list_agents_tool_rejects_out_of_schema_arguments
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: list_agents 说明 section 注册
-  Test: pending_req_fr_builtin_tools_list_agents_section
+  Test: list_agents_tool_registers_its_catalog_section
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 list_agents 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: list_agents 参数 scope 形状
-  Test: pending_req_fr_builtin_tools_list_agents_scope
+  Test: list_agents_tool_pins_the_scope_parameter
   假设 工具 list_agents 已注册
   当 校验 schema 时
   那么 参数行 [scope:opt:enum[children|descendants]（descendants 深>1 仅可 interrupt）] 的名称与类型按目录行实现
 
 Scenario: list_agents 参数 scope 约束
-  Test: pending_req_fr_builtin_tools_list_agents_scope
+  Test: list_agents_tool_pins_the_scope_parameter
   假设 工具 list_agents 已注册
   当 校验 schema 时
   那么 参数行 [scope:opt:enum[children|descendants]（descendants 深>1 仅可 interrupt）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: send_message 调度与呈现
-  Test: pending_req_fr_builtin_tools_send_message
+  Test: send_message_tool_is_exclusive_with_generic_presentation
   假设 合约要求的行为已实现
   当 读取工具 send_message 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: send_message 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_send_message
+  Test: send_message_tool_rejects_out_of_schema_arguments
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: send_message 说明 section 注册
-  Test: pending_req_fr_builtin_tools_send_message_section
+  Test: send_message_tool_registers_its_catalog_section
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 send_message 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: send_message 参数 agent_id 形状
-  Test: pending_req_fr_builtin_tools_send_message_agent_id
+  Test: send_message_tool_pins_the_agent_id_parameter
   假设 工具 send_message 已注册
   当 校验 schema 时
   那么 参数行 [agent_id:string:req] 的名称与类型按目录行实现
 
 Scenario: send_message 参数 agent_id 约束
-  Test: pending_req_fr_builtin_tools_send_message_agent_id
+  Test: send_message_tool_pins_the_agent_id_parameter
   假设 工具 send_message 已注册
   当 校验 schema 时
   那么 参数行 [agent_id:string:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: send_message 参数 message 形状
-  Test: pending_req_fr_builtin_tools_send_message_message
+  Test: send_message_tool_pins_the_message_parameter
   假设 工具 send_message 已注册
   当 校验 schema 时
   那么 参数行 [message:string:req] 的名称与类型按目录行实现
 
 Scenario: send_message 参数 message 约束
-  Test: pending_req_fr_builtin_tools_send_message_message
+  Test: send_message_tool_pins_the_message_parameter
   假设 工具 send_message 已注册
   当 校验 schema 时
   那么 参数行 [message:string:req] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: send_message 行为 1
-  Test: pending_req_fr_builtin_tools_send_message_1
+  Test: send_message_tool_delivers_at_the_next_step_or_turn
   假设 工具 send_message 执行时
   当 达到触发条件时
   那么 工作中者最近 step 收到，空闲者开新轮；返回送达确认非答案
 
 Scenario: list_subagent_models 调度与呈现
-  Test: pending_req_fr_builtin_tools_list_subagent_models
+  Test: list_subagent_models_tool_is_exclusive_with_generic_presentation
   假设 合约要求的行为已实现
   当 读取工具 list_subagent_models 的声明时
   那么 executionMode 为 exclusive（parallel 仅 isConcurrencySafe 严格 true，否则 fail-closed exclusive）且 presentation 族为 generic
 
 Scenario: list_subagent_models 参数越界拒绝
-  Test: pending_req_fr_builtin_tools_list_subagent_models
+  Test: list_subagent_models_tool_rejects_out_of_schema_arguments
   假设 提交违反该工具 schema 的参数
   当 校验运行时
   那么 校验失败返回结构化错误且不执行
 
 Scenario: list_subagent_models 说明 section 注册
-  Test: pending_req_fr_builtin_tools_list_subagent_models_section
+  Test: list_subagent_models_tool_registers_its_catalog_section
   假设 组装系统提示词时
   当 扫描 section 注册表
   那么 工具 list_subagent_models 的说明 section 由工具插件注册且 order 位于 1000-3000，文本从 catalog 逐字抽取
 
 Scenario: list_subagent_models 参数 provider 形状
-  Test: pending_req_fr_builtin_tools_list_subagent_models_provider
+  Test: list_subagent_models_tool_pins_the_provider_parameter
   假设 工具 list_subagent_models 已注册
   当 校验 schema 时
   那么 参数行 [provider:opt] 的名称与类型按目录行实现
 
 Scenario: list_subagent_models 参数 provider 约束
-  Test: pending_req_fr_builtin_tools_list_subagent_models_provider
+  Test: list_subagent_models_tool_pins_the_provider_parameter
   假设 工具 list_subagent_models 已注册
   当 校验 schema 时
   那么 参数行 [provider:opt] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: list_subagent_models 参数 model 形状
-  Test: pending_req_fr_builtin_tools_list_subagent_models_model
+  Test: list_subagent_models_tool_pins_the_model_parameter
   假设 工具 list_subagent_models 已注册
   当 校验 schema 时
   那么 参数行 [model:opt（需 provider）] 的名称与类型按目录行实现
 
 Scenario: list_subagent_models 参数 model 约束
-  Test: pending_req_fr_builtin_tools_list_subagent_models_model
+  Test: list_subagent_models_tool_pins_the_model_parameter
   假设 工具 list_subagent_models 已注册
   当 校验 schema 时
   那么 参数行 [model:opt（需 provider）] 的 required、默认值与枚举约束按目录行实现并冻结对照
 
 Scenario: list_subagent_models 行为 1
-  Test: pending_req_fr_builtin_tools_list_subagent_models_1
+  Test: list_subagent_models_tool_treats_the_catalog_as_advisory
   假设 工具 list_subagent_models 执行时
   当 达到触发条件时
   那么 目录仅 advisory

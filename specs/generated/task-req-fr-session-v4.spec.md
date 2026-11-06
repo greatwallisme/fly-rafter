@@ -120,7 +120,7 @@ Scenario: ptc-dispatch 子调用不进请求
   那么 重建结果不含任何子调用消息
 
 Scenario: fork 会话拒绝被续用
-  Test: pending_req_fr_session_fork
+  Test: subagent_and_fork_lineages_are_refused
   假设 存在一个由 session/fork 派生的会话
   当 以 --session-id 采纳该会话时
   那么 拒绝并报明确错误

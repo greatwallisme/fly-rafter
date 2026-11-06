@@ -41,6 +41,7 @@ PAIRS = [
     ("zstd 压缩回环", "materialize_append_read_round_trips_plain_and_zstd"),
     ("crash 孤儿 turn 的 interrupted 关闭", "crash_orphan_turn_with_no_step_closes_with_interrupted_only"),
     ("fork seed 的 forked 关闭", "fork_seed_marks_cut_and_closes_open_turn_with_forked_closers"),
+    ("fork 会话拒绝被续用", "subagent_and_fork_lineages_are_refused"),  # Phase 19：fr-headless adopt.rs 四拒之 subagent/fork 臂
     ("user/message 直载形态", "user_message_data_is_the_message_itself"),
     ("非 v4 文件被拒绝", "foreign_versions_refuse_before_shape_checks"),
     ("写路径校验失败不发布后继文件", "write_path_validation_failure_publishes_nothing"),
@@ -48,7 +49,7 @@ PAIRS = [
     ("后继世代 EEXIST 逐字节比对", "republishing_identical_log_adopts_and_divergent_refuses"),
     ("zstd 撕裂尾恢复", "zstd_torn_tail_keeps_the_committed_prefix_and_classifies_the_frame"),
     ("abort 补合成 tool/result", "unstarted_call_closes_with_not_started_error_and_no_source_seqs"),
-    ("两级补偿错误码与文案", "started_call_closes_with_outcome_unknown_and_call_seq_source"),
+    ("两级补偿错误码与文案", "two_level_compensation_codes_and_wording"),  # 18f：双腿组合测试取代单腿 started_call 钉测
     ("未知必需事件拒绝重建", "restore_gate_refuses_unknown_required_and_enforces_the_cut"),
     ("扩展事件与 end-seed 参与回环", "fork_seed_round_trips_with_the_inherited_cut"),
     ("SessionHeader 逻辑九字段与磁盘六必需键", "header_round_trips_through_the_logical_shape"),
@@ -68,7 +69,7 @@ PAIRS = [
     ("contentGeneration 变化触发整表重建", "replacement_bumps_generations_and_derive_rebuilds"),
     ("空 assistant 投影为 null", "empty_assistant_projects_to_no_message"),
     ("canonicalHeader 空 tools 省略", "request_header_fold_last_wins_and_canonicalizes"),
-    ("工具增删 developer 声明门控", "header_seq_required_exactly_when_additions_present"),
+    ("工具增删 developer 声明门控", "tool_changes_gate_the_developer_message"),  # 18f：driver 钉测取代 surface admission 钉测
     ("node-0 重写白名单", "node_zero_system_head_rejects_non_system_rewrite"),
     ("ptc-dispatch 子调用不进请求", "ptc_subcall_records_stay_out_of_derived_messages"),
     ("五角色与七种 ContentBlock 往返无损", "roles_and_blocks_round_trip"),
@@ -109,9 +110,9 @@ AUTHORISED_OUTGOING = {
 
 # Withdrawals: bindings whose Then carries an unimplemented module half go
 # back to pending until the owning slice lands (F11/F13).
+# 18f 已把下列两枚有意改绑为真测（双腿组合测试/driver 工具门控钉测），
+# 原 WITHDRAW 项删除——保留会让重放把改绑撤回到 pending（本次事故根因）。
 WITHDRAW = [
-    ("两级补偿错误码与文案", "pending_req_fr_session_two_level_abort_codes"),
-    ("工具增删 developer 声明门控", "pending_req_fr_session_tool_gate"),
 ]
 
 

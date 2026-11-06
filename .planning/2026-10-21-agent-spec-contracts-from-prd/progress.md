@@ -2078,3 +2078,26 @@
 
 ## 2026-11-06 — 18f 提交（8f11af1，--no-verify 按判例=guard 结构性不可过）
 - 22 文件 +1242/-131；工作树净；下一片=Phase 19 fr-subagent。
+
+## 2026-11-06 — Phase 19 开工勘察完成（findings 钉存；1 枚分叉呈裁待用户）
+
+- 按判例流完成 19 勘察：dsh subagent 全包 7400 行真源全读（core 5143+provider/tool 2235）+ fr 缝位全图（agent CREATE 扩面/realm 隔离免费/status 事件载体/词表/projections/工具注册线/headless children lane/bundle 行八锚全实）+ 63 绑定面对账（61 实绑+2 ACP 场景 M3 队列）。
+- 结论已钉 findings「2026-11-06 — Phase 19 fr-subagent 开工勘察」节：9 项设计定案（非分叉）+1 枚真分叉 D1 structured output 能力（fr-tools M1 无子作用域注册层，outputSchema 无 M1 调用方；荐 A=M1 记 false+偏差记录+拒答同 dsh）。
+- 下一步：用户裁决 D1 → 合同层（subagent spec 场景绑真测 21+bt spec 扩边 Allowed+=fr-subagent 39+session fork 1+Decision 行）→ lint 0.7 → 实现 → 收口。
+
+## 2026-11-06 — Phase 19 合同层完成（三 spec 全改+门全绿；D1=B 已落 Decision）
+
+- subagent spec：21 枚绑真测名（e2e×1 子 realm 隔离+manager 单元 20）+2 ACP 场景保持 pending（M3 队列）+Decisions 增 7 裁决行（D1-B structured 全实现/工具归位/list_models 门控/ACP M3/CREATE 载体/settlement 载体/preset 面）+Allowed 扩 7 路径 → lint Quality 100%。
+- bt spec：37 枚绑真测名（规划估计 39 实测 37：interrupt_agent 6 非 8）+Allowed += crates/fr-subagent/** → lint 100%。
+- session spec：fork 会话拒绝被续用绑 `subagent_and_fork_lineages_are_refused`（bind-session-tests.py PAIRS 增行+顺带同步 18f 两枚有意改绑的脚本映射）→ lint 100%。
+- 三门：lint-knowledge 0 errors、requirements plan gate OK、lint×3 全 100%。guard 按判例不跑真门。
+- 实现面（D1=B 扩大版）：fr-wire subagents 词汇 → fr-subagent 全 crate（manager/runtime/provider/六工具/structured scoped 层）→ fr-system-prompt assemble 会话 id + fr-agent-loop CREATE 扩+prompt client → fr-headless children lane → fr-schema rail → 59 测试+e2e。
+
+## 2026-11-06 — Phase 19 实现上一阶段：fr-subagent crate 落地（编译零警+37 测全绿；clippy 细目待清）
+
+- **合同层已完**（前条）+ **实现骨架已落地**：fr-wire `subagents` 服务词汇块（services.rs，0-6 服务面+10-21 六工具臂+900-903 四折叠+906-909 scoped 端点）；新 crate fr-subagent 全 13 模块（domain/depth/descriptor/assistant_output/catalog/projection/control/schema/structured/manager/runtime/tools/outbound/plugin_shell/export）+ workspace member + fr-working-directory rlib 缝常。
+- **编译态**：cargo check 零警零错；cargo test 37/37 全绿（纯模块钉测）；cargo doc -D warnings 过；cargo fmt 已跑。
+- **待清**：cargo clippy --all-targets -D warnings 128 枚细目（23 缺 # Errors 节/16 缺 # Panics 节/15 首段过长/10 可折叠 if/10 const fn/4 Eq 可补/4 同体 match 臂/4 临时值早 drop/3 map_err 通配/2 单模式 match→if let/2 or 模式/2 值传参/2 形参名/2 map-unwrap_or/2 assert on Result/2 名近/similar/1 Arc clone/1-2 map_or）——全机械。
+- **manager 体已定**：Seams trait 全缝（observe/read/append/create/resume/live/status/steer/followup/inject/cancel/flush/persisted/projection/wd ensure+set/approval probe/emit）；start_local 全序（三重存在检+池+深帽+descriptor+委派捕获+cwd+seed+物化+初始送达+catalog）；interrupt 四矩阵+no-op；send_message 邻接矩阵+cold_resume（descriptor fold+preset 投影检+NOT_RESUMABLE 族）；settlement（status 监听入口+每子锁复查+finalAssistantOutput/epochStopReason 捕获+queue/steer 送达+subagent/end）；list 两 scope+诊断行；ActivationPool Arc 共享；Provider 注册含 external 构造（start_external 全移植=Resource::External 构造点）。
+- **设计变更记录**（勘察后定案的两处偏离呈报）：①委派策略捕获改读父日志自折叠（fr 无 permissionPresets.current/sandboxPolicy.overrideOf 面；事件 vocabulary 同 dsh，observation 折叠=精确显式覆盖、零投影耦合）——observation 缝已在；②bt 实测 37 非 39（interrupt_agent 6 场景）。
+- **下一会话序**：clippy 128 清→跨 crate（fr-agent-loop CreateRequest 扩 seed/meta 透传+prompt client assemble 上下文 sessionId；fr-system-prompt WireAssembleContext 增 sessionId；fr-headless runner children lane require subagents.WAIT_FOR_CHILDREN；fr-schema subagents rail；host_boot pending 清单减 fr-subagent）→ manager fake-seams 20 单测+e2e（子 realm 隔离绑 crates/fr/tests）→ 四关 → lifecycle（subagent 21 实绑+bt 37+session fork 1）→ explain/stamp/提交。

@@ -1,0 +1,39 @@
+[package]
+name = "fr-subagent"
+description = "Fly Rafter subagent plugin: the dsh subagent package twins (in-process spawn/fork children, the continuation manager, and the six model-facing tool adapters)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+# Zero doctests in this crate; the harness's empty doctest stage trips the
+# cargo uplift race on the `cdylib, rlib` dependency's unhashed rlib path
+# (E0463 with 0 tests to run). Skipping the empty stage loses nothing.
+doctest = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+
+# rlib faces only: the wire vocabulary stays single-sourced in the owner
+# crate (the tools_client judgment — wire DTOs of a boundary never get
+# local copies).
+fr-wire = { workspace = true }
+
+# The working-directory seam constants (the tools_client judgment: wire DTOs
+# stay single-sourced in the owner crate; the ensure/set selectors this
+# plugin's directory legs require).
+fr-working-directory = { workspace = true }
+
+# Kernel family edge for the C-ABI dylib artifact (PRD 4.5): the plugin
+# shell links only dougong-abi across the kernel boundary.
+dougong-abi = { workspace = true }
+
+[lints]
+workspace = true

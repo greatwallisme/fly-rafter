@@ -25,10 +25,19 @@
 |  | （Q3A：permission-presets 竞窗排查随 18e 同期） | |
 | 18e | fiber_realm+竞窗排查（47-1A+Q3A） | complete（fiber_realm：lifecycle 33/34、stamp 33/34、四关全绿、commit 29a21b3；Q3A：竞窗排除=on_event 回复协议确定性缺陷，两壳修复+钉测、四关全绿待提交） |
 | 18f | M1 小账清零片（header_reason+孤儿批核对+abort 补偿集成场景；Q1A） | complete（dougong 0.6.1 修复发布+词表 declare 接线+两处真实装配缺口根修；e2e 8/8；stamp：headless 33/33、agent-loop 34/34、session 99/108（9 旧欠 skip）、builtin-tools 358/410（52 队列项 skip）、compaction 26/26） |
-| 19 | fr-subagent | pending |
+| 19 | fr-subagent | in_progress（勘察+合同层完成，D1=B；实现进行中） |
 | 20 | fr-mcp | pending |
 | 21 | fr-ptc | pending |
 | 22 | M1 收官片（对拍+批绑+标题治理 Q4A+文档评审+清零核验） | pending |
+
+### Phase 19 — fr-subagent
+**Status:** in_progress（勘察✓ 合同层✓ 全门绿；D1=B 已落 Decision；实现进行中）
+
+1. 勘察 ✓（dsh 7400 行全读+fr 缝位八锚+63 绑定面对账：61 实绑+2 ACP 场景 M3 队列 skip）
+2. 合同 ✓（subagent spec 21 枚绑真测+2 ACP 场景 M3 skip+Decision 行 7；bt spec Allowed += fr-subagent+37 枚绑真测；session spec fork 绑 adopt 测试+bind 脚本 WITHDRAW 陈旧项清除事故修复；lint×3 全 100%+plan/lint-knowledge 门绿）
+3. 实现（进行中）：fr-wire 词汇✓+fr-subagent 全 13 模块✓（编译零警+37 测绿+doc 过；clippy 128 机械细目待清）→ 跨 crate 待做（agent CREATE 扩 seed/meta+prompt client assemble sessionId；fr-system-prompt WireAssembleContext 增 sessionId；fr-headless children lane；fr-schema rail；host_boot 清单）→ manager fake-seams 20 单测+e2e
+4. 测试：59 枚绑定全绿+e2e 子代理真实 turn 集成场景
+5. 收口：四关 → lifecycle（subagent+builtin-tools+session[/headless/agent-loop 触面]）→ explain/stamp/提交
 
 ### Phase 18d — fr-working-directory
 **Status:** complete（待提交；详见 progress.md 2026-11-05 18d 完成）
@@ -58,7 +67,7 @@
 5. 收口：lifecycle（session/agent-loop/builtin-tools/headless[/compaction]）→ explain/stamp/提交
 
 ## Next Step
-**18f complete 已提交。下一步=Phase 19 fr-subagent（in-process spawn/fork+五工具族+manager；63 绑定面）。**
+**Phase 19 实现续：clippy 128 清→跨 crate → fr-subagent 全 crate（manager/runtime/provider/六工具/structured scoped 层）→ fr-system-prompt assemble 会话 id + fr-agent-loop CREATE 扩+prompt client → fr-headless children lane → fr-schema rail → 59 测试+e2e → 四关/lifecycle/收口。**
 
 ## Errors Encountered
 | Error | Attempt | Resolution |

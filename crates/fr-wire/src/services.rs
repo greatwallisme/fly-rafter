@@ -793,4 +793,80 @@ pub mod events {
     pub const EVENT_USER_ADMITTED: &str = "agent/user-admitted";
 }
 
+/// The `'subagents'` service face (owner crate `fr-subagent`; the dsh
+/// `ctx.subagents` seam: named-provider registry, the continuation
+/// manager, and the six model-facing tool arms).
+pub mod subagents {
+    /// The provided service name consumers inject.
+    pub const SERVICE_NAME: &str = "subagents";
+    /// Shell metadata echo.
+    pub const METHOD_DESCRIBE: u32 = 0;
+    /// Start one managed child (`{provider, label, childId?, request, delivery}`
+    /// → `{childId, messageId?}`; the dsh `startActivation`).
+    pub const METHOD_START: u32 = 1;
+    /// Interrupt one live child (`{targetSessionId, authority}` →
+    /// `{accepted: true}`; the dsh `interrupt`).
+    pub const METHOD_INTERRUPT: u32 = 2;
+    /// Steer one adjacent-Agent message (`{sender, targetId, content}` →
+    /// `{messageId}`; the dsh `sendMessage`).
+    pub const METHOD_SEND: u32 = 3;
+    /// The headless runner's non-blocking descendant join probe
+    /// (`{sessionId}` → `{progressing}`; decision 46: no blocking
+    /// require waits for idle over the wire).
+    pub const METHOD_WAIT_FOR_CHILDREN: u32 = 4;
+    /// Read the durable direct-child catalog (`{parentSessionId}` →
+    /// `{entries}`; the dsh `listChildren`).
+    pub const METHOD_LIST_CHILDREN: u32 = 5;
+    /// Recursively list reachable catalogs (`{rootSessionId}` →
+    /// `{entries}`; the dsh `listDescendants`).
+    pub const METHOD_LIST_DESCENDANTS: u32 = 6;
+    /// The `subagent` tool body (the dsh tool-subagent execute).
+    pub const METHOD_SUBAGENT_TOOL_EXECUTE: u32 = 10;
+    /// The `subagent` tool render.
+    pub const METHOD_SUBAGENT_TOOL_RENDER: u32 = 11;
+    /// The `subagent_fork` tool body.
+    pub const METHOD_SUBAGENT_FORK_TOOL_EXECUTE: u32 = 12;
+    /// The `subagent_fork` tool render.
+    pub const METHOD_SUBAGENT_FORK_TOOL_RENDER: u32 = 13;
+    /// The `send_message` tool body.
+    pub const METHOD_SEND_MESSAGE_TOOL_EXECUTE: u32 = 14;
+    /// The `send_message` tool render.
+    pub const METHOD_SEND_MESSAGE_TOOL_RENDER: u32 = 15;
+    /// The `interrupt_agent` tool body.
+    pub const METHOD_INTERRUPT_TOOL_EXECUTE: u32 = 16;
+    /// The `interrupt_agent` tool render.
+    pub const METHOD_INTERRUPT_TOOL_RENDER: u32 = 17;
+    /// The `list_agents` tool body.
+    pub const METHOD_LIST_AGENTS_TOOL_EXECUTE: u32 = 18;
+    /// The `list_agents` tool render.
+    pub const METHOD_LIST_AGENTS_TOOL_RENDER: u32 = 19;
+    /// The `list_subagent_models` tool body.
+    pub const METHOD_LIST_SUBAGENT_MODELS_TOOL_EXECUTE: u32 = 20;
+    /// The `list_subagent_models` tool render.
+    pub const METHOD_LIST_SUBAGENT_MODELS_TOOL_RENDER: u32 = 21;
+    /// The `subagentCatalog` projection fold relay (the chunked-list
+    /// fold over the parent's `subagent/catalog` events).
+    pub const METHOD_FOLD_CATALOG: u32 = 900;
+    /// The `subagentTiming` projection fold relay.
+    pub const METHOD_FOLD_TIMING: u32 = 901;
+    /// The `subagent` identity projection fold relay.
+    pub const METHOD_FOLD_IDENTITY: u32 = 902;
+    /// The `agentPreset` projection fold relay (the cold-resume
+    /// restoration requirement; fr-subagent owns the fold in M1).
+    pub const METHOD_FOLD_AGENT_PRESET: u32 = 903;
+    /// The `tool:subagent:depth` context text provider (dynamic per
+    /// agent: the verbatim cap wording only at max depth).
+    pub const METHOD_CONTEXT_DEPTH_TEXT: u32 = 906;
+    /// The `subagent:delegation` context text provider (the verbatim
+    /// delegated-scope statement for child sessions only).
+    pub const METHOD_CONTEXT_DELEGATION_TEXT: u32 = 907;
+    /// The `tool:structured_output` section text provider (the verbatim
+    /// instruction for structured-output children only).
+    pub const METHOD_SECTION_STRUCTURED_TEXT: u32 = 908;
+    /// The scoped structured-output tool-schema provider (answers the
+    /// requesting session's `structured_output` schema only while its
+    /// runtime is live).
+    pub const METHOD_STRUCTURED_TOOLS: u32 = 909;
+}
+
 // Rust guideline compliant 2026-11-03
