@@ -26,6 +26,7 @@ use super::{
     JsonlCompression, PersistError, SESSION_FORMAT_VERSION, encoding_mismatch,
     session_format_version_refusal,
 };
+use crate::error::SessionError;
 use crate::vocabulary::EventVocabulary;
 
 /// Default physical encoding (dsh `DEFAULT_COMPRESSION`).
@@ -63,7 +64,7 @@ pub struct JsonlBackend {
     list_permits: usize,
     scheduler: BatchScheduler,
     tracker: Arc<super::tracker::BackendTracker>,
-    known: EventVocabulary,
+    known: super::super::service::SharedVocabulary,
     root_encoding: Mutex<Option<Result<(), String>>>,
     warn_hook: Option<Arc<dyn Fn(String) + Send + Sync>>,
 }
@@ -96,7 +97,7 @@ pub struct JsonlBackendBuilder {
     compression: JsonlCompression,
     list_concurrency: usize,
     batch_max_delay: Duration,
-    known: EventVocabulary,
+    known: super::super::service::SharedVocabulary,
     warn_hook: Option<Arc<dyn Fn(String) + Send + Sync>>,
 }
 
@@ -104,7 +105,7 @@ impl JsonlBackend {
     /// Starts a builder for the backend rooted at `root` with the event
     /// vocabulary that decode admits (dsh `Config.root` + catalog).
     #[must_use]
-    pub fn builder(root: &Path, known: EventVocabulary) -> JsonlBackendBuilder {
+    pub fn builder(root: &Path, known: crate::service::SharedVocabulary) -> JsonlBackendBuilder {
         JsonlBackendBuilder {
             root: root.to_path_buf(),
             compression: DEFAULT_COMPRESSION,
@@ -281,6 +282,7 @@ impl JsonlBackendBuilder {
             )),
             known: self.known,
             root_encoding: Mutex::new(None),
+
             warn_hook: self.warn_hook,
         }))
     }
@@ -534,11 +536,40 @@ impl JsonlBackend {
     /// # Errors
     ///
     /// The persistence-layer refusal family.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the vocabulary lock is poisoned.
     pub fn cold_read(
         &self,
         id: &SessionId,
     ) -> Result<Option<super::read::ReadOutcome>, PersistError> {
-        cold_read_stored_log(&self.root, self.compression, self.known.clone(), id)
+        cold_read_stored_log(
+            &self.root,
+            self.compression,
+            self.known.lock().expect("vocabulary lock").clone(),
+            id,
+        )
+    }
+
+    /// Declares plugin-owned durable event types into the read-path
+    /// vocabulary (the Q34A activation-time channel; the wire
+    /// `declare-event-types` arm routes here so the read gate sees the
+    /// aggregate, not just the construction-time core set).
+    ///
+    /// # Errors
+    ///
+    /// Returns the vocabulary refusal for a duplicate declaration.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the vocabulary lock is poisoned.
+    pub(crate) fn declare_types(&self, types: &[String]) -> Result<(), SessionError> {
+        self.known
+            .lock()
+            .expect("vocabulary lock")
+            .declare(types)
+            .map_err(|error| SessionError::Other(error.to_string()))
     }
 
     /// materialized artifacts plus this process's created-but-unmaterialized
@@ -910,7 +941,7 @@ impl JsonlBackend {
             &raw,
             id,
             self.compression,
-            self.known.clone(),
+            self.known.lock().expect("vocabulary lock").clone(),
         )
     }
 
@@ -1130,7 +1161,7 @@ the first frame holds more than one record (raw log: {})",
             &raw,
             id,
             self.compression,
-            self.known.clone(),
+            self.known.lock().expect("vocabulary lock").clone(),
         )
     }
 
@@ -1284,10 +1315,13 @@ mod tests {
 
     fn backend(tag: &str) -> (TempRoot, Arc<JsonlBackend>) {
         let root = TempRoot::new(tag);
-        let backend = JsonlBackend::builder(root.path(), EventVocabulary::core())
-            .batch_max_delay(Duration::from_millis(30))
-            .build()
-            .expect("backend builds");
+        let backend = JsonlBackend::builder(
+            root.path(),
+            std::sync::Arc::new(std::sync::Mutex::new(EventVocabulary::core())),
+        )
+        .batch_max_delay(Duration::from_millis(30))
+        .build()
+        .expect("backend builds");
         (root, backend)
     }
 

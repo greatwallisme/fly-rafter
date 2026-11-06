@@ -601,6 +601,155 @@ mod tests {
         assert_eq!(text.as_str(), closer_text::INTERRUPTED_STARTED);
     }
 
+    /// The two-level abort compensation in one recovery (PRD 7.6): the
+    /// call the scheduler skipped carries the live synthetic pair verbatim
+    /// (`ABORTED_BEFORE_DISPATCH`, name `AbortError`, the dsh dispatch
+    /// text), while the call never dispatched receives the repair-level
+    /// `TOOL_NOT_STARTED` closer — continuous seqs, reused time, and the
+    /// repaired log replays legally.
+    /// One assistant message advertising both calls (the pending pair).
+    fn assistant_two_calls() -> SessionEvent {
+        let tool_call_block = |call_id: &str| {
+            ContentBlock::Known(KnownContentBlock::ToolCall {
+                id: ToolCallId::new(call_id),
+                name: "bash".to_owned(),
+                arguments: "{}".to_owned(),
+            })
+        };
+        SessionEvent {
+            seq: SessionSeq::new(2).expect("seq"),
+            time: 1_002,
+            data: SessionEventData::AssistantMessage(AssistantMessageData {
+                turn: 1,
+                step: 1,
+                message: Message::Known(Box::new(KnownMessage::Assistant {
+                    id: MessageId::new("assistant-2"),
+                    content: vec![tool_call_block("call-a"), tool_call_block("call-b")],
+                    source: MessageSource::Known(KnownMessageSource::Model {
+                        provider: "deepseek-official".to_owned(),
+                        model: "deepseek-chat".to_owned(),
+                        replay_state: None,
+                        extra: RawObject::new(),
+                    }),
+                    extra: RawObject::new(),
+                })),
+                stream: Vec::new(),
+                usage: None,
+                interrupted: None,
+            }),
+            ignorable: None,
+            surface_op: Some(SurfaceOp::Append(AppendOp)),
+            source_event_seqs: None,
+        }
+    }
+
+    /// The live scheduler-skip settlement (fr-agent-loop
+    /// `append_skipped_tool_call`, dsh `appendSkippedToolCall`): the pair
+    /// is already durable, so recovery owes it nothing.
+    fn skipped_pair_result() -> SessionEvent {
+        SessionEvent {
+            seq: SessionSeq::new(4).expect("seq"),
+            time: 1_004,
+            data: SessionEventData::ToolResult(ToolResultData {
+                turn: 1,
+                step: 1,
+                message: Message::Known(Box::new(KnownMessage::Tool {
+                    id: MessageId::new("interrupted-tool-result-call-a-4"),
+                    content: vec![ContentBlock::Known(KnownContentBlock::Text {
+                        text: "Error: tool call aborted before dispatch".to_owned(),
+                    })],
+                    source: MessageSource::Known(KnownMessageSource::Tool {
+                        call_id: ToolCallId::new("call-a"),
+                        extra: RawObject::new(),
+                    }),
+                    tool_call_id: ToolCallId::new("call-a"),
+                    is_error: Some(TrueOnly),
+                    extra: RawObject::new(),
+                })),
+                error: Some(ToolResultError {
+                    name: "AbortError".to_owned(),
+                    code: "ABORTED_BEFORE_DISPATCH".to_owned(),
+                    reason: None,
+                }),
+                meta: None,
+            }),
+            ignorable: None,
+            surface_op: Some(SurfaceOp::Append(AppendOp)),
+            source_event_seqs: None,
+        }
+    }
+
+    #[test]
+    fn two_level_compensation_codes_and_wording() {
+        let log = vec![
+            turn_start(0, 1),
+            step_start(1, 1, 1),
+            assistant_two_calls(),
+            tool_call(3, 1, 1, "call-a"),
+            skipped_pair_result(),
+        ];
+        let closers = interrupted_turn_closers(&log).expect("closers");
+        assert_eq!(closers.len(), 3, "one recovery result plus both boundaries");
+        // The skipped pair survives verbatim: the first compensation level.
+        let SessionEventData::ToolResult(skipped) = &log[4].data else {
+            panic!("the skipped pair's result");
+        };
+        let skipped_error = skipped.error.as_ref().expect("the skipped error");
+        assert_eq!(skipped_error.name, "AbortError");
+        assert_eq!(skipped_error.code, "ABORTED_BEFORE_DISPATCH");
+        // The second level: only call-b is still pending.
+        let SessionEventData::ToolResult(recovered) = &closers[0].data else {
+            panic!("the recovered result");
+        };
+        let error = recovered.error.as_ref().expect("the recovery error");
+        assert_eq!(error.name, "ToolNotStartedError");
+        assert_eq!(error.code, TOOL_NOT_STARTED);
+        let Message::Known(known) = &recovered.message else {
+            panic!("the recovery message");
+        };
+        let KnownMessage::Tool { content, .. } = known.as_ref() else {
+            panic!("the recovery message");
+        };
+        let Some(ContentBlock::Known(KnownContentBlock::Text { text })) = content.first() else {
+            panic!("one text block");
+        };
+        assert_eq!(text.as_str(), INTERRUPTED_NOT_STARTED);
+        assert!(closers[0].source_event_seqs.is_none());
+        assert_eq!(closers[0].seq.get(), 5);
+        assert_eq!(
+            closers[0].time, log[4].time,
+            "time reuses the last real event"
+        );
+        assert!(matches!(closers[1].data, SessionEventData::StepEnd(_)));
+        assert_eq!(closers[1].seq.get(), 6);
+        assert_eq!(closers[1].time, log[4].time);
+        let SessionEventData::TurnEnd(end) = &closers[2].data else {
+            panic!("turn/end third");
+        };
+        assert_eq!(
+            end.reason,
+            TurnEndReason::Known(TurnEndReasonKind::Interrupted)
+        );
+        assert_eq!(closers[2].seq.get(), 7);
+        assert_eq!(closers[2].time, log[4].time);
+        // The repaired log replays legally.
+        let mut replayed = log;
+        replayed.extend(closers);
+        let header = fr_wire::event::SessionHeader {
+            version: 4,
+            id: fr_wire::ids::SessionId::new("two-level-repair"),
+            created_at: 1,
+            cwd: None,
+            parent_session: None,
+            is_seeded: false,
+            origin: None,
+            delegation_depth: None,
+            agent_preset: None,
+        };
+        crate::session::Session::from_seed(header, replayed)
+            .unwrap_or_else(|error| panic!("replay: {error}"));
+    }
+
     #[test]
     fn appended_matching_result_settles_pending_but_non_append_does_not() {
         let mut appended = tool_call(3, 1, 1, "call-a");

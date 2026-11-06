@@ -6,6 +6,7 @@
 
 use std::io::{Read as _, Write as _};
 use std::net::TcpListener;
+use std::os::unix::process::ExitStatusExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -490,4 +491,141 @@ fn help_prints_the_usage_and_exits_zero() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.starts_with("Usage:"), "{stdout:?}");
     assert!(stdout.contains("--session-id"), "{stdout:?}");
+}
+
+/// The abort-compensation integration scenario (M1 acceptance 4, 18f
+/// Q1A): a run parked mid-turn on a held provider stream takes SIGKILL
+/// (a hard crash — no graceful shutdown, so the loop never writes a
+/// closer: `interrupted` is reserved for exactly this orphan shape),
+/// leaving the open turn on disk; the `--session-id` resume repairs the
+/// orphan with the synthesized `step/end` + `turn/end{kind:
+/// interrupted}` closers and drives the conversation to completion.
+#[test]
+fn sigint_mid_run_repairs_the_orphan_on_resume() {
+    require_artifacts();
+    let _gate = E2E_GATE.lock().expect("the e2e gate");
+    // The drip-hold mock: the stream answers the request head and then
+    // stays open with ping frames, so the run parks inside the turn
+    // (the host_boot signals-test pattern).
+    let hold = TcpListener::bind("127.0.0.1:0").expect("the hold binds");
+    let hold_port = hold.local_addr().expect("hold addr").port();
+    let _hold_thread = std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = hold.accept() {
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n: ping\n\n";
+            let _ = stream.write_all(head.as_bytes());
+            loop {
+                std::thread::sleep(Duration::from_millis(50));
+                if stream.write_all(b": ping\n\n").is_err() {
+                    return;
+                }
+            }
+        }
+    });
+    let home = TempHome::new("abort-resume");
+    let mut child = boot_command(&home, &format!("http://127.0.0.1:{hold_port}"))
+        .arg("--json")
+        .arg("say hi")
+        .spawn()
+        .expect("the fr binary spawns");
+    // The serve window: boot settles and the generation holds on the
+    // dripping stream; the kill lands inside the open turn.
+    std::thread::sleep(Duration::from_millis(1500));
+    let delivery = Command::new("kill")
+        .arg("-s")
+        .arg("SIGKILL")
+        .arg(child.id().to_string())
+        .status()
+        .expect("kill runs");
+    assert!(delivery.success(), "SIGKILL delivered");
+    let status = child.wait().expect("the child exits after the signal");
+    assert_eq!(
+        status.signal(),
+        Some(9),
+        "SIGKILL crashes the child (no graceful shutdown)"
+    );
+    // The interrupted turn is a crash orphan: open on disk, no closer.
+    let log = find_session_log(&home);
+    assert!(
+        !log.lines().any(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .is_ok_and(|event| event["type"] == "turn/end")
+        }),
+        "the orphaned turn carries no turn/end yet: {log}"
+    );
+    let session_id = session_id_of(&home);
+    // The resume: a completing exchange, adopted and repaired.
+    let mock = MockMessages::spawn(SSE_BODY);
+    let output = boot_command(&home, &mock.base_url())
+        .args(["--json", "--session-id", &session_id, "say hi again"])
+        .output()
+        .expect("the fr binary runs");
+    assert_eq!(output.status.code(), Some(0), "the resume completes");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let last = stdout.lines().last().expect("the final frame");
+    let frame: serde_json::Value = serde_json::from_str(last).expect("the final frame decodes");
+    assert_eq!(frame["type"], "final");
+    assert_eq!(frame["text"], "mocked answer");
+    // The repair landed: the orphan closed with the interrupted reason
+    // before the resumed turn ran (the resume itself proves replay
+    // legality — the restore gate would refuse a malformed log).
+    let log = find_session_log(&home);
+    let closers: Vec<serde_json::Value> = log
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|event| event["type"] == "turn/end")
+        .collect();
+    assert_eq!(
+        closers.len(),
+        2,
+        "the orphan closer plus the completed turn"
+    );
+    assert_eq!(
+        closers[0]["data"]["reason"],
+        serde_json::json!({ "kind": "interrupted" }),
+        "the orphan closes with interrupted: {}",
+        closers[0]
+    );
+    assert_eq!(
+        closers[1]["data"],
+        serde_json::json!({ "turn": 2, "reason": { "kind": "completed" } }),
+        "the resumed turn completes: {}",
+        closers[1]
+    );
+}
+
+/// Walks every session-log path under one root (the single-log e2e
+/// contract's shared traversal).
+fn walk_session_logs(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            walk_session_logs(&path, found);
+        } else if path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("session.v4.jsonl"))
+        {
+            found.push(path);
+        }
+    }
+}
+
+/// The session id of the single session under one home (the directory
+/// name below the encoded project segment; the v4 layout encodes the id
+/// as one path segment and headless ids are segment-safe).
+fn session_id_of(home: &TempHome) -> String {
+    let sessions = home.path().join("sessions");
+    let mut found = Vec::new();
+    walk_session_logs(&sessions, &mut found);
+    assert_eq!(found.len(), 1, "one session log per e2e home");
+    found
+        .remove(0)
+        .parent()
+        .expect("the log lives in the session dir")
+        .file_name()
+        .expect("the session dir names the id")
+        .to_string_lossy()
+        .into_owned()
 }

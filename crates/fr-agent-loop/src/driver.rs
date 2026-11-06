@@ -1741,7 +1741,9 @@ impl LoopDriver {
     }
 
     /// Whether the assembled tool schemas differ from the logged request
-    /// header's (dsh `toolsChanged`).
+    /// header's (dsh `toolsChanged`, agent.ts:294: the canonical header
+    /// with the assembled tools fails `headerEquals` against the logged
+    /// baseline — the schema compare is the order-sensitive wire JSON).
     fn tools_changed(&mut self, tools: &[ToolSchema]) -> bool {
         let Some(baseline) = self.reads.request_header() else {
             return false;
@@ -1751,7 +1753,7 @@ impl LoopDriver {
             adapter_defaults: baseline.adapter_defaults,
             tools: Some(tools.to_vec()),
         });
-        baseline != candidate
+        !fr_session::session::header_equals(&baseline, &candidate)
     }
 
     /// Executes one admitted step (dsh `step`): render once, then retry
@@ -1984,7 +1986,8 @@ impl LoopDriver {
     /// Logs the resolved header snapshot (dsh buildRequest's three-state
     /// publication): the first request is `initial`/`resume`, a changed
     /// canonical header is `change` with the tool delta, and an unchanged
-    /// header on a series boundary is `series` alone.
+    /// header on a series boundary is `series` alone. The change test is
+    /// the dsh `headerEquals` (order-sensitive wire-JSON schema compare).
     fn log_request_header(
         &mut self,
         header: &EpochHeader,
@@ -2010,7 +2013,7 @@ impl LoopDriver {
             self.request_header_logged = true;
             return Ok(Some(event.seq));
         }
-        if baseline.is_none_or(|logged| logged != header) {
+        if baseline.is_none_or(|logged| !fr_session::session::header_equals(logged, header)) {
             let event = self.commit(
                 event_type::REQUEST_HEADER,
                 &RequestHeaderData {
@@ -3124,6 +3127,9 @@ mod tests {
             "user/message" => SessionEventData::UserMessage(
                 serde_json::from_value(data.clone()).expect("user message"),
             ),
+            "developer/message" => SessionEventData::DeveloperMessage(
+                serde_json::from_value(data.clone()).expect("developer message"),
+            ),
             "system/message" => SessionEventData::SystemMessage(
                 serde_json::from_value(data.clone()).expect("system message"),
             ),
@@ -3738,6 +3744,131 @@ mod tests {
                 .expect("tools double lock")
                 .finish(exec, result)
         }
+    }
+
+    /// The prompt double with a mutable tool list (the tool-delta gate
+    /// probe): turns swap the assembled tools between assembles.
+    struct MutablePrompt {
+        text: &'static str,
+        tools: Arc<Mutex<Vec<fr_wire::call_config::ToolSchema>>>,
+    }
+
+    impl SystemPromptFace for MutablePrompt {
+        fn assemble(&mut self) -> Result<PromptAssembly, String> {
+            Ok(PromptAssembly {
+                rendered_prompt: self.text.to_owned(),
+                context_sections: Vec::new(),
+                joined_sections: String::new(),
+                tools: self.tools.lock().expect("prompt tools lock").clone(),
+            })
+        }
+
+        fn refresh_context(&mut self, assembly: &PromptAssembly) -> Result<PromptAssembly, String> {
+            Ok(assembly.clone())
+        }
+    }
+
+    /// The harness twin with the mutable prompt (the tool-gate tests);
+    /// returns the prompt's tool-list handle alongside the harness.
+    fn harness_with_prompt(
+        scripts: Vec<Script>,
+        in_history: bool,
+        initial_tools: Vec<fr_wire::call_config::ToolSchema>,
+    ) -> (Harness, Arc<Mutex<Vec<fr_wire::call_config::ToolSchema>>>) {
+        let session = Arc::new(Mutex::new(TestSession::new()));
+        let admitted: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let session_handle = Box::into_raw(Box::new(Arc::clone(&session)));
+        let outbound = Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
+            dispatch: crate::outbound::identity_dispatch,
+            host_handle: session_handle.cast::<c_void>(),
+            require: serving_require,
+            emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
+        });
+        let events = AgentEvents::new(outbound, Arc::new(|_warning: &str| {}));
+        let events = Arc::new(events);
+        let map = SessionMap::new(outbound);
+        let mailbox = session_mailbox(&map, "s1");
+        let reads = TestReads {
+            session: Arc::clone(&session),
+        };
+        let next_counter = Arc::new(AtomicU64::new(0));
+        let next_id = Box::new(move || {
+            fr_wire::MessageId::new(format!(
+                "id-{}",
+                next_counter.fetch_add(1, Ordering::Relaxed)
+            ))
+        });
+        let prompt_tools = Arc::new(Mutex::new(initial_tools));
+        let tools = Arc::new(Mutex::new(ScriptedTools {
+            mailbox: Some(Arc::clone(&mailbox)),
+            mode: ToolExecutionMode::Parallel,
+            mode_overrides: std::collections::HashMap::new(),
+            flip_on_dispatch: None,
+            results: Vec::new().into(),
+            settled: Vec::new(),
+            dispatches: Vec::new(),
+            cancel_on_dispatch: false,
+            in_flight_now: Vec::new(),
+            timeline: Vec::new(),
+        }));
+        let llm = Arc::new(Mutex::new(ScriptedLlm {
+            session: Arc::clone(&session),
+            mailbox: Some(Arc::clone(&mailbox)),
+            scripts: scripts.into(),
+            prepared: Vec::new(),
+            requests: Vec::new(),
+            in_history,
+        }));
+        let driver = LoopDriver::new(
+            "s1",
+            AgentOptions {
+                provider: Some("p".to_owned()),
+                model: Some("m".to_owned()),
+                reasoning_effort: None,
+                max_tokens: None,
+            },
+            Arc::clone(&mailbox),
+            Arc::clone(&events),
+            DriverDeps {
+                reads: Box::new(reads),
+                prompt: Box::new(MutablePrompt {
+                    text: "system",
+                    tools: Arc::clone(&prompt_tools),
+                }),
+                llm: Box::new(SharedLlm(Arc::clone(&llm))),
+                tools: Box::new(SharedTools(Arc::clone(&tools))),
+                instructions: None,
+                skills: None,
+                clock: Box::new(|| 1_700_000_000_000),
+                next_id,
+                max_parallel_tool_calls: Box::new(move || 10),
+                emit_user_admitted: {
+                    let admitted = Arc::clone(&admitted);
+                    Box::new(move |agent: &str| {
+                        admitted
+                            .lock()
+                            .expect("admitted lock")
+                            .push(agent.to_owned());
+                    })
+                },
+            },
+        )
+        .expect("driver restores");
+        (
+            Harness {
+                session,
+                mailbox,
+                driver,
+                tools,
+                llm,
+                admitted,
+            },
+            prompt_tools,
+        )
     }
 
     struct Harness {
@@ -4454,6 +4585,193 @@ mod tests {
         // logged exactly one request/header (the initial).
         assert_eq!(session.typed("turn/end").len(), 2);
         assert_eq!(session.typed("request/header").len(), 1);
+        drop(session);
+        drop(thread);
+    }
+
+    /// The three-state publication (dsh buildRequest): a fresh instance's
+    /// first header over an existing log is `resume`, over none is
+    /// `initial`; a changed header is `change`; an unchanged header on a
+    /// series boundary is `series`; and the change test is the dsh
+    /// `headerEquals` — a key-order-only tool schema difference is a
+    /// change.
+    #[test]
+    fn header_reason_tracks_initial_change_and_series() {
+        use fr_wire::call_config::{CallConfig, CallControls, ToolSchema};
+        use fr_wire::content::TrueOnly;
+        use fr_wire::event::RequestHeaderReason;
+        let tool = |name: &str, parameters: &str| ToolSchema {
+            defer_loading: Some(TrueOnly),
+            name: name.to_owned(),
+            description: "d".to_owned(),
+            parameters: serde_json::from_str(parameters).expect("schema object"),
+        };
+        let header_with = |tools: Vec<ToolSchema>| EpochHeader {
+            config: CallConfig {
+                provider: "p".to_owned(),
+                model: "m".to_owned(),
+                controls: CallControls::default(),
+            },
+            adapter_defaults: None,
+            tools: Some(tools),
+        };
+        let bash = header_with(vec![tool(
+            "bash",
+            r#"{"type":"object","properties":{"a":{"type":"string"}}}"#,
+        )]);
+        let web = header_with(vec![tool("web", r#"{"type":"object"}"#)]);
+        let bash_flipped = header_with(vec![tool(
+            "bash",
+            r#"{"properties":{"a":{"type":"string"}},"type":"object"}"#,
+        )]);
+        let reasons_of = |harness: &Harness| -> Vec<RequestHeaderReason> {
+            harness
+                .session
+                .lock()
+                .expect("test session lock")
+                .typed("request/header")
+                .iter()
+                .map(|event| match &event.data {
+                    SessionEventData::RequestHeader(data) => data.reason,
+                    _ => panic!("a request/header event"),
+                })
+                .collect()
+        };
+        // Resume leg: a fresh instance's first header over a log that
+        // already carries one.
+        let mut resume_harness = harness(vec![]);
+        let resumed = resume_harness
+            .driver
+            .log_request_header(&bash, Some(&bash), false)
+            .expect("resume logs");
+        assert!(resumed.is_some());
+        assert_eq!(reasons_of(&resume_harness), [RequestHeaderReason::Resume]);
+        // The resumed instance then logs a real change.
+        resume_harness
+            .driver
+            .log_request_header(&web, Some(&bash), false)
+            .expect("change logs");
+        assert_eq!(
+            reasons_of(&resume_harness),
+            [RequestHeaderReason::Resume, RequestHeaderReason::Change]
+        );
+        drop(resume_harness);
+        // Initial/series/silence/order-sensitivity legs on a fresh log.
+        let mut harness = harness(vec![]);
+        let initial = harness
+            .driver
+            .log_request_header(&bash, None, false)
+            .expect("initial logs");
+        assert!(initial.is_some());
+        let series = harness
+            .driver
+            .log_request_header(&bash, Some(&bash), true)
+            .expect("series logs");
+        assert!(
+            series.is_none(),
+            "dsh's series publication leaves headerSeq undefined (no tool delta can follow)"
+        );
+        let silent = harness
+            .driver
+            .log_request_header(&bash, Some(&bash), false)
+            .expect("the unchanged header stays silent");
+        assert!(silent.is_none());
+        harness
+            .driver
+            .log_request_header(&web, Some(&bash), false)
+            .expect("change logs");
+        harness
+            .driver
+            .log_request_header(&bash_flipped, Some(&bash), false)
+            .expect("order-only change logs");
+        assert_eq!(
+            reasons_of(&harness),
+            [
+                RequestHeaderReason::Initial,
+                RequestHeaderReason::Series,
+                RequestHeaderReason::Change,
+                RequestHeaderReason::Change,
+            ],
+            "the key-order-only schema difference is a change"
+        );
+    }
+
+    /// The tool-set gate on the developer declaration (dsh
+    /// agent.ts:635-665): no name-set difference appends no
+    /// developer/message; a difference appends one and `headerSeq` rides
+    /// only when additions exist (a pure removal carries none).
+    #[test]
+    fn tool_changes_gate_the_developer_message() {
+        let bash_tool = || fr_wire::call_config::ToolSchema {
+            defer_loading: None,
+            name: "bash".to_owned(),
+            description: "d".to_owned(),
+            parameters: serde_json::from_str(r#"{"type":"object"}"#).expect("schema object"),
+        };
+        let web_tool = || fr_wire::call_config::ToolSchema {
+            defer_loading: None,
+            name: "web".to_owned(),
+            description: "d".to_owned(),
+            parameters: serde_json::from_str(r#"{"type":"object"}"#).expect("schema object"),
+        };
+        // Turn 1 establishes the header with [bash]; turn 2 keeps [bash]
+        // (no developer message); turn 3 adds web (addition -> headerSeq);
+        // turn 4 drops bash (pure removal -> no headerSeq).
+        let bodies = ["one", "two", "three", "four"];
+        let (harness, prompt_tools) = harness_with_prompt(
+            bodies
+                .iter()
+                .map(|body| ScriptedLlm::text_generation(body))
+                .collect(),
+            true,
+            vec![bash_tool()],
+        );
+        let thread = DriverThread::spawn(harness.driver, Arc::clone(&harness.mailbox));
+        for (index, body) in bodies.iter().enumerate() {
+            if index == 2 {
+                prompt_tools
+                    .lock()
+                    .expect("prompt tools lock")
+                    .push(web_tool());
+            }
+            if index == 3 {
+                let mut guard = prompt_tools.lock().expect("prompt tools lock");
+                guard.retain(|tool| tool.name != "bash");
+            }
+            harness.mailbox.enqueue(InboundCommand::Input {
+                target: crate::inbox::InboxTarget::NextTurn,
+                message: user_message(&format!("m{}", index + 1), body),
+                wakeup: true,
+            });
+            let ended = index + 1;
+            wait_for(
+                &harness.session,
+                move |session| session.typed("turn/end").len() >= ended,
+                "the turn ends",
+            );
+        }
+        let session = harness.session.lock().expect("test session lock");
+        let headers = session.typed("request/header");
+        assert_eq!(
+            headers.len(),
+            3,
+            "the unchanged second turn logged no header"
+        );
+        let developer: Vec<_> = session.typed("developer/message");
+        assert_eq!(developer.len(), 2, "only the two differences declare");
+        let header_seq_of = |event: &fr_wire::event::SessionEvent| match &event.data {
+            SessionEventData::DeveloperMessage(data) => data.header_seq,
+            _ => panic!("a developer/message event"),
+        };
+        assert!(
+            header_seq_of(developer[0]).is_some(),
+            "the addition carries headerSeq"
+        );
+        assert_eq!(
+            header_seq_of(developer[1]),
+            None,
+            "the pure removal carries no headerSeq"
+        );
         drop(session);
         drop(thread);
     }

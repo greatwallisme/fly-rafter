@@ -329,6 +329,11 @@ pub fn dispatch(method: u32, payload: &[u8], state: &mut ShellState) -> Result<V
                     .ok_or_else(|| "declare payload requires a types array".to_owned())?,
             )
             .map_err(|error| format!("declare types must be an array of strings: {error}"))?;
+            // The read-path gate consumes the service's shared vocabulary
+            // (the backend's decode admission), so the declaration must
+            // land there — the shell's own aggregate view is updated in
+            // lockstep and stays the test-visible face.
+            state.service.declare_types(&types)?;
             state
                 .vocabulary
                 .declare(&types)
@@ -830,18 +835,20 @@ mod tests {
         }
     }
 
-    #[test]
-    fn state_of_relays_over_a_real_stored_log() {
-        let root = TempRoot::new("relay");
-        // Write one stored log carrying a plugin-declared event.
+    /// Writes one stored log carrying a plugin-declared event (the
+    /// reader's declare arm must make the type known before the fold).
+    fn write_log_with_declared_event(root: &TempRoot) {
         let mut writer_vocabulary = EventVocabulary::core();
         writer_vocabulary
             .declare(&["permission/preset".to_owned()])
             .expect("declare");
-        let backend = JsonlBackend::builder(root.path(), writer_vocabulary)
-            .batch_max_delay(std::time::Duration::from_millis(30))
-            .build()
-            .expect("backend builds");
+        let backend = JsonlBackend::builder(
+            root.path(),
+            std::sync::Arc::new(std::sync::Mutex::new(writer_vocabulary)),
+        )
+        .batch_max_delay(std::time::Duration::from_millis(30))
+        .build()
+        .expect("backend builds");
         let header = fr_wire::event::SessionHeader {
             version: SESSION_FORMAT_VERSION,
             id: SessionId::new("s-relay".to_owned()),
@@ -863,7 +870,12 @@ mod tests {
         handle.flush().expect("flush");
         drop(handle);
         drop(backend);
+    }
 
+    #[test]
+    fn state_of_relays_over_a_real_stored_log() {
+        let root = TempRoot::new("relay");
+        write_log_with_declared_event(&root);
         // The shell over the same root: declare the type (the vocabulary
         // the cold read decodes against), register a unit, then relay.
         let host = Box::leak(Box::new(FoldHost {

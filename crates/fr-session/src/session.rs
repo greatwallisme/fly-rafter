@@ -456,6 +456,63 @@ pub fn canonical_header(header: &EpochHeader) -> EpochHeader {
     }
 }
 
+/// Field-wise equality over canonical headers (the dsh `headerEquals`,
+/// core/session/src/request-header.ts:43-52).
+///
+/// Config, adapter defaults, and tool schemas compare in order; a tool
+/// schema compares through its exact wire JSON, so a key-order-only
+/// difference is unequal (dsh `JSON.stringify` semantics). Canonical
+/// absent and empty tool lists are equivalent.
+#[must_use]
+pub fn header_equals(a: &EpochHeader, b: &EpochHeader) -> bool {
+    if !call_config_equal(&a.config, &b.config) {
+        return false;
+    }
+    let defaults_equal = match (&a.adapter_defaults, &b.adapter_defaults) {
+        (None, None) => true,
+        (Some(left), Some(right)) => {
+            left.reasoning_effort == right.reasoning_effort && left.max_tokens == right.max_tokens
+        }
+        _ => false,
+    };
+    if !defaults_equal {
+        return false;
+    }
+    let empty: [fr_wire::call_config::ToolSchema; 0] = [];
+    let at = a.tools.as_deref().unwrap_or(&empty);
+    let bt = b.tools.as_deref().unwrap_or(&empty);
+    at.len() == bt.len()
+        && at.iter().zip(bt.iter()).all(|(left, right)| {
+            serde_json::to_string(left).unwrap_or_default()
+                == serde_json::to_string(right).unwrap_or_default()
+        })
+}
+
+/// Compare optional envelopes so a headerless estimate can track later
+/// surface deltas (the dsh `optionalHeaderEquals`).
+#[must_use]
+pub fn optional_header_equals(left: Option<&EpochHeader>, right: Option<&EpochHeader>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => header_equals(left, right),
+        _ => false,
+    }
+}
+
+/// The dsh `callConfigEquals`: provider, model, and the four control
+/// fields (the `LlmCallConfig` face without the agent-loop mark).
+fn call_config_equal(
+    a: &fr_wire::call_config::CallConfig,
+    b: &fr_wire::call_config::CallConfig,
+) -> bool {
+    a.provider == b.provider
+        && a.model == b.model
+        && a.controls.reasoning_effort == b.controls.reasoning_effort
+        && a.controls.temperature == b.controls.temperature
+        && a.controls.max_tokens == b.controls.max_tokens
+        && a.controls.stop == b.controls.stop
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1473,6 +1530,44 @@ mod tests {
         assert_dsh_data_keys(&event, &["header", "reason"]);
         assert_log_only_role(&event.data);
         bracketed(event, Carrier::Full);
+        // The reason enum's four wire words round-trip losslessly (the
+        // session layer persists whatever the loop decides; dsh
+        // RequestHeaderReason = 'initial' | 'resume' | 'change' | 'series',
+        // core/session/src/types.ts:261-274).
+        for (reason, word) in [
+            (RequestHeaderReason::Initial, "initial"),
+            (RequestHeaderReason::Resume, "resume"),
+            (RequestHeaderReason::Change, "change"),
+            (RequestHeaderReason::Series, "series"),
+        ] {
+            let event = pinned_event(
+                SessionEventData::RequestHeader(RequestHeaderData {
+                    header: EpochHeader {
+                        config: CallConfig {
+                            provider: "deepseek-official".to_owned(),
+                            model: "deepseek-chat".to_owned(),
+                            controls: CallControls::default(),
+                        },
+                        adapter_defaults: None,
+                        tools: None,
+                    },
+                    reason,
+                    starts_series: None,
+                }),
+                false,
+            );
+            let value = serde_json::to_value(&event).unwrap_or_else(|error| panic!("{error}"));
+            assert_eq!(
+                value
+                    .pointer("/data/reason")
+                    .and_then(serde_json::Value::as_str),
+                Some(word),
+                "the wire word of {reason:?}"
+            );
+            let decoded: SessionEvent =
+                serde_json::from_value(value).unwrap_or_else(|error| panic!("{error}"));
+            assert_eq!(decoded.data, event.data, "the reason round-trips");
+        }
     }
 
     /// `request/context` (dsh: the data is the `RequestContext` snapshot —
@@ -1889,5 +1984,164 @@ mod tests {
             messages.is_empty(),
             "no ptc subcall message may project: {messages:?}"
         );
+    }
+
+    /// Both surface-attribution directions for the three approval audit
+    /// types (dsh user-approval/types.ts: log-only audits, NOT surface
+    /// events — no `surfaceOp`; the policy knob event is the
+    /// permission-presets twin).
+    #[test]
+    fn approval_events_carry_the_log_only_role() {
+        for type_name in ["approval/asked", "approval/decided", "approval/policy"] {
+            let data = SessionEventData::Unknown(fr_wire::event::UnknownEventData {
+                type_name: type_name.to_owned(),
+                data: RawObject::new(),
+            });
+            assert_log_only_role(&data);
+        }
+    }
+
+    /// The three approval audit records ride the v4 file round-trip byte
+    /// verbatim: ignorable extension records stay opaque on reload (the
+    /// fork-seed fixture's extension pair generalizes to the trio).
+    #[test]
+    fn approval_events_round_trip_on_disk() {
+        let record = |seq_value: u64, type_name: &str| SessionEvent {
+            seq: seq(seq_value),
+            time: 1_000 + i64::try_from(seq_value).expect("seq fits i64"),
+            data: SessionEventData::Unknown(fr_wire::event::UnknownEventData {
+                type_name: type_name.to_owned(),
+                data: RawObject::new(),
+            }),
+            ignorable: Some(TrueOnly),
+            surface_op: None,
+            source_event_seqs: None,
+        };
+        let events = vec![
+            record(0, "approval/asked"),
+            record(1, "approval/decided"),
+            record(2, "approval/policy"),
+        ];
+        round_trips_on_disk("approval-audit", false, 0, &events, 1);
+        for (index, type_name) in ["approval/asked", "approval/decided", "approval/policy"]
+            .iter()
+            .enumerate()
+        {
+            // A standalone log starts at seq 0 (the dense-seq contract).
+            let mut single = events[index..=index].to_vec();
+            single[0].seq = seq(0);
+            round_trips_on_disk(type_name, false, 0, &single, 0);
+        }
+    }
+
+    /// The dsh `headerEquals` semantics (core/session/src/
+    /// request-header.ts:43-52): every canonical field compares, tool
+    /// schemas compare as exact wire JSON (a key-order-only difference is
+    /// unequal — the `JSON.stringify` semantics), the tool array order is
+    /// significant, and an absent tool list equals the empty canonical
+    /// form.
+    #[test]
+    fn header_equals_pins_the_dsh_comparison() {
+        use fr_wire::call_config::{AdapterDefaults, ToolSchema};
+        use fr_wire::content::TrueOnly;
+        use fr_wire::ids::ReasoningEffortId;
+        let tool = |name: &str, parameters: &str| ToolSchema {
+            defer_loading: Some(TrueOnly),
+            name: name.to_owned(),
+            description: "d".to_owned(),
+            parameters: serde_json::from_str(parameters).expect("schema object"),
+        };
+        let header_with =
+            |tools: Option<Vec<ToolSchema>>,
+             effort: Option<ReasoningEffortId>,
+             defaults: Option<AdapterDefaults>| EpochHeader {
+                config: CallConfig {
+                    provider: "p".to_owned(),
+                    model: "m".to_owned(),
+                    controls: CallControls {
+                        reasoning_effort: effort,
+                        ..CallControls::default()
+                    },
+                },
+                adapter_defaults: defaults,
+                tools,
+            };
+        let base = header_with(
+            Some(vec![tool(
+                "bash",
+                r#"{"type":"object","properties":{"a":{"type":"string"}}}"#,
+            )]),
+            None,
+            None,
+        );
+        // Identity and field-wise drift.
+        assert!(header_equals(&base, &base));
+        let other_model = EpochHeader {
+            config: CallConfig {
+                model: "other".to_owned(),
+                ..base.config.clone()
+            },
+            ..base.clone()
+        };
+        assert!(!header_equals(&base, &other_model));
+        let other_effort = header_with(
+            base.tools.clone(),
+            Some(ReasoningEffortId::new("high")),
+            None,
+        );
+        assert!(!header_equals(&base, &other_effort));
+        // Tool array order is significant.
+        let two = |first: &str, second: &str| {
+            header_with(
+                Some(vec![
+                    tool(first, r#"{"type":"object"}"#),
+                    tool(second, r#"{"type":"object"}"#),
+                ]),
+                None,
+                None,
+            )
+        };
+        assert!(!header_equals(&two("bash", "web"), &two("web", "bash")));
+        // A key-order-only schema difference is unequal (JSON.stringify).
+        let ordered = header_with(
+            Some(vec![tool(
+                "bash",
+                r#"{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"number"}}}"#,
+            )]),
+            None,
+            None,
+        );
+        let flipped = header_with(
+            Some(vec![tool(
+                "bash",
+                r#"{"properties":{"b":{"type":"number"},"a":{"type":"string"}},"type":"object"}"#,
+            )]),
+            None,
+            None,
+        );
+        assert!(!header_equals(&ordered, &flipped));
+        // Absent and empty tool lists are equivalent canonical absence.
+        let absent = header_with(None, None, None);
+        let empty_list = header_with(Some(Vec::new()), None, None);
+        assert!(header_equals(&absent, &empty_list));
+        // The adapter-defaults comparison covers both marker fields.
+        let with_defaults = header_with(
+            None,
+            None,
+            Some(AdapterDefaults {
+                reasoning_effort: Some(TrueOnly),
+                max_tokens: None,
+            }),
+        );
+        let with_both = header_with(
+            None,
+            None,
+            Some(AdapterDefaults {
+                reasoning_effort: Some(TrueOnly),
+                max_tokens: Some(TrueOnly),
+            }),
+        );
+        assert!(!header_equals(&with_defaults, &with_both));
+        assert!(!header_equals(&absent, &with_defaults));
     }
 }

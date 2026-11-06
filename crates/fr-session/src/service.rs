@@ -209,6 +209,11 @@ impl OutboundLog {
 
 type Shared<T> = Arc<Mutex<T>>;
 
+/// The read-path vocabulary aggregate, shared between the wire declare
+/// channel and every decode gate (the Q34A ruling's single source of
+/// truth: plugin activation-time declarations must reach the reads).
+pub(crate) type SharedVocabulary = Shared<EventVocabulary>;
+
 /// The assembled session runtime: the publication store, the persistence
 /// backend, and the two shared cells its store listeners write through.
 pub struct SessionService {
@@ -250,7 +255,8 @@ impl SessionService {
         clock: Arc<dyn Fn() -> i64 + Send + Sync>,
         warn: Arc<dyn Fn(String) + Send + Sync>,
     ) -> Result<Self, PersistError> {
-        let backend = JsonlBackend::builder(root, known)
+        let known = SharedVocabulary::from(Mutex::new(known));
+        let backend = JsonlBackend::builder(root, Arc::clone(&known))
             .warn_hook(Arc::clone(&warn))
             .build()?;
         // The struct keeps its own clock clone (append timestamps).
@@ -962,6 +968,21 @@ fn persisted_cold_read_text(error: PersistError) -> String {
             format!("SessionPersistenceCorruptionError: {message}")
         }
         other => other.to_string(),
+    }
+}
+
+impl SessionService {
+    /// Declares plugin-owned durable event types into the shared read-path
+    /// vocabulary (the wire `declare-event-types` arm's landing; the read
+    /// gate consumes the same handle).
+    ///
+    /// # Errors
+    ///
+    /// Returns the vocabulary refusal for a duplicate declaration.
+    pub fn declare_types(&self, types: &[String]) -> Result<(), String> {
+        self.backend
+            .declare_types(types)
+            .map_err(|error| error.to_string())
     }
 }
 

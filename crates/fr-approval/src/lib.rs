@@ -680,6 +680,63 @@ mod tests {
         assert_eq!(events[2]["data"]["outcome"], "unavailable");
     }
 
+    /// The audit pair's data key sets match dsh types.ts verbatim:
+    /// `approval/asked` is exactly `{id, toolName, callId?, reason?}` and
+    /// `approval/decided` exactly `{id, outcome}` — the optional keys are
+    /// absent (not null) when the asker supplied none, and present
+    /// otherwise.
+    #[test]
+    fn audit_pair_fields_match_dsh_verbatim() {
+        let log = Arc::new(FakeLog::default());
+        let (service, _inject) = service_with(ApprovalPolicy::Ask, Arc::clone(&log));
+        open_turn(&log);
+        let outcome = service.request(&ask("bash")).expect("request");
+        assert_eq!(outcome, ApprovalOutcome::Unavailable);
+        let events = log.read_all("s1").expect("read");
+        let asked = &events[1]["data"];
+        let mut keys: Vec<&str> = asked
+            .as_object()
+            .expect("the asked data object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["id", "toolName"]);
+        let decided = &events[2]["data"];
+        let mut keys: Vec<&str> = decided
+            .as_object()
+            .expect("the decided data object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["id", "outcome"]);
+        // With every optional field supplied, both ride the asked event.
+        let log = Arc::new(FakeLog::default());
+        let (service, _inject) = service_with(ApprovalPolicy::Ask, Arc::clone(&log));
+        open_turn(&log);
+        let full = ApprovalAsk {
+            call_id: Some("call-1".to_owned()),
+            reason: Some("needs a decision".to_owned()),
+            ..ask("bash")
+        };
+        let _outcome = service.request(&full).expect("request");
+        let events = log.read_all("s1").expect("read");
+        let asked = &events[1]["data"];
+        let mut keys: Vec<&str> = asked
+            .as_object()
+            .expect("the asked data object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["callId", "id", "reason", "toolName"]);
+        // The pairing id matches across the pair.
+        assert_eq!(asked["id"], events[2]["data"]["id"]);
+        // The localized display reason never persists.
+        assert!(asked.get("displayReason").is_none());
+    }
+
     /// The asked id is a fresh RFC 4122 v4 UUID per ask (dsh mints one
     /// `randomUUID()` per request; two asks never share an id — Q-D).
     #[test]

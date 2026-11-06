@@ -33,11 +33,16 @@ dsh 的“协议即会话日志”原则要求：模型可见即已记录，每�
 - tools 投影 MUST（2026-10-23 Q36A 补遗，dsh tool-history.ts）：request/header 进 headers 表，reason==='series' 或 startsSeries 或同名工具定义变更（JSON.stringify 比较）即重置基线；developer/message 的 tool-addition 经 headerSeq 解析定义追加进 updates；快照 = {tools: 基线, updates: [{messageId, additions}]}；active≠available 时 legacy 回退 updates: []。
 - 写侧坐标正数 MUST（2026-10-24 裁决 B 案，19.2 条 17）：system/message 与 developer/message 的写侧 admission 对 turn 或 step 为 0 即拒（文案 `session event <type> turn must be positive` / `session event <type> step must be positive` 四条），镜像存储侧 positivity 门（dsh assertV4SystemMessageFields / assertV4DeveloperData developer 分支的读侧族）；turn/step 编号自 1 起；turn 链单调性不入写侧（读侧专属不变量）。
 - 写侧 system/message 保护头 MUST（2026-10-24 裁决 B 案，19.2 条 18）：surface 非空且保护头缺席时的 system/message 写入即拒，文案与存储侧逐字一致（`system/message requires a protected first surface head`）；空 surface 首插 system/message 建立保护头，单节点 system/message 重写转移保护头——写侧折叠状态与读侧 fold_surface 语义逐点一致，seed 重放同受检。
+- headerEquals 归属与 18f 归属核对 MUST（2026-11-06 18f Q1A 兑现）：dsh `headerEquals`（core/session/src/request-header.ts:43-52，dsh-session 导出）在 fr 的归位=fr-session（与 canonical_header 同模块）；fr-token-meter 本地副本删除、改用 fr-session 实现（其唯一内部消费点 meter 锚跟踪不变）；fr-agent-loop 的 request/header change 判定与 toolsChanged 两处比较切换为 headerEquals 语义（tool schema JSON.stringify 键序敏感）。session 批 15 枚（approval 9+杂 6）+header_reason+两级补偿码的归属核对结论：approval/asked+decided 触发面=fr-approval（字段与 dsh types.ts 逐字）、approval/policy 触发面=fr-approval set_policy 与 fr-permission-presets DirectApproval、三事件表面归属与回环=fr-session 层（ignorable unknown 记录）、in-history/first-node/空渲染三路由投影面=fr-agent-loop runtime_context 纯核、工具增删 developer 门控面=fr-agent-loop driver、tool schema 顺序敏感面=headerEquals（fr-session）。Allowed += crates/fr-approval/**、crates/fr-permission-presets/**、crates/fr-agent-loop/**、crates/fr-token-meter/**（各仅测试与上述归属核对所指实现面）。
 
 ## Boundaries
 
 ### Allowed Changes
 - crates/fr-session/**
+- crates/fr-approval/**（2026-11-06 18f Q1A 归属核对：approval/asked+decided+policy 触发面钉测）
+- crates/fr-permission-presets/**（同上：approval/policy 直写面钉测）
+- crates/fr-agent-loop/**（同上：投影三路由与 developer 门控绑定点归属）
+- crates/fr-token-meter/**（同上：header_equals 副本删除改委托）
 
 ### Forbidden
 - Do not weaken or remove the source requirement clauses.
@@ -55,7 +60,7 @@ Scenario: v4 会话写入与读取回环
   那么 全部事件逐条还原，无丢失与变形
 
 Scenario: request/header reason 枚举
-  Test: pending_req_fr_session_request_header_reason
+  Test: request_header_round_trips
   假设 同一会话经历新建、续用、配置变化与请求序列中段
   当 各情形生成 request/header 时
   那么 reason 分别为 initial、resume、change、series
@@ -97,7 +102,7 @@ Scenario: 写路径校验失败不发布后继文件
   那么 不产生后继文件且已发布文件保持不变
 
 Scenario: replace-op 后源事件永久留存
-  Test: pending_req_fr_session_replace_op
+  Test: replace_shadowed_range_updates_nodes_and_both_generations
   假设 压缩以 op 为 replace、startSeq 与 endSeq 界定的区间结算
   当 重放读取该区间时
   那么 区间内原事件全部留存，表面显示引用 sourceEventSeqs 的新内容
@@ -151,19 +156,19 @@ Scenario: 五角色与七种 ContentBlock 往返无损
   那么 角色判别与 block 类型逐条还原
 
 Scenario: in-history 增量追加
-  Test: pending_req_fr_session_in_history
+  Test: capable_series_appends_changed_text
   假设 同一请求世代内提示词增量变化
   当 提交 surface 时
   那么 以 in-history 增量追加节点，不重写既有节点
 
 Scenario: 世代更替走 first-node 归一化
-  Test: pending_req_fr_session_first_node
+  Test: normalization_empties_tail_and_rewrites_head
   假设 请求世代更替
   当 提交 surface 时
   那么 system 节点按 first-node 归一化路由重写首节点
 
 Scenario: 空渲染清空活跃尾部
-  Test: pending_req_fr_session_requirement
+  Test: normalization_empties_tail_and_rewrites_head
   假设 system prompt 渲染结果为空
   当 提交 surface 时
   那么 活跃尾部 system 节点被清空且 head 节点以 replace 落为空文本节点
@@ -211,7 +216,7 @@ Scenario: tool/result 替换越权
   那么 拒绝
 
 Scenario: 两级补偿错误码与文案
-  Test: pending_req_fr_session_two_level_abort_codes
+  Test: two_level_compensation_codes_and_wording
   假设 一次 abort 同时产生调度器跳过与步级未启动调用
   当 恢复落盘时
   那么 前者为 ABORTED_BEFORE_DISPATCH 加 AbortError，后者为 TOOL_NOT_STARTED 或 TOOL_OUTCOME_UNKNOWN 精确文案，seq 连续且 time 复用最后真实事件
@@ -475,55 +480,55 @@ Scenario: 事件 session/end-seed 回环
   那么 事件逐字节还原
 
 Scenario: 事件 approval/policy 触发
-  Test: pending_req_fr_session_approval_policy
+  Test: set_approval_policy_appends_the_bare_override
   假设 会话运行中满足条件：策略切换时且 log-only
   当 结算时
   那么 日志追加 approval/policy 事件且字段与 dsh types.ts 逐字一致
 
 Scenario: 事件 approval/policy 表面归属
-  Test: pending_req_fr_session_approval_policy
+  Test: approval_events_carry_the_log_only_role
   假设 事件 approval/policy 落盘
   当 重放分类时
   那么 按类型正确判定 入表面 或 log-only
 
 Scenario: 事件 approval/policy 回环
-  Test: pending_req_fr_session_approval_policy
+  Test: approval_events_round_trip_on_disk
   假设 含 approval/policy 的会话持久化
   当 写出并重载时
   那么 事件逐字节还原
 
 Scenario: 事件 approval/asked 触发
-  Test: pending_req_fr_session_approval_asked
+  Test: audit_pair_fields_match_dsh_verbatim
   假设 会话运行中满足条件：ask 发起时与 decided 配对
   当 结算时
   那么 日志追加 approval/asked 事件且字段与 dsh types.ts 逐字一致
 
 Scenario: 事件 approval/asked 表面归属
-  Test: pending_req_fr_session_approval_asked
+  Test: approval_events_carry_the_log_only_role
   假设 事件 approval/asked 落盘
   当 重放分类时
   那么 按类型正确判定 入表面 或 log-only
 
 Scenario: 事件 approval/asked 回环
-  Test: pending_req_fr_session_approval_asked
+  Test: approval_events_round_trip_on_disk
   假设 含 approval/asked 的会话持久化
   当 写出并重载时
   那么 事件逐字节还原
 
 Scenario: 事件 approval/decided 触发
-  Test: pending_req_fr_session_approval_decided
+  Test: audit_pair_fields_match_dsh_verbatim
   假设 会话运行中满足条件：应答结算时
   当 结算时
   那么 日志追加 approval/decided 事件且字段与 dsh types.ts 逐字一致
 
 Scenario: 事件 approval/decided 表面归属
-  Test: pending_req_fr_session_approval_decided
+  Test: approval_events_carry_the_log_only_role
   假设 事件 approval/decided 落盘
   当 重放分类时
   那么 按类型正确判定 入表面 或 log-only
 
 Scenario: 事件 approval/decided 回环
-  Test: pending_req_fr_session_approval_decided
+  Test: approval_events_round_trip_on_disk
   假设 含 approval/decided 的会话持久化
   当 写出并重载时
   那么 事件逐字节还原
@@ -589,13 +594,13 @@ Scenario: canonicalHeader 空 tools 省略
   那么 tools 字段整体省略
 
 Scenario: tool schema 比较顺序敏感
-  Test: pending_req_fr_session_tool_schema
+  Test: header_equals_pins_the_dsh_comparison
   假设 两个同名工具的 schema JSON 键序不同
   当 headerEquals 比较时
   那么 判定为不相等且 reason 升级为 change
 
 Scenario: 工具增删 developer 声明门控
-  Test: pending_req_fr_session_tool_gate
+  Test: tool_changes_gate_the_developer_message
   假设 工具集合相对 baseline 的名字集合无差异
   当 结算新请求世代时
   那么 不追加 developer/message 且 headerSeq 不携带；有名字集合差且 baseline 存在时追加 developer/message，headerSeq 仅 additions>0 时携带

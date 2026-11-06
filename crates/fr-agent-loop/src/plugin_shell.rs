@@ -1442,6 +1442,25 @@ unsafe extern "C" fn setup(host: *const HostExports) -> *mut std::os::raw::c_voi
     // composition without the consumer keeps the loop alive — the offer
     // lapses and the notice machine skips fail-closed.
     let _ignored = outbound.grant("builtin-tools", crate::agent_service::SERVICE_NAME);
+    // Declare the loop's durable extension event to the process-wide
+    // vocabulary aggregate (the Q34A activation-time channel; the
+    // fr-approval setup declare is the precedent). The driver writes
+    // `agent/inbox/spliced` records, and the read path refuses unknown
+    // required events — without this declaration every resume of a real
+    // log dies at the vocabulary gate. Parent and realm-child
+    // activations share one global session service, so the duplicate
+    // declaration the second activation raises is absorbed.
+    let declare = serde_json::json!({ "types": ["agent/inbox/spliced"] });
+    if let Ok(bytes) = serde_json::to_vec(&declare)
+        && let Err(error) = outbound.require(
+            fr_wire::services::session_persistence::SERVICE_NAME,
+            fr_wire::services::session_persistence::METHOD_DECLARE_EVENT_TYPES,
+            &bytes,
+        )
+        && !String::from_utf8_lossy(&error.detail).contains("already declared")
+    {
+        return std::ptr::null_mut();
+    }
     Box::into_raw(Box::new(ShellState::new(outbound))).cast::<std::os::raw::c_void>()
 }
 

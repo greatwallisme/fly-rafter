@@ -24,7 +24,7 @@
 | 18d | fr-working-directory 抽移+装配行兑现（47-3A） | complete（四关 63 组 2027 过；lifecycle builtin-tools 357/0/53skip、prompt 47/47；顺带根因修复 fr-llm 代理丢唤醒+rearm 双 setup；待提交） |
 |  | （Q3A：permission-presets 竞窗排查随 18e 同期） | |
 | 18e | fiber_realm+竞窗排查（47-1A+Q3A） | complete（fiber_realm：lifecycle 33/34、stamp 33/34、四关全绿、commit 29a21b3；Q3A：竞窗排除=on_event 回复协议确定性缺陷，两壳修复+钉测、四关全绿待提交） |
-| 18f | M1 小账清零片（header_reason+孤儿批核对+abort 补偿集成场景；Q1A） | pending |
+| 18f | M1 小账清零片（header_reason+孤儿批核对+abort 补偿集成场景；Q1A） | complete（dougong 0.6.1 修复发布+词表 declare 接线+两处真实装配缺口根修；e2e 8/8；stamp：headless 33/33、agent-loop 34/34、session 99/108（9 旧欠 skip）、builtin-tools 358/410（52 队列项 skip）、compaction 26/26） |
 | 19 | fr-subagent | pending |
 | 20 | fr-mcp | pending |
 | 21 | fr-ptc | pending |
@@ -48,8 +48,17 @@
 4. 测试 ✓（fr-llm-retry 11+agent-loop +2+e2e +2 全绿；选择器对齐：spec:99→exhaust e2e 合成场景、spec:105→driver cancel 同名）
 5. 收口：四关 ✓（62 组 0 败 EXIT=0;fmt/clippy/doc ✓;host_boot 期望清单随 fr-llm-retry 解析更新）→ lifecycle 跑动中 → explain/stamp/提交
 
+### Phase 18f — M1 小账清零片（Q1A）
+**Status:** complete（已提交；dougong daed684+v0.6.1 已 push GitHub 并发 crates.io）
+
+1. 勘察 ✓（19 枚 pending 全对账：headerEquals 三处分裂核实/driver reason 三态/杂 6 归属/approval 9 缺项/两级码组合测试缺/wire 面缺钉测）
+2. 合同：session spec 17 枚重绑+扩边 4 crate（Q1A Decision 行）；agent-loop spec 重绑 1+扩 fr-session；builtin-tools 重绑 1；headless spec 新增 abort 补偿集成场景 → lint 0.7
+3. 实现：header_equals 族归位 fr-session（canonical_header 邻）+fr-token-meter 删副本改用+driver 两处切换（log_request_header/tools_changed）；新测试 8 枚（fr-session×4：header_equals 钉测/approval 归属/approval 回环/两级码组合+replace 扩断言+reason 扩四词；fr-agent-loop×2：header reason 三态序敏/工具门控；fr-approval×1：审计对逐字键集；fr-tools-builtin×1：ask wire fail-closed）+e2e×1（SIGINT 中途打断+resume interrupted 修复）
+4. 测试：全部新测绿+四关全绿
+5. 收口：lifecycle（session/agent-loop/builtin-tools/headless[/compaction]）→ explain/stamp/提交
+
 ## Next Step
-**18e 全片 complete（fiber_realm commit 29a21b3 + Q3A 修复随下半提交）。下一步=18f M1 小账清零片（header_reason 两枚绑真测+孤儿批核对+abort 补偿集成场景；Q1A）→19 subagent→20 mcp→21 ptc→22 收官。**
+**18f complete 已提交。下一步=Phase 19 fr-subagent（in-process spawn/fork+五工具族+manager；63 绑定面）。**
 
 ## Errors Encountered
 | Error | Attempt | Resolution |

@@ -281,6 +281,31 @@ pub fn execute_timed_ask(
     (state.ask)(&request, &seams).map_err(ask_body_error)
 }
 
+/// Maps one body result onto the wire reply (the fr-tools body
+/// protocol).
+///
+/// `{"value": …}` on success, `{"error": {code, message, name}}` on
+/// failure — the model-facing refusal rides the error arm and keeps its
+/// routable code.
+///
+/// # Errors
+///
+/// The reply encoding failure.
+pub fn wire_body_reply(value: Result<Value, BodyError>) -> Result<Vec<u8>, String> {
+    match value {
+        Ok(value) => serde_json::to_vec(&json!({ "value": value }))
+            .map_err(|error| format!("body reply encode failed: {error}")),
+        Err(error) => serde_json::to_vec(&json!({
+            "error": {
+                "code": error.code,
+                "message": error.message,
+                "name": error.name,
+            }
+        }))
+        .map_err(|error| format!("body error encode failed: {error}")),
+    }
+}
+
 /// The `ask_user_question` output render (dsh `output.render`): the
 /// value JSON stringifies into one text block.
 #[must_use]
@@ -494,6 +519,49 @@ mod tests {
 
     fn exit_args(plan: &str) -> Value {
         json!({ "plan": plan })
+    }
+
+    /// The headless fail-closed chain over the wire (the service arm's
+    /// exact contract): the production ask composition (no answerer) ends
+    /// at `NO_PROVIDER`, and the wire reply carries the coded refusal —
+    /// the model receives `{"error": …}` with the routable code, the
+    /// dsh-verbatim message, and the error class name.
+    #[test]
+    fn ask_execute_fails_closed_on_the_wire() {
+        let state = InteractionState {
+            questions: TimedWaits::default(),
+            plans: Box::new(OwnedRig(std::sync::Arc::new(Rig {
+                plan_state: json!({ "active": false }),
+                answer: std::sync::Mutex::new(Err(UserQuestionError::no_provider())),
+            }))),
+            ask: InteractionState::production_ask(),
+            disposed: false,
+            user_questions_present: true,
+        };
+        let args = json!({ "questions": [
+            { "id": "q1", "question": "Pick", "header": "H",
+              "options": [{ "label": "A", "description": "d" }] }
+        ] });
+        let reply = wire_body_reply(execute_ask(&args, Some("s1"), &state))
+            .expect("the wire reply encodes");
+        let decoded: Value = serde_json::from_slice(&reply).expect("the wire reply decodes");
+        assert_eq!(
+            decoded,
+            json!({
+                "error": {
+                    "code": "NO_PROVIDER",
+                    "message": "no user-questions answerer accepted the request",
+                    "name": "UserQuestionError",
+                }
+            }),
+            "the model-facing refusal keeps its routable code"
+        );
+        // The success arm rides the canonical value envelope.
+        let ok = wire_body_reply(Ok(json!({ "answers": ["A"] }))).expect("the value encodes");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&ok).expect("decode"),
+            json!({ "value": { "answers": ["A"] } })
+        );
     }
 
     #[test]

@@ -247,6 +247,12 @@ Scenario: 事件泵送达 listened 事件
   当 发布插件 emit 事件时
   那么 事件按 listen 表送达对应订阅插件 on_event 且载荷逐字无损
 
+Scenario: abort 补偿集成（M1 验收 4 补全，2026-11-06 18f Q1A）
+  Test: sigint_mid_run_repairs_the_orphan_on_resume
+  假设 一次运行在中途 turn 挂于 provider 流时被 SIGKILL 崩溃（无优雅关停、孤儿 turn 留盘）
+  当 以 --session-id 续用同一会话再次运行
+  那么 resume 修复为崩溃孤儿 turn 追加合成 step/end 与 turn/end{kind: interrupted}（seq 连续、time 复用最后真实事件），续跑完成且 v4 日志重放合法
+
 ## Questions
 
 - Source trace: doc/prd.md#18.1: headless 字段级规格（CLI、输出、--json、审批、多轮）, confidence: high（PRD 18.1 字段级）, doc/dsh-source-notes.md: 源码级技术关键点（file:line 证据）

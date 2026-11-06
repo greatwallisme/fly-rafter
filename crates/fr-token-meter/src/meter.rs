@@ -65,57 +65,11 @@ pub fn usage_tokens(usage: &TokenUsage) -> u64 {
 }
 
 /// Compare optional envelopes so a headerless estimate can track later
-/// surface deltas (the dsh `optionalHeaderEquals`).
-#[must_use]
-pub fn optional_header_equals(left: Option<&EpochHeader>, right: Option<&EpochHeader>) -> bool {
-    match (left, right) {
-        (None, None) => true,
-        (Some(left), Some(right)) => header_equals(left, right),
-        _ => false,
-    }
-}
-
-/// Field-wise equality over canonical headers (the dsh `headerEquals`):
-/// config, adapter defaults, and tool schemas in order; a tool schema
-/// compares through its exact wire JSON.
-#[must_use]
-pub fn header_equals(a: &EpochHeader, b: &EpochHeader) -> bool {
-    if !call_config_equal(&a.config, &b.config) {
-        return false;
-    }
-    let defaults_equal = match (&a.adapter_defaults, &b.adapter_defaults) {
-        (None, None) => true,
-        (Some(left), Some(right)) => {
-            left.reasoning_effort == right.reasoning_effort && left.max_tokens == right.max_tokens
-        }
-        _ => false,
-    };
-    if !defaults_equal {
-        return false;
-    }
-    let empty: [fr_wire::call_config::ToolSchema; 0] = [];
-    let at = a.tools.as_deref().unwrap_or(&empty);
-    let bt = b.tools.as_deref().unwrap_or(&empty);
-    at.len() == bt.len()
-        && at.iter().zip(bt.iter()).all(|(left, right)| {
-            serde_json::to_string(left).unwrap_or_default()
-                == serde_json::to_string(right).unwrap_or_default()
-        })
-}
-
-/// The dsh `callConfigEquals`: provider, model, and the four control
-/// fields (the `LlmCallConfig` face without the agent-loop mark).
-fn call_config_equal(
-    a: &fr_wire::call_config::CallConfig,
-    b: &fr_wire::call_config::CallConfig,
-) -> bool {
-    a.provider == b.provider
-        && a.model == b.model
-        && a.controls.reasoning_effort == b.controls.reasoning_effort
-        && a.controls.temperature == b.controls.temperature
-        && a.controls.max_tokens == b.controls.max_tokens
-        && a.controls.stop == b.controls.stop
-}
+/// surface deltas (the dsh `optionalHeaderEquals`). The canonical
+/// implementation lives in fr-session (the dsh-session export's home,
+/// next to `canonical_header`); this re-export keeps the existing
+/// call paths stable.
+pub use fr_session::session::{header_equals, optional_header_equals};
 
 /// Fold one event into the replay state (the dsh `_foldEvent`).
 ///

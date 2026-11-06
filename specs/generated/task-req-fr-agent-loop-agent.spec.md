@@ -32,6 +32,7 @@ fly-rafter 是字面全插件系统：agent 主循环不是宿主内置，而是
 - provider 重试执行 MUST（2026-11-05 18c Q1A 裁决；决策 47-2A 引：独立 fr-llm-retry 插件，dsh llm-retry/src/index.ts 259 行 1:1）：经内核 waterfall 监听 `agent/request-error`（descriptor listen+CPS 续延，STATUS_DEFERRED 拉 next 续延→on_next 收下游结果）；两段载体=监听器即决即返（`llm/retry` 先持久 1:1 dsh backoff 先行 append；链值 fr 自有扩展 `{"kind":"retry","delayMs":N}`）→驱动做可取消 park 等待（deadline|cancel 命令|shutdown 三源唤醒，其余命令留队）→中止=丢弃决策（`llm/retry` 留存、无 `llm/retry-started`=dsh 逐字节同）→到期=驱动补 append `llm/retry-started` `{retryId,turn,step,retry}`→重试 step。durable 面零偏差、取消即时。门语义 1:1：policy 缺/码不可重试/normal 超限=放行下游（恒等回包=untouched→in-process 兜底）；always=先审下游再无帽退避（下游 warn `'llm-retry: provider "X" always policy ignored a downstream recovery failure: %o'`）；providerRetryAfterMs 有限>0 直用（超 maxDelayMs：normal 放行/always 本地退避）；localDelay 指数+对称抖动（fr-llm local_delay 单源）。Allowed += crates/fr-llm-retry/**。
 - 重试状态与事件权 MUST（2026-11-05 18c 裁决）：llmRetry=fr-llm-retry 自持 (session,turn,step,provider,policyKey) 键控表（fr-compaction 自持会话表判例；dsh sessionProjections 通用投影服务不建——消费方到场纪律），首见会话冷读折叠重建（`llm/retry` 事件数据自带 turn/step/provider/policyKey/retry/retryId 全字段=精确 dsh fold 语义含重启恢复；同 (retry,retryId) 幂等守卫 1:1）；事件类型所有权=激活期 persistence DECLARE_EVENT_TYPES 声明 `llm/retry`+`llm/retry-started`（Q34A 通道）；retryId=uuid v4（dsh RetryId 品牌串，同链复用）。
 - fiber_realm 落地 MUST（2026-11-06 18e 裁决，决策 47-1A 兑现）：fr-agent-loop 单工件双角色——加载激活为父（全局 `agent` 面：CREATE/RESUME/LIVE + 会话方法按 sessionId→(realm,child) 注册表 realm_require 原号路由）；CREATE/RESUME 臂经插件自有线程（scope spawn+join，realm-partner 判例安全条件成文：join 窗内子只触全局服务、永不 require 父 `agent`）realm_spawn 自身工件入新 realm（realm=0 取 fresh）；工件路径=镜像宿主解析器（FR_PLUGIN_PATH 各目录→exe 目录→exe 父目录找 libfr_agent_loop.so，缺席 fail-closed 拒）；spawn 后 realm_require 子 METHOD_REALM_ADOPT=13（载荷 {"role":"child"}）握手，角色采用制：Undefined 首 CREATE/RESUME→Parent、首 ADOPT→Child；未采用/父收到会话方法按 realm 查表，未注册会话拒 `agent "X" is not registered`；REALM_ADOPT 在已采用角色上拒绝（二次握手/父激活）；子在其 realm 内以本地臂服务路由进的 CREATE/RESUME（持久层+驱动 attach 不变）；子 CREATE/RESUME 失败 realm_retire 不留残（child 句柄注册表内持）；会话方法在子=今日本地快路径（wire 号与语义不变）；descriptor 共享监听，父壳幻影邮箱可忽略（每 session id 一个，teardown 随 state 释放）；teardown 内核级联处置子（子=父 fiber effect），子 teardown=广播+join 子驱动线程。循环实现仍仅在 fr-agent-loop dylib 工件，宿主零循环逻辑。wire 常量双源同增（fr-wire services.rs agent 面+agent_service.rs+互钉测试）。Allowed 不变（crates/fr-agent-loop/** 与 fr-wire/src/services.rs 已含）。
+- header 判定对齐 MUST（2026-11-06 18f Q1A 归属核对）：`log_request_header` 的 change 判定与 `tools_changed` 两处比较切换为 dsh `headerEquals` 语义（fr-session `header_equals`：tool schema JSON.stringify 键序敏感、config 四控制字段、absent≡empty）；请求 header 判定三态（initial/resume/change/series）与工具 schema 仅顺序不同=change 由 driver 测试钉住。Allowed += crates/fr-session/**（header_equals 消费面）。
 
 ## Boundaries
 
@@ -39,6 +40,7 @@ fly-rafter 是字面全插件系统：agent 主循环不是宿主内置，而是
 - crates/fr-agent-loop/**
 - crates/fr-wire/src/services.rs（跨插件契约常量单文件，Q61A 判例同形）
 - crates/fr-llm-retry/**
+- crates/fr-session/**（2026-11-06 18f Q1A：headerEquals 语义消费面）
 
 ### Forbidden
 - Do not weaken or remove the source requirement clauses.
@@ -163,7 +165,7 @@ Scenario: incapable 模型走归一化路由
   那么 走归一化路由整段重写首节点
 
 Scenario: header reason 判定
-  Test: pending_req_fr_agent_loop_header_reason
+  Test: header_reason_tracks_initial_change_and_series
   假设 会话经历新建、工具集变更、仅序列推进三种情形
   当 发布 request/header 时
   那么 reason 分别为 initial、change、series；工具 schema 仅顺序不同的相等比较按顺序敏感判定

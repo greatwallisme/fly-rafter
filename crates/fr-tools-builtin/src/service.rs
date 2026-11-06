@@ -1036,18 +1036,7 @@ impl BuiltinTools {
                 let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
                 let value =
                     crate::interaction_tools::execute_ask(&arguments, agent, &self.interactions);
-                return match value {
-                    Ok(value) => serde_json::to_vec(&json!({ "value": value }))
-                        .map_err(|error| format!("body reply encode failed: {error}")),
-                    Err(error) => serde_json::to_vec(&json!({
-                        "error": {
-                            "code": error.code,
-                            "message": error.message,
-                            "name": error.name,
-                        }
-                    }))
-                    .map_err(|error| format!("body error encode failed: {error}")),
-                };
+                return crate::interaction_tools::wire_body_reply(value);
             }
             METHOD_EXIT_PLAN_EXECUTE => {
                 let call = request
@@ -1057,18 +1046,7 @@ impl BuiltinTools {
                 let arguments = call.get("arguments").cloned().unwrap_or(Value::Null);
                 let value =
                     crate::interaction_tools::execute_exit(&arguments, agent, &self.interactions);
-                return match value {
-                    Ok(value) => serde_json::to_vec(&json!({ "value": value }))
-                        .map_err(|error| format!("body reply encode failed: {error}")),
-                    Err(error) => serde_json::to_vec(&json!({
-                        "error": {
-                            "code": error.code,
-                            "message": error.message,
-                            "name": error.name,
-                        }
-                    }))
-                    .map_err(|error| format!("body error encode failed: {error}")),
-                };
+                return crate::interaction_tools::wire_body_reply(value);
             }
             METHOD_ASK_RENDER | METHOD_EXIT_PLAN_RENDER => {
                 let args = request.get("args").cloned().unwrap_or(Value::Null);

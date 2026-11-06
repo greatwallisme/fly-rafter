@@ -624,6 +624,43 @@ mod tests {
         assert_eq!(result.replacements.len(), 1);
         assert_eq!(result.replacements[0].start, seq(0));
         assert_eq!(result.replacements[0].shadowed_seqs, vec![seq(0), seq(1)]);
+        // The shadowed source events stay in the log untouched (the
+        // append-only v4 contract): replay still reads the original range
+        // while the surface shows the replacement citing its sources.
+        assert_eq!(events.len(), 3);
+        for (index, text) in ["a", "b"].iter().enumerate() {
+            let SessionEventData::UserMessage(message) = &events[index].data else {
+                panic!("source event {index} keeps its shape");
+            };
+            let Message::Known(known) = message else {
+                panic!("source message {index} stays known");
+            };
+            assert_eq!(
+                known.content(),
+                [ContentBlock::Known(KnownContentBlock::Text {
+                    text: (*text).to_owned(),
+                })],
+                "source event {index} keeps its content"
+            );
+        }
+        let SessionEventData::UserMessage(replacement_message) = &events[2].data else {
+            panic!("the replacement keeps its shape");
+        };
+        let Message::Known(known) = replacement_message else {
+            panic!("the replacement message stays known");
+        };
+        assert_eq!(
+            known.content(),
+            [ContentBlock::Known(KnownContentBlock::Text {
+                text: "compacted".to_owned(),
+            })],
+            "the surface shows the new content"
+        );
+        assert_eq!(
+            events[2].source_event_seqs.as_deref(),
+            Some(&[seq(0), seq(1)][..]),
+            "the replacement cites the retained sources"
+        );
     }
 
     #[test]

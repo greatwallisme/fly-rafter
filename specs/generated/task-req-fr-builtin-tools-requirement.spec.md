@@ -72,7 +72,7 @@ Scenario: FR_RIPGREP 指认生效
   那么 使用该指认的 rg 执行
 
 Scenario: headless 下 ask 工具 fail-closed
-  Test: pending_req_fr_builtin_tools_headless_ask_fail_closed
+  Test: ask_execute_fails_closed_on_the_wire
   假设 headless 形态调用 ask_user_question
   当 工具执行时
   那么 fail-closed 返回，模型收到拒绝结果

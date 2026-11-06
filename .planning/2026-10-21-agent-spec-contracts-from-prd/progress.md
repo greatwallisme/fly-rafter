@@ -2053,3 +2053,25 @@
 - 修复：两壳镜像 agent-loop 回复判例（Ok 写 {}/Err 写错误详情）+去下划线参数+各一 on_event 直调钉测；fmt/clippy/doc 三关全零，两 crate 13/24 测绿；全量 workspace 测试后台复跑中。
 - 结论锚 findings「18e 下半 Q3A 排查结论」节；原「空载荷竞窗」判断正式纠正（确定性协议缺陷，非时序问题）。
 - 全量 workspace 测试（Q3A 修复后复跑）：exit 0 全绿。18e 下半待提交。
+
+## 2026-11-06 — 18f 开工：勘察完成，合同编辑起步
+- 勘察全量落盘 findings「18f 开工勘察」节：19 枚 pending + 1 新场景对账完毕。核心发现=headerEquals 三处分裂（fr-token-meter 已 1:1 但 driver 两处用 derived PartialEq=键序不敏感，与 dsh JSON.stringify 语义有真实缺口）；其余 16 枚多为「实现已备、测试缺/归属待核」。
+- task_plan 增 Phase 18f 段（in_progress）。
+
+## 2026-11-06 — 18f 单元面完成全绿；e2e 面被 dougong 0.6.0 realm 缺陷硬阻（呈报裁决）
+
+- **单元面全完成**：8 新测（fr-session header_equals 钉测/approval 归属/approval 回环/两级码组合；fr-agent-loop header reason 三态序敏/工具门控；fr-approval 审计对键集；fr-tools-builtin ask wire）+3 扩展（reason 四词/replace 源留存/replace 组合）全绿；fmt/clippy/doc 三关零；受影响 crate 测试全绿（session 184、agent-loop 137、approval 32、token-meter 32、builtin-tools 397）。
+- **lifecycle**：session 99/108（9 枚 skip= fork→19 片/标题 2→22 片 Q4A/ptc 6→21 片，全 out-of-scope）；agent-loop 33/34（1 非过=provider 重试生效，绑 e2e，同受阻）；builtin-tools 358/410（52 非过=run_code 13+subagent 39+_17 全量 1，全 Phase 19/22 队列项；ask 场景已改善）；compaction 全过（fr-token-meter 委托无回归）。
+- **阻塞呈报**：HEAD 净树复现全部进程级 e2e 红（dougong realm adopt 快照快路径缺陷，根因与最小复现锚 findings「18f 排障」节）；探针测试留在 ~/project/dougong realm_tests.rs 未提交（即修复的回归测试）。18e 当时「e2e 全绿」判为 cdylib 陈旧假象。
+
+## 2026-11-06 — 18f 下半：dougong 0.6.1 修复+发布、词表 declare 接线修复、e2e 8/8 全绿
+
+- **用户裁决**：Q1=A（dougong 内核修+发 0.6.1）、Q2=整体一起提交。
+- **dougong 修复（commit daed684 + tag v0.6.1，四件已发 crates.io）**：`Context::get` realm 作用域读跳过**自提供**快照（注入依赖快照=E1.6 遮蔽臂语义不变）；E1.10 回归测试（探针转正）；需求文档 §9.1+D33+CHANGELOG 0.6.1 同步。四关+三 demo 全绿。
+- **fr 第二处真实装配缺口（连带修复）**：wire DECLARE 只更新 ShellState 词表而读门用 backend 克隆词表——读门永远看不到激活期声明（resume 必死于词表门）。修：backend.known 改 Arc<Mutex<>> 共享句柄（SessionService::declare_types 直通），declare 臂双写；agent-loop setup 增 wire DECLARE（容 already-declared 重声明）。
+- **SIGINT vs SIGKILL 勘误**：SIGINT 中途=优雅关停，driver 写 turn/end{aborted}（1:1 dsh）；interrupted 专属硬崩溃孤儿。e2e 改 SIGKILL（status.signal()==9）。
+- **e2e 8/8 全绿**（含新 abort 补偿场景：孤儿→resume 修 interrupted→续跑 completed）；fmt/clippy/doc 三关零。
+
+## 2026-11-06 — 18f 收口：五 spec stamp 完成、整体提交
+- stamp：headless 33/33、agent-loop 34/34、compaction 26/26 全过；session 99/108（9 skip=队列旧欠）、builtin-tools 358/410（52 skip=Phase 19/22 队列项）skip 计 not-passing（设计态）。
+- dougong push 补漏：master 2c48b04..daed684 + tag v0.6.1 已推 GitHub（用户指出遗漏）。
