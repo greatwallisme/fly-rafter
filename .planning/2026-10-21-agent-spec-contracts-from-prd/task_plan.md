@@ -23,7 +23,7 @@
 | 18c | fr-llm-retry 新 crate（决策 47-2A）+偿还 provider_retry | complete（lifecycle 29/31：29 过 0 败 2 skip=fiber_realm/header_reason 旧欠；四关 62 组 0 败；e2e 7/7） |
 | 18d | fr-working-directory 抽移+装配行兑现（47-3A） | complete（四关 63 组 2027 过；lifecycle builtin-tools 357/0/53skip、prompt 47/47；顺带根因修复 fr-llm 代理丢唤醒+rearm 双 setup；待提交） |
 |  | （Q3A：permission-presets 竞窗排查随 18e 同期） | |
-| 18e | fiber_realm+竞窗排查（47-1A+Q3A） | fiber_realm complete（lifecycle 33/34：33 过 0 败 1 skip=header_reason 18f 旧欠；四关全绿含 e2e；stamp 33/34）；Q3A 竞窗排查 in_progress |
+| 18e | fiber_realm+竞窗排查（47-1A+Q3A） | complete（fiber_realm：lifecycle 33/34、stamp 33/34、四关全绿、commit 29a21b3；Q3A：竞窗排除=on_event 回复协议确定性缺陷，两壳修复+钉测、四关全绿待提交） |
 | 18f | M1 小账清零片（header_reason+孤儿批核对+abort 补偿集成场景；Q1A） | pending |
 | 19 | fr-subagent | pending |
 | 20 | fr-mcp | pending |
@@ -49,7 +49,7 @@
 5. 收口：四关 ✓（62 组 0 败 EXIT=0;fmt/clippy/doc ✓;host_boot 期望清单随 fr-llm-retry 解析更新）→ lifecycle 跑动中 → explain/stamp/提交
 
 ## Next Step
-**18e 上半 fiber_realm 已收口待提交（lifecycle 33/34、四关全绿、stamp dry-run 已录）。下一步=Q3A permission-presets 空 session/created 载荷竞窗排查（findings 2026-11-05 独立发现节：静态链全程载荷非空，疑点在内核 emit→dylib 递送或时序竞窗；seeding 失败非致命、M1 不消费 presets 投影）→ 18e 下半收口提交；随后 18f→19 subagent→20 mcp→21 ptc→22 收官。**
+**18e 全片 complete（fiber_realm commit 29a21b3 + Q3A 修复随下半提交）。下一步=18f M1 小账清零片（header_reason 两枚绑真测+孤儿批核对+abort 补偿集成场景；Q1A）→19 subagent→20 mcp→21 ptc→22 收官。**
 
 ## Errors Encountered
 | Error | Attempt | Resolution |

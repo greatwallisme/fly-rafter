@@ -2047,3 +2047,9 @@
 - 七步流：lint Quality 100% → lifecycle 33/34（33 过 0 败 1 skip=header_reason 18f 旧欠；fiber_realm/路由/失败关闭/清理四场景全 pass）→ explain 合同级摘要 → stamp dry-run "33/34 passed, 0 failed, 1 skipped"（guard 按判例结构性不可过，记录在案）。
 - 挂死排障全记录锚 findings「18e 排障：realm spawn 挂死根因=运行中处置违 whenIdle 契约」（根因/死锁环/修复/wart/复盘五节）。
 - 状态：18e 上半 complete 待提交；下半=Q3A permission-presets 空 session/created 载荷竞窗排查。
+
+## 2026-11-06 — 18e 下半 Q3A 收口：竞窗嫌疑排除=on_event 回复协议缺陷，已修已测
+- 排查链：pump.rs:54 载荷键存在 → service.rs drain 恒带 payload → 疑点转向宿主桥 → dougong-dylib 桥 `_` 臂解码空 reply=serde EOF（listener_failure: payload_codec 真源）→ 全仓扫描 22 个 on_event 仅 presets/guard-repeat-reminder 裸返成功臂。
+- 修复：两壳镜像 agent-loop 回复判例（Ok 写 {}/Err 写错误详情）+去下划线参数+各一 on_event 直调钉测；fmt/clippy/doc 三关全零，两 crate 13/24 测绿；全量 workspace 测试后台复跑中。
+- 结论锚 findings「18e 下半 Q3A 排查结论」节；原「空载荷竞窗」判断正式纠正（确定性协议缺陷，非时序问题）。
+- 全量 workspace 测试（Q3A 修复后复跑）：exit 0 全绿。18e 下半待提交。

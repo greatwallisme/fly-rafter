@@ -277,7 +277,10 @@ fn entry_facts_injected_through_document_rows() {
             .await
             .expect("the run converges within the grace bound")
             .expect("the exit lane stays open");
-        assert_eq!(exit, 1, "the in-process run fails closed without a provider key");
+        assert_eq!(
+            exit, 1,
+            "the in-process run fails closed without a provider key"
+        );
         let code = shutdown_tree(&mut live, 0).await;
         assert_eq!(code, 0);
     });

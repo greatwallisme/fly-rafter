@@ -3377,3 +3377,9 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - **修复**：测试在 shutdown_tree 前先 `live.exit.recv()`（退出守望通道=生产 serve 循环的同一 whenIdle 面）等 runner 收敛（30s 测试界，幂等断言 exit=1=无 provider key fail-closed）。生产路径（exit watcher 先等 whenIdle 再退役）契约不变，无需改。
 - **记录在案的既有 wart（非本切片修）**：`shutdown_tree` 的 SHUTDOWN_GRACE 超时对 current-thread runtime 无效——retire 任务内同步 join 阻塞 runtime 线程，定时器永不被 poll。生产不触发（whenIdle 先行），测试违契时表现为挂死而非优雅超时。后续切片候选。
 - **纪律复盘**：并发 flake 第一假设=自己代码（本次成立：我的改动把必赢竞态变成可输）；但根因判定要靠栈证据（gdb 三连），不能只看时间线猜测；测试设计不得依赖「CREATE 比 dispose 快」的时序运气。
+
+## 18e 下半 Q3A 排查结论：竞窗嫌疑排除，实为 on_event 回复协议确定性缺陷（2026-11-06）
+- **症状重解读**：原记录「空载荷 session/created（listener_failure: payload_codec: EOF 0:0）」实为**宿主桥解码 on_event 的空 REPLY**——dougong-dylib 桥 `_ => serde_json::from_slice(&reply)` 对零字节报 serde「EOF while parsing a value at line 1 column 0」。入站载荷链（service.rs push {"sessionId"}→drain 恒带 payload 键→pump 原样转发）全程非空的早前核实成立，「空载荷/时序竞窗」判断纠正。
+- **根因**：fr-permission-presets 与 fr-guard-repeat-reminder 两壳 on_event 成功臂裸返 `STATUS_OK` 不回写 out-buffer；宿主桥对空 reply 解码失败 → LogOnly 的 listener_failure 日志（每次 session/created、agent/user-admitted 必现）。seeding/reset 本身在 serve_event 内已成功（error 是 LogOnly），故测试全绿但日志脏。
+- **全仓扫描**：22 个 on_event 导出仅这两个裸返成功臂（其余写 `b"{}"`——agent-loop/compaction/tools-builtin/headless 判例，或无监听的恒 FAILED 短桩）。
+- **修复**：两壳镜像 agent-loop 回复判例（Ok 写 `{}`、Err 写 {"error":...} 详情）；参数去下划线（used_underscore_binding）；各增一钉测直调 on_event 断言回包=b"{}"（borrow_as_ptr 用 &raw mut）。两 crate clippy -D warnings + 13/24 测全绿。

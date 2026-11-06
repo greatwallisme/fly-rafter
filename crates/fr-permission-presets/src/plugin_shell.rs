@@ -419,9 +419,9 @@ unsafe extern "C" fn on_event(
     in_data: *const u8,
     in_len: usize,
     _next_available: u32,
-    _out: *mut u8,
-    _cap: usize,
-    _out_len: *mut usize,
+    out: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
 ) -> i32 {
     if handle.is_null() {
         return STATUS_FAILED;
@@ -440,9 +440,30 @@ unsafe extern "C" fn on_event(
     let state = unsafe { &*(handle.cast::<ShellState>()) };
     // Seeding failures surface to the host (dsh pin throws at the
     // created edge); the event face carries no veto either way.
+    //
+    // The reply contract mirrors the fr-agent-loop shell: the handled
+    // notification answers with an empty JSON object and a failure
+    // carries its detail. A bare `STATUS_OK` with an untouched buffer
+    // leaves the reply empty, and the host bridge decodes the empty
+    // bytes as the chain value — the spurious
+    // `listener_failure: payload_codec` EOF this listener used to log
+    // on every `session/created` (2026-11-06 finding).
     match state.serve_event(event, payload) {
-        Ok(()) => STATUS_OK,
-        Err(_) => STATUS_FAILED,
+        Ok(()) => {
+            // SAFETY: the host contract hands a `cap`-sized out-buffer
+            // with a writable `len` slot.
+            if unsafe { write_out(b"{}", out, cap, out_len) } {
+                STATUS_OK
+            } else {
+                STATUS_CAPACITY
+            }
+        }
+        Err(message) => {
+            let body = serde_json::json!({ "error": message }).to_string();
+            // SAFETY: same caller-owned buffer contract.
+            let _ = unsafe { write_out(body.as_bytes(), out, cap, out_len) };
+            STATUS_FAILED
+        }
     }
 }
 
@@ -892,6 +913,42 @@ mod tests {
 
         // An unexpected event id refuses.
         assert!(state.serve_event(7, b"{}").is_err());
+    }
+
+    /// The emit-mode reply contract: a handled notification answers with
+    /// an empty JSON object — never a bare `STATUS_OK` with an untouched
+    /// buffer, which the host bridge decodes as an empty chain value and
+    /// logs a spurious `listener_failure: payload_codec` EOF (the
+    /// 2026-11-06 finding).
+    #[test]
+    fn on_event_answers_handled_notifications_with_an_empty_object() {
+        let host = Box::leak(Box::new(FakeHost::default())) as &'static FakeHost;
+        let state = Box::new(
+            ShellState::try_new(Some(super::HostLink::new(exports(host))))
+                .expect("wiring succeeds against the scripted host"),
+        );
+        let handle = std::ptr::from_ref(state.as_ref()).cast_mut().cast();
+        let payload = br#"{"sessionId":"s-new"}"#;
+        let mut out = [0_u8; 64];
+        let mut len = 0_usize;
+        // SAFETY: the handle aliases the boxed state (alive for the
+        // call); the payload and out-buffer are valid for the call per
+        // the export-table contract.
+        let status = unsafe {
+            super::on_event(
+                handle,
+                1,
+                0,
+                payload.as_ptr(),
+                payload.len(),
+                0,
+                out.as_mut_ptr(),
+                out.len(),
+                &raw mut len,
+            )
+        };
+        assert_eq!(status, dougong_abi::STATUS_OK);
+        assert_eq!(&out[..len], b"{}");
     }
 }
 
