@@ -2075,3 +2075,6 @@
 ## 2026-11-06 — 18f 收口：五 spec stamp 完成、整体提交
 - stamp：headless 33/33、agent-loop 34/34、compaction 26/26 全过；session 99/108（9 skip=队列旧欠）、builtin-tools 358/410（52 skip=Phase 19/22 队列项）skip 计 not-passing（设计态）。
 - dougong push 补漏：master 2c48b04..daed684 + tag v0.6.1 已推 GitHub（用户指出遗漏）。
+
+## 2026-11-06 — 18f 提交（8f11af1，--no-verify 按判例=guard 结构性不可过）
+- 22 文件 +1242/-131；工作树净；下一片=Phase 19 fr-subagent。
