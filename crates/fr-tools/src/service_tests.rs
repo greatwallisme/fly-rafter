@@ -37,6 +37,43 @@ const unsafe extern "C" fn noop_dispatch(
     STATUS_FAILED
 }
 
+/// Test double for the host side of the ABI v6 `realm_spawn` entry (D33):
+/// no tools test drives a realm activation, so the double accepts quietly.
+const unsafe extern "C" fn quiet_realm_spawn(
+    _host: *mut std::ffi::c_void,
+    _realm: u64,
+    _path: *const u8,
+    _path_len: usize,
+    _out_buf: *mut u8,
+    _cap: usize,
+    _out_len: *mut usize,
+) -> i32 {
+    STATUS_OK
+}
+
+/// Test double for the host side of the ABI v6 `realm_retire` entry (D33):
+/// no tools test drives a realm retirement, so the double accepts quietly.
+const unsafe extern "C" fn quiet_realm_retire(_host: *mut std::ffi::c_void, _child: u64) -> i32 {
+    STATUS_OK
+}
+
+/// Test double for the host side of the ABI v6 `realm_require` entry (D33):
+/// no tools test drives a realm call, so the double accepts quietly.
+const unsafe extern "C" fn quiet_realm_require(
+    _host: *mut std::ffi::c_void,
+    _realm: u64,
+    _service: *const u8,
+    _service_len: usize,
+    _method: u32,
+    _in_data: *const u8,
+    _in_len: usize,
+    _out_buf: *mut u8,
+    _cap: usize,
+    _out_len: *mut usize,
+) -> i32 {
+    STATUS_OK
+}
+
 /// The scripted endpoint handler shape (method, payload) -> reply.
 type Endpoint = Box<dyn Fn(u32, &[u8]) -> Result<Vec<u8>, String> + Send>;
 
@@ -64,6 +101,9 @@ impl TestHost {
                 emit: test_emit,
                 grant: test_grant,
                 dispatch: noop_dispatch,
+                realm_spawn: quiet_realm_spawn,
+                realm_retire: quiet_realm_retire,
+                realm_require: quiet_realm_require,
             },
         }
     }
@@ -304,7 +344,7 @@ fn describe_reports_metadata() {
     let parsed: Value = serde_json::from_slice(&reply).expect("json");
     assert_eq!(parsed["name"], PLUGIN_NAME);
     assert_eq!(parsed["service"], "tools");
-    assert_eq!(parsed["abiVersion"], 5);
+    assert_eq!(parsed["abiVersion"], 6);
 }
 
 #[test]

@@ -247,6 +247,9 @@ mod tests {
                 host_handle: std::ptr::null_mut(),
                 require: quiet_require,
                 emit: quiet_emit,
+                realm_spawn: crate::outbound::quiet_realm_spawn,
+                realm_retire: crate::outbound::quiet_realm_retire,
+                realm_require: crate::outbound::quiet_realm_require,
             }),
             Arc::new(|_warning: &str| {}),
         )

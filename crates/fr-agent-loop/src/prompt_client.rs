@@ -379,6 +379,9 @@ mod tests {
             host_handle: service.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
         let mut client = SystemPromptClient::new(outbound);
         let assembly = client.assemble().expect("assemble over wire");
@@ -399,6 +402,9 @@ mod tests {
             host_handle: service.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         }));
         fresh.refresh_context(&assembly).unwrap_err();
         release(service);
@@ -416,6 +422,9 @@ mod tests {
             host_handle: service.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
         let mut bridge = InstructionsClient::new(outbound, "s1", "/proj");
         let id = next_id();
@@ -462,6 +471,9 @@ mod tests {
             host_handle: service.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
         let mut bridge = InstructionsClient::new(outbound, "s1", "/nowhere");
         let composed = bridge
@@ -495,6 +507,9 @@ mod tests {
             host_handle: std::ptr::null_mut(),
             require: failing_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
         let mut client = SystemPromptClient::new(outbound);
         let error = client.assemble().expect_err("host rejected");

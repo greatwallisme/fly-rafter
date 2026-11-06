@@ -298,6 +298,142 @@ impl Outbound {
             Err(GrantError { status })
         }
     }
+
+    /// Activates one child plugin artifact inside a realm owned by this
+    /// activation (ABI v6, D33; the 18e `fiber_realm` ruling's spawn face).
+    ///
+    /// `realm == 0` allocates a fresh realm label; a non-zero realm must be
+    /// one an earlier spawn returned. The call blocks the calling thread
+    /// until the child settles and replies with the JSON spawn document
+    /// (`{"realm":L,"child":C,"state":"active"|"pending"}`). The out-buffer
+    /// honors [`dougong_abi::REALM_SPAWN_REPLY_MIN`] up front so the host
+    /// never answers `STATUS_CAPACITY`.
+    ///
+    /// The call must originate on a plugin-owned thread (a foreign entry
+    /// frame fails with `STATUS_REENTRANCY`); the parent lifecycle arms run
+    /// the spawn on a scope-spawned worker and join it inside the service
+    /// entry — safe because the child's setup and adopt handshake touch
+    /// only global services, never this activation's `agent` face (the
+    /// realm-partner judgment, documented at the call site).
+    ///
+    /// # Errors
+    ///
+    /// Returns the host status and any JSON detail document on any
+    /// non-OK terminal status (`realm_spawn_load_failed` for an unloadable
+    /// artifact, the child's own startup error otherwise).
+    pub fn realm_spawn(&self, realm: u64, path: &str) -> Result<Vec<u8>, RequireError> {
+        let mut buf = vec![0_u8; 4096_usize.max(dougong_abi::REALM_SPAWN_REPLY_MIN)];
+        let mut len = 0_usize;
+        // SAFETY: the copied vtable is live until this activation's
+        // `teardown` returns; every caller is joined before `teardown`
+        // (shell thread discipline). Buffers are caller-owned per the
+        // export-table contract.
+        let status = unsafe {
+            (self.host.realm_spawn)(
+                self.host.host_handle,
+                realm,
+                path.as_ptr(),
+                path.len(),
+                buf.as_mut_ptr(),
+                buf.len(),
+                &raw mut len,
+            )
+        };
+        buf.truncate(len);
+        if status == STATUS_OK {
+            Ok(buf)
+        } else {
+            Err(RequireError {
+                status,
+                detail: buf,
+            })
+        }
+    }
+
+    /// Disposes one child this activation spawned (ABI v6, D33) and
+    /// returns once the child's teardown has settled. Status-only like
+    /// [`Self::grant`]; the failure cleanup leg of the parent lifecycle
+    /// arms ignores a refusal rather than masking the original error.
+    ///
+    /// # Errors
+    ///
+    /// Returns the host status for an unknown or already-retired handle.
+    pub fn realm_retire(&self, child: u64) -> Result<(), RequireError> {
+        // SAFETY: same vtable lifetime and thread discipline as `require`.
+        let status = unsafe { (self.host.realm_retire)(self.host.host_handle, child) };
+        if status == STATUS_OK {
+            Ok(())
+        } else {
+            Err(RequireError {
+                status,
+                detail: Vec::new(),
+            })
+        }
+    }
+
+    /// `require` addressed to a realm (ABI v6, D33): resolves `service` in
+    /// the named realm and calls `method`, authorizing the call only when
+    /// the provider is a child this activation spawned. The parent routes
+    /// the session lifecycle and session methods into the session realm
+    /// through this face with the original method numbers.
+    ///
+    /// Follows the same growable buffer protocol as [`Self::require`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the host status and any JSON detail document on any
+    /// non-OK terminal status (`unknown_realm` / `STATUS_UNDECLARED` for
+    /// a provider that is not this activation's child).
+    pub fn realm_require(
+        &self,
+        realm: u64,
+        service: &str,
+        method: u32,
+        payload: &[u8],
+    ) -> Result<Vec<u8>, RequireError> {
+        let mut cap = 4096_usize;
+        loop {
+            let mut buf = vec![0_u8; cap];
+            let mut len = 0_usize;
+            // SAFETY: the copied vtable is live until this activation's
+            // `teardown` returns; every caller is joined before `teardown`
+            // (shell thread discipline). Buffers are caller-owned per the
+            // export-table contract.
+            let status = unsafe {
+                (self.host.realm_require)(
+                    self.host.host_handle,
+                    realm,
+                    service.as_ptr(),
+                    service.len(),
+                    method,
+                    payload.as_ptr(),
+                    payload.len(),
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    &raw mut len,
+                )
+            };
+            if status == STATUS_CAPACITY {
+                if cap >= MAX_REPLY_CAPACITY {
+                    return Err(RequireError {
+                        status,
+                        detail: format!("reply still exceeds {MAX_REPLY_CAPACITY} bytes")
+                            .into_bytes(),
+                    });
+                }
+                cap = cap.saturating_mul(2);
+                continue;
+            }
+            buf.truncate(len);
+            if status == STATUS_OK {
+                return Ok(buf);
+            }
+            return Err(RequireError {
+                status,
+                detail: buf,
+            });
+        }
+    }
 }
 
 /// The failure of one D31 grant registration (the host status only; the
@@ -363,6 +499,49 @@ pub(crate) const unsafe extern "C" fn noop_dispatch(
     _out_len: *mut usize,
 ) -> i32 {
     dougong_abi::STATUS_FAILED
+}
+
+/// Test double for the host side of the ABI v6 `realm_spawn` entry (D33):
+/// no loop test drives a realm activation, so the double accepts quietly.
+#[cfg(test)]
+pub(crate) const unsafe extern "C" fn quiet_realm_spawn(
+    _host: *mut std::ffi::c_void,
+    _realm: u64,
+    _path: *const u8,
+    _path_len: usize,
+    _out_buf: *mut u8,
+    _cap: usize,
+    _out_len: *mut usize,
+) -> i32 {
+    dougong_abi::STATUS_OK
+}
+
+/// Test double for the host side of the ABI v6 `realm_retire` entry (D33):
+/// no loop test drives a realm retirement, so the double accepts quietly.
+#[cfg(test)]
+pub(crate) const unsafe extern "C" fn quiet_realm_retire(
+    _host: *mut std::ffi::c_void,
+    _child: u64,
+) -> i32 {
+    dougong_abi::STATUS_OK
+}
+
+/// Test double for the host side of the ABI v6 `realm_require` entry (D33):
+/// no loop test drives a realm call, so the double accepts quietly.
+#[cfg(test)]
+pub(crate) const unsafe extern "C" fn quiet_realm_require(
+    _host: *mut std::ffi::c_void,
+    _realm: u64,
+    _service: *const u8,
+    _service_len: usize,
+    _method: u32,
+    _in_data: *const u8,
+    _in_len: usize,
+    _out_buf: *mut u8,
+    _cap: usize,
+    _out_len: *mut usize,
+) -> i32 {
+    dougong_abi::STATUS_OK
 }
 
 #[cfg(test)]
@@ -538,6 +717,9 @@ mod tests {
             host_handle,
             require,
             emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         })
     }
 
@@ -554,6 +736,9 @@ mod tests {
             host_handle: &raw const fake as *mut c_void,
             require: undeclared_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
         outbound
             .grant("builtin-tools", "agent")
@@ -569,6 +754,9 @@ mod tests {
             host_handle: std::ptr::null_mut(),
             require: undeclared_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
         let error = refusing
             .grant("builtin-tools", "agent")

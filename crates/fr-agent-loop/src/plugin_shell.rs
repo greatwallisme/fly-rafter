@@ -41,6 +41,9 @@ use crate::driver::{AgentOptions, LoopDriver};
 use crate::driver_factory::{production_deps, spawn_driver, validated_max_tokens};
 use crate::inbox::InboxTarget;
 use crate::outbound::Outbound;
+use crate::realm_parent::{
+    REALM_ADOPT_PAYLOAD, Role, SpawnedRealm, own_artifact_path, validate_realm_adopt_payload,
+};
 use crate::session_reads::SessionReadsClient;
 
 /// The provided service name consumers call, and the seven method
@@ -50,8 +53,8 @@ use crate::session_reads::SessionReadsClient;
 /// link); the re-exports keep this path stable.
 pub use crate::agent_service::{
     METHOD_CANCEL, METHOD_CREATE, METHOD_DESCRIBE, METHOD_FOLLOWUP, METHOD_INJECT, METHOD_LIVE,
-    METHOD_MAINTENANCE_BEGIN, METHOD_MAINTENANCE_END, METHOD_MAINTENANCE_POLL, METHOD_RESUME,
-    METHOD_SEND, METHOD_STATUS, METHOD_STEER, SERVICE_NAME,
+    METHOD_MAINTENANCE_BEGIN, METHOD_MAINTENANCE_END, METHOD_MAINTENANCE_POLL, METHOD_REALM_ADOPT,
+    METHOD_RESUME, METHOD_SEND, METHOD_STATUS, METHOD_STEER, SERVICE_NAME,
 };
 
 /// The dylib artifact's plugin name.
@@ -695,8 +698,13 @@ fn parse<T: serde::de::DeserializeOwned>(payload: &[u8], entry: &str) -> Result<
     serde_json::from_slice(payload).map_err(|error| format!("{entry} payload is invalid: {error}"))
 }
 
-/// Serves one agent-service method invocation: a pure (JSON-in, JSON-out)
-/// function over the session map so the shell surface stays testable.
+/// Serves one agent-service method invocation locally: a pure
+/// (JSON-in, JSON-out) function over the session map so the shell
+/// surface stays testable.
+///
+/// The `call` entry reaches this through the routed dispatch face, which
+/// first resolves the role and realm for session-scoped methods (the
+/// 18e `fiber_realm` ruling).
 ///
 /// # Errors
 ///
@@ -799,10 +807,17 @@ pub fn dispatch(method: u32, payload: &[u8], sessions: &SessionMap) -> Result<Ve
     Ok(serde_json::to_vec(&serde_json::json!({ "queued": true })).unwrap_or_default())
 }
 
-/// Serves the lifecycle arms (CREATE/RESUME/LIVE — the driver-spawning
-/// faces over the full shell state). Returns `None` for every other
-/// method so the `call` entry falls through to the pure quick-enqueue
-/// face ([`dispatch`]).
+/// Serves the lifecycle arms (`CREATE`/`RESUME`/`LIVE`/`REALM_ADOPT`).
+///
+/// These are the driver-spawning and role-adoption faces over the full
+/// shell state; every other method returns `None` so the `call` entry
+/// falls through to the session-routing quick face ([`dispatch_routed`]).
+///
+/// The role adoption lives here (the 18e `fiber_realm` ruling): the first
+/// CREATE/RESUME adopts [`Role::Parent`] and runs the realm-spawn arm; a
+/// [`Role::Child`] serves CREATE/RESUME on its local session map (the
+/// parent routes the original call into the realm); the first
+/// `METHOD_REALM_ADOPT` adopts [`Role::Child`].
 ///
 /// # Errors
 ///
@@ -813,17 +828,251 @@ fn dispatch_lifecycle(
     state: &ShellState,
 ) -> Option<Result<Vec<u8>, String>> {
     match method {
-        METHOD_CREATE => Some(create_session_driver(state, payload)),
-        METHOD_RESUME => Some(resume_session_driver(state, payload)),
+        METHOD_CREATE => Some(match current_role(state) {
+            Role::Child => create_session_driver(state, payload),
+            _ => parent_lifecycle_arm(state, payload, LifecycleArm::Create),
+        }),
+        METHOD_RESUME => Some(match current_role(state) {
+            Role::Child => resume_session_driver(state, payload),
+            _ => parent_lifecycle_arm(state, payload, LifecycleArm::Resume),
+        }),
         METHOD_LIVE => Some(live_probe(state, payload)),
+        METHOD_REALM_ADOPT => Some(realm_adopt_handshake(state, payload)),
         _ => None,
     }
 }
-/// The CREATE arm (the dsh `agents.create` wire face): guard the
-/// driver registry, create the session through the persistence face,
-/// assemble the production deps, restore-fold the driver, and spawn its
-/// thread into the registry. The reply carries the session identity
-/// (the spec's session-handle face).
+
+/// Reads the activation role (the adoption cell's only shared reader).
+///
+/// # Panics
+///
+/// Panics if the role lock is poisoned (a holder panicked).
+fn current_role(state: &ShellState) -> Role {
+    *state.role.lock().expect("role lock poisoned")
+}
+
+/// Stores the adopted role after the arm's validation refused conflicts.
+///
+/// # Errors
+///
+/// Returns the adoption refusal (a role-defining call on an activation
+/// that already adopted the other role).
+fn adopt_role(state: &ShellState, current: Role, adopted: Role) -> Result<(), String> {
+    let check = match adopted {
+        Role::Parent => Role::adopt_for_lifecycle(current),
+        Role::Child => Role::adopt_for_realm_handshake(current),
+        Role::Undefined => unreachable!("Undefined is never an adoption target"),
+    };
+    match check {
+        Ok(next) => {
+            *state.role.lock().expect("role lock poisoned") = next;
+            Ok(())
+        }
+        Err(refusal) => Err(refusal),
+    }
+}
+
+/// Which lifecycle arm the parent routes into the session realm after
+/// the spawn handshake.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LifecycleArm {
+    /// The dsh `agents.create` face ([`METHOD_CREATE`]).
+    Create,
+    /// The dsh `agents.resume` face ([`METHOD_RESUME`]).
+    Resume,
+}
+
+/// The parent's CREATE/RESUME arm (the 18e `fiber_realm` ruling): adopt
+/// the [`Role::Parent`] role, guard the realm registry, resolve the own
+/// artifact, then realm-spawn it into a fresh realm on a plugin-owned
+/// thread, adopt the child over the wire, and route the original
+/// lifecycle call into the realm. The reply is the child's reply (the
+/// session-handle face is unchanged).
+///
+/// `realm_spawn` must originate on a plugin-owned thread — the host call
+/// thread is a foreign entry. The scope-spawned worker is joined inside
+/// this entry; that is safe because the child's `setup`, handshake, and
+/// local lifecycle arms touch only global services (session-persistence
+/// and friends), never this activation's `agent` face — the exact
+/// condition the realm-partner example documents (the join would
+/// deadlock only against a child that requires its spawner back).
+///
+/// # Errors
+///
+/// Returns the adoption, registry guard, artifact-resolution, spawn,
+/// handshake, or routed-call refusal.
+fn parent_lifecycle_arm(
+    state: &ShellState,
+    payload: &[u8],
+    arm: LifecycleArm,
+) -> Result<Vec<u8>, String> {
+    adopt_role(state, current_role(state), Role::Parent)?;
+    let request: SessionRequest = parse(payload, arm.entry())?;
+    guard_realm_registry(state, &request.session_id)?;
+    // The artifact search is pure filesystem probing; it needs no
+    // plugin-owned thread. Resolving it here also keeps the worker
+    // body testable with an arbitrary path.
+    let path = own_artifact_path().ok_or_else(|| {
+        "fr: cannot locate plugin artifacts (fr-agent-loop dylib not found in FR_PLUGIN_PATH, \
+         the executable directory, or its parent)"
+            .to_owned()
+    })?;
+    let payload = payload.to_vec();
+    let session_id = request.session_id;
+    std::thread::scope(|scope| {
+        scope
+            .spawn(move || spawn_session_realm(state, &payload, arm, &session_id, &path))
+            .join()
+            .unwrap_or_else(|_| Err("session realm spawn panicked".to_owned()))
+    })
+}
+
+/// The scope-spawned worker body: spawn this artifact's own dylib into
+/// a fresh realm, adopt the child, route the lifecycle call, and
+/// register the session's realm on success (retiring the child on a
+/// routed-call failure leaves no half-made realm).
+///
+/// # Errors
+///
+/// Returns the spawn, handshake, or routed-call refusal.
+fn spawn_session_realm(
+    state: &ShellState,
+    payload: &[u8],
+    arm: LifecycleArm,
+    session_id: &str,
+    path: &str,
+) -> Result<Vec<u8>, String> {
+    let outbound = state.sessions.outbound;
+    let spawned = SpawnedRealm::decode(
+        &outbound
+            .realm_spawn(0, path)
+            .map_err(|error| format!("session realm spawn failed: {error}"))?,
+    )?;
+    if let Err(error) = outbound.realm_require(
+        spawned.realm,
+        SERVICE_NAME,
+        METHOD_REALM_ADOPT,
+        REALM_ADOPT_PAYLOAD,
+    ) {
+        // The handshake failed: the child is unusable, dispose it before
+        // the refusal surfaces (the same leave-no-residue leg as the
+        // routed lifecycle below).
+        let _cleanup = outbound.realm_retire(spawned.child);
+        return Err(format!("session realm adopt failed: {error}"));
+    }
+    let method = match arm {
+        LifecycleArm::Create => METHOD_CREATE,
+        LifecycleArm::Resume => METHOD_RESUME,
+    };
+    let reply = match outbound.realm_require(spawned.realm, SERVICE_NAME, method, payload) {
+        Ok(reply) => reply,
+        Err(error) => {
+            // A failed child leaves no residue: dispose it before the
+            // refusal surfaces (the ABI's leave-no-residue semantics).
+            let _cleanup = outbound.realm_retire(spawned.child);
+            return Err(format!("session realm lifecycle failed: {error}"));
+        }
+    };
+    state
+        .realms
+        .lock()
+        .expect("realm registry lock poisoned")
+        .insert(session_id.to_owned(), (spawned.realm, spawned.child));
+    Ok(reply)
+}
+
+impl LifecycleArm {
+    /// The payload-decoding entry name used in refusal text.
+    const fn entry(self) -> &'static str {
+        match self {
+            Self::Create => "create",
+            Self::Resume => "resume",
+        }
+    }
+}
+
+/// The realm-spawn handshake face: validates the role word and adopts
+/// [`Role::Child`] on a role-less activation. The parent calls this on
+/// its fresh child before any session traffic; a second handshake or a
+/// handshake on the parent refuses (fail-closed).
+///
+/// # Errors
+///
+/// Returns the payload or adoption refusal.
+fn realm_adopt_handshake(state: &ShellState, payload: &[u8]) -> Result<Vec<u8>, String> {
+    validate_realm_adopt_payload(payload)?;
+    adopt_role(state, current_role(state), Role::Child)?;
+    Ok(serde_json::to_vec(&serde_json::json!({ "adopted": true })).unwrap_or_default())
+}
+
+/// The `call` entry's fall-through face: routes one session-scoped
+/// method by role first (the 18e `fiber_realm` ruling). A [`Role::Child`]
+/// activation serves the method on its local session map; any other role
+/// looks the session up in the realm registry and `realm_require`s the
+/// child activation inside the session's realm with the original method
+/// number and payload. A session with no realm entry refuses with the
+/// registry text and never mints a mailbox.
+///
+/// # Errors
+///
+/// Returns the failure text the host surfaces as `STATUS_FAILED`.
+fn dispatch_routed(method: u32, payload: &[u8], state: &ShellState) -> Result<Vec<u8>, String> {
+    if let Some(realm) = route_session_method(method, payload, state)? {
+        return state
+            .sessions
+            .outbound
+            .realm_require(realm, SERVICE_NAME, method, payload)
+            .map_err(|error| format!("agent realm call failed: {error}"));
+    }
+    dispatch(method, payload, &state.sessions)
+}
+
+/// Routes one session-scoped method before the local arms run: a child
+/// serves locally (`None`), any other role returns the session's realm
+/// label. The session id parses with the arm's entry name so refusal
+/// text matches the local face.
+///
+/// # Errors
+///
+/// Returns the payload-decode refusal, or the registry text when the
+/// session has no realm entry.
+fn route_session_method(
+    method: u32,
+    payload: &[u8],
+    state: &ShellState,
+) -> Result<Option<u64>, String> {
+    let entry = match method {
+        METHOD_SEND => "send",
+        METHOD_STEER => "steer",
+        METHOD_INJECT => "inject",
+        METHOD_FOLLOWUP => "followup",
+        METHOD_CANCEL => "cancel",
+        METHOD_STATUS => "status",
+        METHOD_MAINTENANCE_BEGIN => "maintenance-begin",
+        METHOD_MAINTENANCE_POLL => "maintenance-poll",
+        METHOD_MAINTENANCE_END => "maintenance-end",
+        _ => return Ok(None),
+    };
+    let request: SessionRequest = parse(payload, entry)?;
+    if current_role(state) == Role::Child {
+        return Ok(None);
+    }
+    let realm = {
+        let realms = state.realms.lock().expect("realm registry lock poisoned");
+        realms
+            .get(&request.session_id)
+            .map(|(realm, _child)| *realm)
+            .ok_or_else(|| format!("agent \"{}\" is not registered", request.session_id))?
+    };
+    Ok(Some(realm))
+}
+/// The realm-local CREATE arm (the dsh `agents.create` wire face),
+/// served by a [`Role::Child`] activation when the parent routes the
+/// original call into the session realm: guard the local driver
+/// registry, create the session through the persistence face, assemble
+/// the production deps, restore-fold the driver, and spawn its thread
+/// into the registry. The reply carries the session identity (the
+/// spec's session-handle face).
 ///
 /// A failure past the persistence create does not roll the session
 /// back: the dsh rollback unwinds through cordis effects, and the wire
@@ -835,7 +1084,7 @@ fn dispatch_lifecycle(
 /// Returns the registry, persistence, restore, or spawn refusal.
 fn create_session_driver(state: &ShellState, payload: &[u8]) -> Result<Vec<u8>, String> {
     let request: CreateRequest = parse(payload, "create")?;
-    guard_driver_registry(state, &request.session_id)?;
+    guard_local_driver_registry(state, &request.session_id)?;
     let outbound = state.sessions.outbound;
     let create_body = serde_json::to_vec(&serde_json::json!({
         "id": request.session_id,
@@ -873,8 +1122,9 @@ fn create_session_driver(state: &ShellState, payload: &[u8]) -> Result<Vec<u8>, 
         },
     )
 }
-/// The RESUME arm (the dsh `agents.resume` wire face): guard the
-/// registry, take the persistence write claim and crash-repair closers
+/// The realm-local RESUME arm (the dsh `agents.resume` wire face),
+/// served by a [`Role::Child`] activation: guard the local registry,
+/// take the persistence write claim and crash-repair closers
 /// (method 6 = the full `resumeWith` chain), read the session header
 /// for the workspace path, and attach the restored driver.
 ///
@@ -884,7 +1134,7 @@ fn create_session_driver(state: &ShellState, payload: &[u8]) -> Result<Vec<u8>, 
 /// refusal.
 fn resume_session_driver(state: &ShellState, payload: &[u8]) -> Result<Vec<u8>, String> {
     let request: ResumeRequest = parse(payload, "resume")?;
-    guard_driver_registry(state, &request.session_id)?;
+    guard_local_driver_registry(state, &request.session_id)?;
     let outbound = state.sessions.outbound;
     let resume_body = serde_json::to_vec(&serde_json::json!({ "id": request.session_id }))
         .map_err(|error| format!("resume payload encode failed: {error}"))?;
@@ -951,14 +1201,15 @@ fn attach_session_driver(
     .unwrap_or_default())
 }
 
-/// Refuses a second driver for one session id (the dsh registry insert
-/// guard, index.ts:469; the registry check precedes all persistence
-/// I/O).
+/// Refuses a second local driver for one session id at a child
+/// activation (the dsh registry insert guard, index.ts:469; the registry
+/// check precedes all persistence I/O). The parent arm guards the realm
+/// registry instead ([`guard_realm_registry`]).
 ///
 /// # Errors
 ///
 /// Returns the dsh verbatim replacement refusal.
-fn guard_driver_registry(state: &ShellState, session_id: &str) -> Result<(), String> {
+fn guard_local_driver_registry(state: &ShellState, session_id: &str) -> Result<(), String> {
     if state
         .drivers
         .lock()
@@ -970,20 +1221,49 @@ fn guard_driver_registry(state: &ShellState, session_id: &str) -> Result<(), Str
     Ok(())
 }
 
+/// Refuses a second realm for one session id at the parent (the dsh
+/// registry insert guard, index.ts:469; the registry check precedes all
+/// spawn and persistence I/O). The realm registry is the parent's
+/// liveness view; the child's local create arm keeps its own driver
+/// registry guard.
+///
+/// # Errors
+///
+/// Returns the dsh verbatim replacement refusal.
+fn guard_realm_registry(state: &ShellState, session_id: &str) -> Result<(), String> {
+    if state
+        .realms
+        .lock()
+        .expect("realm registry lock poisoned")
+        .contains_key(session_id)
+    {
+        return Err(format!("agent \"{session_id}\" is already registered"));
+    }
+    Ok(())
+}
+
 /// The LIVE arm (the dsh `agents.get` liveness read): reports whether a
-/// driver thread is attached for the id. It never touches the session
-/// map, so a probe cannot mint a mailbox (the spec's no-create pin).
+/// session realm is registered at the parent (or a driver is attached at
+/// a child). It never touches the session map, so a probe cannot mint a
+/// mailbox (the spec's no-create pin).
 ///
 /// # Errors
 ///
 /// Returns the payload decode refusal.
 fn live_probe(state: &ShellState, payload: &[u8]) -> Result<Vec<u8>, String> {
     let request: SessionRequest = parse(payload, "live")?;
-    let live = state
-        .drivers
-        .lock()
-        .expect("driver registry lock poisoned")
-        .contains_key(&request.session_id);
+    let live = match current_role(state) {
+        Role::Child => state
+            .drivers
+            .lock()
+            .expect("driver registry lock poisoned")
+            .contains_key(&request.session_id),
+        _ => state
+            .realms
+            .lock()
+            .expect("realm registry lock poisoned")
+            .contains_key(&request.session_id),
+    };
     Ok(serde_json::to_vec(&serde_json::json!({ "live": live })).unwrap_or_default())
 }
 
@@ -1047,13 +1327,42 @@ pub fn handle_tools_settled(payload: &[u8], sessions: &SessionMap) -> Result<(),
     Ok(())
 }
 
-struct ShellState {
+/// The shell's activation state.
+///
+/// Carries the outbound seam, the per-session mailboxes and driver
+/// threads, the adopted role, and — at the parent — the session realm
+/// registry. Fields stay private; the shell's arms and the test surface
+/// go through the constructors and helpers.
+#[derive(Debug)]
+pub struct ShellState {
     /// The activation-scoped registry: the copied vtable (retained as the
     /// [`Outbound`] seam) and the per-session mailboxes.
     sessions: SessionMap,
     /// Loop-thread handles by session id; `teardown` joins every entry
-    /// before the state (and with it the vtable) is released.
+    /// before the state (and with it the vtable) is released. A parent
+    /// activation never spawns loop threads — its children hold their
+    /// own registries — so this map stays empty at the parent.
     drivers: Mutex<HashMap<String, std::thread::JoinHandle<()>>>,
+    /// The activation role (the 18e `fiber_realm` ruling): `Undefined`
+    /// until the first role-defining call adopts `Parent` (CREATE/RESUME)
+    /// or `Child` (the realm-spawn handshake).
+    role: Mutex<Role>,
+    /// The parent-side registry of spawned session realms: session id to
+    /// the (realm label, child handle) pair. The realm label routes the
+    /// session methods; the child handle settles the failure cleanup.
+    realms: Mutex<HashMap<String, (u64, u64)>>,
+}
+
+impl ShellState {
+    /// Assembles one fresh, role-less activation over the copied vtable.
+    fn new(outbound: Outbound) -> Self {
+        Self {
+            sessions: SessionMap::new(outbound),
+            drivers: Mutex::new(HashMap::new()),
+            role: Mutex::new(Role::Undefined),
+            realms: Mutex::new(HashMap::new()),
+        }
+    }
 }
 
 /// Broadcasts shutdown to every session mailbox, then joins every loop
@@ -1133,11 +1442,7 @@ unsafe extern "C" fn setup(host: *const HostExports) -> *mut std::os::raw::c_voi
     // composition without the consumer keeps the loop alive — the offer
     // lapses and the notice machine skips fail-closed.
     let _ignored = outbound.grant("builtin-tools", crate::agent_service::SERVICE_NAME);
-    Box::into_raw(Box::new(ShellState {
-        sessions: SessionMap::new(outbound),
-        drivers: Mutex::new(HashMap::new()),
-    }))
-    .cast::<std::os::raw::c_void>()
+    Box::into_raw(Box::new(ShellState::new(outbound))).cast::<std::os::raw::c_void>()
 }
 
 unsafe extern "C" fn call(
@@ -1167,7 +1472,7 @@ unsafe extern "C" fn call(
         unsafe { std::slice::from_raw_parts(in_data, in_len) }
     };
     let reply = match dispatch_lifecycle(method, payload, state)
-        .unwrap_or_else(|| dispatch(method, payload, &state.sessions))
+        .unwrap_or_else(|| dispatch_routed(method, payload, state))
     {
         Ok(reply) => reply,
         Err(message) => {
@@ -1264,15 +1569,17 @@ mod export;
 #[cfg(test)]
 mod tests {
     use super::{
-        CancelCause, InboundCommand, METHOD_CANCEL, METHOD_CREATE, METHOD_DESCRIBE,
+        CancelCause, InboundCommand, LifecycleArm, METHOD_CANCEL, METHOD_CREATE, METHOD_DESCRIBE,
         METHOD_FOLLOWUP, METHOD_INJECT, METHOD_LIVE, METHOD_MAINTENANCE_BEGIN,
-        METHOD_MAINTENANCE_END, METHOD_MAINTENANCE_POLL, METHOD_RESUME, METHOD_SEND, METHOD_STATUS,
-        METHOD_STEER, PLUGIN_NAME, SessionMap, ShellState, dispatch, dispatch_lifecycle,
-        handle_chunk_ready, handle_tools_settled, session_mailbox, shutdown_and_join,
+        METHOD_MAINTENANCE_END, METHOD_MAINTENANCE_POLL, METHOD_REALM_ADOPT, METHOD_RESUME,
+        METHOD_SEND, METHOD_STATUS, METHOD_STEER, PLUGIN_NAME, SessionMap, ShellState, dispatch,
+        dispatch_lifecycle, dispatch_routed, handle_chunk_ready, handle_tools_settled,
+        parent_lifecycle_arm, realm_adopt_handshake, session_mailbox, shutdown_and_join,
     };
     use crate::inbox::InboxTarget;
     use crate::outbound::Outbound;
-    use dougong_abi::{HostExports, STATUS_FAILED, STATUS_OK};
+    use crate::realm_parent::Role;
+    use dougong_abi::{HostExports, STATUS_FAILED, STATUS_OK, write_out};
     use fr_wire::message::Message;
     use std::collections::HashMap;
     use std::ffi::c_void;
@@ -1303,14 +1610,23 @@ mod tests {
         STATUS_OK
     }
 
-    fn empty_map() -> SessionMap {
-        SessionMap::new(Outbound::new(HostExports {
+    /// One quiet outbound seam for shell-state constructions that never
+    /// make outbound calls.
+    fn quiet_outbound() -> Outbound {
+        Outbound::new(HostExports {
             grant: crate::outbound::quiet_grant,
             dispatch: crate::outbound::noop_dispatch,
             host_handle: std::ptr::null_mut(),
             require: quiet_require,
             emit: quiet_emit,
-        }))
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
+        })
+    }
+
+    fn empty_map() -> SessionMap {
+        SessionMap::new(quiet_outbound())
     }
 
     fn user_message(text: &str) -> Message {
@@ -1671,6 +1987,9 @@ mod tests {
             host_handle: std::ptr::null_mut(),
             require: quiet_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
         let events = crate::agent_events::AgentEvents::new(
             outbound,
@@ -1766,11 +2085,16 @@ mod tests {
             host_handle: handle.cast::<c_void>(),
             require: real_persistence_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
-        let state = ShellState {
-            sessions: SessionMap::new(outbound),
-            drivers: Mutex::new(HashMap::new()),
-        };
+        // The lifecycle integration tests exercise the realm-local arms:
+        // adopt the child role up front so CREATE/RESUME serve locally
+        // (the parent arm is covered by the scripted-realm tests below).
+        let state = ShellState::new(outbound);
+        realm_adopt_handshake(&state, crate::realm_parent::REALM_ADOPT_PAYLOAD)
+            .expect("adopt the child role");
         (state, handle)
     }
 
@@ -1871,10 +2195,7 @@ mod tests {
     /// mailbox entry (spec: live 探测不建邮箱).
     #[test]
     fn live_probe_reports_without_creating_mailboxes() {
-        let state = ShellState {
-            sessions: empty_map(),
-            drivers: Mutex::new(HashMap::new()),
-        };
+        let state = ShellState::new(quiet_outbound());
         let reply = dispatch_lifecycle(METHOD_LIVE, br#"{"sessionId":"ghost"}"#, &state)
             .expect("the live arm serves")
             .expect("the live arm succeeds");
@@ -1976,5 +2297,331 @@ mod tests {
         assert_eq!(error, "agent \"r1\" is already registered");
 
         lifecycle_teardown(&state, service);
+    }
+
+    // --- Parent-activation faces: the scripted realm host drives the
+    // realm_spawn/adopt/route chain without a real dylib (the 18e
+    // fiber_realm ruling's test double).
+
+    /// One recorded `realm_require`: (realm, service, method, payload).
+    type RecordedRequire = (u64, String, u32, Vec<u8>);
+
+    /// The scripted host side of the ABI v6 realm entries: records every
+    /// spawn/require/retire and answers the adopt handshake plus one
+    /// scripted lifecycle reply per realm.
+    struct RealmFake {
+        spawns: Mutex<Vec<(u64, String)>>,
+        requires: Mutex<Vec<RecordedRequire>>,
+        retires: Mutex<Vec<u64>>,
+        /// The realm label handed out for `realm == 0` spawns.
+        next_realm: std::sync::atomic::AtomicU64,
+        /// When set, the routed lifecycle call answers `STATUS_FAILED`.
+        fail_routed_lifecycle: bool,
+    }
+
+    impl RealmFake {
+        fn new() -> Self {
+            Self {
+                spawns: Mutex::new(Vec::new()),
+                requires: Mutex::new(Vec::new()),
+                retires: Mutex::new(Vec::new()),
+                next_realm: std::sync::atomic::AtomicU64::new(41),
+                fail_routed_lifecycle: false,
+            }
+        }
+
+        fn spawns(&self) -> Vec<(u64, String)> {
+            self.spawns.lock().expect("spawns lock").clone()
+        }
+
+        fn requires(&self) -> Vec<RecordedRequire> {
+            self.requires.lock().expect("requires lock").clone()
+        }
+
+        fn retires(&self) -> Vec<u64> {
+            self.retires.lock().expect("retires lock").clone()
+        }
+    }
+
+    unsafe extern "C" fn fake_realm_spawn(
+        host: *mut c_void,
+        realm: u64,
+        path: *const u8,
+        path_len: usize,
+        out_buf: *mut u8,
+        cap: usize,
+        out_len: *mut usize,
+    ) -> i32 {
+        // SAFETY: the handle aliases the test-owned fake; the payload
+        // slice is valid for this call per the vtable contract.
+        let fake = unsafe { &*(host.cast::<RealmFake>()) };
+        // SAFETY: the path pointer is readable for `path_len` bytes per
+        // the vtable contract.
+        let path = unsafe { std::str::from_utf8(std::slice::from_raw_parts(path, path_len)) }
+            .expect("utf-8 path")
+            .to_owned();
+        fake.spawns.lock().expect("spawns lock").push((realm, path));
+        let realm = if realm == 0 {
+            fake.next_realm
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        } else {
+            realm
+        };
+        let body = format!(r#"{{"realm":{realm},"child":3,"state":"active"}}"#);
+        // SAFETY: the caller-owned buffer contract.
+        if unsafe { write_out(body.as_bytes(), out_buf, cap, out_len) } {
+            STATUS_OK
+        } else {
+            dougong_abi::STATUS_CAPACITY
+        }
+    }
+
+    unsafe extern "C" fn fake_realm_require(
+        host: *mut c_void,
+        realm: u64,
+        service: *const u8,
+        service_len: usize,
+        method: u32,
+        in_data: *const u8,
+        in_len: usize,
+        out_buf: *mut u8,
+        cap: usize,
+        out_len: *mut usize,
+    ) -> i32 {
+        // SAFETY: same aliasing and slice contract as `fake_realm_spawn`.
+        let fake = unsafe { &*(host.cast::<RealmFake>()) };
+        // SAFETY: the service pointer is readable for `service_len`
+        // bytes per the vtable contract.
+        let service =
+            unsafe { std::str::from_utf8(std::slice::from_raw_parts(service, service_len)) }
+                .expect("utf-8 service")
+                .to_owned();
+        // SAFETY: the payload pointer is readable for `in_len` bytes per
+        // the vtable contract.
+        let payload = unsafe { std::slice::from_raw_parts(in_data, in_len) }.to_vec();
+        fake.requires
+            .lock()
+            .expect("requires lock")
+            .push((realm, service, method, payload));
+        let body = if method == METHOD_REALM_ADOPT {
+            r#"{"adopted":true}"#.to_owned()
+        } else if fake.fail_routed_lifecycle {
+            let _ = fake;
+            return STATUS_FAILED;
+        } else {
+            r#"{"sessionId":"s1"}"#.to_owned()
+        };
+        // SAFETY: the caller-owned buffer contract.
+        if unsafe { write_out(body.as_bytes(), out_buf, cap, out_len) } {
+            STATUS_OK
+        } else {
+            dougong_abi::STATUS_CAPACITY
+        }
+    }
+
+    unsafe extern "C" fn fake_realm_retire(host: *mut c_void, child: u64) -> i32 {
+        // SAFETY: the handle aliases the test-owned fake.
+        let fake = unsafe { &*(host.cast::<RealmFake>()) };
+        fake.retires.lock().expect("retires lock").push(child);
+        STATUS_OK
+    }
+
+    /// Builds one parent-role shell state over the scripted realm host.
+    fn parent_state(fake: &'static RealmFake) -> ShellState {
+        let outbound = Outbound::new(HostExports {
+            grant: crate::outbound::quiet_grant,
+            dispatch: crate::outbound::noop_dispatch,
+            host_handle: std::ptr::from_ref(fake).cast_mut().cast::<c_void>(),
+            require: quiet_require,
+            emit: quiet_emit,
+            realm_spawn: fake_realm_spawn,
+            realm_retire: fake_realm_retire,
+            realm_require: fake_realm_require,
+        });
+        ShellState::new(outbound)
+    }
+
+    /// The parent CREATE chain: adopt the role, spawn the own artifact
+    /// into a fresh realm, handshake the child, route the original CREATE
+    /// call, and register the session's realm (spec: 每会话循环 fiber
+    /// 置于会话 realm — the driver runs inside the spawned realm's child).
+    #[test]
+    fn create_spawns_the_driver_in_its_own_realm() {
+        let fake = Box::leak(Box::new(RealmFake::new()));
+        let state = parent_state(fake);
+        let payload = serde_json::json!({
+            "sessionId": "s1",
+            "cwd": "/repo",
+            "provider": "deepseek-official",
+            "model": "deepseek-chat",
+        });
+        let reply =
+            parent_lifecycle_arm(&state, payload.to_string().as_bytes(), LifecycleArm::Create)
+                .expect("the parent create arm succeeds");
+        let reply: serde_json::Value = serde_json::from_slice(&reply).expect("reply json");
+        assert_eq!(reply["sessionId"], "s1");
+
+        // The spawn asked for a fresh realm and the own-artifact path.
+        let spawns = fake.spawns();
+        assert_eq!(spawns.len(), 1);
+        assert_eq!(spawns[0].0, 0, "realm 0 asks the host for a fresh label");
+        assert!(
+            spawns[0].1.ends_with("libfr_agent_loop.so"),
+            "the spawn carries the own artifact path"
+        );
+
+        // The realm calls went to the spawned realm: handshake first,
+        // then the routed CREATE with the original payload.
+        let requires = fake.requires();
+        assert_eq!(requires.len(), 2);
+        assert_eq!(requires[0].0, 41, "the fresh realm label answers the calls");
+        assert_eq!(requires[0].1, "agent");
+        assert_eq!(requires[0].2, METHOD_REALM_ADOPT);
+        assert_eq!(requires[1].2, METHOD_CREATE);
+        assert_eq!(
+            requires[1].3,
+            payload.to_string().into_bytes(),
+            "the routed call carries the original payload"
+        );
+
+        // The parent adopted the Parent role, registered the realm, and
+        // answers LIVE from the registry without minting mailboxes.
+        assert_eq!(super::current_role(&state), Role::Parent);
+        let live = dispatch_lifecycle(METHOD_LIVE, br#"{"sessionId":"s1"}"#, &state)
+            .expect("the live arm serves")
+            .expect("the live arm succeeds");
+        let live: serde_json::Value = serde_json::from_slice(&live).expect("live json");
+        assert_eq!(live["live"], true);
+        let ghost = dispatch_lifecycle(METHOD_LIVE, br#"{"sessionId":"ghost"}"#, &state)
+            .expect("the live arm serves")
+            .expect("the live arm succeeds");
+        let ghost: serde_json::Value = serde_json::from_slice(&ghost).expect("ghost json");
+        assert_eq!(ghost["live"], false);
+    }
+
+    /// The parent routes session methods into the session's realm with
+    /// the original method number and payload; an unregistered session
+    /// refuses with the registry text and no mailbox (spec: 会话方法按
+    /// 会话 realm 路由).
+    #[test]
+    fn parent_routes_session_calls_into_the_realm() {
+        let fake = Box::leak(Box::new(RealmFake::new()));
+        let state = parent_state(fake);
+        let payload = serde_json::json!({ "sessionId": "s1", "cwd": "/repo" });
+        parent_lifecycle_arm(&state, payload.to_string().as_bytes(), LifecycleArm::Create)
+            .expect("the parent create arm succeeds");
+
+        let send = input_payload("task");
+        dispatch_routed(METHOD_SEND, send.to_string().as_bytes(), &state).expect("routed send");
+        let requires = fake.requires();
+        let last = requires.last().expect("the routed send");
+        assert_eq!(last.0, 41, "the call addresses the session realm");
+        assert_eq!(last.1, "agent");
+        assert_eq!(last.2, METHOD_SEND);
+        assert_eq!(last.3, send.to_string().into_bytes());
+
+        let error = dispatch_routed(
+            METHOD_SEND,
+            br#"{"sessionId":"ghost","message":{"role":"user","id":"m","content":[{"type":"text","text":"hi"}],"source":{"kind":"user"}}}"#,
+            &state,
+        )
+        .expect_err("an unregistered session refuses");
+        assert_eq!(error, "agent \"ghost\" is not registered");
+        assert!(
+            state
+                .sessions
+                .sessions
+                .lock()
+                .expect("session map lock")
+                .is_empty(),
+            "the refusal mints no mailbox"
+        );
+    }
+
+    /// A routed lifecycle failure disposes the child and leaves no realm
+    /// residue (spec: 子创建失败清理子激活).
+    #[test]
+    fn failed_child_create_retires_the_child() {
+        let fake = Box::leak(Box::new(RealmFake::new()));
+        fake.fail_routed_lifecycle = true;
+        let state = parent_state(fake);
+        let payload = serde_json::json!({ "sessionId": "s1", "cwd": "/repo" });
+        let error =
+            parent_lifecycle_arm(&state, payload.to_string().as_bytes(), LifecycleArm::Create)
+                .expect_err("the routed failure surfaces");
+        assert!(
+            error.contains("session realm lifecycle failed"),
+            "the refusal names the routed leg: {error}"
+        );
+        assert_eq!(fake.retires(), vec![3], "the child handle is retired");
+        assert!(
+            state.realms.lock().expect("realm registry lock").is_empty(),
+            "no realm residue is registered"
+        );
+    }
+
+    /// Role adoption is fail-closed: an unadopted activation refuses
+    /// session methods without minting mailboxes, the first CREATE adopts
+    /// Parent, the first ADOPT adopts Child, and ADOPT refuses on any
+    /// adopted role (spec: 未采用角色失败关闭).
+    #[test]
+    fn unadopted_activation_refuses_session_calls() {
+        let state = ShellState::new(quiet_outbound());
+
+        let error = dispatch_routed(
+            METHOD_SEND,
+            input_payload("early").to_string().as_bytes(),
+            &state,
+        )
+        .expect_err("no role, no realm, no service");
+        assert_eq!(error, "agent \"s1\" is not registered");
+        assert_eq!(super::current_role(&state), Role::Undefined);
+        assert!(
+            state
+                .sessions
+                .sessions
+                .lock()
+                .expect("session map lock")
+                .is_empty()
+        );
+
+        // The first CREATE adopts Parent before any leg can refuse; in
+        // this test environment the artifact search may still resolve
+        // (the workspace builds the real dylib next to the test binary),
+        // so the refusal leg is environment-dependent — the role is not.
+        let error = dispatch_lifecycle(
+            METHOD_CREATE,
+            br#"{"sessionId":"s1","cwd":"/repo"}"#,
+            &state,
+        )
+        .expect("the create arm serves")
+        .expect_err("the arm refuses without a scripted realm host");
+        assert_ne!(error, "");
+        assert_eq!(
+            super::current_role(&state),
+            Role::Parent,
+            "the first create adopts Parent"
+        );
+
+        // ADOPT refuses on the adopted parent.
+        let error = dispatch_lifecycle(METHOD_REALM_ADOPT, br#"{"role":"child"}"#, &state)
+            .expect("the adopt arm serves")
+            .expect_err("the parent refuses the handshake");
+        assert!(error.contains("not served on the parent"));
+
+        // A child adopted first serves CREATE locally (the lifecycle
+        // integration tests cover that arm); a second ADOPT refuses.
+        let child = ShellState::new(quiet_outbound());
+        realm_adopt_handshake(&child, crate::realm_parent::REALM_ADOPT_PAYLOAD)
+            .expect("the handshake adopts");
+        assert_eq!(super::current_role(&child), Role::Child);
+        let error = dispatch_lifecycle(METHOD_REALM_ADOPT, br#"{"role":"child"}"#, &child)
+            .expect("the adopt arm serves")
+            .expect_err("the second handshake refuses");
+        assert!(error.contains("already completed"));
+        let error = dispatch_lifecycle(METHOD_REALM_ADOPT, br#"{"role":"parent"}"#, &child)
+            .expect("the adopt arm serves")
+            .expect_err("the wrong role word refuses");
+        assert!(error.contains("\"parent\" is not supported"));
     }
 }

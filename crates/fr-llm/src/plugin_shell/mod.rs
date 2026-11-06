@@ -523,6 +523,9 @@ mod tests {
             grant: failed_grant,
             emit: loop_emit,
             dispatch: failed_dispatch,
+            realm_spawn: crate::generation::quiet_realm_spawn,
+            realm_retire: crate::generation::quiet_realm_retire,
+            realm_require: crate::generation::quiet_realm_require,
         }
     }
 

@@ -67,6 +67,15 @@ pub mod agent {
     /// `{sessionId}` → `{live}` — liveness probe; never creates the
     /// session mailbox (the dsh `agents.get` liveness read).
     pub const METHOD_LIVE: u32 = 12;
+    /// Realm-spawned child handshake (`{"role":"child"}` → `{adopted: true}`).
+    ///
+    /// The parent activation calls it on its realm-spawned child before
+    /// routing the session lifecycle into the realm; the first ADOPT
+    /// adopts the `Child` role on an otherwise role-less activation
+    /// (2026-11-06 18e `fiber_realm` ruling; the dsh per-session scope
+    /// mount's wire face — dsh mounts the loop per session in a cordis
+    /// scope, fr mounts it per session in a dougong realm).
+    pub const METHOD_REALM_ADOPT: u32 = 13;
 }
 
 /// The `'session-persistence'` service face (owner crate `fr-session`).

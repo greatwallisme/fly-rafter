@@ -69,6 +69,14 @@ pub const METHOD_RESUME: u32 = 11;
 /// creates the session mailbox (the dsh `agents.get` liveness read).
 pub const METHOD_LIVE: u32 = 12;
 
+/// Method selector: realm-spawned child handshake (`{"role":"child"}` →
+/// `{adopted: true}`).
+///
+/// The parent calls it on its realm-spawned child before routing the
+/// session lifecycle into the realm; the first ADOPT adopts the `Child`
+/// role on a role-less activation (the 18e `fiber_realm` ruling).
+pub const METHOD_REALM_ADOPT: u32 = 13;
+
 #[cfg(test)]
 mod tests {
     /// The local face pins the shared protocol table selector-for-selector
@@ -79,14 +87,16 @@ mod tests {
         use super::{
             METHOD_CANCEL, METHOD_CREATE, METHOD_DESCRIBE, METHOD_FOLLOWUP, METHOD_INJECT,
             METHOD_LIVE, METHOD_MAINTENANCE_BEGIN, METHOD_MAINTENANCE_END, METHOD_MAINTENANCE_POLL,
-            METHOD_RESUME, METHOD_SEND, METHOD_STATUS, METHOD_STEER, SERVICE_NAME,
+            METHOD_REALM_ADOPT, METHOD_RESUME, METHOD_SEND, METHOD_STATUS, METHOD_STEER,
+            SERVICE_NAME,
         };
         use fr_wire::services::agent::{
             METHOD_CANCEL as W_CANCEL, METHOD_CREATE as W_CREATE, METHOD_DESCRIBE as W_DESCRIBE,
             METHOD_FOLLOWUP as W_FOLLOWUP, METHOD_INJECT as W_INJECT, METHOD_LIVE as W_LIVE,
             METHOD_MAINTENANCE_BEGIN as W_BEGIN, METHOD_MAINTENANCE_END as W_END,
-            METHOD_MAINTENANCE_POLL as W_POLL, METHOD_RESUME as W_RESUME, METHOD_SEND as W_SEND,
-            METHOD_STATUS as W_STATUS, METHOD_STEER as W_STEER, SERVICE_NAME as W_SERVICE,
+            METHOD_MAINTENANCE_POLL as W_POLL, METHOD_REALM_ADOPT as W_REALM_ADOPT,
+            METHOD_RESUME as W_RESUME, METHOD_SEND as W_SEND, METHOD_STATUS as W_STATUS,
+            METHOD_STEER as W_STEER, SERVICE_NAME as W_SERVICE,
         };
         assert_eq!(SERVICE_NAME, W_SERVICE);
         assert_eq!(METHOD_SEND, W_SEND);
@@ -102,6 +112,7 @@ mod tests {
         assert_eq!(METHOD_CREATE, W_CREATE);
         assert_eq!(METHOD_RESUME, W_RESUME);
         assert_eq!(METHOD_LIVE, W_LIVE);
+        assert_eq!(METHOD_REALM_ADOPT, W_REALM_ADOPT);
     }
 }
 

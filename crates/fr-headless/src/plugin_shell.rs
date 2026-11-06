@@ -450,7 +450,53 @@ fn quiet_outbound() -> fr_agent_loop::outbound::Outbound {
         host_handle: std::ptr::null_mut(),
         require: failing_require,
         emit: quiet_emit,
+        realm_spawn: quiet_realm_spawn,
+        realm_retire: quiet_realm_retire,
+        realm_require: quiet_realm_require,
     })
+}
+
+/// Test double for the host side of the ABI v6 `realm_spawn` entry (D33):
+/// no headless test drives a realm activation, so the double accepts quietly.
+#[cfg(test)]
+pub(crate) const unsafe extern "C" fn quiet_realm_spawn(
+    _host: *mut std::ffi::c_void,
+    _realm: u64,
+    _path: *const u8,
+    _path_len: usize,
+    _out_buf: *mut u8,
+    _cap: usize,
+    _out_len: *mut usize,
+) -> i32 {
+    dougong_abi::STATUS_OK
+}
+
+/// Test double for the host side of the ABI v6 `realm_retire` entry (D33):
+/// no headless test drives a realm retirement, so the double accepts quietly.
+#[cfg(test)]
+pub(crate) const unsafe extern "C" fn quiet_realm_retire(
+    _host: *mut std::ffi::c_void,
+    _child: u64,
+) -> i32 {
+    dougong_abi::STATUS_OK
+}
+
+/// Test double for the host side of the ABI v6 `realm_require` entry (D33):
+/// no headless test drives a realm call, so the double accepts quietly.
+#[cfg(test)]
+pub(crate) const unsafe extern "C" fn quiet_realm_require(
+    _host: *mut std::ffi::c_void,
+    _realm: u64,
+    _service: *const u8,
+    _service_len: usize,
+    _method: u32,
+    _in_data: *const u8,
+    _in_len: usize,
+    _out_buf: *mut u8,
+    _cap: usize,
+    _out_len: *mut usize,
+) -> i32 {
+    dougong_abi::STATUS_OK
 }
 
 #[cfg(test)]

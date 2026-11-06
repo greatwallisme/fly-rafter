@@ -237,6 +237,9 @@ mod tests {
             host_handle: fake.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
         (SessionClient::new(outbound, "s1"), fake)
     }
@@ -326,6 +329,9 @@ mod tests {
             host_handle: std::ptr::null_mut(),
             require: failing_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
         let client = SessionClient::new(outbound, "s1");
         let error = client
@@ -340,6 +346,9 @@ mod tests {
             host_handle: std::ptr::null_mut(),
             require: broken_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
         let client = SessionClient::new(outbound, "s1");
         let error = client
@@ -432,6 +441,9 @@ mod tests {
             host_handle: handle.cast::<c_void>(),
             require: real_dispatch_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
         let client = SessionClient::new(outbound, "s1");
 

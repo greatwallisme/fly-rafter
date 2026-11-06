@@ -3786,6 +3786,9 @@ mod tests {
             host_handle: session_handle.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
         let events = Arc::new(AgentEvents::new(outbound, Arc::new(|_warning: &str| {})));
         let map = SessionMap::new(outbound);
@@ -3896,6 +3899,9 @@ mod tests {
             host_handle: session_handle.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
         let mut events = AgentEvents::new(outbound, Arc::new(|_warning: &str| {}));
         setup(&mut events);
@@ -5684,6 +5690,9 @@ mod tests {
             host_handle: raw.cast::<c_void>().cast_mut(),
             require: dispatch_host_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
         let events = Arc::new(AgentEvents::new(outbound, Arc::new(|_warning: &str| {})));
         let map = SessionMap::new(outbound);

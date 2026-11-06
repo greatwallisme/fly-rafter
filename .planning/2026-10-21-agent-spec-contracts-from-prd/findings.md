@@ -3333,3 +3333,47 @@ Q43-A（内部精确总线 + 宿主泵事件中继）= 织物的事件车道，�
 - **事实 3（已实证，非 18d 引入）**：约 1% 的 `fr headless` 进程在生成阶段永久挂起。同一脚本（300 次、14 并发、stdio 写文件）：HEAD 基线(e93d0e2) 2/300 挂起，当前工作区 3/300 挂起，gdb 栈同形——loop 驱动线程 `SessionMailbox::wait_step`（condvar 等步骤事件）+ fr-llm 生成线程 `drive_stream`（`WakeGate` condvar 等 waker）。即 HEAD 既有的 provider→生成流→loop 唤醒路径丢唤醒，e2e 套件被 spawn 的 fr 挂死 = 用户那次 40 分钟无结果。**尚未根因，禁止遮盖（不得加轮询/超时补丁）**。
 - **脚本教训（我的错）**：(1) 第一版挂起探测脚本用 `Popen(stderr=PIPE)` 轮询不读管道，boot 日志写满 64KB 管道致 fr 阻塞在 write(stderr)——测出 80% “挂起”全是脚本假象，栈作废；改 stdio 写文件后才抓到真挂起。(2) 8 并发下基线 192/192 零挂起曾让我误判“基线无此问题”，负载不对等；必须同参数（300 次/14 并发）对照。(3) /tmp 是 2GB tmpfs：基线 debug 构建放 /tmp 撑满磁盘（ENOSPC 使命令输出丢失）；基线构建与大量临时目录必须放 ~/project 下。(4) `pkill -f <含自身命令行的模式>` 会杀掉自己的 shell（两次）；改用 `ps|awk` 取 pid 再 kill。(5) 上轮我未验证即断言“MALFORMED_RESPONSE 是 mock 的问题”，应先实证。
 - **环境**：基线 worktree ~/project/fr-base-wt，基线 target ~/project/fr-base-target（5.3G；收尾后须删除并 `git worktree remove`）。
+
+## 18e 开工勘察（2026-11-05）：fiber_realm 与 PRD 19.2-24 / 决策 47-1A 的冲突
+- **事实一（dougong 内核）**：realm 是插件激活的属性，不是线程的属性。`Context::isolate_realm(label)` 返回绑定该 label 的新 Context（~/project/dougong/crates/dougong/src/context.rs:321）；loader 在槽位插入时按 `spec.isolate` 取 label 并 `ctx.isolate_realm(label)` 激活（dougong-loader/src/reconcile.rs:238-244），isolate 变更=retire+insert（reconcile.rs:197-204）。作用域在 fiber 启动时烘进 ctx，不可迁移（dougong-design.md D9）。
+- **事实二（dylib ABI v4）**：HostExports 仅 require/emit/grant/dispatch 四个出站项（dougong-abi/src/lib.rs:331-384），host_handle 绑定"调用激活的能力集与 isolation realm"（:296-299）；无 insert-plugin/isolate/新建 realm 入口。dylib 的驱动线程只能沿用其激活的 realm。
+- **事实三（fr 现状）**：fr-agent-loop 单实例，每会话一个 OS 驱动线程（driver_factory.rs:87-106 spawn_driver）；fr-config 编译产物 isolate 列为 null（patch.rs:582），18a 仅钉声明位被 loader 接受。
+- **冲突**：PRD 19.2 第 24 条（Q82-A，2026-10-27）已将"每会话循环 fiber 置于会话 realm"勘误为"单实例每会话一循环线程、会话隔离在驱动体内部"，理由=dougong 无每会话 realm/激活机制；而 spec 场景 `pending_req_fr_agent_loop_fiber_realm`（agent-loop spec:56-61）与决策 47-1A（"驱动线程挂 isolate_realm"）仍按原文保留。三者不可同时成立，需用户裁决（见呈报）。
+
+## 18e 方案 C 可行性评估（2026-11-05，只读核实 ~/project/dougong）
+- **ABI 现状已是 v5**（D32 dispatch，dougong-design.md:558-589）；C 将是 v6。先例：D32 经维护者显式裁决推翻 v3 §5.5 排除、配 doc/maintenance/dispatch_requirements.md 需求文档——C 同走此流程（function_requirements.md:307-351 变更控制：未载需求先呈报裁决立项，不得顺手实现）。
+- **内核侧已有基础**：in-process `Context::plugin`（context.rs:741）+`isolate_realm(label)`（:321）+`fresh_label`（:333）可在 realm 内启动子 fiber，子 fiber 注册为父 fiber effect、父卸载级联（Eq.31）。缺口只在 dylib 出站面：HostExports 无 spawn/realm 入口（dougong-abi lib.rs:331-384）。
+- **结构性阻力 1（排除项 9 的原则）**：function_requirements.md:316 明文"作用域/隔离语义归应用层所有……子代理等隔离需求由应用层满足（fr M2+ 亦然），不以内核作用域过滤满足"。该条针对事件作用域过滤出站，字面不覆盖"动态 realm 激活"，但立场相抵；C 需维护者显式裁决，不是顺手可加。
+- **结构性阻力 2（排除项 2 的同类问题）**：运行时监听注册被排除，理由=插件自有线程无 fiber 可归属（:313）。动态 spawn 若从驱动线程发起，同样需把子 fiber 挂到调用激活的 fiber（host_handle 已绑激活，理论可行，但 retire 子 realm/会话结束先于父 teardown 的生命周期需另设句柄与 retire 出口）。
+- **结构性阻力 3（D15 可见性，C 的核心设计难点）**：provide 落域内、"全局消费者看不到域内服务"（dougong-design.md:106-107）。session realm 内的 agent 服务对全局的 fr-headless/fr-approval 等消费者不可见（fr-approval inject 含 agent，plugin_shell.rs:657）。要成立必须把一切会话级消费者也放进同 realm 或设会话路由层——等于重做会话级装配，远超"驱动线程挂 realm"。
+- **M1 实情**：headless 一进程一会话；M1 内每会话 realm 与单个静态 realm（方案 B）运行行为等价，C 的收益仅在 Phase 19 subagent 子会话与 M2+ 多会话。
+- **成本**：dougong 需求文档+实现+双/三测试矩阵+发新版（fr 现依赖 crates.io dougong 0.5.1 Cargo.toml:45-48）；ABI v6 使 20 个 cdylib 须同步重编；fr 侧重做会话级装配。18e 与 19-22 均受阻于 dougong 交付。
+
+## 18e 实现期发现：realm_requirements.md C3 的前提事实错误（2026-11-05）
+- 实测：realm_require 首个测试 `spawned_child_answers_realm_require` 得 inactive_dependency（-4），子激活 active 且 provide 已落域内。
+- 根因（源码）：`Context::get` 动态路径 `resolve_typed` 先查 fiber.store 快照（仅 inject 声明项，由 `resolve_impl_for` 按 `label_candidates` 域内→全局解析），未声明项走 `effective_label(name)`（context.rs:355-357 → scope.rs:`effective_label` 只看 per-name isolate 映射，默认 label 0），**完全忽略 realm 作用域**。故 `ctx.isolate_realm(l).get::<Invoker>(name)` 在非 inject 名上只解析全局 label，找不到域内 provide。文档 §1.1 事实 4/§2.3 C3 "isolate_realm(realm).get 域内解析" 的前提不成立（我未跑代码验证即成文）。
+- 副作用判断：D15 域内解析只对 fiber 的 inject 快照与 provide 落点生效；动态 `ctx.get` 非 inject 名无 realm 语义。
+- 待裁决：B1 宿主侧子服务注册表（子激活 provide 提交后记录 (parent,realm,service)→Invoker，realm_require 直接查表；内核零改动；授权=表成员；子 spawn 成功即表项就绪，C5 窗口消失）/ A1 内核增 `Context::get_in_realm` 最小助手（D4 须成文理由；内核公共 API 增面）。
+- 测试现状：realm_tests.rs 16 测 7 过 9 败（败因同上；links 泄漏计数为 panic 未 finish 的副产物）；clippy 全绿。
+
+## 18e：B1 的二次核查与 ctx.get realm 语义（2026-11-05，用户选 B1 并追问 get 是否需 realm 语义）
+- **探针实证**（临时测试已删）：realm 7 内同名 svc 全局="global"、域内="in-realm"；域内未声明 `ctx.get("svc")`=Some("global")，域内声明后 `ctx.get`=Some("in-realm")，realm ctx 外部 `get`=Some("global")。即 get 动态分支无 realm 语义，仅 inject 快照与 provide 落点有。
+- **D15 不完整应用**：provide（service.rs:441/527/584 primary_label）与 fiber 依赖解析（service.rs:406 label_candidates）已 realm 化；`Context::get` 动态分支（context.rs:599 effective_label，仅 per-name isolate）未跟进。fiber.rs:1156 commit_view 同用 effective_label 算 label，但 commit_edges 丢弃 label（service.rs:294 `for &(_, provider)`）——死数据，非缺陷。
+- **既有症状**：outbound_tests.rs:1175-1214 探针为得到 realm 本地解析被迫"声明 svc-a 走快照"（变通）；D31 grant 目标解析（grant_impl `ctx.get::<Invoker>(target)`）CHANGELOG:77 宣称"按授予者 realm 解析"，实际目标名未在授予者 inject 内时只解全局 label——realm 内授予会静默绑错激活。fr 现 isolate 恒 null，暂无影响；Phase 19 子 realm 起会触发。
+- **B1 二次核查结论（致命）**：内核在**解析时**对 Invoker 施加策略装饰 `maybe_quarantine`（policy.rs:409-429：S5 provider 隔离=传输类失败处置提供者 fiber；O7 boundary_call 追踪；boundary_calls 指标）。B1 宿主侧注册表直接持原始 Invoker，realm_require 绕过 S5/O7/指标，违背 C4"与 require 同路径"；dylib 侧无法复现该装饰（RootState/maybe_quarantine 非公开）。故 B1 要成立必须再加内核公开助手——与 A1 同代价。
+- **推荐 X**：修 `Context::get` 动态分支，镜像 `resolve_impl_for` 的 label_candidates 循环（realm→全局，首个 strict 命中）；realm_require 回到文档原设计（`isolate_realm(realm).get` + 子激活链接授权），C3 前提即成立；顺带修复 grant 在 realm 内的目标解析。行为变更：realm 内未声明 get 改为 realm 优先（前为全局）；fr 无 realm 使用，零影响。
+
+## 18e fr 侧勘察：realm_spawn 兑现 fiber_realm 的固定事实与待裁决分叉（2026-11-05）
+- **固定事实①（机制）**：realm 是激活属性；realm_spawn 只能由插件自有线程发起（外来入口帧=STATUS_REENTRANCY）；子激活 setup 收标准 HostExports，无 realm 标记可辨。CREATE 臂（外来入口）必须先交插件自有线程再 spawn（realm-partner 判例：服务入口内 spawn+join 安全的前提=子的 setup 不 require 本插件服务——fr 子只 inject 全局四服务，成立）。
+- **固定事实②（同工件父子）**：父与子同跑 libfr_agent_loop.so 同一 call 入口。子的全局不可见（D15），全局消费者（fr-headless/fr-approval 经 grant）只触父。父必须按 sessionId→realm 注册表 realm_require 路由会话方法。
+- **固定事实③（grant 兼容）**：子 setup 重复 grant(builtin-tools,agent) 绑子自身=冗余无害（builtin-tools 的全局 require 解析到父，命中父的授权行）；父行随激活寿命，子行随子。fr 现 isolate 恒 null，grant 目标解析走全局 label，无 realm 误绑。
+- **固定事实④（失败清理）**：子 CREATE 失败（持久层拒）→ 父 realm_retire 子，不留半成品 realm（ABI「leave no residue」语义直接推论）。
+- **固定事实⑤（teardown 级联）**：子是父 fiber 的 effect，父 teardown 内核级联处置子；子 teardown=今日 shutdown_and_join 形状（广播+join 子驱动线程）。父注册表恒空，父 teardown 退化为幻影邮箱广播。
+- **待裁决分叉**（呈报中）：①角色区分机制 ②自身工件路径发现 ③共享 descriptor 双监听面。见会话呈报。
+
+## 18e 排障：realm spawn 挂死根因=运行中处置违 whenIdle 契约（2026-11-06）
+- **现象**：全量套件两次后台跑均挂死 35 分钟+；gdb 三进程同形：fr-headless teardown join runner ← runner 在 CREATE 的 scope join ← scope 工人在 host spawn_impl block_on 等子 settle。
+- **根因（我的代码放大了一个既有测试违契）**：`entry_facts_injected_through_document_rows` 内进程 boot 后携带任务（argv 快照兼 runner 任务），断言 facts 后直接 shutdown_tree——**运行中处置，违反 whenIdle 先收敛契约**。18e 前本地 CREATE 窗口 ~µs，竞态几乎必赢；18e 后 spawn+握手+路由 CREATE 窗口 ~ms，竞态可输。死锁环（确定性命中后）：fr-headless teardown join runner → runner 等 CREATE → spawn_impl 的子收敛依赖 fr-agent-loop 激活退休级联 → 该退休排在 fr-headless 之后 → 环。dougong 0.6.0 C6 活性门保证对「门已翻转后的在途出站调用」fail-fast 退场，但 spawn_impl 已过门检查、block_on 等的是子 fiber settle（子 fiber 是父 fiber 的 effect，父退休才级联）——门机制覆盖不到这个等待。
+- **修复**：测试在 shutdown_tree 前先 `live.exit.recv()`（退出守望通道=生产 serve 循环的同一 whenIdle 面）等 runner 收敛（30s 测试界，幂等断言 exit=1=无 provider key fail-closed）。生产路径（exit watcher 先等 whenIdle 再退役）契约不变，无需改。
+- **记录在案的既有 wart（非本切片修）**：`shutdown_tree` 的 SHUTDOWN_GRACE 超时对 current-thread runtime 无效——retire 任务内同步 join 阻塞 runtime 线程，定时器永不被 poll。生产不触发（whenIdle 先行），测试违契时表现为挂死而非优雅超时。后续切片候选。
+- **纪律复盘**：并发 flake 第一假设=自己代码（本次成立：我的改动把必赢竞态变成可输）；但根因判定要靠栈证据（gdb 三连），不能只看时间线猜测；测试设计不得依赖「CREATE 比 dispose 快」的时序运气。

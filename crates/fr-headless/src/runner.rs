@@ -1202,6 +1202,9 @@ mod tests {
             host_handle: Arc::as_ptr(host).cast_mut().cast::<std::ffi::c_void>(),
             require: scripted_require,
             emit: scripted_emit,
+            realm_spawn: crate::plugin_shell::quiet_realm_spawn,
+            realm_retire: crate::plugin_shell::quiet_realm_retire,
+            realm_require: crate::plugin_shell::quiet_realm_require,
         });
         (
             RunnerDeps {

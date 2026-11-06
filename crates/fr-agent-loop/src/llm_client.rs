@@ -337,6 +337,9 @@ mod tests {
             host_handle: service.cast::<std::ffi::c_void>(),
             require: real_dispatch_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
         (LlmClient::new(outbound), service)
     }
@@ -459,6 +462,9 @@ mod tests {
             host_handle: std::ptr::null_mut(),
             require: failing_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
         let mut client = LlmClient::new(outbound);
         let error = client
@@ -502,6 +508,9 @@ mod tests {
             host_handle: std::ptr::null_mut(),
             require: broken_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
         let mut client = LlmClient::new(outbound);
         let error = client.drain("gen-0").expect_err("reply outside contract");

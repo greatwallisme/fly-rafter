@@ -115,6 +115,9 @@ mod tests {
             emit: quiet_emit,
             grant: quiet_grant,
             dispatch: crate::outbound::noop_dispatch,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         };
         (host, Outbound::new(exports))
     }

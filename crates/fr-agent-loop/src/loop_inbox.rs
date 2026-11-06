@@ -468,6 +468,9 @@ mod tests {
             host_handle: fake.cast::<c_void>(),
             require: serving_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
         let mut events = AgentEvents::new(outbound, Arc::new(|_warning: &str| {}));
         let inserted = Arc::new(Mutex::new(Vec::new()));

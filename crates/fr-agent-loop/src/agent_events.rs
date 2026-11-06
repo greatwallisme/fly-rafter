@@ -667,6 +667,9 @@ mod tests {
             host_handle: std::ptr::null_mut(),
             require: quiet_require,
             emit: quiet_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         })
     }
 
@@ -749,6 +752,9 @@ mod tests {
             host_handle: bus.cast::<c_void>(),
             require: quiet_require,
             emit: recording_emit,
+            realm_spawn: crate::outbound::quiet_realm_spawn,
+            realm_retire: crate::outbound::quiet_realm_retire,
+            realm_require: crate::outbound::quiet_realm_require,
         });
         let (events, _log) = face_with(outbound);
         events.emit_status("s1", AgentStatus::Running);
@@ -1044,6 +1050,9 @@ mod tests {
                 host_handle: handle.cast_mut().cast::<std::ffi::c_void>(),
                 require: recording_require,
                 emit: recording_emit,
+                realm_spawn: crate::outbound::quiet_realm_spawn,
+                realm_retire: crate::outbound::quiet_realm_retire,
+                realm_require: crate::outbound::quiet_realm_require,
             }),
             Arc::new(|_warning: &str| {}),
         );

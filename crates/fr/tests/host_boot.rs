@@ -267,6 +267,17 @@ fn entry_facts_injected_through_document_rows() {
             }),
             "the relayed snapshot reads back verbatim (argv + the model selection rail)"
         );
+        // The whenIdle contract before disposal (the 退出守望 lane): the
+        // argv snapshot doubles as the runner's task, and an in-flight
+        // CREATE at retire time parks the realm spawn's child settle
+        // behind the teardown join — the run must converge first, exactly
+        // as the production serve loop awaits the exit request (the
+        // 2026-11-06 18e realm-spawn finding).
+        let exit = tokio::time::timeout(std::time::Duration::from_secs(30), live.exit.recv())
+            .await
+            .expect("the run converges within the grace bound")
+            .expect("the exit lane stays open");
+        assert_eq!(exit, 1, "the in-process run fails closed without a provider key");
         let code = shutdown_tree(&mut live, 0).await;
         assert_eq!(code, 0);
     });

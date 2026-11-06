@@ -26,6 +26,7 @@ pub mod outbound;
 pub mod phase;
 pub mod plugin_shell;
 pub mod prompt_client;
+pub mod realm_parent;
 pub mod runtime_context;
 pub mod session_client;
 pub mod session_reads;
